@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[codz]
+*.py.cover
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project-specific
+.env
+.envrc
+.venv
+
+# Tests (not needed in container)
+tests/
+specs/
+QUEST.md

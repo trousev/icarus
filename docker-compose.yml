@@ -1,0 +1,106 @@
+# ── icarus ───────────────────────────────────────────────────────────────────
+# Start:   docker compose up
+# Stop:    docker compose down
+# Rebuild: docker compose up --build
+#
+# Copy .env.example → .env and fill in ANTHROPIC_AUTH_TOKEN before starting.
+
+services:
+
+  # ── development (default) ───────────────────────────────────────────────
+  icarus:
+    build: .
+    container_name: icarus
+    profiles:
+      - ""           # default profile — `docker compose up` starts this
+
+    # ── ports ────────────────────────────────────────────────────────────
+    ports:
+      - "${ICARUS_PORT:-9090}:9090"
+
+    # ── volumes ──────────────────────────────────────────────────────────
+    volumes:
+      # Mount the current directory as the agent's workspace.
+      # The agent sees your project files at /workspace and can read/edit them.
+      - .:/workspace
+      # Prevent the container's virtual env / caches from leaking into the
+      # host's mounted directory.
+      - /workspace/.venv
+      - /workspace/__pycache__
+
+    # ── environment ──────────────────────────────────────────────────────
+    # Reads from .env (auto-loaded by docker compose) + any explicit overrides.
+    environment:
+      - ANTHROPIC_AUTH_TOKEN
+      - ANTHROPIC_BASE_URL
+      - ANTHROPIC_MODEL
+      - ICARUS_PORT
+      - ICARUS_HOST
+      - ICARUS_MAX_TURNS
+      - ICARUS_MAX_BUDGET_USD
+      - ICARUS_LOG_LEVEL
+      - ICARUS_ALLOWED_TOOLS
+      - ICARUS_READONLY
+      - ICARUS_CWD=/workspace
+      - ICARUS_REQUEST_TIMEOUT
+
+    # ── health check ─────────────────────────────────────────────────────
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9090/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+
+    # ── resource limits ──────────────────────────────────────────────────
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+        reservations:
+          memory: 256m
+
+    restart: unless-stopped
+
+  # ── development (hot-reload) ────────────────────────────────────────────
+  dev:
+    build: .
+    container_name: icarus-dev
+    profiles:
+      - dev          # `docker compose --profile dev up`
+
+    ports:
+      - "${ICARUS_PORT:-9090}:9090"
+
+    volumes:
+      # Mount the source tree so code changes take effect via --reload.
+      - ./src:/app/src
+      - .:/workspace
+      - /workspace/.venv
+      - /workspace/__pycache__
+
+    environment:
+      - ANTHROPIC_AUTH_TOKEN
+      - ANTHROPIC_BASE_URL
+      - ANTHROPIC_MODEL
+      - ICARUS_PORT
+      - ICARUS_HOST
+      - ICARUS_MAX_TURNS
+      - ICARUS_MAX_BUDGET_USD
+      - ICARUS_LOG_LEVEL=debug
+      - ICARUS_ALLOWED_TOOLS
+      - ICARUS_READONLY
+      - ICARUS_CWD=/workspace
+      - ICARUS_REQUEST_TIMEOUT
+
+    # Override the entrypoint to add --reload for live code changes.
+    entrypoint: ["icarus", "serve", "--host", "0.0.0.0", "--reload"]
+
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9090/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+
+    restart: unless-stopped
