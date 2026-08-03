@@ -29,7 +29,7 @@ class Config:
 
     # Graphiti MCP server
     GRAPHITI_URL: str = os.getenv("GRAPHITI_URL", "http://localhost:8001/mcp")
-    GRAPHITI_GROUP_ID: str = os.getenv("GRAPHITI_GROUP_ID", "default")
+    GRAPHITI_GROUP_ID: str = os.getenv("GRAPHITI_GROUP_ID", "alex")
     GRAPHITI_MAX_FACTS: int = int(os.getenv("GRAPHITI_MAX_FACTS", "30"))
 
     # Timeouts: reads are on the hot path (must not block), writes are background
