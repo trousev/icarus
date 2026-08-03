@@ -8,12 +8,17 @@ cd "$PROJECT_DIR"
 
 # ── Parse flags ────────────────────────────────────────────────────────────
 LOG_PROMPTS=""
+VERBOSE=""
 UVICORN_ARGS=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --log-every-prompt)
             LOG_PROMPTS="true"
+            shift
+            ;;
+        -v|--verbose)
+            VERBOSE="1"
             shift
             ;;
         --host|--port|--log-level|--workers|--reload)
@@ -69,6 +74,26 @@ done
 
 echo ""
 
-exec uv run uvicorn icarus.proxy:app \
+# ── Tail Graphiti container logs in background (verbose only) ───────────────
+if [ -n "$VERBOSE" ] && command -v docker &> /dev/null \
+   && docker ps --filter name=graphiti --format '{{.ID}}' | grep -q .; then
+    docker compose logs -f graphiti 2>/dev/null | stdbuf -oL sed 's/^/[graphiti] /' &
+    LOGS_PID=$!
+else
+    LOGS_PID=""
+fi
+
+cleanup() {
+    [ -n "$LOGS_PID" ] && kill "$LOGS_PID" 2>/dev/null
+    exit
+}
+trap cleanup INT TERM
+
+# ── Start proxy ─────────────────────────────────────────────────────────────
+uv run uvicorn icarus.proxy:app \
     --host "$HOST" --port "$PORT" --log-level "$LOG_LEVEL" \
-    "${UVICORN_ARGS[@]}"
+    "${UVICORN_ARGS[@]}" &
+PROXY_PID=$!
+
+trap 'cleanup; kill $PROXY_PID 2>/dev/null' EXIT
+wait $PROXY_PID
