@@ -1,17 +1,22 @@
 """Transparent proxy for OpenAI-compatible APIs with memory injection."""
 
 import asyncio
+import hmac as hmac_mod
 import json
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import BackgroundTasks, FastAPI, Request, Response
+import structlog
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
 from icarus.config import config
 from icarus.logger import RequestLogger
 from icarus.memory import (
     MemoryClient,
+    _drop_dedup_filter,
+    _snapshot_store,
     extract_and_store,
     maintenance_worker,
     memory_client,
@@ -19,11 +24,57 @@ from icarus.memory import (
     is_conversation_start,
     conversation_key,
 )
+from icarus.tenant import (
+    Tenant,
+    TenantRejected,
+    _current_tenant,
+    current_tenant,
+    resolve_tenant,
+    tenant_context,
+    tenant_registry,
+)
+
+_proxy_log = structlog.get_logger("icarus.proxy")
 
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     """Startup: connect to Graphiti memory service (non-fatal)."""
+    # Multi-tenancy startup validations
+    if config.MEMORY_MULTI_TENANT:
+        if not config.UPSTREAM_API_KEY:
+            _proxy_log.error(
+                "tenant_mode_requires_key",
+                msg="MEMORY_MULTI_TENANT requires UPSTREAM_API_KEY — "
+                    "the chat path is authenticated by it in MT mode",
+            )
+            raise SystemExit(1)
+        if config.ICARUS_ADMIN_API_KEY and (
+            config.ICARUS_ADMIN_API_KEY == config.UPSTREAM_API_KEY
+        ):
+            _proxy_log.error(
+                "tenant_admin_key_equals_upstream",
+                msg="ICARUS_ADMIN_API_KEY must differ from UPSTREAM_API_KEY",
+            )
+            raise SystemExit(1)
+        if not config.MEMORY_TENANT_HMAC_SECRET:
+            _proxy_log.warning(
+                "tenant_mode_unsigned_header",
+                msg="MT mode with unsigned identity headers: ensure Icarus is "
+                    "reachable only by LibreChat (firewall / docker network)",
+            )
+        # Merge snapshot-table orphans into registry (lost-registry recovery)
+        orphans = _snapshot_store.tenant_prefixes()
+        if orphans:
+            added = tenant_registry.merge_orphans(orphans)
+            if added:
+                _proxy_log.info(
+                    "tenant_registry_recovered_orphans", count=added,
+                )
+        _proxy_log.info("tenant_mode", mode="multi_tenant")
+    else:
+        _proxy_log.info("tenant_mode", mode="legacy")
+
     await memory_client.connect()
     maintenance_worker.start()
     yield
@@ -32,9 +83,104 @@ async def lifespan(application: FastAPI):
     await memory_client.close()
 
 
-app = FastAPI(title="Icarus Proxy", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="Icarus Proxy", version="0.3.0", lifespan=lifespan)
 
 logger = RequestLogger(config.LOG_DIR)
+
+
+# ── Tenant middleware ────────────────────────────────────────────────────────
+
+class TenantMiddleware(BaseHTTPMiddleware):
+    """Resolve the request-scoped tenant and set the ContextVar.
+
+    Authoritative resolver: runs once per request, sets the ContextVar
+    before the handler, resets it in ``finally``.  Fail-closes in
+    MULTI_TENANT mode — absence of identity is an error, never a fallback
+    to the legacy group.
+    """
+
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
+        # Public health + admin routes never need a tenant (admin endpoints
+        # take explicit group_id from params, never the ContextVar).
+        path = request.url.path
+        if path == "/health" or path.startswith("/admin/"):
+            return await call_next(request)
+
+        try:
+            tenant = await resolve_tenant(request)
+        except TenantRejected as exc:
+            status = exc.status_code
+            if status == 401 and path.startswith("/memory/"):
+                status = 403  # API key authenticated but no tenant
+            _proxy_log.warning(
+                "tenant_rejected",
+                path=path,
+                status=status,
+                reason=exc.reason,
+            )
+            return Response(
+                content=json.dumps({"error": exc.reason}),
+                status_code=status,
+                media_type="application/json",
+            )
+
+        tenant_registry.record_seen(tenant)
+        _proxy_log.info(
+            "tenant_resolved",
+            group_id=tenant.group_id,
+            via=tenant.via,
+        )
+        token = _current_tenant.set(tenant)
+        try:
+            return await call_next(request)
+        finally:
+            _current_tenant.reset(token)
+
+
+app.add_middleware(TenantMiddleware)
+
+
+# ── Auth dependencies ────────────────────────────────────────────────────────
+
+
+def _check_auth(request: Request) -> bool:
+    """Verify the request uses the configured upstream API key.
+
+    Uses constant-time comparison to avoid timing side-channels.
+    """
+    auth = request.headers.get("authorization", "")
+    expected = f"Bearer {config.UPSTREAM_API_KEY}"
+    return hmac_mod.compare_digest(auth, expected)
+
+
+def require_operator(request: Request) -> None:
+    """FastAPI dependency: reject requests without the upstream API key."""
+    if not _check_auth(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+
+
+def require_admin(request: Request) -> None:
+    """FastAPI dependency: reject requests without the admin API key."""
+    if not config.ICARUS_ADMIN_API_KEY:
+        raise HTTPException(status_code=404, detail="not found")
+    auth = request.headers.get("authorization", "")
+    expected = f"Bearer {config.ICARUS_ADMIN_API_KEY}"
+    if not hmac_mod.compare_digest(auth, expected):
+        raise HTTPException(status_code=401, detail="unauthorized")
+
+
+def get_current_tenant() -> Tenant:
+    """FastAPI dependency: the request-scoped tenant.
+
+    Set by ``TenantMiddleware`` before handlers run; this is a typed
+    consumer and a belt-and-suspenders guard.
+    """
+    tenant = _current_tenant.get()
+    if tenant is None:
+        raise HTTPException(status_code=403, detail="missing tenant identity")
+    return tenant
 
 
 # ── Specific routes (must be registered before the catch-all) ──────────────
@@ -42,12 +188,13 @@ logger = RequestLogger(config.LOG_DIR)
 
 @app.get("/health")
 async def health():
-    """Health check endpoint."""
+    """Health check endpoint (public)."""
     return {
         "status": "ok",
         "upstream": config.UPSTREAM_BASE_URL,
         "memory_enabled": config.MEMORY_ENABLED,
         "memory_injection": bool(config.MEMORY_INJECTION),
+        "multi_tenant": config.MEMORY_MULTI_TENANT,
         "graphiti": "ok" if memory_client.available else "unreachable",
         "memory": {
             "writes_total": memory_client.writes_total,
@@ -64,27 +211,44 @@ async def health():
 # ── Memory management API ──────────────────────────────────────────────────
 
 
-def _check_auth(request: Request) -> bool:
-    """Verify the request uses the configured upstream API key."""
-    auth = request.headers.get("authorization", "")
-    expected = f"Bearer {config.UPSTREAM_API_KEY}"
-    return auth == expected
-
-
 @app.get("/memory/status")
-async def memory_status(request: Request):
-    """Get memory system status (requires auth)."""
-    if not _check_auth(request):
-        return Response(content='{"error":"unauthorized"}', status_code=401)
-    return await health()
+async def memory_status(
+    request: Request,
+    _: None = Depends(require_operator),
+    tenant: Tenant = Depends(get_current_tenant),
+):
+    """Get memory system status for the current tenant."""
+    return {
+        "status": "ok",
+        "tenant_group_id": tenant.group_id,
+        "tenant_via": tenant.via,
+        "upstream": config.UPSTREAM_BASE_URL,
+        "memory_enabled": config.MEMORY_ENABLED,
+        "graphiti": "ok" if memory_client.available else "unreachable",
+        "memory": {
+            "writes_total": memory_client.writes_total,
+            "writes_failed": memory_client.writes_failed,
+            "writes_last_error": memory_client.writes_last_error,
+            "queue_depth": memory_client._write_queue.qsize(),
+            "last_maintenance": maintenance_worker.last_run_iso,
+            "trimmed_edges_24h": maintenance_worker.trimmed_edges_24h,
+            "rejected_24h": memory_client.writes_rejected_24h,
+        },
+    }
 
 
 @app.get("/memory/facts")
-async def memory_facts(request: Request, q: str = "", limit: int = 20):
-    """Search the knowledge graph for facts (requires auth)."""
-    if not _check_auth(request):
-        return Response(content='{"error":"unauthorized"}', status_code=401)
-    facts = await memory_client.search_facts(q, limit=limit)
+async def memory_facts(
+    request: Request,
+    q: str = "",
+    limit: int = 20,
+    _: None = Depends(require_operator),
+    tenant: Tenant = Depends(get_current_tenant),
+):
+    """Search the knowledge graph for facts (tenant-scoped)."""
+    facts = await memory_client.search_facts(
+        q, limit=limit, group_id=tenant.group_id,
+    )
     return {
         "facts": [
             {
@@ -100,34 +264,37 @@ async def memory_facts(request: Request, q: str = "", limit: int = 20):
 
 
 @app.post("/memory/forget")
-async def memory_forget(request: Request):
-    """Forget a fact, episode, or topic (requires auth).
+async def memory_forget(
+    request: Request,
+    _: None = Depends(require_operator),
+    tenant: Tenant = Depends(get_current_tenant),
+):
+    """Forget a fact, episode, or topic (tenant-scoped).
 
-    Body: {"fact_uuid": "..."} or {"message": "forget that I prefer Rust"}
+    Body: {"fact_uuid": "..."} or {"episode_uuid": "..."} or {"message": "..."}
     """
-    if not _check_auth(request):
-        return Response(content='{"error":"unauthorized"}', status_code=401)
-
     try:
         data = await request.json()
     except Exception:
         return {"error": "invalid_json"}
 
     if "fact_uuid" in data:
-        ok = await memory_client.delete_fact(data["fact_uuid"])
+        ok = await memory_client.delete_fact(data["fact_uuid"], group_id=tenant.group_id)
         return {"status": "deleted" if ok else "error"}
 
     if "episode_uuid" in data:
-        ok = await memory_client.delete_episode(data["episode_uuid"])
+        ok = await memory_client.delete_episode(data["episode_uuid"], group_id=tenant.group_id)
         return {"status": "deleted" if ok else "error"}
 
     if "message" in data:
-        # Find facts matching the message, then delete them
-        facts = await memory_client.search_facts(data["message"], limit=5)
+        # Find facts matching the message, then delete them (tenant-scoped)
+        facts = await memory_client.search_facts(
+            data["message"], limit=5, group_id=tenant.group_id,
+        )
         deleted = 0
         for f in facts:
             try:
-                await memory_client.delete_fact(f.uuid)
+                await memory_client.delete_fact(f.uuid, group_id=tenant.group_id)
                 deleted += 1
             except Exception:
                 pass
@@ -137,18 +304,122 @@ async def memory_forget(request: Request):
 
 
 @app.post("/memory/purge")
-async def memory_purge(request: Request):
-    """Purge all memory for the current group_id (requires auth)."""
-    if not _check_auth(request):
-        return Response(content='{"error":"unauthorized"}', status_code=401)
+async def memory_purge(
+    request: Request,
+    _: None = Depends(require_operator),
+    tenant: Tenant = Depends(get_current_tenant),
+):
+    """Purge all memory for the current tenant."""
     try:
         data = await request.json()
     except Exception:
         return {"error": "invalid_json"}
     if data.get("confirm") != "purge-all":
         return {"error": "must confirm with 'purge-all'"}
-    ok = await memory_client.clear_graph()
-    return {"status": "purged" if ok else "error"}
+
+    group_id = tenant.group_id
+
+    # 1. Mark purged_at (so the write worker drops queued jobs)
+    purged_at = tenant_registry.record_purge(group_id)
+
+    # 2. Sweep SnapshotStore cache + set purged_at guard BEFORE Graphiti purge
+    _snapshot_store.delete_prefix(f"{group_id}:")
+
+    # 3. Enumerated verified deletion
+    result = await memory_client.purge_tenant(group_id)
+
+    # 4. Drop the per-tenant DedupFilter
+    _drop_dedup_filter(group_id)
+
+    return {
+        "status": "purged",
+        "group_id": group_id,
+        "purged_at": purged_at,
+        **result,
+    }
+
+
+# ── Admin endpoints ──────────────────────────────────────────────────────────
+
+
+@app.get("/admin/tenants")
+async def admin_tenants(
+    request: Request,
+    _: None = Depends(require_admin),
+    identity: str = "",
+):
+    """List all tenants (admin-only, local data — zero Graphiti round trips)."""
+    if identity:
+        # Look up a specific tenant by raw identity
+        import hashlib
+        target = f"t:{hashlib.sha256(identity.encode('utf-8')).hexdigest()[:16]}"
+        rec = tenant_registry.get(target)
+        return {"tenants": [rec] if rec else [], "total": 1 if rec else 0}
+
+    tenants = tenant_registry.all()
+    # Enrich with snapshot counts from SQLite
+    for t in tenants:
+        gid = t["group_id"]
+        t["snapshot_count"] = 0  # lightweight; deep stats are behind /admin/tenant/{gid}/status
+
+    return {"tenants": tenants, "total": len(tenants)}
+
+
+@app.get("/admin/tenant/{group_id}/status")
+async def admin_tenant_status(
+    group_id: str,
+    request: Request,
+    _: None = Depends(require_admin),
+):
+    """Deep per-tenant stats (one Graphiti search)."""
+    rec = tenant_registry.get(group_id)
+    try:
+        facts = await memory_client.search_facts(
+            "", limit=1000, group_id=group_id, include_invalid=True,
+        )
+    except Exception:
+        facts = []
+    return {
+        "group_id": group_id,
+        "registry": rec,
+        "fact_count": len(facts),
+    }
+
+
+@app.post("/admin/tenant/{group_id}/purge")
+async def admin_tenant_purge(
+    group_id: str,
+    request: Request,
+    _: None = Depends(require_admin),
+):
+    """GDPR erasure: purge all memory for a tenant (admin-only)."""
+    # 1. Mark purged_at
+    purged_at = tenant_registry.record_purge(group_id)
+
+    # 2. Sweep SnapshotStore cache + purged_at guard BEFORE Graphiti purge
+    snapshots_deleted = _snapshot_store.delete_prefix(f"{group_id}:")
+
+    # 3. Enumerated verified deletion
+    result = await memory_client.purge_tenant(group_id)
+
+    # 4. Drop DedupFilter
+    _drop_dedup_filter(group_id)
+
+    _proxy_log.info(
+        "tenant_purge_completed",
+        group_id=group_id,
+        purged_at=purged_at,
+        snapshots_deleted=snapshots_deleted,
+        **result,
+    )
+
+    return {
+        "status": "purged",
+        "group_id": group_id,
+        "purged_at": purged_at,
+        "snapshots_deleted": snapshots_deleted,
+        **result,
+    }
 
 
 # ── Memory injection ───────────────────────────────────────────────────────
@@ -361,7 +632,16 @@ async def _proxy_buffered(request, upstream_url, forward_headers, modified_body,
     methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
 )
 async def proxy(request: Request, path: str, background_tasks: BackgroundTasks):
-    """Catch-all route that proxies requests to the upstream API."""
+    """Catch-all route that proxies requests to the upstream API.
+
+    In MT mode the chat path requires the upstream API key (the same
+    gate that protects /memory/* endpoints).  This closes the LAN
+    attacker vector: only clients holding the key can reach the memory
+    system.
+    """
+    # Auth gate in MT mode — must precede body read / injection / extraction
+    if config.MEMORY_MULTI_TENANT and not _check_auth(request):
+        return Response(content='{"error":"unauthorized"}', status_code=401)
 
     upstream_url = f"{config.UPSTREAM_BASE_URL}/{path}"
     body = await request.body()
