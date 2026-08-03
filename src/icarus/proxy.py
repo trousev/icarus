@@ -11,6 +11,7 @@ from icarus.config import config
 from icarus.logger import RequestLogger
 from icarus.memory import (
     MemoryClient,
+    extract_and_store,
     memory_client,
     memory_for_request,
     is_conversation_start,
@@ -128,6 +129,45 @@ async def inject_dynamic_memory(body: bytes) -> bytes:
     return inject_static_memory(body)
 
 
+def _schedule_memory_extraction(
+    background_tasks: BackgroundTasks,
+    body: bytes,
+    request_id: str,
+) -> None:
+    """Schedule fire-and-forget memory extraction after a successful response.
+
+    Extracts the messages array from the request body and passes it to the
+    evaluator→dedup→store pipeline. Runs entirely in the background.
+    """
+    if not config.MEMORY_ENABLED:
+        return
+
+    try:
+        data = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return
+
+    messages = data.get("messages", [])
+    if not messages:
+        return
+
+    key = conversation_key(messages)
+
+    # Collect known facts from the frozen snapshot (for L0 dedup in the prompt)
+    known_facts: list[str] = []
+    # (The snapshot is the injected text; we don't re-parse it here —
+    #  the evaluator's KNOWN FACTS block will say "(none)" for simplicity in v1)
+
+    background_tasks.add_task(
+        extract_and_store,
+        memory_client,
+        messages,
+        key,
+        known_facts,
+        request_id,
+    )
+
+
 # ── Catch-all proxy route ──────────────────────────────────────────────────
 
 
@@ -236,6 +276,10 @@ async def proxy(request: Request, path: str, background_tasks: BackgroundTasks):
         modified_body=modified_body if injected else None,
         injected=injected,
     )
+
+    # Schedule fire-and-forget memory extraction after successful response
+    if path == "v1/chat/completions" and body:
+        _schedule_memory_extraction(background_tasks, body, request_id)
 
     # Build forwarding headers: pass through client headers but override auth,
     # and drop headers that would break the upstream request or cause

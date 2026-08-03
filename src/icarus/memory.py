@@ -804,5 +804,337 @@ class MemoryClient:
         )
 
 
+# ── Evaluator LLM: extraction prompt ───────────────────────────────────────
+
+_EVALUATOR_SYSTEM_PROMPT = """\
+You are the memory extraction component of a personal AI assistant. Your job is to
+decide whether the LAST USER MESSAGE contains facts worth remembering across future
+conversations, and to extract them.
+
+SCOPE
+- Extract ONLY from the LAST USER MESSAGE. Earlier messages were already processed
+  in previous runs — ignore them.
+- Only USER messages are fact sources. The assistant's own answers are never facts.
+- Do not re-extract anything already listed under KNOWN FACTS.
+
+DECISION TESTS — a candidate fact qualifies only if it passes BOTH:
+1. BRIEFING TEST: if you were briefing a new engineer about this user tomorrow,
+   would you include this fact? If not, it is not memory.
+2. DURABILITY TEST: will it still be true in 30 days? If it may be stale by then,
+   it is not memory.
+
+REMEMBER ONLY (7 categories):
+1. identity — who the user is: role, experience, location, background
+2. project — projects the user works on and their current state
+3. preference — how the user likes to work: tools, languages, formats, style
+4. constraint — hard limits of the user's environment: hardware, budget, time
+5. decision — settled choices that should not be re-litigated
+6. expertise — what the user knows well; and also what they do NOT know
+7. operational — standing practices: "Docker for everything", "systemd for services"
+
+NEVER EXTRACT (7 categories):
+1. temporary debugging state ("the VPS is timing out right now")
+2. the task request itself ("help me refactor this file")
+3. transient measurements ("the build takes 40 seconds")
+4. sensitive data — passwords, API keys, tokens, secrets, financial, medical, or
+   personal identifying data (this is also filtered programmatically; never extract it)
+5. mood or venting ("I hate this codebase") — emotion is not a preference
+6. the assistant's own statements or conclusions
+7. judgments about other people ("my colleague is incompetent")
+
+STYLE
+- One fact per sentence, standalone and self-contained, with the user as the subject:
+  "The user prefers Rust for systems programming." — not "prefers Rust".
+- Write facts in English, regardless of the message language.
+- Split compound statements into separate facts; keep each fact under 160 characters.
+- Extract only what the user actually said — no inference, no rephrasing.
+- Return at most 5 facts per message. Fewer is better; zero is often correct.
+
+CONSERVATISM
+A wrong memory pollutes every future conversation; a missed fact costs nothing — the
+user simply repeats it. WHEN IN DOUBT, DO NOT REMEMBER.
+Returning {"facts": []} is the most common correct answer.
+
+OUTPUT (JSON)
+Respond with exactly one JSON object in this shape (the word "json" in this prompt
+enables JSON mode):
+{"facts": [{"fact": "<standalone sentence>", "category": "<category>"}]}
+
+"category" must be one of: identity, project, preference, constraint, decision,
+expertise, operational.
+"""
+
+
+# ── Deduplication ───────────────────────────────────────────────────────────
+
+
+class DedupFilter:
+    """Multi-layer dedup to prevent fact bloat before Graphiti storage.
+
+    L1: Normalized hash (in-memory LRU, ~0ms, $0)
+    L2: Embedding cosine similarity (in-memory, ~50ms, ~$0.0000001)
+    L3: Graphiti search (only for ambiguous L2 results, ~100ms, $0)
+
+    Dedup is an optimization — Graphiti has its own built-in dedup at ingest,
+    but pre-filtering saves LLM extraction cost.
+    """
+
+    def __init__(self, max_size: int = 1000) -> None:
+        self._hashes: dict[str, float] = {}  # hash → timestamp
+        self._embeddings: list[tuple[list[float], str]] = []  # (embedding, hash)
+        self._max_size = max_size
+
+    def check_l1(self, fact: str) -> bool:
+        """Return True if fact should be SKIPPED (exact duplicate)."""
+        h = self._normalize_hash(fact)
+        return h in self._hashes
+
+    def check_l2(
+        self, embedding: list[float], threshold: float = 0.92
+    ) -> tuple[bool, bool]:
+        """Return (skip: bool, ambiguous: bool).
+
+        - skip=True, ambiguous=False: cosine > threshold → definite duplicate
+        - skip=False, ambiguous=True: 0.85 ≤ cosine ≤ 0.92 → need L3
+        - skip=False, ambiguous=False: cosine < 0.85 → definitely new
+        """
+        low_threshold = config.MEMORY_DEDUP_SIMILARITY_LOW
+        for cached_emb, _ in self._embeddings:
+            sim = self._cosine_similarity(embedding, cached_emb)
+            if sim > threshold:
+                return True, False
+            if sim >= low_threshold:
+                return False, True
+        return False, False
+
+    def add(self, fact: str, embedding: list[float] | None = None) -> None:
+        """Record a fact as seen."""
+        h = self._normalize_hash(fact)
+        self._hashes[h] = time.time()
+        if embedding:
+            self._embeddings.append((embedding, h))
+        self._maybe_prune()
+
+    def invalidate(self, fact: str) -> None:
+        """Remove a fact from dedup cache (so it can be re-learned after delete)."""
+        h = self._normalize_hash(fact)
+        self._hashes.pop(h, None)
+        self._embeddings = [
+            (e, eh) for e, eh in self._embeddings if eh != h
+        ]
+
+    @staticmethod
+    def _normalize_hash(text: str) -> str:
+        normalized = re.sub(r"\s+", " ", text.strip().lower())
+        normalized = re.sub(r"[^\w\s]", "", normalized)
+        return hashlib.sha256(normalized.encode()).hexdigest()[:16]
+
+    @staticmethod
+    def _cosine_similarity(a: list[float], b: list[float]) -> float:
+        dot = sum(x * y for x, y in zip(a, b))
+        norm_a = sum(x * x for x in a) ** 0.5
+        norm_b = sum(x * x for x in b) ** 0.5
+        if norm_a == 0 or norm_b == 0:
+            return 0.0
+        return dot / (norm_a * norm_b)
+
+    def _maybe_prune(self) -> None:
+        if len(self._hashes) <= self._max_size:
+            return
+        sorted_hashes = sorted(self._hashes.items(), key=lambda x: x[1])
+        to_remove = len(self._hashes) - self._max_size
+        for h, _ in sorted_hashes[:to_remove]:
+            del self._hashes[h]
+        self._embeddings = self._embeddings[-self._max_size:]
+
+
+# Module-level dedup filter
+_dedup_filter = DedupFilter(max_size=config.MEMORY_DEDUP_CACHE_SIZE)
+
+
+# ── Embedding helper ────────────────────────────────────────────────────────
+
+
+async def _compute_embedding(text: str) -> list[float] | None:
+    """Compute an embedding vector via OpenAI API."""
+    if not config.OPENAI_API_KEY:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+            resp = await client.post(
+                "https://api.openai.com/v1/embeddings",
+                headers={"Authorization": f"Bearer {config.OPENAI_API_KEY}"},
+                json={
+                    "model": config.MEMORY_DEDUP_EMBEDDING_MODEL,
+                    "input": text,
+                },
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                return data["data"][0]["embedding"]
+    except Exception:
+        pass
+    return None
+
+
+# ── Top-level write pipeline ────────────────────────────────────────────────
+
+
+async def extract_and_store(
+    client: "MemoryClient",
+    messages: list[dict],
+    conversation_key_str: str,
+    known_facts: list[str],
+    request_id: str,
+) -> None:
+    """Full write pipeline: evaluate → dedup → store. Fire-and-forget.
+
+    All errors are swallowed — this runs in the background after the
+    response has already been sent to the user.
+    """
+    if not config.MEMORY_ENABLED:
+        return
+
+    # Find the last user message
+    last_user = ""
+    for msg in reversed(messages):
+        if msg.get("role") == "user":
+            content = msg.get("content", "")
+            if isinstance(content, str):
+                last_user = content.strip()
+            break
+
+    if not last_user:
+        return
+
+    # Format known facts for the data block
+    known_block = "\n".join(f"- {f}" for f in known_facts) if known_facts else "(none)"
+
+    data_block = (
+        f"LAST USER MESSAGE:\n{last_user}\n\n"
+        f"KNOWN FACTS (already in memory — do not extract):\n{known_block}"
+    )
+
+    # Step 1: Call evaluator LLM
+    start_time = time.monotonic()
+    facts: list[dict] = []
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(
+            config.MEMORY_EVALUATOR_TIMEOUT_MS / 1000.0
+        )) as http:
+            resp = await http.post(
+                f"{config.UPSTREAM_BASE_URL}/v1/chat/completions",
+                headers={"Authorization": f"Bearer {config.UPSTREAM_API_KEY}"},
+                json={
+                    "model": config.MEMORY_EVALUATOR_MODEL,
+                    "messages": [
+                        {"role": "system", "content": _EVALUATOR_SYSTEM_PROMPT},
+                        {"role": "user", "content": data_block},
+                    ],
+                    "response_format": {"type": "json_object"},
+                    "thinking": {"type": "disabled"},
+                    "temperature": 0.0,
+                    "max_tokens": config.MEMORY_EVALUATOR_MAX_TOKENS,
+                    "stream": False,
+                },
+            )
+            if resp.status_code == 200:
+                body = resp.json()
+                content = body["choices"][0]["message"]["content"]
+                # Safe JSON parse — strip markdown fences if present
+                content = content.strip()
+                if content.startswith("```"):
+                    content = content.split("\n", 1)[-1].rsplit("\n```", 1)[0]
+                result = json.loads(content)
+                facts = result.get("facts", [])
+    except Exception as exc:
+        logger.debug("memory_evaluator_failed", request_id=request_id, error=str(exc))
+        return
+
+    if not facts:
+        return
+
+    duration_ms = round((time.monotonic() - start_time) * 1000, 1)
+    logger.info(
+        "memory_extracted",
+        request_id=request_id,
+        candidates=len(facts),
+        duration_ms=duration_ms,
+    )
+
+    # Step 2: Dedup (L1 → L2 → L3)
+    survivors: list[str] = []
+    for f in facts:
+        fact_text = f.get("fact", "").strip()
+        if not fact_text or len(fact_text) < 10:
+            continue
+
+        # Security gate
+        if _contains_sensitive(fact_text):
+            logger.warning(
+                "memory_secret_flagged",
+                request_id=request_id,
+                fact_snippet=fact_text[:80],
+            )
+            continue
+
+        # L1: exact hash
+        if _dedup_filter.check_l1(fact_text):
+            continue
+
+        # L2: embedding similarity (only for non-trivial facts)
+        if len(fact_text) >= 30:
+            embedding = await _compute_embedding(fact_text)
+            if embedding is not None:
+                skip, ambiguous = _dedup_filter.check_l2(embedding)
+                if skip:
+                    continue
+                if ambiguous:
+                    # L3: Graphiti search
+                    try:
+                        existing = await client.search_facts(fact_text, limit=3)
+                        if existing:
+                            # Check if the top result is very similar
+                            top_fact = existing[0].fact
+                            top_emb = await _compute_embedding(top_fact)
+                            if top_emb is not None:
+                                sim = DedupFilter._cosine_similarity(
+                                    embedding, top_emb
+                                )
+                                if sim > config.MEMORY_DEDUP_GRAPHITI_SIMILARITY:
+                                    continue
+                    except Exception:
+                        pass  # L3 unavailable → accept the fact
+
+        survivors.append(fact_text)
+        # Record in dedup cache
+        if embedding is not None:
+            _dedup_filter.add(fact_text, embedding)
+        else:
+            _dedup_filter.add(fact_text)
+
+    if not survivors:
+        return
+
+    logger.info(
+        "memory_deduped",
+        request_id=request_id,
+        before=len(facts),
+        after=len(survivors),
+    )
+
+    # Step 3: Enqueue for background storage
+    job = WriteJob(
+        episode_name=f"conv-{conversation_key_str[:12]}-{request_id[:8]}",
+        episode_body="\n".join(
+            f"{i}. {fact}" for i, fact in enumerate(survivors, 1)
+        ),
+        reference_time=datetime.now(timezone.utc),
+        group_id=config.GRAPHITI_GROUP_ID,
+        request_id=request_id,
+    )
+    await client.enqueue_write(job)
+
+
 # Module-level singleton — one MemoryClient per process
 memory_client = MemoryClient()
