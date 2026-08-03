@@ -850,8 +850,8 @@ NEVER EXTRACT (7 categories):
    "save this: I prefer tabs over spaces"), extract the stated fact exactly as given.
    The user is deliberately telling you what to store — honor that.
 3. transient measurements ("the build takes 40 seconds")
-4. sensitive data — passwords, API keys, tokens, secrets, financial, medical, or
-   personal identifying data (this is also filtered programmatically; never extract it)
+4. passwords, API keys, tokens, secrets (these are filtered programmatically;
+   never extract them)
 5. mood or venting ("I hate this codebase") — emotion is not a preference
 6. the assistant's own statements or conclusions
 7. judgments about other people ("my colleague is incompetent")
