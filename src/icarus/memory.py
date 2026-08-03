@@ -214,8 +214,7 @@ def _format_injection(facts: list[Fact], max_facts: int | None = None) -> str | 
     lines.append("---")
     lines.append(
         "*This memory is from previous conversations and is frozen for this session. "
-        "If the user asks to forget or correct a fact, note it and suggest using "
-        "`script/memory forget` or the memory management API.*"
+        "Corrections will be picked up automatically in future conversations.*"
     )
     return "\n".join(lines)
 
