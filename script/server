@@ -6,21 +6,47 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_DIR"
 
-# Load .env if it exists (uses set -a to handle values with spaces/quotes)
+# ── Parse flags ────────────────────────────────────────────────────────────
+LOG_PROMPTS=""
+UVICORN_ARGS=()
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --log-every-prompt)
+            LOG_PROMPTS="true"
+            shift
+            ;;
+        --host|--port|--log-level|--workers|--reload)
+            UVICORN_ARGS+=("$1" "$2")
+            shift 2
+            ;;
+        *)
+            UVICORN_ARGS+=("$1")
+            shift
+            ;;
+    esac
+done
+
+# ── Load .env ──────────────────────────────────────────────────────────────
 if [ -f .env ]; then
     set -a
     source .env
     set +a
 fi
 
-# Defaults
+# ── Overrides ──────────────────────────────────────────────────────────────
 HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-8000}"
 LOG_LEVEL="${LOG_LEVEL:-info}"
+LOG_PROMPTS="${LOG_PROMPTS:-${LOG_PROMPTS_OVERRIDE:-}}"
+export LOG_PROMPTS
 
 echo "=== Icarus Proxy ==="
 echo "Upstream: ${UPSTREAM_BASE_URL:-https://api.deepseek.com}"
 echo "Listening on: http://${HOST}:${PORT}"
+echo "Log prompts: ${LOG_PROMPTS:-false}"
 echo ""
 
-exec uv run uvicorn icarus.proxy:app --host "$HOST" --port "$PORT" --log-level "$LOG_LEVEL"
+exec uv run uvicorn icarus.proxy:app \
+    --host "$HOST" --port "$PORT" --log-level "$LOG_LEVEL" \
+    "${UVICORN_ARGS[@]}"
