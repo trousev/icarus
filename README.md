@@ -52,19 +52,27 @@ Graphiti MCP Server (localhost:8001, FalkorDB inside)
 ### Memory Management
 
 ```bash
-script/memory status           # Health + counters
-script/memory search "rust"    # Search stored facts
-script/memory forget <uuid>    # Delete a fact
-script/memory purge            # Wipe all memory
+script/memory status                        # Health + counters
+script/memory search "rust"                 # Search stored facts
+script/memory forget <uuid>                 # Delete a fact
+script/memory --user alice search "rust"    # Multi-tenant: search as user 'alice'
+script/memory --admin tenants               # Admin: list all tenants
+script/memory --admin erase t:<group_id>    # Admin: GDPR erasure
+script/memory purge                         # Wipe all memory for current user
 ```
 
-Or via HTTP API (requires `Authorization: Bearer $UPSTREAM_API_KEY`):
+Or via HTTP API (requires `Authorization: Bearer $UPSTREAM_API_KEY`; multi-tenant adds `X-User-ID` header):
 
 ```bash
+# Single-tenant / legacy mode
 curl -H "Authorization: Bearer sk-..." http://localhost:8000/memory/status
 curl -H "Authorization: Bearer sk-..." "http://localhost:8000/memory/facts?q=rust"
 curl -X POST -H "Authorization: Bearer sk-..." \
   -d '{"fact_uuid": "..."}' http://localhost:8000/memory/forget
+
+# Multi-tenant mode
+curl -H "Authorization: Bearer sk-..." -H "X-User-ID: alice" \
+  http://localhost:8000/memory/status
 ```
 
 ### Disabling
@@ -75,7 +83,61 @@ Set `MEMORY_ENABLED=false` (or omit it) to fall back to static `MEMORY_INJECTION
 
 The proxy intercepts `/v1/chat/completions` requests, parses the messages array, and injects a second system message (after any existing system message) containing the configured memory text. This simulates cache-safe memory injection without breaking the prompt structure.
 
-Any API key is accepted by the proxy — authentication is passed through to the upstream service.
+Any API key is accepted by the proxy in single-user mode. In multi-tenant mode the proxy requires the configured `UPSTREAM_API_KEY`.
+
+## Multi-Tenancy (User-Isolated Memory)
+
+When `MEMORY_MULTI_TENANT=true`, Icarus isolates memory per user using Graphiti's `group_id` namespacing. Each user gets their own knowledge graph — facts, preferences, and projects are never shared between users.
+
+### How It Works
+
+1. LibreChat sends the user identity via the `X-User-ID` header (configured with `{{LIBRECHAT_USER_ID}}` placeholder)
+2. Icarus maps the identity to a deterministic `group_id` = `sha256(identity)[:16]`
+3. All Graphiti operations (read + write) use the user-specific `group_id`
+4. Memory management endpoints are scoped to the requesting user
+
+### Configuration
+
+```bash
+MEMORY_MULTI_TENANT=true           # Enable multi-tenant mode
+MEMORY_TENANT_HEADER=X-User-ID     # Identity header name (default)
+ICARUS_ADMIN_API_KEY=sk-admin-...  # Admin key for GDPR erasure (must differ from UPSTREAM_API_KEY)
+```
+
+### LibreChat Integration
+
+Add Icarus as a custom endpoint in `librechat.yaml`:
+
+```yaml
+endpoints:
+  custom:
+    - name: "Icarus"
+      baseURL: "http://icarus:8000/v1"
+      apiKey: "${ICARUS_UPSTREAM_KEY}"
+      headers:
+        X-User-ID: "{{LIBRECHAT_USER_ID}}"
+      models:
+        default: ["deepseek-v4-flash"]
+```
+
+### Security
+
+- In MT mode the chat path requires `UPSTREAM_API_KEY` — only trusted clients can reach the memory system.
+- The admin key for GDPR operations (`ICARUS_ADMIN_API_KEY`) must differ from the upstream key.
+- Optional HMAC-SHA256 header signing (`MEMORY_TENANT_HMAC_SECRET`) provides defense-in-depth when Icarus sits behind a custom gateway.
+- **Network isolation**: Icarus should only be reachable by LibreChat. Direct LAN exposure without HMAC allows header forgery.
+
+### Admin Endpoints
+
+```bash
+# List all tenants (requires ICARUS_ADMIN_API_KEY)
+curl -H "Authorization: Bearer $ICARUS_ADMIN_API_KEY" \
+  http://localhost:8000/admin/tenants
+
+# GDPR erasure — purge all memory for a tenant
+curl -X POST -H "Authorization: Bearer $ICARUS_ADMIN_API_KEY" \
+  http://localhost:8000/admin/tenant/t:3f2a9c1e8b47d602/purge
+```
 
 ## Docker
 
