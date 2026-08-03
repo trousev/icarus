@@ -7,6 +7,8 @@ import uuid
 import structlog
 from datetime import datetime, timezone
 
+from icarus.config import config
+
 
 class RequestLogger:
     """Logs every request/response pair to the filesystem for debugging.
@@ -117,6 +119,15 @@ class RequestLogger:
         date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         dir_path = os.path.join(self.log_dir, date_str)
         os.makedirs(dir_path, exist_ok=True)
+
+        # Strip prompt/response bodies unless explicitly enabled
+        if not config.LOG_PROMPTS:
+            for key in ("original_body", "modified_body", "headers"):
+                entry.pop(key, None)
+            resp = entry.get("response", {})
+            if isinstance(resp, dict):
+                resp.pop("body", None)
+                resp.pop("headers", None)
 
         file_path = os.path.join(dir_path, f"{request_id}.json")
         with open(file_path, "w") as f:

@@ -13,7 +13,7 @@ class Config:
     HOST: str = os.getenv("HOST", "0.0.0.0")
     PORT: int = int(os.getenv("PORT", "8000"))
     LOG_DIR: str = os.getenv("LOG_DIR", "./logs")
-    LOG_ENABLED: bool = os.getenv("LOG_ENABLED", "true").lower() == "true"
+    LOG_PROMPTS: bool = os.getenv("LOG_PROMPTS", "").lower() in ("1", "true", "yes")
 
 
 config = Config()
