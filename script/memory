@@ -14,28 +14,73 @@ fi
 
 PROXY_URL="${PROXY_URL:-http://localhost:${PORT:-8000}}"
 AUTH_HEADER="Authorization: Bearer ${UPSTREAM_API_KEY:-}"
+ADMIN_AUTH_HEADER="Authorization: Bearer ${ICARUS_ADMIN_API_KEY:-}"
+TENANT_HEADER_NAME="${MEMORY_TENANT_HEADER:-X-User-ID}"
+
+# ── Parse --user and --admin flags ─────────────────────────────────────────
+USER_ID="${ICARUS_USER_ID:-}"
+USE_ADMIN=false
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --user)
+            USER_ID="$2"
+            shift 2
+            ;;
+        --admin)
+            USE_ADMIN=true
+            shift
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+cmd="${1:-help}"; shift || true
+
+# Build tenant header if user ID is set
+TENANT_HDR=()
+if [ -n "$USER_ID" ]; then
+    TENANT_HDR=(-H "$TENANT_HEADER_NAME: $USER_ID")
+fi
 
 usage() {
     cat <<EOF
-Usage: script/memory <command> [args]
+Usage: script/memory [--user <id>] [--admin] <command> [args]
 
-Commands:
-  status              Show memory system health and counters
+Multi-tenancy flags:
+  --user <id>   Set the tenant identity header (or set ICARUS_USER_ID env).
+                In legacy mode this is ignored; in MT mode it is required.
+  --admin       Use the admin API key (ICARUS_ADMIN_API_KEY) for admin ops.
+
+Commands (user-scoped — require --user in MT mode):
+  status              Show memory system health and counters for this user
   search <query>      Search knowledge graph for facts (max 20)
   forget <uuid>       Delete a fact by UUID
   forget-topic <msg>  Find and delete facts matching a natural-language query
-  purge               Delete ALL memory for this group (requires confirmation)
+  purge               Delete ALL memory for this user (requires confirmation)
   log                 Show recent dead-letter entries
+
+Commands (admin-scoped — require --admin):
+  tenants             List all tenants with stats
+  tenant-status <gid> Deep per-tenant status
+  erase <group_id>    GDPR erasure: purge all memory for a tenant
 
 Examples:
   script/memory status
-  script/memory search "rust"
-  script/memory forget abc123-def456
-  script/memory forget-topic "forget everything about Kubernetes"
-  script/memory purge
+  script/memory --user alice search "rust"
+  script/memory --user alice forget abc123-def456
+  script/memory --user alice forget-topic "forget everything about Kubernetes"
+  script/memory --user alice purge
+  script/memory --admin tenants
+  script/memory --admin erase t:3f2a9c1e8b47d602
 
 Environment:
-  PROXY_URL   Override proxy URL (default: http://localhost:\${PORT:-8000})
+  PROXY_URL              Override proxy URL (default: http://localhost:\${PORT:-8000})
+  ICARUS_USER_ID         Default user identity (overridden by --user)
+  ICARUS_ADMIN_API_KEY   Admin API key for admin commands
+  MEMORY_TENANT_HEADER   Identity header name (default: X-User-ID)
 EOF
     exit 0
 }
@@ -43,15 +88,25 @@ EOF
 # ── Commands ───────────────────────────────────────────────────────────────
 
 cmd_status() {
-    curl -sf "$PROXY_URL/health" | python3 -m json.tool 2>/dev/null || {
-        echo "Error: could not reach $PROXY_URL/health"
-        exit 1
-    }
+    if [ -n "$USER_ID" ]; then
+        curl -sf -H "$AUTH_HEADER" "${TENANT_HDR[@]}" "$PROXY_URL/memory/status" \
+            | python3 -m json.tool 2>/dev/null || {
+            echo "Error: could not reach $PROXY_URL/memory/status"
+            echo "Hint: in MT mode, pass --user <id>"
+            exit 1
+        }
+    else
+        curl -sf "$PROXY_URL/health" | python3 -m json.tool 2>/dev/null || {
+            echo "Error: could not reach $PROXY_URL/health"
+            exit 1
+        }
+    fi
 }
 
 cmd_search() {
     local query="$1"
-    curl -sf -H "$AUTH_HEADER" "$PROXY_URL/memory/facts?q=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$query'))")&limit=20" \
+    curl -sf -H "$AUTH_HEADER" "${TENANT_HDR[@]}" \
+        "$PROXY_URL/memory/facts?q=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$query'))")&limit=20" \
         | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
@@ -68,27 +123,27 @@ if not data.get('facts'):
 
 cmd_forget() {
     local uuid="$1"
-    curl -sf -X POST -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+    curl -sf -X POST -H "$AUTH_HEADER" -H "Content-Type: application/json" "${TENANT_HDR[@]}" \
         -d "{\"fact_uuid\": \"$uuid\"}" "$PROXY_URL/memory/forget" \
         | python3 -m json.tool
 }
 
 cmd_forget_topic() {
     local msg="$1"
-    curl -sf -X POST -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+    curl -sf -X POST -H "$AUTH_HEADER" -H "Content-Type: application/json" "${TENANT_HDR[@]}" \
         -d "{\"message\": \"$msg\"}" "$PROXY_URL/memory/forget" \
         | python3 -m json.tool
 }
 
 cmd_purge() {
-    echo "WARNING: This will delete ALL memory facts for this group."
+    echo "WARNING: This will delete ALL memory facts for this user."
     echo "Type 'purge-all' to confirm:"
     read -r confirm
     if [ "$confirm" != "purge-all" ]; then
         echo "Aborted."
         exit 0
     fi
-    curl -sf -X POST -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+    curl -sf -X POST -H "$AUTH_HEADER" -H "Content-Type: application/json" "${TENANT_HDR[@]}" \
         -d '{"confirm": "purge-all"}' "$PROXY_URL/memory/purge" \
         | python3 -m json.tool
 }
@@ -102,13 +157,68 @@ cmd_log() {
     fi
 }
 
+# ── Admin commands ─────────────────────────────────────────────────────────
+
+cmd_admin_tenants() {
+    curl -sf -H "$ADMIN_AUTH_HEADER" "$PROXY_URL/admin/tenants" \
+        | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+if 'error' in data:
+    print(f\"Error: {data['error']}\")
+    sys.exit(1)
+print(f\"Total tenants: {data['total']}\")
+for t in data.get('tenants', []):
+    purged = ' [PURGED]' if t.get('purged_at') else ''
+    print(f\"  {t['group_id']}  seen={t.get('last_seen','?')[:19]}  writes={t.get('last_write','?')[:19] if t.get('last_write') else 'none'}{purged}\")
+if not data.get('tenants'):
+    print('No tenants found.')
+"
+}
+
+cmd_admin_tenant_status() {
+    local gid="$1"
+    curl -sf -H "$ADMIN_AUTH_HEADER" "$PROXY_URL/admin/tenant/$gid/status" \
+        | python3 -m json.tool
+}
+
+cmd_admin_erase() {
+    local gid="$1"
+    echo "WARNING: This will erase ALL memory for tenant $gid (GDPR erasure)."
+    echo "Type 'ERASE' to confirm:"
+    read -r confirm
+    if [ "$confirm" != "ERASE" ]; then
+        echo "Aborted."
+        exit 0
+    fi
+    curl -sf -X POST -H "$ADMIN_AUTH_HEADER" -H "Content-Type: application/json" \
+        "$PROXY_URL/admin/tenant/$gid/purge" \
+        | python3 -m json.tool
+}
+
 # ── Dispatch ───────────────────────────────────────────────────────────────
 
-case "${1:-}" in
+if $USE_ADMIN; then
+    if [ -z "$ICARUS_ADMIN_API_KEY" ]; then
+        echo "Error: ICARUS_ADMIN_API_KEY not set — admin commands require the admin key"
+        echo "Set it in .env or export ICARUS_ADMIN_API_KEY=..."
+        exit 1
+    fi
+    case "$cmd" in
+        tenants)      cmd_admin_tenants ;;
+        tenant-status) cmd_admin_tenant_status "${1:-}" ;;
+        erase)        cmd_admin_erase "${1:-}" ;;
+        help|--help|-h) usage ;;
+        *)            usage ;;
+    esac
+    exit 0
+fi
+
+case "$cmd" in
     status)       cmd_status ;;
-    search)       cmd_search "${2:-}" ;;
-    forget)       cmd_forget "${2:-}" ;;
-    forget-topic) cmd_forget_topic "${2:-}" ;;
+    search)       cmd_search "${1:-}" ;;
+    forget)       cmd_forget "${1:-}" ;;
+    forget-topic) cmd_forget_topic "${1:-}" ;;
     purge)        cmd_purge ;;
     log)          cmd_log ;;
     help|--help|-h) usage ;;
