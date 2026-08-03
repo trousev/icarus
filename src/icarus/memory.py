@@ -340,6 +340,7 @@ class MemoryClient:
 
         # Long-lived MCP transport + session (created in connect, recreated on error)
         self._session: ClientSession | None = None
+        self._session_ctx: object | None = None  # ClientSession context
         self._transport_ctx: object | None = None  # streamable_http_client context
         self._http_client: httpx.AsyncClient | None = None
         self._available: bool = False
@@ -394,19 +395,21 @@ class MemoryClient:
         self._transport_ctx = streamable_http_client(
             self._url, http_client=self._http_client,
         )
-        read, write, _get_session_id = await self._transport_ctx.__aenter__()
-        self._session = ClientSession(read, write)
+        read, write = await self._transport_ctx.__aenter__()
+        self._session_ctx = ClientSession(read, write)
+        self._session = await self._session_ctx.__aenter__()
         await self._session.initialize()
         tools = await self._session.list_tools()
         self._resolve_tools(tools.tools)
 
     async def _teardown_transport(self) -> None:
         """Close existing session and transport if any."""
-        if self._session is not None:
+        if self._session_ctx is not None:
             try:
-                await self._session.__aexit__(None, None, None)
+                await self._session_ctx.__aexit__(None, None, None)
             except Exception:
                 pass
+            self._session_ctx = None
             self._session = None
         if self._transport_ctx is not None:
             try:
@@ -521,34 +524,26 @@ class MemoryClient:
             )
 
     async def add_memory(
-        self, name: str, facts: list[str],
+        self, name: str,
+        episode_body: str = "",
         source_description: str = "icarus evaluator",
         reference_time: datetime | None = None,
     ) -> bool:
-        """Store extracted facts as an episode in the knowledge graph.
+        """Store an episode in the knowledge graph.
 
+        The episode_body is stored as-is (already formatted by the caller).
         Returns True on success, False on failure.
         """
-        if not facts:
+        if not episode_body.strip():
             return False
 
-        # Security gate: never send raw conversations, and filter secrets
-        clean_facts: list[str] = []
-        for f in facts:
-            if _contains_sensitive(f):
-                logger.warning(
-                    "memory_secret_flagged",
-                    fact_snippet=f[:80],
-                )
-                continue
-            clean_facts.append(f)
-
-        if not clean_facts:
+        # Security gate: check the entire episode body for secrets
+        if _contains_sensitive(episode_body):
+            logger.warning(
+                "memory_secret_flagged",
+                body_snippet=episode_body[:80],
+            )
             return False
-
-        episode_body = "\n".join(
-            f"{i}. {fact}" for i, fact in enumerate(clean_facts, 1)
-        )
 
         try:
             result = await self._call_tool(
@@ -567,8 +562,11 @@ class MemoryClient:
                 },
                 timeout=self._write_timeout,
             )
-            return "error" not in str(result).lower()
-        except Exception:
+            # Success: MCP returns a message string on success
+            logger.debug("memory_add_result", result=str(result)[:200])
+            return True
+        except Exception as exc:
+            logger.warning("memory_add_failed", error=str(exc))
             return False
 
     # ── Delete / forget ──────────────────────────────────────────────────
@@ -641,9 +639,10 @@ class MemoryClient:
 
             for attempt in range(max_retries + 1):
                 try:
+                    # add_memory formats and filters the facts; pass the raw text
                     success = await self.add_memory(
                         name=job.episode_name,
-                        facts=[job.episode_body],
+                        episode_body=job.episode_body,
                         reference_time=job.reference_time,
                     )
                     if success:
@@ -712,7 +711,7 @@ class MemoryClient:
             self._available = False
             raise
 
-        if result.isError:
+        if result.is_error:
             raise RuntimeError(
                 f"MCP tool '{tool_name}' returned error: {result.content}"
             )
@@ -1083,6 +1082,7 @@ async def extract_and_store(
             continue
 
         # L2: embedding similarity (only for non-trivial facts)
+        embedding: list[float] | None = None
         if len(fact_text) >= 30:
             embedding = await _compute_embedding(fact_text)
             if embedding is not None:

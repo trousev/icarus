@@ -28,7 +28,7 @@ class Config:
     )
 
     # Graphiti MCP server
-    GRAPHITI_URL: str = os.getenv("GRAPHITI_URL", "http://localhost:8001/mcp/")
+    GRAPHITI_URL: str = os.getenv("GRAPHITI_URL", "http://localhost:8001/mcp")
     GRAPHITI_GROUP_ID: str = os.getenv("GRAPHITI_GROUP_ID", "default")
     GRAPHITI_MAX_FACTS: int = int(os.getenv("GRAPHITI_MAX_FACTS", "30"))
 
@@ -37,10 +37,10 @@ class Config:
     GRAPHITI_WRITE_TIMEOUT_MS: int = int(os.getenv("GRAPHITI_WRITE_TIMEOUT_MS", "10000"))
     GRAPHITI_WRITE_RETRIES: int = int(os.getenv("GRAPHITI_WRITE_RETRIES", "1"))
 
-    # Model config for Graphiti's internal extraction (deepseek-v4-flash is the canonical ID;
-    # deepseek-chat was deprecated 2026-07-24)
+    # Model config for Graphiti's internal extraction (runs inside the container,
+    # uses OpenAI API — not the upstream DeepSeek proxy)
     GRAPHITI_EXTRACTOR_MODEL: str = os.getenv(
-        "GRAPHITI_EXTRACTOR_MODEL", "deepseek-v4-flash"
+        "GRAPHITI_EXTRACTOR_MODEL", "gpt-4o-mini"
     )
     GRAPHITI_EMBEDDING_MODEL: str = os.getenv(
         "GRAPHITI_EMBEDDING_MODEL", "text-embedding-3-small"

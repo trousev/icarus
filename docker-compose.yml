@@ -6,11 +6,9 @@ services:
       - "${GRAPHITI_PORT:-8001}:8000"
     environment:
       - LLM_PROVIDER=openai
-      - OPENAI_API_URL=${UPSTREAM_BASE_URL}/v1
-      - OPENAI_API_KEY=${UPSTREAM_API_KEY}
-      - MODEL_NAME=${GRAPHITI_EXTRACTOR_MODEL:-deepseek-v4-flash}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - MODEL_NAME=${GRAPHITI_EXTRACTOR_MODEL:-gpt-4o-mini}
       - EMBEDDING_PROVIDER=openai
-      - EMBEDDING_API_URL=${GRAPHITI_EMBEDDING_API_URL:-https://api.openai.com/v1}
       - EMBEDDING_API_KEY=${OPENAI_API_KEY}
       - EMBEDDING_MODEL=${GRAPHITI_EMBEDDING_MODEL:-text-embedding-3-small}
       - GRAPHITI_TELEMETRY_ENABLED=false
@@ -37,7 +35,7 @@ services:
     env_file:
       - .env
     environment:
-      - GRAPHITI_URL=http://graphiti:8000/mcp/
+      - GRAPHITI_URL=http://graphiti:8000/mcp
     volumes:
       - ./logs:/app/logs
       - ./data:/app/data

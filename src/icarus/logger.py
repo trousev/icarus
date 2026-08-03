@@ -130,8 +130,12 @@ class RequestLogger:
                 resp.pop("headers", None)
 
         file_path = os.path.join(dir_path, f"{request_id}.json")
-        with open(file_path, "w") as f:
-            json.dump(entry, f, indent=2, default=str, ensure_ascii=False)
+        try:
+            with open(file_path, "w") as f:
+                json.dump(entry, f, indent=2, default=str, ensure_ascii=False)
+        except PermissionError:
+            # Docker may have created logs/ as root — skip silently
+            pass
 
     def _sanitize_headers(self, headers: dict) -> dict:
         sensitive = {"authorization", "api-key", "x-api-key", "cookie"}
