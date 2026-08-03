@@ -845,6 +845,10 @@ REMEMBER ONLY (7 categories):
 NEVER EXTRACT (7 categories):
 1. temporary debugging state ("the VPS is timing out right now")
 2. the task request itself ("help me refactor this file")
+   EXCEPTION: if the user explicitly asks you to remember or save a fact
+   (e.g., "remember that I use Rust", "запомни: я работаю над проектом Icarus",
+   "save this: I prefer tabs over spaces"), extract the stated fact exactly as given.
+   The user is deliberately telling you what to store — honor that.
 3. transient measurements ("the build takes 40 seconds")
 4. sensitive data — passwords, API keys, tokens, secrets, financial, medical, or
    personal identifying data (this is also filtered programmatically; never extract it)
