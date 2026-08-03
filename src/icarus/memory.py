@@ -208,7 +208,8 @@ def _format_injection(facts: list[Fact], max_facts: int | None = None) -> str | 
     lines = ["## User Memory (from previous conversations)", ""]
     lines.append("### Known Facts")
     for f in facts:
-        lines.append(f"- {f.fact}")
+        ts = f.valid_at[:10] if f.valid_at else "?"
+        lines.append(f"- [{ts}] {f.fact}")
     lines.append("")
     lines.append("---")
     lines.append(
