@@ -51,7 +51,7 @@ class Config:
         "MEMORY_EVALUATOR_MODEL", "deepseek-v4-flash"
     )
     MEMORY_EVALUATOR_TIMEOUT_MS: int = int(
-        os.getenv("MEMORY_EVALUATOR_TIMEOUT_MS", "5000")
+        os.getenv("MEMORY_EVALUATOR_TIMEOUT_MS", "10000")
     )
     MEMORY_EVALUATOR_MAX_TOKENS: int = int(
         os.getenv("MEMORY_EVALUATOR_MAX_TOKENS", "800")

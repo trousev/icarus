@@ -1031,7 +1031,16 @@ async def extract_and_store(
     # Step 1: Call evaluator LLM
     start_time = time.monotonic()
     facts: list[dict] = []
-    logger.info("memory_evaluator_calling", request_id=request_id, model=config.MEMORY_EVALUATOR_MODEL)
+
+    logger.info(
+        "memory_evaluator_calling",
+        request_id=request_id,
+        model=config.MEMORY_EVALUATOR_MODEL,
+        last_user_len=len(last_user),
+        known_facts_count=len(known_facts),
+    )
+    logger.debug("memory_evaluator_payload", request_id=request_id, data_block=data_block)
+
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(
             config.MEMORY_EVALUATOR_TIMEOUT_MS / 1000.0
@@ -1052,6 +1061,13 @@ async def extract_and_store(
                     "stream": False,
                 },
             )
+            eval_duration_ms = round((time.monotonic() - start_time) * 1000, 1)
+            logger.info(
+                "memory_evaluator_response",
+                request_id=request_id,
+                status=resp.status_code,
+                duration_ms=eval_duration_ms,
+            )
             if resp.status_code == 200:
                 body = resp.json()
                 content = body["choices"][0]["message"]["content"]
@@ -1061,11 +1077,48 @@ async def extract_and_store(
                     content = content.split("\n", 1)[-1].rsplit("\n```", 1)[0]
                 result = json.loads(content)
                 facts = result.get("facts", [])
+                logger.info(
+                    "memory_evaluator_parsed",
+                    request_id=request_id,
+                    raw_len=len(content),
+                    facts_count=len(facts),
+                )
+                if facts:
+                    for i, f in enumerate(facts):
+                        logger.debug(
+                            "memory_evaluator_fact",
+                            request_id=request_id,
+                            index=i,
+                            fact=f.get("fact", "")[:120],
+                            category=f.get("category", "?"),
+                        )
+            else:
+                logger.warning(
+                    "memory_evaluator_bad_status",
+                    request_id=request_id,
+                    status=resp.status_code,
+                    body_snippet=resp.text[:200],
+                )
+    except httpx.TimeoutException:
+        eval_duration_ms = round((time.monotonic() - start_time) * 1000, 1)
+        logger.warning(
+            "memory_evaluator_timeout",
+            request_id=request_id,
+            duration_ms=eval_duration_ms,
+            timeout_ms=config.MEMORY_EVALUATOR_TIMEOUT_MS,
+        )
+        return
     except Exception as exc:
-        logger.warning("memory_evaluator_failed", request_id=request_id, error=str(exc))
+        logger.warning(
+            "memory_evaluator_failed",
+            request_id=request_id,
+            error_type=type(exc).__name__,
+            error=str(exc),
+        )
         return
 
     if not facts:
+        logger.info("memory_extracted_empty", request_id=request_id)
         return
 
     duration_ms = round((time.monotonic() - start_time) * 1000, 1)
@@ -1078,13 +1131,19 @@ async def extract_and_store(
 
     # Step 2: Dedup (L1 → L2 → L3)
     survivors: list[str] = []
+    l1_hits = 0
+    l2_hits = 0
+    l3_hits = 0
+    secret_hits = 0
     for f in facts:
         fact_text = f.get("fact", "").strip()
         if not fact_text or len(fact_text) < 10:
+            logger.debug("memory_dedup_skip_short", request_id=request_id, fact=fact_text[:80])
             continue
 
         # Security gate
         if _contains_sensitive(fact_text):
+            secret_hits += 1
             logger.warning(
                 "memory_secret_flagged",
                 request_id=request_id,
@@ -1094,17 +1153,25 @@ async def extract_and_store(
 
         # L1: exact hash
         if _dedup_filter.check_l1(fact_text):
+            l1_hits += 1
+            logger.debug("memory_dedup_l1_hit", request_id=request_id, fact=fact_text[:80])
             continue
 
         # L2: embedding similarity (only for non-trivial facts)
         embedding: list[float] | None = None
         if len(fact_text) >= 30:
+            emb_start = time.monotonic()
             embedding = await _compute_embedding(fact_text)
             if embedding is not None:
+                emb_ms = round((time.monotonic() - emb_start) * 1000, 1)
+                logger.debug("memory_dedup_l2_computed", request_id=request_id, fact=fact_text[:80], embedding_ms=emb_ms)
                 skip, ambiguous = _dedup_filter.check_l2(embedding)
                 if skip:
+                    l2_hits += 1
+                    logger.debug("memory_dedup_l2_hit", request_id=request_id, fact=fact_text[:80])
                     continue
                 if ambiguous:
+                    logger.debug("memory_dedup_l2_ambiguous", request_id=request_id, fact=fact_text[:80])
                     # L3: Graphiti search
                     try:
                         existing = await client.search_facts(fact_text, limit=3)
@@ -1116,12 +1183,16 @@ async def extract_and_store(
                                 sim = DedupFilter._cosine_similarity(
                                     embedding, top_emb
                                 )
+                                logger.debug("memory_dedup_l3_check", request_id=request_id, fact=fact_text[:80], similarity=round(sim, 3))
                                 if sim > config.MEMORY_DEDUP_GRAPHITI_SIMILARITY:
+                                    l3_hits += 1
+                                    logger.debug("memory_dedup_l3_hit", request_id=request_id, fact=fact_text[:80])
                                     continue
-                    except Exception:
-                        pass  # L3 unavailable → accept the fact
+                    except Exception as exc:
+                        logger.debug("memory_dedup_l3_error", request_id=request_id, error=str(exc))
 
         survivors.append(fact_text)
+        logger.info("memory_dedup_pass", request_id=request_id, fact=fact_text[:120])
         # Record in dedup cache
         if embedding is not None:
             _dedup_filter.add(fact_text, embedding)
@@ -1129,6 +1200,7 @@ async def extract_and_store(
             _dedup_filter.add(fact_text)
 
     if not survivors:
+        logger.info("memory_deduped_empty", request_id=request_id, l1_hits=l1_hits, l2_hits=l2_hits, l3_hits=l3_hits, secret_hits=secret_hits)
         return
 
     logger.info(
@@ -1136,6 +1208,10 @@ async def extract_and_store(
         request_id=request_id,
         before=len(facts),
         after=len(survivors),
+        l1_hits=l1_hits,
+        l2_hits=l2_hits,
+        l3_hits=l3_hits,
+        secret_hits=secret_hits,
     )
 
     # Step 3: Enqueue for background storage
@@ -1149,6 +1225,12 @@ async def extract_and_store(
         request_id=request_id,
     )
     await client.enqueue_write(job)
+    logger.info(
+        "memory_write_enqueued",
+        request_id=request_id,
+        queue_depth=client._write_queue.qsize(),
+        episode=job.episode_name,
+    )
 
 
 # ── Maintenance worker ──────────────────────────────────────────────────────
