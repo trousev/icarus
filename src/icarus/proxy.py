@@ -1,14 +1,27 @@
 """Transparent proxy for OpenAI-compatible APIs with memory injection."""
 
 import json
+from contextlib import asynccontextmanager
+
 import httpx
-from fastapi import FastAPI, Request, Response
+from fastapi import BackgroundTasks, FastAPI, Request, Response
 from fastapi.responses import StreamingResponse
 
 from icarus.config import config
 from icarus.logger import RequestLogger
+from icarus.memory import MemoryClient, memory_client
 
-app = FastAPI(title="Icarus Proxy", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    """Startup: connect to Graphiti memory service (non-fatal)."""
+    await memory_client.connect()
+    yield
+    """Shutdown: release MCP transport + write worker."""
+    await memory_client.close()
+
+
+app = FastAPI(title="Icarus Proxy", version="0.2.0", lifespan=lifespan)
 
 logger = RequestLogger(config.LOG_DIR)
 
@@ -22,7 +35,9 @@ async def health():
     return {
         "status": "ok",
         "upstream": config.UPSTREAM_BASE_URL,
+        "memory_enabled": config.MEMORY_ENABLED,
         "memory_injection": bool(config.MEMORY_INJECTION),
+        "graphiti": "ok" if memory_client.available else "unreachable",
     }
 
 
@@ -147,7 +162,7 @@ async def _proxy_buffered(request, upstream_url, forward_headers, modified_body,
     "/{path:path}",
     methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
 )
-async def proxy(request: Request, path: str):
+async def proxy(request: Request, path: str, background_tasks: BackgroundTasks):
     """Catch-all route that proxies requests to the upstream API."""
 
     upstream_url = f"{config.UPSTREAM_BASE_URL}/{path}"
