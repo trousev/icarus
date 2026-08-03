@@ -17,6 +17,12 @@ RUN apt-get update \
         git \
     && rm -rf /var/lib/apt/lists/*
 
+# ── non-root user ─────────────────────────────────────────────────────────────
+# The bundled claude CLI refuses --dangerously-skip-permissions under root.
+RUN useradd --create-home --shell /bin/bash icarus \
+    && mkdir -p /workspace \
+    && chown icarus:icarus /workspace
+
 # ── install dependencies (cached layer) ──────────────────────────────────────
 WORKDIR /app
 
@@ -43,6 +49,10 @@ RUN pip install --no-cache-dir --no-deps .
 WORKDIR /workspace
 
 EXPOSE 9090
+
+# Drop root after pip install — claude CLI refuses --dangerously-skip-permissions
+# when running as root (the container's default user).
+USER icarus
 
 # Bind to 0.0.0.0 so the host (and any chat UI) can reach the server.
 # All other settings are picked up from environment variables.
