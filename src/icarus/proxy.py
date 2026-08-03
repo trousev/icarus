@@ -64,8 +64,13 @@ def inject_memory(body: bytes) -> bytes:
 # ── Catch-all proxy route ──────────────────────────────────────────────────
 
 
-async def _proxy_streaming(client, request, upstream_url, forward_headers, modified_body, request_id):
-    """Forward a streaming request to upstream, yielding chunks as they arrive."""
+async def _proxy_streaming(request, upstream_url, forward_headers, modified_body, request_id):
+    """Forward a streaming request to upstream, yielding chunks as they arrive.
+
+    Uses its own httpx client so the client outlives the returned generator.
+    """
+    client = httpx.AsyncClient(timeout=httpx.Timeout(300.0))
+
     upstream_req = client.build_request(
         method=request.method,
         url=upstream_url,
@@ -97,6 +102,7 @@ async def _proxy_streaming(client, request, upstream_url, forward_headers, modif
                 full_body,
                 response_headers,
             )
+            await client.aclose()
 
     return StreamingResponse(
         stream_response(),
@@ -105,35 +111,36 @@ async def _proxy_streaming(client, request, upstream_url, forward_headers, modif
     )
 
 
-async def _proxy_buffered(client, request, upstream_url, forward_headers, modified_body, request_id):
+async def _proxy_buffered(request, upstream_url, forward_headers, modified_body, request_id):
     """Forward a non-streaming request to upstream, returning the full response."""
-    upstream_resp = await client.request(
-        method=request.method,
-        url=upstream_url,
-        headers=forward_headers,
-        content=modified_body,
-    )
-    response_body = upstream_resp.content
+    async with httpx.AsyncClient(timeout=httpx.Timeout(300.0)) as client:
+        upstream_resp = await client.request(
+            method=request.method,
+            url=upstream_url,
+            headers=forward_headers,
+            content=modified_body,
+        )
+        response_body = upstream_resp.content
 
-    response_headers = {}
-    for key, value in upstream_resp.headers.items():
-        lower = key.lower()
-        if lower in ("transfer-encoding", "content-encoding"):
-            continue
-        response_headers[key] = value
+        response_headers = {}
+        for key, value in upstream_resp.headers.items():
+            lower = key.lower()
+            if lower in ("transfer-encoding", "content-encoding"):
+                continue
+            response_headers[key] = value
 
-    logger.log_response(
-        request_id,
-        upstream_resp.status_code,
-        response_body,
-        response_headers,
-    )
+        logger.log_response(
+            request_id,
+            upstream_resp.status_code,
+            response_body,
+            response_headers,
+        )
 
-    return Response(
-        content=response_body,
-        status_code=upstream_resp.status_code,
-        headers=response_headers,
-    )
+        return Response(
+            content=response_body,
+            status_code=upstream_resp.status_code,
+            headers=response_headers,
+        )
 
 
 @app.api_route(
@@ -182,15 +189,14 @@ async def proxy(request: Request, path: str):
         pass
 
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(300.0)) as client:
-            if is_streaming:
-                return await _proxy_streaming(
-                    client, request, upstream_url, forward_headers, modified_body, request_id
-                )
-            else:
-                return await _proxy_buffered(
-                    client, request, upstream_url, forward_headers, modified_body, request_id
-                )
+        if is_streaming:
+            return await _proxy_streaming(
+                request, upstream_url, forward_headers, modified_body, request_id
+            )
+        else:
+            return await _proxy_buffered(
+                request, upstream_url, forward_headers, modified_body, request_id
+            )
     except httpx.HTTPError as exc:
         logger._log.error(
             "upstream_error",
