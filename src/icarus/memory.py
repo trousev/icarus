@@ -20,6 +20,7 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
 from icarus.config import config
+from icarus.tenant import current_tenant, tenant_registry
 
 logger = structlog.get_logger("icarus.memory")
 
@@ -114,41 +115,94 @@ class SnapshotStore:
     """SQLite-backed store for conversation→snapshot mappings.
 
     Persists formatted injection text so re-injection is byte-identical
-    across process restarts.
+    across process restarts.  In MT mode keys are ``{tenant}:{content_hash}``;
+    in legacy mode keys are bare ``{content_hash}``.
+
+    Degrades gracefully on SQLite errors — a disk-full ``upsert`` logs a
+    warning rather than 500'ing the chat request.
     """
 
     def __init__(self, db_path: str = config.MEMORY_DB_PATH) -> None:
         self._db_path = db_path
         self._cache: dict[str, dict] = {}  # key → {snapshot, first_seen, last_seen}
+        self._purged_at: dict[str, float] = {}  # key prefix → purge timestamp
         self._init_db()
+        self._migrate_keys()
 
     def _init_db(self) -> None:
-        os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
-        with sqlite3.connect(self._db_path) as conn:
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS conversation_snapshots (
-                    key        TEXT PRIMARY KEY,
-                    snapshot   TEXT NOT NULL,
-                    first_seen REAL NOT NULL,
-                    last_seen  REAL NOT NULL
+        try:
+            os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
+            with sqlite3.connect(self._db_path) as conn:
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS conversation_snapshots (
+                        key        TEXT PRIMARY KEY,
+                        snapshot   TEXT NOT NULL,
+                        first_seen REAL NOT NULL,
+                        last_seen  REAL NOT NULL
+                    )
+                """)
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_last_seen
+                    ON conversation_snapshots(last_seen)
+                """)
+        except Exception:
+            logger.warning("memory_snapshot_store_init_failed", path=self._db_path)
+
+    def _migrate_keys(self) -> None:
+        """One-time migration: prefix bare-hash keys with the legacy group_id.
+
+        Only runs in legacy mode (MT mode keys are always prefixed at write
+        time).  Idempotent — second run matches nothing.
+        """
+        if config.MEMORY_MULTI_TENANT:
+            return  # MT mode keys are always prefixed; bare rows are orphans
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                prefix = config.GRAPHITI_GROUP_ID + ":"
+                conn.execute(
+                    "UPDATE conversation_snapshots SET key = ? || key "
+                    "WHERE key NOT LIKE '%:%'",
+                    (prefix,),
                 )
-            """)
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_last_seen
-                ON conversation_snapshots(last_seen)
-            """)
+        except Exception:
+            pass
+
+    def _mkkey(self, content_hash: str) -> str:
+        """Build a storage key, tenant-prefixed in MT mode."""
+        if config.MEMORY_MULTI_TENANT:
+            tenant = current_tenant()
+            return f"{tenant.group_id}:{content_hash}"
+        return f"{config.GRAPHITI_GROUP_ID}:{content_hash}"
+
+    def _purged(self, key: str, first_seen: float | None) -> bool:
+        """True if *key* belongs to a purged prefix with a stale timestamp."""
+        for pfx, t in self._purged_at.items():
+            if key.startswith(pfx) and (first_seen is None or first_seen < t):
+                return True
+        return False
 
     def get(self, key: str) -> dict | None:
-        """Return cached entry or load from SQLite."""
+        """Return cached entry or load from SQLite.
+
+        Entries that predate a tenant purge are silently dropped.
+        """
         if key in self._cache:
-            return self._cache[key]
-        with sqlite3.connect(self._db_path) as conn:
-            row = conn.execute(
-                "SELECT snapshot, first_seen, last_seen "
-                "FROM conversation_snapshots WHERE key = ?",
-                (key,),
-            ).fetchone()
+            entry = self._cache[key]
+            if self._purged(key, entry["first_seen"]):
+                del self._cache[key]
+                return None
+            return entry
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                row = conn.execute(
+                    "SELECT snapshot, first_seen, last_seen "
+                    "FROM conversation_snapshots WHERE key = ?",
+                    (key,),
+                ).fetchone()
+        except Exception:
+            logger.warning("memory_snapshot_store_error", op="get", key=key[:12])
+            return None
         if row is None:
             return None
         entry = {
@@ -156,32 +210,87 @@ class SnapshotStore:
             "first_seen": row[1],
             "last_seen": row[2],
         }
+        if self._purged(key, entry["first_seen"]):
+            return None
         self._cache[key] = entry
         return entry
 
     def upsert(self, key: str, snapshot: str, first_seen: float, last_seen: float) -> None:
-        """Insert or update a snapshot row."""
+        """Insert or update a snapshot row.
+
+        Drops writes where *first_seen* predates the tenant's purge —
+        prevents erased snapshots from being resurrected on continuation.
+        """
+        if self._purged(key, first_seen):
+            logger.info("memory_write_dropped_purged", key=key[:12])
+            return
         self._cache[key] = {
             "snapshot": snapshot,
             "first_seen": first_seen,
             "last_seen": last_seen,
         }
-        with sqlite3.connect(self._db_path) as conn:
-            conn.execute(
-                "INSERT OR REPLACE INTO conversation_snapshots "
-                "(key, snapshot, first_seen, last_seen) VALUES (?, ?, ?, ?)",
-                (key, snapshot, first_seen, last_seen),
-            )
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO conversation_snapshots "
+                    "(key, snapshot, first_seen, last_seen) VALUES (?, ?, ?, ?)",
+                    (key, snapshot, first_seen, last_seen),
+                )
+        except Exception:
+            logger.warning("memory_snapshot_store_error", op="upsert", key=key[:12])
+
+    def delete_prefix(self, prefix: str) -> int:
+        """Delete all rows + cache entries with keys starting with *prefix*.
+
+        Records the purge time so stale entries can't be re-persisted.
+        This MUST be called BEFORE Graphiti-side deletion (to close the
+        cache-leak window during slow purges).
+        """
+        purged = time.time()
+        deleted = 0
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                cur = conn.execute(
+                    "DELETE FROM conversation_snapshots WHERE key LIKE ?",
+                    (prefix + "%",),
+                )
+                deleted = cur.rowcount
+        except Exception:
+            logger.warning("memory_snapshot_store_error", op="delete_prefix", prefix=prefix[:12])
+        for key in list(self._cache):
+            if key.startswith(prefix):
+                del self._cache[key]
+        self._purged_at[prefix] = purged
+        return deleted
+
+    def tenant_prefixes(self) -> list[str]:
+        """Return distinct tenant prefixes from stored keys (maintenance enumeration)."""
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                rows = conn.execute(
+                    "SELECT DISTINCT key FROM conversation_snapshots"
+                ).fetchall()
+        except Exception:
+            return []
+        prefixes: set[str] = set()
+        for (key,) in rows:
+            if ":" in key:
+                prefixes.add(key.rsplit(":", 1)[0])
+        return sorted(prefixes)
 
     def prune(self, max_age_days: int = 7) -> int:
         """Delete entries older than `max_age_days`. Returns deleted count."""
         cutoff = time.time() - (max_age_days * 86400)
-        with sqlite3.connect(self._db_path) as conn:
-            cursor = conn.execute(
-                "DELETE FROM conversation_snapshots WHERE last_seen < ?",
-                (cutoff,),
-            )
-            deleted = cursor.rowcount
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                cursor = conn.execute(
+                    "DELETE FROM conversation_snapshots WHERE last_seen < ?",
+                    (cutoff,),
+                )
+                deleted = cursor.rowcount
+        except Exception:
+            logger.warning("memory_snapshot_store_error", op="prune")
+            return 0
         # Also prune cache
         for key in list(self._cache):
             if self._cache[key]["last_seen"] < cutoff:
@@ -283,7 +392,8 @@ async def memory_for_request(
     if not config.MEMORY_ENABLED:
         return None
 
-    key = conversation_key(messages)
+    content_hash = conversation_key(messages)
+    key = _snapshot_store._mkkey(content_hash) if config.MEMORY_MULTI_TENANT else content_hash
     now = time.time()
     is_start = is_conversation_start(messages)
 
@@ -337,7 +447,6 @@ class MemoryClient:
 
     def __init__(self) -> None:
         self._url: str = config.GRAPHITI_URL
-        self._group_id: str = config.GRAPHITI_GROUP_ID
         self._read_timeout: float = config.GRAPHITI_READ_TIMEOUT_MS / 1000.0
         self._write_timeout: float = config.GRAPHITI_WRITE_TIMEOUT_MS / 1000.0
 
@@ -355,6 +464,7 @@ class MemoryClient:
         self._tool_delete_edge: str = "delete_entity_edge"
         self._tool_delete_episode: str = "delete_episode"
         self._tool_get_edge: str = "get_entity_edge"
+        self._tool_get_episodes: str = "get_episodes"
         self._tool_clear: str = "clear_graph"
 
         # Write path
@@ -442,21 +552,27 @@ class MemoryClient:
     # ── Read path ────────────────────────────────────────────────────────
 
     async def search_facts(
-        self, query: str, limit: int | None = None
+        self, query: str, limit: int | None = None,
+        group_id: str | None = None,
+        include_invalid: bool = False,
     ) -> list[Fact]:
         """Search the knowledge graph for facts matching `query`.
 
+        *group_id* defaults to the request-scoped tenant (or the legacy
+        ``GRAPHITI_GROUP_ID`` outside a request in legacy mode).
         Returns empty list on timeout or error (graceful degradation).
         """
         if limit is None:
             limit = config.GRAPHITI_MAX_FACTS
+        if group_id is None:
+            group_id = current_tenant().group_id
 
         try:
             result = await self._call_tool(
                 self._tool_search,
                 {
                     "query": query,
-                    "group_ids": [self._group_id],
+                    "group_ids": [group_id],
                     "max_facts": limit,
                 },
                 timeout=self._read_timeout,
@@ -477,22 +593,26 @@ class MemoryClient:
                 created_at=f.get("created_at", ""),
             )
             # Skip facts that Graphiti has already invalidated
-            if fact.invalid_at or fact.expired_at:
+            # (unless include_invalid=True — used by purge enumeration)
+            if not include_invalid and (fact.invalid_at or fact.expired_at):
                 continue
             facts.append(fact)
 
         return facts
 
     async def search_nodes(
-        self, query: str, limit: int = 10
+        self, query: str, limit: int = 10,
+        group_id: str | None = None,
     ) -> list[dict]:
         """Search for entity nodes matching `query`."""
+        if group_id is None:
+            group_id = current_tenant().group_id
         try:
             result = await self._call_tool(
                 "search_nodes",
                 {
                     "query": query,
-                    "group_ids": [self._group_id],
+                    "group_ids": [group_id],
                     "max_nodes": limit,
                 },
                 timeout=self._read_timeout,
@@ -531,10 +651,13 @@ class MemoryClient:
         episode_body: str = "",
         source_description: str = "icarus evaluator",
         reference_time: datetime | None = None,
+        group_id: str | None = None,
     ) -> bool:
         """Store an episode in the knowledge graph.
 
-        The episode_body is stored as-is (already formatted by the caller).
+        *group_id* defaults to the request-scoped tenant.  The write worker
+        always passes ``job.group_id`` explicitly — it must never read the
+        ContextVar (created at startup, outside any request context).
         Returns True on success, False on failure.
         """
         if not episode_body.strip():
@@ -548,13 +671,16 @@ class MemoryClient:
             )
             return False
 
+        if group_id is None:
+            group_id = current_tenant().group_id
+
         try:
             result = await self._call_tool(
                 self._tool_add,
                 {
                     "name": name,
                     "episode_body": episode_body,
-                    "group_id": self._group_id,
+                    "group_id": group_id,
                     "source": "text",
                     "source_description": source_description,
                     "reference_time": (
@@ -574,9 +700,29 @@ class MemoryClient:
 
     # ── Delete / forget ──────────────────────────────────────────────────
 
-    async def delete_fact(self, uuid: str) -> bool:
-        """Delete a single fact (edge) by UUID."""
+    async def delete_fact(
+        self, uuid: str, group_id: str | None = None
+    ) -> bool:
+        """Delete a fact (edge) by UUID — only if it belongs to *group_id*.
+
+        Verify-before-delete: fetches the edge via ``get_entity_edge``,
+        checks the owning ``group_id``, and refuses cross-tenant deletes.
+        """
+        if group_id is None:
+            group_id = current_tenant().group_id
         try:
+            edge = await self._call_tool(
+                self._tool_get_edge,
+                {"uuid": uuid},
+                timeout=self._read_timeout,
+            )
+            if not edge or edge.get("group_id") != group_id:
+                logger.warning(
+                    "memory_delete_refused",
+                    uuid=uuid[:12],
+                    reason="cross_tenant" if edge else "not_found",
+                )
+                return False
             await self._call_tool(
                 self._tool_delete_edge,
                 {"uuid": uuid},
@@ -586,9 +732,35 @@ class MemoryClient:
         except Exception:
             return False
 
-    async def delete_episode(self, uuid: str) -> bool:
-        """Delete an episode and its cascade-owned entities/edges."""
+    async def delete_episode(
+        self, uuid: str, group_id: str | None = None
+    ) -> bool:
+        """Delete an episode and its cascade-owned entities/edges.
+
+        Verify-before-delete: fetches the episode list for the tenant and
+        refuses deletion unless *uuid* belongs to *group_id*.
+        """
+        if group_id is None:
+            group_id = current_tenant().group_id
         try:
+            episodes = await self._call_tool(
+                self._tool_get_episodes,
+                {"group_ids": [group_id], "limit": 500},
+                timeout=self._read_timeout,
+            )
+            if not isinstance(episodes, list):
+                episodes = episodes.get("episodes", []) if isinstance(episodes, dict) else []
+            found = any(
+                (e.get("uuid") if isinstance(e, dict) else getattr(e, "uuid", None)) == uuid
+                for e in episodes
+            )
+            if not found:
+                logger.warning(
+                    "memory_delete_refused",
+                    uuid=uuid[:12],
+                    reason="cross_tenant_episode",
+                )
+                return False
             await self._call_tool(
                 self._tool_delete_episode,
                 {"uuid": uuid},
@@ -598,17 +770,76 @@ class MemoryClient:
         except Exception:
             return False
 
-    async def clear_graph(self) -> bool:
-        """Remove all data for the current group_id."""
+    async def clear_graph(self, group_id: str | None = None) -> bool:
+        """Remove all data for *group_id* (default: the request-scoped tenant).
+
+        NOTE: This calls the MCP ``clear_graph`` tool which may require
+        root-group auth and a confirmation code.  For per-tenant purges in
+        MT mode prefer ``purge_tenant`` which uses enumerated verified deletion.
+        """
+        if group_id is None:
+            group_id = current_tenant().group_id
         try:
             await self._call_tool(
                 self._tool_clear,
-                {"group_id": self._group_id},
+                {"group_id": group_id},
                 timeout=self._write_timeout,
             )
             return True
         except Exception:
             return False
+
+    async def purge_tenant(self, group_id: str) -> dict:
+        """Enumerated verified deletion of all facts + episodes for *group_id*.
+
+        Used for per-tenant GDPR erasure.  Returns a dict with counts of
+        deleted facts, episodes, and any errors.
+        """
+        result = {"facts_deleted": 0, "episodes_deleted": 0, "errors": 0}
+
+        # Enumerate and delete facts (including invalidated ones)
+        try:
+            facts = await self.search_facts(
+                "", limit=1000, group_id=group_id, include_invalid=True,
+            )
+        except Exception:
+            facts = []
+        for f in facts:
+            try:
+                if await self.delete_fact(f.uuid, group_id=group_id):
+                    result["facts_deleted"] += 1
+                else:
+                    result["errors"] += 1
+            except Exception:
+                result["errors"] += 1
+
+        # Enumerate and delete episodes
+        try:
+            episodes_raw = await self._call_tool(
+                self._tool_get_episodes,
+                {"group_ids": [group_id], "limit": 500},
+                timeout=self._read_timeout,
+            )
+            if isinstance(episodes_raw, list):
+                episodes = episodes_raw
+            elif isinstance(episodes_raw, dict):
+                episodes = episodes_raw.get("episodes", [])
+            else:
+                episodes = []
+        except Exception:
+            episodes = []
+        for ep in episodes:
+            uuid = ep.get("uuid") if isinstance(ep, dict) else getattr(ep, "uuid", None)
+            if uuid:
+                try:
+                    if await self.delete_episode(uuid, group_id=group_id):
+                        result["episodes_deleted"] += 1
+                    else:
+                        result["errors"] += 1
+                except Exception:
+                    result["errors"] += 1
+
+        return result
 
     # ── Internals ────────────────────────────────────────────────────────
 
@@ -800,6 +1031,12 @@ class MemoryClient:
                 self._tool_get_edge = candidate
                 break
 
+        # Get episodes (for verify-before-delete + purge enumeration)
+        for candidate in ("get_episodes",):
+            if candidate in tool_names:
+                self._tool_get_episodes = candidate
+                break
+
         # Clear graph
         for candidate in ("clear_graph",):
             if candidate in tool_names:
@@ -972,8 +1209,40 @@ class DedupFilter:
         self._embeddings = self._embeddings[-self._max_size:]
 
 
-# Module-level dedup filter
-_dedup_filter = DedupFilter(max_size=config.MEMORY_DEDUP_CACHE_SIZE)
+# Module-level per-tenant dedup filters (lazy, LRU-evicted)
+_dedup_filters: dict[str, DedupFilter] = {}
+_dedup_last_used: dict[str, float] = {}
+_DEDUP_MAX_TENANTS = 500
+_DEDUP_IDLE_SECONDS = 24 * 3600
+
+
+def _get_dedup_filter(group_id: str) -> DedupFilter:
+    """Return the per-tenant DedupFilter, creating it lazily."""
+    now = time.time()
+    flt = _dedup_filters.get(group_id)
+    if flt is None:
+        flt = DedupFilter(max_size=config.MEMORY_DEDUP_CACHE_SIZE)
+        _dedup_filters[group_id] = flt
+        _maybe_evict_dedup(now)
+    _dedup_last_used[group_id] = now
+    return flt
+
+
+def _drop_dedup_filter(group_id: str) -> None:
+    """Drop a tenant's dedup cache entirely (admin purge step)."""
+    _dedup_filters.pop(group_id, None)
+    _dedup_last_used.pop(group_id, None)
+
+
+def _maybe_evict_dedup(now: float) -> None:
+    """Evict idle tenants from the dedup registry to bound memory."""
+    while len(_dedup_filters) > _DEDUP_MAX_TENANTS:
+        idle = min(_dedup_last_used, key=_dedup_last_used.get)
+        if now - _dedup_last_used[idle] < _DEDUP_IDLE_SECONDS:
+            break  # all tenants active — cap is soft
+        _dedup_filters.pop(idle, None)
+        _dedup_last_used.pop(idle, None)
+        logger.debug("tenant_dedup_evicted", group_id=idle, reason="idle")
 
 
 # ── Embedding helper ────────────────────────────────────────────────────────
@@ -1020,6 +1289,10 @@ async def extract_and_store(
     if not config.MEMORY_ENABLED:
         logger.info("memory_extraction_skipped", request_id=request_id, reason="disabled")
         return
+
+    # Capture tenant at entry — the asyncio.create_task copies the ContextVar,
+    # but we capture explicitly so WriteJob carries the authority.
+    tenant = current_tenant()
 
     # Find the last user message
     last_user = ""
@@ -1157,7 +1430,8 @@ async def extract_and_store(
         duration_ms=duration_ms,
     )
 
-    # Step 2: Dedup (L1 → L2 → L3)
+    # Step 2: Dedup (L1 → L2 → L3) — per-tenant
+    flt = _get_dedup_filter(tenant.group_id)
     survivors: list[str] = []
     l1_hits = 0
     l2_hits = 0
@@ -1179,8 +1453,8 @@ async def extract_and_store(
             )
             continue
 
-        # L1: exact hash
-        if _dedup_filter.check_l1(fact_text):
+        # L1: exact hash (per-tenant)
+        if flt.check_l1(fact_text):
             l1_hits += 1
             logger.debug("memory_dedup_l1_hit", request_id=request_id, fact=fact_text[:80])
             continue
@@ -1193,16 +1467,18 @@ async def extract_and_store(
             if embedding is not None:
                 emb_ms = round((time.monotonic() - emb_start) * 1000, 1)
                 logger.debug("memory_dedup_l2_computed", request_id=request_id, fact=fact_text[:80], embedding_ms=emb_ms)
-                skip, ambiguous = _dedup_filter.check_l2(embedding)
+                skip, ambiguous = flt.check_l2(embedding)
                 if skip:
                     l2_hits += 1
                     logger.debug("memory_dedup_l2_hit", request_id=request_id, fact=fact_text[:80])
                     continue
                 if ambiguous:
                     logger.debug("memory_dedup_l2_ambiguous", request_id=request_id, fact=fact_text[:80])
-                    # L3: Graphiti search
+                    # L3: Graphiti search (tenant-scoped)
                     try:
-                        existing = await client.search_facts(fact_text, limit=3)
+                        existing = await client.search_facts(
+                            fact_text, limit=3, group_id=tenant.group_id,
+                        )
                         if existing:
                             # Check if the top result is very similar
                             top_fact = existing[0].fact
@@ -1221,11 +1497,11 @@ async def extract_and_store(
 
         survivors.append(fact_text)
         logger.info("memory_dedup_pass", request_id=request_id, fact=fact_text[:120])
-        # Record in dedup cache
+        # Record in per-tenant dedup cache
         if embedding is not None:
-            _dedup_filter.add(fact_text, embedding)
+            flt.add(fact_text, embedding)
         else:
-            _dedup_filter.add(fact_text)
+            flt.add(fact_text)
 
     if not survivors:
         logger.info("memory_deduped_empty", request_id=request_id, l1_hits=l1_hits, l2_hits=l2_hits, l3_hits=l3_hits, secret_hits=secret_hits)
@@ -1249,15 +1525,18 @@ async def extract_and_store(
             f"{i}. {fact}" for i, fact in enumerate(survivors, 1)
         ),
         reference_time=datetime.now(timezone.utc),
-        group_id=config.GRAPHITI_GROUP_ID,
+        group_id=tenant.group_id,
         request_id=request_id,
     )
     await client.enqueue_write(job)
+    # Record in tenant registry for maintenance enumeration
+    tenant_registry.record_write(tenant.group_id)
     logger.info(
         "memory_write_enqueued",
         request_id=request_id,
         queue_depth=client._write_queue.qsize(),
         episode=job.episode_name,
+        group_id=tenant.group_id,
     )
 
 
