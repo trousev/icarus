@@ -83,8 +83,6 @@ async def memory_facts(request: Request, q: str = "", limit: int = 20):
     """Search the knowledge graph for facts (requires auth)."""
     if not _check_auth(request):
         return Response(content='{"error":"unauthorized"}', status_code=401)
-    if not memory_client.available:
-        return {"error": "graphiti_unreachable", "facts": []}
     facts = await memory_client.search_facts(q, limit=limit)
     return {
         "facts": [
@@ -108,8 +106,6 @@ async def memory_forget(request: Request):
     """
     if not _check_auth(request):
         return Response(content='{"error":"unauthorized"}', status_code=401)
-    if not memory_client.available:
-        return {"error": "graphiti_unreachable"}
 
     try:
         data = await request.json()
@@ -150,8 +146,6 @@ async def memory_purge(request: Request):
         return {"error": "invalid_json"}
     if data.get("confirm") != "purge-all":
         return {"error": "must confirm with 'purge-all'"}
-    if not memory_client.available:
-        return {"error": "graphiti_unreachable"}
     ok = await memory_client.clear_graph()
     return {"status": "purged" if ok else "error"}
 

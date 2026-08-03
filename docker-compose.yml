@@ -14,6 +14,8 @@ services:
       - GRAPHITI_TELEMETRY_ENABLED=false
       - SEMAPHORE_LIMIT=2
       - GRAPHITI_GROUP_ID=${GRAPHITI_GROUP_ID:-alex}
+    volumes:
+      - graphiti_data:/data
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
       interval: 5s
@@ -43,3 +45,6 @@ services:
       graphiti:
         condition: service_healthy
     restart: unless-stopped
+
+volumes:
+  graphiti_data:
