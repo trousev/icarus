@@ -106,5 +106,16 @@ class Config:
         "MEMORY_REGISTRY_FILE", "./data/memory_registry.jsonl"
     )
 
+    # ── Multi-tenancy ─────────────────────────────────────────────────────
+    MEMORY_MULTI_TENANT: bool = (
+        os.getenv("MEMORY_MULTI_TENANT", "").lower() in ("1", "true", "yes")
+    )
+    MEMORY_TENANT_HEADER: str = os.getenv("MEMORY_TENANT_HEADER", "X-User-ID")
+    MEMORY_TENANT_HMAC_SECRET: str = os.getenv("MEMORY_TENANT_HMAC_SECRET", "")
+    MEMORY_BODY_USER_FALLBACK: bool = (
+        os.getenv("MEMORY_BODY_USER_FALLBACK", "").lower() in ("1", "true", "yes")
+    )
+    ICARUS_ADMIN_API_KEY: str = os.getenv("ICARUS_ADMIN_API_KEY", "")
+
 
 config = Config()
