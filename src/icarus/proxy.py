@@ -365,7 +365,7 @@ async def proxy(request: Request, path: str, background_tasks: BackgroundTasks):
     # Inject memory into chat completion requests (before logging so we capture both)
     modified_body = body
     injected = False
-    if path == "v1/chat/completions" and body:
+    if path in ("v1/chat/completions", "chat/completions") and body:
         modified_body = await inject_dynamic_memory(body)
         injected = modified_body != body
 
@@ -380,7 +380,7 @@ async def proxy(request: Request, path: str, background_tasks: BackgroundTasks):
     )
 
     # Schedule fire-and-forget memory extraction after successful response
-    if path == "v1/chat/completions" and body:
+    if path in ("v1/chat/completions", "chat/completions") and body:
         _schedule_memory_extraction(background_tasks, body, request_id)
 
     # Build forwarding headers: pass through client headers but override auth,
