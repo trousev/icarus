@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+
+cd "$PROJECT_DIR"
+
+# Load .env if it exists
+if [ -f .env ]; then
+    export $(grep -v '^#' .env | xargs)
+fi
+
+# Defaults
+HOST="${HOST:-0.0.0.0}"
+PORT="${PORT:-8000}"
+LOG_LEVEL="${LOG_LEVEL:-info}"
+
+echo "=== Icarus Proxy ==="
+echo "Upstream: ${UPSTREAM_BASE_URL:-https://api.deepseek.com}"
+echo "Listening on: http://${HOST}:${PORT}"
+echo ""
+
+exec uv run uvicorn icarus.proxy:app --host "$HOST" --port "$PORT" --log-level "$LOG_LEVEL"
