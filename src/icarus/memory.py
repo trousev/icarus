@@ -1002,7 +1002,9 @@ async def extract_and_store(
     All errors are swallowed — this runs in the background after the
     response has already been sent to the user.
     """
+    logger.info("memory_extraction_started", request_id=request_id)
     if not config.MEMORY_ENABLED:
+        logger.info("memory_extraction_skipped", request_id=request_id, reason="disabled")
         return
 
     # Find the last user message
@@ -1015,6 +1017,7 @@ async def extract_and_store(
             break
 
     if not last_user:
+        logger.info("memory_extraction_skipped", request_id=request_id, reason="no_user_message")
         return
 
     # Format known facts for the data block
