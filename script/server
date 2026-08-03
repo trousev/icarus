@@ -46,6 +46,10 @@ LOG_LEVEL="${LOG_LEVEL:-info}"
 LOG_PROMPTS="${LOG_PROMPTS:-${LOG_PROMPTS_OVERRIDE:-}}"
 GRAPHITI_PORT="${GRAPHITI_PORT:-8001}"
 GRAPHITI_URL="${GRAPHITI_URL:-http://localhost:${GRAPHITI_PORT}/mcp}"
+# Verbose mode: debug logging + graphiti container logs
+if [ -n "$VERBOSE" ]; then
+    LOG_LEVEL="${LOG_LEVEL:-debug}"
+fi
 export LOG_PROMPTS
 
 # ── Ensure infrastructure is running ───────────────────────────────────────
