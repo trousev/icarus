@@ -653,6 +653,17 @@ class MemoryClient:
                         await asyncio.sleep(1.0)
 
             if success:
+                # Log each stored fact individually for visibility
+                for line in job.episode_body.split("\n"):
+                    fact_text = line.strip()
+                    if fact_text and fact_text[0].isdigit():
+                        # Strip the "1. " prefix
+                        fact_text = fact_text.split(". ", 1)[-1]
+                        logger.info(
+                            "memory_fact_stored",
+                            fact=fact_text,
+                            request_id=job.request_id,
+                        )
                 logger.info(
                     "memory_write_succeeded",
                     episode_name=job.episode_name,
