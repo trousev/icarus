@@ -186,6 +186,11 @@ async def resolve_tenant(request) -> Tenant:
         return Tenant.legacy(via="legacy_default")
 
     # MULTI_TENANT mode
+    # Check for empty/malformed before checking presence —
+    # whitespace-only headers are 400, not 401.
+    header_raw = request.headers.get(config.MEMORY_TENANT_HEADER, "")
+    if header_raw and not header_raw.strip():
+        raise TenantRejected(400, "empty tenant identity")
     if header:
         return _tenant_from_header(header)
 
