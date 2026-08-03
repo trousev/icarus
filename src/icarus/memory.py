@@ -822,9 +822,9 @@ decide whether the LAST USER MESSAGE contains facts worth remembering across fut
 conversations, and to extract them.
 
 SCOPE
-- Extract ONLY from the LAST USER MESSAGE. Earlier messages were already processed
-  in previous runs — ignore them.
-- Only USER messages are fact sources. The assistant's own answers are never facts.
+- You see the FULL conversation as context, but extract new facts ONLY from the
+  LAST USER MESSAGE. Earlier messages were already processed in previous runs.
+- The assistant's answers are context only — never extract facts from them.
 - Do not re-extract anything already listed under KNOWN FACTS.
 
 DECISION TESTS — a candidate fact qualifies only if it passes BOTH:
@@ -855,6 +855,13 @@ NEVER EXTRACT (7 categories):
 5. mood or venting ("I hate this codebase") — emotion is not a preference
 6. the assistant's own statements or conclusions
 7. judgments about other people ("my colleague is incompetent")
+
+CORRECTIONS AND UPDATES
+- If the user contradicts or updates a previous statement (e.g., "I no longer use X",
+  "actually we're not doing Y anymore", "I switched from A to B"), extract the new
+  corrected fact. The knowledge graph will invalidate the old one automatically.
+  This is one of the most important things to capture — outdated facts are worse
+  than no facts.
 
 STYLE
 - One fact per sentence, standalone and self-contained, with the user as the subject:
@@ -1027,8 +1034,22 @@ async def extract_and_store(
     # Format known facts for the data block
     known_block = "\n".join(f"- {f}" for f in known_facts) if known_facts else "(none)"
 
+    # Format the full conversation as context (the last message is the extraction target)
+    conversation_text = ""
+    for i, msg in enumerate(messages):
+        role = msg.get("role", "?")
+        content = msg.get("content", "")
+        if isinstance(content, list):
+            parts = [p.get("text", "") for p in content if p.get("type") == "text"]
+            content = " ".join(parts)
+        content = str(content).strip()
+        if not content:
+            continue
+        marker = " ← EXTRACT FROM THIS" if (i == len(messages) - 1 and role == "user") else ""
+        conversation_text += f"[{role}]: {content}{marker}\n"
+
     data_block = (
-        f"LAST USER MESSAGE:\n{last_user}\n\n"
+        f"FULL CONVERSATION (context):\n{conversation_text}\n"
         f"KNOWN FACTS (already in memory — do not extract):\n{known_block}"
     )
 
@@ -1040,7 +1061,7 @@ async def extract_and_store(
         "memory_evaluator_calling",
         request_id=request_id,
         model=config.MEMORY_EVALUATOR_MODEL,
-        last_user_len=len(last_user),
+        conversation_msgs=len(messages),
         known_facts_count=len(known_facts),
     )
     logger.debug("memory_evaluator_payload", request_id=request_id, data_block=data_block)
