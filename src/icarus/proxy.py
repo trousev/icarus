@@ -1,5 +1,6 @@
 """Transparent proxy for OpenAI-compatible APIs with memory injection."""
 
+import asyncio
 import json
 from contextlib import asynccontextmanager
 
@@ -232,14 +233,14 @@ async def inject_dynamic_memory(body: bytes) -> bytes:
 
 
 def _schedule_memory_extraction(
-    background_tasks: BackgroundTasks,
     body: bytes,
     request_id: str,
 ) -> None:
     """Schedule fire-and-forget memory extraction after a successful response.
 
-    Extracts the messages array from the request body and passes it to the
-    evaluator→dedup→store pipeline. Runs entirely in the background.
+    Uses asyncio.create_task rather than BackgroundTasks — the write path
+    must survive MCP session timeouts and connection drops, which can
+    cancel request-scoped background tasks.
     """
     if not config.MEMORY_ENABLED:
         return
@@ -254,21 +255,22 @@ def _schedule_memory_extraction(
         return
 
     key = conversation_key(messages)
-
-    # Collect known facts from the frozen snapshot (for L0 dedup in the prompt)
     known_facts: list[str] = []
 
     import structlog
     _bg_log = structlog.get_logger("icarus.memory")
     _bg_log.info("memory_extraction_scheduled", request_id=request_id, key=key[:12])
 
-    background_tasks.add_task(
-        extract_and_store,
-        memory_client,
-        messages,
-        key,
-        known_facts,
-        request_id,
+    # Use asyncio.create_task — survives MCP session timeouts that can
+    # cancel request-scoped BackgroundTasks
+    asyncio.create_task(
+        extract_and_store(
+            memory_client,
+            messages,
+            key,
+            known_facts,
+            request_id,
+        )
     )
 
 
@@ -383,7 +385,7 @@ async def proxy(request: Request, path: str, background_tasks: BackgroundTasks):
 
     # Schedule fire-and-forget memory extraction after successful response
     if path in ("v1/chat/completions", "chat/completions") and body:
-        _schedule_memory_extraction(background_tasks, body, request_id)
+        _schedule_memory_extraction(body, request_id)
 
     # Build forwarding headers: pass through client headers but override auth,
     # and drop headers that would break the upstream request or cause
