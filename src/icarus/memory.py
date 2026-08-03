@@ -243,13 +243,16 @@ async def build_snapshot(
             break
 
     # Run profile + topic queries concurrently
-    queries = [_PROFILE_QUERY]
+    queries = [
+        (_PROFILE_QUERY, 10),           # identity/preferences/constraints (always)
+        (_RECENCY_QUERY, 10),           # most recent facts (always — catches updates)
+    ]
     token_count = len(first_user.split()) if first_user else 0
     if token_count >= 3:
-        queries.append(first_user)
+        queries.append((first_user, 10))  # topic match
 
     results = await asyncio.gather(
-        *(client.search_facts(q, limit=15) for q in queries),
+        *(client.search_facts(q, limit=lim) for q, lim in queries),
         return_exceptions=True,
     )
 
@@ -264,13 +267,6 @@ async def build_snapshot(
             if normalized not in seen:
                 seen.add(normalized)
                 merged.append(f)
-
-    # If nothing found (generic opening), fall back to recency
-    if not merged:
-        try:
-            merged = await client.search_facts(_RECENCY_QUERY, limit=20)
-        except Exception:
-            pass
 
     return _format_injection(merged)
 
@@ -303,6 +299,10 @@ async def memory_for_request(
         snapshot = await build_snapshot(client, messages)
         if snapshot is not None:
             _snapshot_store.upsert(key, snapshot, now, now)
+            logger.info("memory_injected", key=key[:12], snapshot_len=len(snapshot), source="fresh")
+            logger.debug("memory_injected_body", snapshot=snapshot)
+        else:
+            logger.info("memory_injected_empty", key=key[:12], source="fresh")
         return snapshot
 
     # Key exists — check cooldown
@@ -312,12 +312,15 @@ async def memory_for_request(
         snapshot = await build_snapshot(client, messages)
         if snapshot is not None:
             _snapshot_store.upsert(key, snapshot, now, now)
+            logger.info("memory_injected", key=key[:12], snapshot_len=len(snapshot), source="rebuilt")
+            logger.debug("memory_injected_body", snapshot=snapshot)
         return snapshot
 
     # Reuse existing snapshot (continuation OR collision within cooldown)
     _snapshot_store.upsert(
         key, existing["snapshot"], existing["first_seen"], now
     )
+    logger.info("memory_injected", key=key[:12], snapshot_len=len(existing["snapshot"]), source="cached")
     return existing["snapshot"]
 
 
