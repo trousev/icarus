@@ -1058,7 +1058,7 @@ async def extract_and_store(
                 result = json.loads(content)
                 facts = result.get("facts", [])
     except Exception as exc:
-        logger.debug("memory_evaluator_failed", request_id=request_id, error=str(exc))
+        logger.warning("memory_evaluator_failed", request_id=request_id, error=str(exc))
         return
 
     if not facts:

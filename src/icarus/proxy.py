@@ -257,8 +257,10 @@ def _schedule_memory_extraction(
 
     # Collect known facts from the frozen snapshot (for L0 dedup in the prompt)
     known_facts: list[str] = []
-    # (The snapshot is the injected text; we don't re-parse it here —
-    #  the evaluator's KNOWN FACTS block will say "(none)" for simplicity in v1)
+
+    import structlog
+    _bg_log = structlog.get_logger("icarus.memory")
+    _bg_log.info("memory_extraction_scheduled", request_id=request_id, key=key[:12])
 
     background_tasks.add_task(
         extract_and_store,
