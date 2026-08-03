@@ -64,6 +64,73 @@ def inject_memory(body: bytes) -> bytes:
 # ── Catch-all proxy route ──────────────────────────────────────────────────
 
 
+async def _proxy_streaming(client, request, upstream_url, forward_headers, modified_body, request_id):
+    """Forward a streaming request to upstream, yielding chunks as they arrive."""
+    upstream_req = client.build_request(
+        method=request.method,
+        url=upstream_url,
+        headers=forward_headers,
+        content=modified_body,
+    )
+    upstream_resp = await client.send(upstream_req, stream=True)
+
+    async def stream_response():
+        try:
+            async for chunk in upstream_resp.aiter_bytes():
+                yield chunk
+        except httpx.HTTPError:
+            # Client disconnected or upstream dropped — stop streaming
+            pass
+
+    response_headers = dict(upstream_resp.headers)
+    for h in ("transfer-encoding", "content-encoding", "content-length"):
+        response_headers.pop(h, None)
+
+    logger.log_response(
+        request_id,
+        upstream_resp.status_code,
+        b"[streaming response -- body not logged]",
+        response_headers,
+    )
+
+    return StreamingResponse(
+        stream_response(),
+        status_code=upstream_resp.status_code,
+        headers=response_headers,
+    )
+
+
+async def _proxy_buffered(client, request, upstream_url, forward_headers, modified_body, request_id):
+    """Forward a non-streaming request to upstream, returning the full response."""
+    upstream_resp = await client.request(
+        method=request.method,
+        url=upstream_url,
+        headers=forward_headers,
+        content=modified_body,
+    )
+    response_body = upstream_resp.content
+
+    response_headers = {}
+    for key, value in upstream_resp.headers.items():
+        lower = key.lower()
+        if lower in ("transfer-encoding", "content-encoding"):
+            continue
+        response_headers[key] = value
+
+    logger.log_response(
+        request_id,
+        upstream_resp.status_code,
+        response_body,
+        response_headers,
+    )
+
+    return Response(
+        content=response_body,
+        status_code=upstream_resp.status_code,
+        headers=response_headers,
+    )
+
+
 @app.api_route(
     "/{path:path}",
     methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
@@ -108,66 +175,25 @@ async def proxy(request: Request, path: str):
     except (json.JSONDecodeError, UnicodeDecodeError):
         pass
 
-    # Use an async client per request (connection pooling handled by httpx)
-    async with httpx.AsyncClient(timeout=httpx.Timeout(300.0)) as client:
-        if is_streaming:
-            # For streaming: open a streaming connection to upstream
-            upstream_req = client.build_request(
-                method=request.method,
-                url=upstream_url,
-                headers=forward_headers,
-                content=modified_body,
-            )
-            upstream_resp = await client.send(upstream_req, stream=True)
-
-            async def stream_response():
-                async for chunk in upstream_resp.aiter_bytes():
-                    yield chunk
-
-            response_headers = dict(upstream_resp.headers)
-            # Drop hop-by-hop headers
-            for h in ("transfer-encoding", "content-encoding", "content-length"):
-                response_headers.pop(h, None)
-
-            # Log the streaming response metadata
-            logger.log_response(
-                request_id,
-                upstream_resp.status_code,
-                b"[streaming response -- body not logged]",
-                response_headers,
-            )
-
-            return StreamingResponse(
-                stream_response(),
-                status_code=upstream_resp.status_code,
-                headers=response_headers,
-            )
-        else:
-            upstream_resp = await client.request(
-                method=request.method,
-                url=upstream_url,
-                headers=forward_headers,
-                content=modified_body,
-            )
-            response_body = upstream_resp.content
-
-            # Build response headers, dropping hop-by-hop
-            response_headers = {}
-            for key, value in upstream_resp.headers.items():
-                lower = key.lower()
-                if lower in ("transfer-encoding", "content-encoding"):
-                    continue
-                response_headers[key] = value
-
-            logger.log_response(
-                request_id,
-                upstream_resp.status_code,
-                response_body,
-                response_headers,
-            )
-
-            return Response(
-                content=response_body,
-                status_code=upstream_resp.status_code,
-                headers=response_headers,
-            )
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(300.0)) as client:
+            if is_streaming:
+                return await _proxy_streaming(
+                    client, request, upstream_url, forward_headers, modified_body, request_id
+                )
+            else:
+                return await _proxy_buffered(
+                    client, request, upstream_url, forward_headers, modified_body, request_id
+                )
+    except httpx.HTTPError as exc:
+        logger._log.error(
+            "upstream_error",
+            request_id=request_id,
+            error=str(exc),
+            upstream_url=upstream_url,
+        )
+        return Response(
+            content=json.dumps({"error": f"Upstream error: {exc}"}),
+            status_code=502,
+            media_type="application/json",
+        )
