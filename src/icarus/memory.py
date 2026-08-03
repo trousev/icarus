@@ -69,6 +69,11 @@ class WriteJob:
     group_id: str
     request_id: str = ""
 
+    # request_time is set by the middleware (before evaluator latency) and is
+    # used for the purge-drop check — NOT reference_time, which is enqueue
+    # time and can postdate a purge started during evaluation.
+    request_time: datetime | None = None
+
 
 # ── Conversation identity ───────────────────────────────────────────────────
 
@@ -857,14 +862,35 @@ class MemoryClient:
         self._write_worker.add_done_callback(_respawn)
 
     async def _write_loop(self) -> None:
-        """Consume write jobs one at a time (FIFO order for temporal integrity)."""
+        """Consume write jobs one at a time (FIFO order for temporal integrity).
+
+        This task is created at startup — it MUST NOT read the ContextVar.
+        All tenant context comes from ``job.group_id`` explicitly.
+        """
         while True:
             job = await self._write_queue.get()
             self.writes_total += 1
+
+            # Purge check: drop jobs whose request predates a tenant purge.
+            # Uses request_time (captured by middleware before evaluator
+            # latency) rather than reference_time (enqueue time), so a
+            # pre-erasure conversation cannot enqueue post-erasure.
+            ref = job.request_time or job.reference_time
+            if tenant_registry.is_purged_after(job.group_id, ref):
+                logger.info(
+                    "memory_write_dropped_purged",
+                    group_id=job.group_id,
+                    episode_name=job.episode_name,
+                    request_id=job.request_id,
+                )
+                self._write_queue.task_done()
+                continue
+
             logger.info(
                 "memory_write_started",
                 episode_name=job.episode_name,
                 request_id=job.request_id,
+                group_id=job.group_id,
             )
 
             success = False
@@ -873,11 +899,13 @@ class MemoryClient:
 
             for attempt in range(max_retries + 1):
                 try:
-                    # add_memory formats and filters the facts; pass the raw text
+                    # Pass job.group_id explicitly — the write worker must
+                    # never read the ContextVar.
                     success = await self.add_memory(
                         name=job.episode_name,
                         episode_body=job.episode_body,
                         reference_time=job.reference_time,
+                        group_id=job.group_id,
                     )
                     if success:
                         break
@@ -897,11 +925,13 @@ class MemoryClient:
                             "memory_fact_stored",
                             fact=fact_text,
                             request_id=job.request_id,
+                            group_id=job.group_id,
                         )
                 logger.info(
                     "memory_write_succeeded",
                     episode_name=job.episode_name,
                     request_id=job.request_id,
+                    group_id=job.group_id,
                 )
             else:
                 self.writes_failed += 1
@@ -911,6 +941,7 @@ class MemoryClient:
                     episode_name=job.episode_name,
                     request_id=job.request_id,
                     error=last_error,
+                    group_id=job.group_id,
                 )
                 # Dead-letter: write to file for later replay
                 self._write_dead_letter(job, last_error)
@@ -1586,7 +1617,7 @@ class MaintenanceWorker:
                 logger.error("memory_maintenance_failed", error=str(exc))
 
     async def _run_maintenance(self) -> None:
-        """Execute one maintenance sweep."""
+        """Execute one maintenance sweep — per-tenant in MT mode."""
         self._last_run = time.time()
         trimmed_edges = 0
         trimmed_episodes = 0
@@ -1595,23 +1626,48 @@ class MaintenanceWorker:
             logger.warning("memory_maintenance_skipped", reason="graphiti_unreachable")
             return
 
-        # Phase A: Delete dead edges (invalid_at/expired_at set by Graphiti)
-        # These are facts Graphiti already judged as wrong — zero information loss.
-        try:
-            dead_facts = await self._client.search_facts("", limit=200)
-            for f in dead_facts:
-                if f.invalid_at or f.expired_at:
+        # Enumerate tenants: registry (primary) + snapshot table (orphan recovery)
+        group_ids: set[str] = set()
+        if config.MEMORY_MULTI_TENANT:
+            group_ids.update(tenant_registry.group_ids())
+            group_ids.update(_snapshot_store.tenant_prefixes())
+            # Skip purged tenants (crash recovery — don't resurrect)
+            now_ts = time.time()
+            for gid in list(group_ids):
+                rec = tenant_registry.get(gid)
+                if rec and rec.get("purged_at"):
+                    group_ids.discard(gid)
+                # Skip tenants idle > MAX_STALE_HOURS
+                elif rec and rec.get("last_seen"):
                     try:
-                        await self._client.delete_fact(f.uuid)
-                        trimmed_edges += 1
-                    except Exception:
+                        last_seen = datetime.fromisoformat(rec["last_seen"]).timestamp()
+                        stale_secs = config.MEMORY_MAINTENANCE_MAX_STALE_HOURS * 3600
+                        if now_ts - last_seen > stale_secs:
+                            group_ids.discard(gid)
+                    except (ValueError, OSError):
                         pass
-        except Exception:
-            pass
+        else:
+            # Legacy mode: just the default group
+            group_ids = {config.GRAPHITI_GROUP_ID}
 
-        # Phase D: Orphan sweep would go here (requires direct FalkorDB access,
-        # not available through MCP). Skipped for v1 — dead edge deletion is
-        # the highest-value trim.
+        for gid in sorted(group_ids):
+            try:
+                # Phase A: Delete dead edges. Use include_invalid=True
+                # because the default search_facts client-side filter drops
+                # facts with invalid_at/expired_at — we need to see them to
+                # delete them.
+                dead_facts = await self._client.search_facts(
+                    "", limit=200, group_id=gid, include_invalid=True,
+                )
+                for f in dead_facts:
+                    if f.invalid_at or f.expired_at:
+                        try:
+                            await self._client.delete_fact(f.uuid, group_id=gid)
+                            trimmed_edges += 1
+                        except Exception:
+                            pass
+            except Exception:
+                pass
 
         self.trimmed_edges_24h += trimmed_edges
         self.trimmed_episodes_24h += trimmed_episodes
@@ -1621,6 +1677,7 @@ class MaintenanceWorker:
             trimmed_edges=trimmed_edges,
             trimmed_episodes=trimmed_episodes,
             total_trimmed_24h=self.trimmed_edges_24h,
+            tenants_swept=len(group_ids),
             duration_ms=round((time.time() - self._last_run) * 1000, 1),
         )
 
