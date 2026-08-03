@@ -74,24 +74,29 @@ async def _proxy_streaming(client, request, upstream_url, forward_headers, modif
     )
     upstream_resp = await client.send(upstream_req, stream=True)
 
-    async def stream_response():
-        try:
-            async for chunk in upstream_resp.aiter_bytes():
-                yield chunk
-        except httpx.HTTPError:
-            # Client disconnected or upstream dropped — stop streaming
-            pass
-
     response_headers = dict(upstream_resp.headers)
     for h in ("transfer-encoding", "content-encoding", "content-length"):
         response_headers.pop(h, None)
 
-    logger.log_response(
-        request_id,
-        upstream_resp.status_code,
-        b"[streaming response -- body not logged]",
-        response_headers,
-    )
+    # Accumulate all chunks so we can log the full body, then yield from memory
+    chunks: list[bytes] = []
+
+    async def stream_response():
+        try:
+            async for chunk in upstream_resp.aiter_bytes():
+                chunks.append(chunk)
+                yield chunk
+        except httpx.HTTPError:
+            # Client disconnected or upstream dropped — still log what we got
+            pass
+        finally:
+            full_body = b"".join(chunks)
+            logger.log_response(
+                request_id,
+                upstream_resp.status_code,
+                full_body,
+                response_headers,
+            )
 
     return StreamingResponse(
         stream_response(),
@@ -155,11 +160,12 @@ async def proxy(request: Request, path: str):
         modified_body = inject_memory(body)
 
     # Build forwarding headers: pass through client headers but override auth,
-    # and drop headers that would break the upstream request
+    # and drop headers that would break the upstream request or cause
+    # compression (we don't decompress, so ask upstream for plaintext).
     forward_headers = {}
     for key, value in request.headers.items():
         lower = key.lower()
-        if lower in ("host", "content-length", "transfer-encoding"):
+        if lower in ("host", "content-length", "transfer-encoding", "accept-encoding"):
             continue
         forward_headers[key] = value
 
