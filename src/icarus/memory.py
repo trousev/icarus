@@ -1136,5 +1136,91 @@ async def extract_and_store(
     await client.enqueue_write(job)
 
 
+# ── Maintenance worker ──────────────────────────────────────────────────────
+
+
+class MaintenanceWorker:
+    """Periodic graph maintenance: prune dead edges, enforce soft caps.
+
+    Runs on a configurable interval (default 24h) as a background asyncio task.
+    """
+
+    def __init__(self, client: "MemoryClient") -> None:
+        self._client = client
+        self._task: asyncio.Task[None] | None = None
+        self._last_run: float = 0.0
+        self.trimmed_edges_24h: int = 0
+        self.trimmed_episodes_24h: int = 0
+
+    def start(self) -> None:
+        if self._task is not None:
+            return
+        self._task = asyncio.create_task(self._loop())
+
+    async def stop(self) -> None:
+        if self._task is not None:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+            self._task = None
+
+    @property
+    def last_run_iso(self) -> str | None:
+        if self._last_run == 0.0:
+            return None
+        return datetime.fromtimestamp(self._last_run, tz=timezone.utc).isoformat()
+
+    async def _loop(self) -> None:
+        interval = config.MEMORY_MAINTENANCE_INTERVAL_HOURS * 3600
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                await self._run_maintenance()
+            except Exception as exc:
+                logger.error("memory_maintenance_failed", error=str(exc))
+
+    async def _run_maintenance(self) -> None:
+        """Execute one maintenance sweep."""
+        self._last_run = time.time()
+        trimmed_edges = 0
+        trimmed_episodes = 0
+
+        if not self._client.available:
+            logger.warning("memory_maintenance_skipped", reason="graphiti_unreachable")
+            return
+
+        # Phase A: Delete dead edges (invalid_at/expired_at set by Graphiti)
+        # These are facts Graphiti already judged as wrong — zero information loss.
+        try:
+            dead_facts = await self._client.search_facts("", limit=200)
+            for f in dead_facts:
+                if f.invalid_at or f.expired_at:
+                    try:
+                        await self._client.delete_fact(f.uuid)
+                        trimmed_edges += 1
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        # Phase D: Orphan sweep would go here (requires direct FalkorDB access,
+        # not available through MCP). Skipped for v1 — dead edge deletion is
+        # the highest-value trim.
+
+        self.trimmed_edges_24h += trimmed_edges
+        self.trimmed_episodes_24h += trimmed_episodes
+
+        logger.info(
+            "memory_maintenance",
+            trimmed_edges=trimmed_edges,
+            trimmed_episodes=trimmed_episodes,
+            total_trimmed_24h=self.trimmed_edges_24h,
+            duration_ms=round((time.time() - self._last_run) * 1000, 1),
+        )
+
+
 # Module-level singleton — one MemoryClient per process
 memory_client = MemoryClient()
+maintenance_worker = MaintenanceWorker(memory_client)

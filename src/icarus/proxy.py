@@ -12,6 +12,7 @@ from icarus.logger import RequestLogger
 from icarus.memory import (
     MemoryClient,
     extract_and_store,
+    maintenance_worker,
     memory_client,
     memory_for_request,
     is_conversation_start,
@@ -23,8 +24,10 @@ from icarus.memory import (
 async def lifespan(application: FastAPI):
     """Startup: connect to Graphiti memory service (non-fatal)."""
     await memory_client.connect()
+    maintenance_worker.start()
     yield
     """Shutdown: release MCP transport + write worker."""
+    await maintenance_worker.stop()
     await memory_client.close()
 
 
@@ -45,7 +48,112 @@ async def health():
         "memory_enabled": config.MEMORY_ENABLED,
         "memory_injection": bool(config.MEMORY_INJECTION),
         "graphiti": "ok" if memory_client.available else "unreachable",
+        "memory": {
+            "writes_total": memory_client.writes_total,
+            "writes_failed": memory_client.writes_failed,
+            "writes_last_error": memory_client.writes_last_error,
+            "queue_depth": memory_client._write_queue.qsize(),
+            "last_maintenance": maintenance_worker.last_run_iso,
+            "trimmed_edges_24h": maintenance_worker.trimmed_edges_24h,
+            "rejected_24h": memory_client.writes_rejected_24h,
+        },
     }
+
+
+# ── Memory management API ──────────────────────────────────────────────────
+
+
+def _check_auth(request: Request) -> bool:
+    """Verify the request uses the configured upstream API key."""
+    auth = request.headers.get("authorization", "")
+    expected = f"Bearer {config.UPSTREAM_API_KEY}"
+    return auth == expected
+
+
+@app.get("/memory/status")
+async def memory_status(request: Request):
+    """Get memory system status (requires auth)."""
+    if not _check_auth(request):
+        return Response(content='{"error":"unauthorized"}', status_code=401)
+    return await health()
+
+
+@app.get("/memory/facts")
+async def memory_facts(request: Request, q: str = "", limit: int = 20):
+    """Search the knowledge graph for facts (requires auth)."""
+    if not _check_auth(request):
+        return Response(content='{"error":"unauthorized"}', status_code=401)
+    if not memory_client.available:
+        return {"error": "graphiti_unreachable", "facts": []}
+    facts = await memory_client.search_facts(q, limit=limit)
+    return {
+        "facts": [
+            {
+                "uuid": f.uuid,
+                "fact": f.fact,
+                "name": f.name,
+                "valid_at": f.valid_at,
+                "invalid_at": f.invalid_at,
+            }
+            for f in facts
+        ]
+    }
+
+
+@app.post("/memory/forget")
+async def memory_forget(request: Request):
+    """Forget a fact, episode, or topic (requires auth).
+
+    Body: {"fact_uuid": "..."} or {"message": "forget that I prefer Rust"}
+    """
+    if not _check_auth(request):
+        return Response(content='{"error":"unauthorized"}', status_code=401)
+    if not memory_client.available:
+        return {"error": "graphiti_unreachable"}
+
+    try:
+        data = await request.json()
+    except Exception:
+        return {"error": "invalid_json"}
+
+    if "fact_uuid" in data:
+        ok = await memory_client.delete_fact(data["fact_uuid"])
+        return {"status": "deleted" if ok else "error"}
+
+    if "episode_uuid" in data:
+        ok = await memory_client.delete_episode(data["episode_uuid"])
+        return {"status": "deleted" if ok else "error"}
+
+    if "message" in data:
+        # Find facts matching the message, then delete them
+        facts = await memory_client.search_facts(data["message"], limit=5)
+        deleted = 0
+        for f in facts:
+            try:
+                await memory_client.delete_fact(f.uuid)
+                deleted += 1
+            except Exception:
+                pass
+        return {"status": "done", "deleted": deleted}
+
+    return {"error": "missing fact_uuid, episode_uuid, or message"}
+
+
+@app.post("/memory/purge")
+async def memory_purge(request: Request):
+    """Purge all memory for the current group_id (requires auth)."""
+    if not _check_auth(request):
+        return Response(content='{"error":"unauthorized"}', status_code=401)
+    try:
+        data = await request.json()
+    except Exception:
+        return {"error": "invalid_json"}
+    if data.get("confirm") != "purge-all":
+        return {"error": "must confirm with 'purge-all'"}
+    if not memory_client.available:
+        return {"error": "graphiti_unreachable"}
+    ok = await memory_client.clear_graph()
+    return {"status": "purged" if ok else "error"}
 
 
 # ── Memory injection ───────────────────────────────────────────────────────
