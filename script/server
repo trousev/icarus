@@ -8,12 +8,17 @@ cd "$PROJECT_DIR"
 
 # ── Parse flags ────────────────────────────────────────────────────────────
 LOG_PROMPTS=""
+VERBOSE=""
 UVICORN_ARGS=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --log-every-prompt)
             LOG_PROMPTS="true"
+            shift
+            ;;
+        -v|--verbose)
+            VERBOSE="1"
             shift
             ;;
         --host|--port|--log-level|--workers|--reload)
@@ -39,14 +44,60 @@ HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-8000}"
 LOG_LEVEL="${LOG_LEVEL:-info}"
 LOG_PROMPTS="${LOG_PROMPTS:-${LOG_PROMPTS_OVERRIDE:-}}"
+GRAPHITI_PORT="${GRAPHITI_PORT:-8001}"
+GRAPHITI_URL="${GRAPHITI_URL:-http://localhost:${GRAPHITI_PORT}/mcp}"
+# Verbose mode: debug logging + graphiti container logs
+if [ -n "$VERBOSE" ]; then
+    LOG_LEVEL="${LOG_LEVEL:-debug}"
+fi
 export LOG_PROMPTS
 
+# ── Ensure infrastructure is running ───────────────────────────────────────
 echo "=== Icarus Proxy ==="
 echo "Upstream: ${UPSTREAM_BASE_URL:-https://api.deepseek.com}"
+echo "Graphiti: ${GRAPHITI_URL}"
 echo "Listening on: http://${HOST}:${PORT}"
 echo "Log prompts: ${LOG_PROMPTS:-false}"
 echo ""
 
-exec uv run uvicorn icarus.proxy:app \
+echo "=== Ensuring infrastructure (graphiti + falkordb) is up ==="
+docker compose up -d --wait graphiti 2>/dev/null || true
+
+# Wait for Graphiti to be healthy (if enabled)
+GRAPHITI_HEALTH_URL="http://localhost:${GRAPHITI_PORT}/health"
+for i in $(seq 1 30); do
+    if curl -sf "$GRAPHITI_HEALTH_URL" > /dev/null 2>&1; then
+        echo "Graphiti is ready."
+        break
+    fi
+    if [ "$i" -eq 30 ]; then
+        echo "Warning: Graphiti did not become ready within 30s — starting without it."
+    fi
+    sleep 1
+done
+
+echo ""
+
+# ── Tail Graphiti container logs in background (verbose only) ───────────────
+if [ -n "$VERBOSE" ] && command -v docker &> /dev/null \
+   && docker ps --filter name=graphiti --format '{{.ID}}' | grep -q .; then
+    docker compose logs -f graphiti 2>/dev/null | stdbuf -oL sed 's/^/[graphiti] /' &
+    LOGS_PID=$!
+else
+    LOGS_PID=""
+fi
+
+cleanup() {
+    [ -n "$LOGS_PID" ] && kill "$LOGS_PID" 2>/dev/null
+    exit
+}
+trap cleanup INT TERM
+
+# ── Start proxy ─────────────────────────────────────────────────────────────
+uv run uvicorn icarus.proxy:app \
     --host "$HOST" --port "$PORT" --log-level "$LOG_LEVEL" \
-    "${UVICORN_ARGS[@]}"
+    "${UVICORN_ARGS[@]}" &
+PROXY_PID=$!
+
+trap 'cleanup; kill $PROXY_PID 2>/dev/null' EXIT
+wait $PROXY_PID

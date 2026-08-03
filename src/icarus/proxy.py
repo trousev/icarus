@@ -1,14 +1,38 @@
 """Transparent proxy for OpenAI-compatible APIs with memory injection."""
 
+import asyncio
 import json
+from contextlib import asynccontextmanager
+
 import httpx
-from fastapi import FastAPI, Request, Response
+from fastapi import BackgroundTasks, FastAPI, Request, Response
 from fastapi.responses import StreamingResponse
 
 from icarus.config import config
 from icarus.logger import RequestLogger
+from icarus.memory import (
+    MemoryClient,
+    extract_and_store,
+    maintenance_worker,
+    memory_client,
+    memory_for_request,
+    is_conversation_start,
+    conversation_key,
+)
 
-app = FastAPI(title="Icarus Proxy", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    """Startup: connect to Graphiti memory service (non-fatal)."""
+    await memory_client.connect()
+    maintenance_worker.start()
+    yield
+    """Shutdown: release MCP transport + write worker."""
+    await maintenance_worker.stop()
+    await memory_client.close()
+
+
+app = FastAPI(title="Icarus Proxy", version="0.2.0", lifespan=lifespan)
 
 logger = RequestLogger(config.LOG_DIR)
 
@@ -22,15 +46,116 @@ async def health():
     return {
         "status": "ok",
         "upstream": config.UPSTREAM_BASE_URL,
+        "memory_enabled": config.MEMORY_ENABLED,
         "memory_injection": bool(config.MEMORY_INJECTION),
+        "graphiti": "ok" if memory_client.available else "unreachable",
+        "memory": {
+            "writes_total": memory_client.writes_total,
+            "writes_failed": memory_client.writes_failed,
+            "writes_last_error": memory_client.writes_last_error,
+            "queue_depth": memory_client._write_queue.qsize(),
+            "last_maintenance": maintenance_worker.last_run_iso,
+            "trimmed_edges_24h": maintenance_worker.trimmed_edges_24h,
+            "rejected_24h": memory_client.writes_rejected_24h,
+        },
     }
+
+
+# ── Memory management API ──────────────────────────────────────────────────
+
+
+def _check_auth(request: Request) -> bool:
+    """Verify the request uses the configured upstream API key."""
+    auth = request.headers.get("authorization", "")
+    expected = f"Bearer {config.UPSTREAM_API_KEY}"
+    return auth == expected
+
+
+@app.get("/memory/status")
+async def memory_status(request: Request):
+    """Get memory system status (requires auth)."""
+    if not _check_auth(request):
+        return Response(content='{"error":"unauthorized"}', status_code=401)
+    return await health()
+
+
+@app.get("/memory/facts")
+async def memory_facts(request: Request, q: str = "", limit: int = 20):
+    """Search the knowledge graph for facts (requires auth)."""
+    if not _check_auth(request):
+        return Response(content='{"error":"unauthorized"}', status_code=401)
+    facts = await memory_client.search_facts(q, limit=limit)
+    return {
+        "facts": [
+            {
+                "uuid": f.uuid,
+                "fact": f.fact,
+                "name": f.name,
+                "valid_at": f.valid_at,
+                "invalid_at": f.invalid_at,
+            }
+            for f in facts
+        ]
+    }
+
+
+@app.post("/memory/forget")
+async def memory_forget(request: Request):
+    """Forget a fact, episode, or topic (requires auth).
+
+    Body: {"fact_uuid": "..."} or {"message": "forget that I prefer Rust"}
+    """
+    if not _check_auth(request):
+        return Response(content='{"error":"unauthorized"}', status_code=401)
+
+    try:
+        data = await request.json()
+    except Exception:
+        return {"error": "invalid_json"}
+
+    if "fact_uuid" in data:
+        ok = await memory_client.delete_fact(data["fact_uuid"])
+        return {"status": "deleted" if ok else "error"}
+
+    if "episode_uuid" in data:
+        ok = await memory_client.delete_episode(data["episode_uuid"])
+        return {"status": "deleted" if ok else "error"}
+
+    if "message" in data:
+        # Find facts matching the message, then delete them
+        facts = await memory_client.search_facts(data["message"], limit=5)
+        deleted = 0
+        for f in facts:
+            try:
+                await memory_client.delete_fact(f.uuid)
+                deleted += 1
+            except Exception:
+                pass
+        return {"status": "done", "deleted": deleted}
+
+    return {"error": "missing fact_uuid, episode_uuid, or message"}
+
+
+@app.post("/memory/purge")
+async def memory_purge(request: Request):
+    """Purge all memory for the current group_id (requires auth)."""
+    if not _check_auth(request):
+        return Response(content='{"error":"unauthorized"}', status_code=401)
+    try:
+        data = await request.json()
+    except Exception:
+        return {"error": "invalid_json"}
+    if data.get("confirm") != "purge-all":
+        return {"error": "must confirm with 'purge-all'"}
+    ok = await memory_client.clear_graph()
+    return {"status": "purged" if ok else "error"}
 
 
 # ── Memory injection ───────────────────────────────────────────────────────
 
 
-def inject_memory(body: bytes) -> bytes:
-    """Inject a second system message after existing system messages.
+def inject_static_memory(body: bytes) -> bytes:
+    """Inject a static system message from MEMORY_INJECTION env var.
 
     If the body contains system messages, the memory is inserted immediately
     after the last system message. If there are no system messages, the memory
@@ -48,7 +173,6 @@ def inject_memory(body: bytes) -> bytes:
     if not messages:
         return body
 
-    # Find insertion point: right after the last system message
     insert_at = 0
     for i, msg in enumerate(messages):
         if msg.get("role") == "system":
@@ -59,6 +183,95 @@ def inject_memory(body: bytes) -> bytes:
     data["messages"] = messages
 
     return json.dumps(data).encode("utf-8")
+
+
+def _insert_memory_into_body(body: bytes, memory_text: str) -> bytes:
+    """Insert `memory_text` as a system message after the last system message."""
+    try:
+        data = json.loads(body)
+    except json.JSONDecodeError:
+        return body
+
+    messages = data.get("messages", [])
+    if not messages:
+        return body
+
+    insert_at = 0
+    for i, msg in enumerate(messages):
+        if msg.get("role") == "system":
+            insert_at = i + 1
+
+    messages.insert(insert_at, {"role": "system", "content": memory_text})
+    data["messages"] = messages
+    return json.dumps(data).encode("utf-8")
+
+
+async def inject_dynamic_memory(body: bytes) -> bytes:
+    """Inject memory from the knowledge graph (if enabled) or fall back to static.
+
+    Dynamic injection only happens for conversation starts. Continuations
+    re-inject the same frozen snapshot (from SQLite cache) for prompt cache stability.
+    """
+    if not config.MEMORY_ENABLED:
+        return inject_static_memory(body)
+
+    try:
+        data = json.loads(body)
+    except json.JSONDecodeError:
+        return body
+
+    messages = data.get("messages", [])
+    if not messages:
+        return body
+
+    memory_text = await memory_for_request(memory_client, messages)
+    if memory_text:
+        return _insert_memory_into_body(body, memory_text)
+
+    # Fall back to static injection if dynamic memory is empty
+    return inject_static_memory(body)
+
+
+def _schedule_memory_extraction(
+    body: bytes,
+    request_id: str,
+) -> None:
+    """Schedule fire-and-forget memory extraction after a successful response.
+
+    Uses asyncio.create_task rather than BackgroundTasks — the write path
+    must survive MCP session timeouts and connection drops, which can
+    cancel request-scoped background tasks.
+    """
+    if not config.MEMORY_ENABLED:
+        return
+
+    try:
+        data = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return
+
+    messages = data.get("messages", [])
+    if not messages:
+        return
+
+    key = conversation_key(messages)
+    known_facts: list[str] = []
+
+    import structlog
+    _bg_log = structlog.get_logger("icarus.memory")
+    _bg_log.info("memory_extraction_scheduled", request_id=request_id, key=key[:12])
+
+    # Use asyncio.create_task — survives MCP session timeouts that can
+    # cancel request-scoped BackgroundTasks
+    asyncio.create_task(
+        extract_and_store(
+            memory_client,
+            messages,
+            key,
+            known_facts,
+            request_id,
+        )
+    )
 
 
 # ── Catch-all proxy route ──────────────────────────────────────────────────
@@ -147,7 +360,7 @@ async def _proxy_buffered(request, upstream_url, forward_headers, modified_body,
     "/{path:path}",
     methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
 )
-async def proxy(request: Request, path: str):
+async def proxy(request: Request, path: str, background_tasks: BackgroundTasks):
     """Catch-all route that proxies requests to the upstream API."""
 
     upstream_url = f"{config.UPSTREAM_BASE_URL}/{path}"
@@ -156,8 +369,8 @@ async def proxy(request: Request, path: str):
     # Inject memory into chat completion requests (before logging so we capture both)
     modified_body = body
     injected = False
-    if path == "v1/chat/completions" and body:
-        modified_body = inject_memory(body)
+    if path in ("v1/chat/completions", "chat/completions") and body:
+        modified_body = await inject_dynamic_memory(body)
         injected = modified_body != body
 
     # Log incoming request — with both original and modified bodies
@@ -169,6 +382,10 @@ async def proxy(request: Request, path: str):
         modified_body=modified_body if injected else None,
         injected=injected,
     )
+
+    # Schedule fire-and-forget memory extraction after successful response
+    if path in ("v1/chat/completions", "chat/completions") and body:
+        _schedule_memory_extraction(body, request_id)
 
     # Build forwarding headers: pass through client headers but override auth,
     # and drop headers that would break the upstream request or cause

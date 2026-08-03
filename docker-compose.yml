@@ -1,10 +1,50 @@
 services:
+  # ── Graphiti knowledge graph (memory backend) ──────────────────────────
+  graphiti:
+    image: zepai/knowledge-graph-mcp:latest
+    ports:
+      - "${GRAPHITI_PORT:-8001}:8000"
+    environment:
+      - LLM_PROVIDER=openai
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - MODEL_NAME=${GRAPHITI_EXTRACTOR_MODEL:-gpt-4o-mini}
+      - EMBEDDING_PROVIDER=openai
+      - EMBEDDING_API_KEY=${OPENAI_API_KEY}
+      - EMBEDDING_MODEL=${GRAPHITI_EMBEDDING_MODEL:-text-embedding-3-small}
+      - GRAPHITI_TELEMETRY_ENABLED=false
+      - SEMAPHORE_LIMIT=2
+      - GRAPHITI_GROUP_ID=${GRAPHITI_GROUP_ID:-default}
+    volumes:
+      - graphiti_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 15s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 400M
+
+  # ── Icarus proxy (only with --profile full) ───────────────────────────
   icarus:
+    profiles: ["full"]
     build: .
     ports:
       - "${PORT:-8000}:8000"
     env_file:
       - .env
+    environment:
+      - GRAPHITI_URL=http://graphiti:8000/mcp
     volumes:
       - ./logs:/app/logs
+      - ./data:/app/data
+    depends_on:
+      graphiti:
+        condition: service_healthy
     restart: unless-stopped
+
+volumes:
+  graphiti_data:

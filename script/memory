@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+cd "$PROJECT_DIR"
+
+# ── Load .env ──────────────────────────────────────────────────────────────
+if [ -f .env ]; then
+    set -a
+    source .env
+    set +a
+fi
+
+PROXY_URL="${PROXY_URL:-http://localhost:${PORT:-8000}}"
+AUTH_HEADER="Authorization: Bearer ${UPSTREAM_API_KEY:-}"
+
+usage() {
+    cat <<EOF
+Usage: script/memory <command> [args]
+
+Commands:
+  status              Show memory system health and counters
+  search <query>      Search knowledge graph for facts (max 20)
+  forget <uuid>       Delete a fact by UUID
+  forget-topic <msg>  Find and delete facts matching a natural-language query
+  purge               Delete ALL memory for this group (requires confirmation)
+  log                 Show recent dead-letter entries
+
+Examples:
+  script/memory status
+  script/memory search "rust"
+  script/memory forget abc123-def456
+  script/memory forget-topic "forget everything about Kubernetes"
+  script/memory purge
+
+Environment:
+  PROXY_URL   Override proxy URL (default: http://localhost:\${PORT:-8000})
+EOF
+    exit 0
+}
+
+# ── Commands ───────────────────────────────────────────────────────────────
+
+cmd_status() {
+    curl -sf "$PROXY_URL/health" | python3 -m json.tool 2>/dev/null || {
+        echo "Error: could not reach $PROXY_URL/health"
+        exit 1
+    }
+}
+
+cmd_search() {
+    local query="$1"
+    curl -sf -H "$AUTH_HEADER" "$PROXY_URL/memory/facts?q=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$query'))")&limit=20" \
+        | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+if 'error' in data:
+    print(f\"Error: {data['error']}\")
+    sys.exit(1)
+for i, f in enumerate(data.get('facts', []), 1):
+    invalid = ' [EXPIRED]' if f.get('invalid_at') else ''
+    print(f\"{i}. [{f['uuid'][:12]}] {f['fact']}{invalid}\")
+if not data.get('facts'):
+    print('No facts found.')
+"
+}
+
+cmd_forget() {
+    local uuid="$1"
+    curl -sf -X POST -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+        -d "{\"fact_uuid\": \"$uuid\"}" "$PROXY_URL/memory/forget" \
+        | python3 -m json.tool
+}
+
+cmd_forget_topic() {
+    local msg="$1"
+    curl -sf -X POST -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+        -d "{\"message\": \"$msg\"}" "$PROXY_URL/memory/forget" \
+        | python3 -m json.tool
+}
+
+cmd_purge() {
+    echo "WARNING: This will delete ALL memory facts for this group."
+    echo "Type 'purge-all' to confirm:"
+    read -r confirm
+    if [ "$confirm" != "purge-all" ]; then
+        echo "Aborted."
+        exit 0
+    fi
+    curl -sf -X POST -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+        -d '{"confirm": "purge-all"}' "$PROXY_URL/memory/purge" \
+        | python3 -m json.tool
+}
+
+cmd_log() {
+    local dead_letter="${LOG_DIR:-./logs}/memory_dead_letter.jsonl"
+    if [ -f "$dead_letter" ]; then
+        tail -20 "$dead_letter" | python3 -m json.tool 2>/dev/null || tail -20 "$dead_letter"
+    else
+        echo "No dead-letter entries found."
+    fi
+}
+
+# ── Dispatch ───────────────────────────────────────────────────────────────
+
+case "${1:-}" in
+    status)       cmd_status ;;
+    search)       cmd_search "${2:-}" ;;
+    forget)       cmd_forget "${2:-}" ;;
+    forget-topic) cmd_forget_topic "${2:-}" ;;
+    purge)        cmd_purge ;;
+    log)          cmd_log ;;
+    help|--help|-h) usage ;;
+    *)            usage ;;
+esac
