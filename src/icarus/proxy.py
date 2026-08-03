@@ -153,18 +153,22 @@ async def proxy(request: Request, path: str):
     upstream_url = f"{config.UPSTREAM_BASE_URL}/{path}"
     body = await request.body()
 
-    # Log incoming request
+    # Inject memory into chat completion requests (before logging so we capture both)
+    modified_body = body
+    injected = False
+    if path == "v1/chat/completions" and body:
+        modified_body = inject_memory(body)
+        injected = modified_body != body
+
+    # Log incoming request — with both original and modified bodies
     request_id = logger.log_request(
         method=request.method,
         path=path,
         body=body,
         headers=dict(request.headers),
+        modified_body=modified_body if injected else None,
+        injected=injected,
     )
-
-    # Inject memory into chat completion requests
-    modified_body = body
-    if path == "v1/chat/completions" and body:
-        modified_body = inject_memory(body)
 
     # Build forwarding headers: pass through client headers but override auth,
     # and drop headers that would break the upstream request or cause
