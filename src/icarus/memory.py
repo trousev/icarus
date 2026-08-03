@@ -7,7 +7,9 @@ and adding facts to the temporal knowledge graph.
 import asyncio
 import hashlib
 import json
+import os
 import re
+import sqlite3
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -96,6 +98,226 @@ def is_conversation_start(messages: list[dict]) -> bool:
         if msg.get("role") == "assistant":
             return False
     return True
+
+
+# ── Snapshot store (SQLite-backed, survives process restart) ────────────────
+
+# Fixed query parts for the two-tier search
+_PROFILE_QUERY = (
+    "the user's stable identity: name, occupation, preferences, "
+    "constraints, goals, tools, projects, decisions, expertise"
+)
+_RECENCY_QUERY = "most recent facts about the user"
+
+
+class SnapshotStore:
+    """SQLite-backed store for conversation→snapshot mappings.
+
+    Persists formatted injection text so re-injection is byte-identical
+    across process restarts.
+    """
+
+    def __init__(self, db_path: str = config.MEMORY_DB_PATH) -> None:
+        self._db_path = db_path
+        self._cache: dict[str, dict] = {}  # key → {snapshot, first_seen, last_seen}
+        self._init_db()
+
+    def _init_db(self) -> None:
+        os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
+        with sqlite3.connect(self._db_path) as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS conversation_snapshots (
+                    key        TEXT PRIMARY KEY,
+                    snapshot   TEXT NOT NULL,
+                    first_seen REAL NOT NULL,
+                    last_seen  REAL NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_last_seen
+                ON conversation_snapshots(last_seen)
+            """)
+
+    def get(self, key: str) -> dict | None:
+        """Return cached entry or load from SQLite."""
+        if key in self._cache:
+            return self._cache[key]
+        with sqlite3.connect(self._db_path) as conn:
+            row = conn.execute(
+                "SELECT snapshot, first_seen, last_seen "
+                "FROM conversation_snapshots WHERE key = ?",
+                (key,),
+            ).fetchone()
+        if row is None:
+            return None
+        entry = {
+            "snapshot": row[0],
+            "first_seen": row[1],
+            "last_seen": row[2],
+        }
+        self._cache[key] = entry
+        return entry
+
+    def upsert(self, key: str, snapshot: str, first_seen: float, last_seen: float) -> None:
+        """Insert or update a snapshot row."""
+        self._cache[key] = {
+            "snapshot": snapshot,
+            "first_seen": first_seen,
+            "last_seen": last_seen,
+        }
+        with sqlite3.connect(self._db_path) as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO conversation_snapshots "
+                "(key, snapshot, first_seen, last_seen) VALUES (?, ?, ?, ?)",
+                (key, snapshot, first_seen, last_seen),
+            )
+
+    def prune(self, max_age_days: int = 7) -> int:
+        """Delete entries older than `max_age_days`. Returns deleted count."""
+        cutoff = time.time() - (max_age_days * 86400)
+        with sqlite3.connect(self._db_path) as conn:
+            cursor = conn.execute(
+                "DELETE FROM conversation_snapshots WHERE last_seen < ?",
+                (cutoff,),
+            )
+            deleted = cursor.rowcount
+        # Also prune cache
+        for key in list(self._cache):
+            if self._cache[key]["last_seen"] < cutoff:
+                del self._cache[key]
+        return deleted
+
+
+# Module-level snapshot store
+_snapshot_store = SnapshotStore()
+
+
+# ── Snapshot building ───────────────────────────────────────────────────────
+
+
+def _format_injection(facts: list[Fact], max_facts: int | None = None) -> str | None:
+    """Format a list of facts into a compact system message."""
+    if not facts:
+        return None
+    if max_facts is None:
+        max_facts = config.GRAPHITI_MAX_FACTS
+
+    facts = facts[:max_facts]
+
+    lines = ["## User Memory (from previous conversations)", ""]
+    lines.append("### Known Facts")
+    for f in facts:
+        lines.append(f"- {f.fact}")
+    lines.append("")
+    lines.append("---")
+    lines.append(
+        "*This memory is from previous conversations and is frozen for this session. "
+        "If the user asks to forget or correct a fact, note it and suggest using "
+        "`script/memory forget` or the memory management API.*"
+    )
+    return "\n".join(lines)
+
+
+async def build_snapshot(
+    client: "MemoryClient", messages: list[dict]
+) -> str | None:
+    """Build a topic-dependent memory snapshot from the first user message.
+
+    Two-tier search:
+    1. Profile tier — stable identity/preferences/constraints (always included)
+    2. Topic tier — the first user message as a search query (topic relevance)
+    3. Recency fallback — if nothing relevant found (generic openings like "hi")
+    """
+    first_user = ""
+    for msg in messages:
+        if msg.get("role") == "user":
+            content = msg.get("content", "")
+            if isinstance(content, str):
+                first_user = content.strip()
+            elif isinstance(content, list):
+                # Multimodal — use text parts only
+                parts = [p.get("text", "") for p in content if p.get("type") == "text"]
+                first_user = " ".join(parts).strip()
+            break
+
+    # Run profile + topic queries concurrently
+    queries = [_PROFILE_QUERY]
+    token_count = len(first_user.split()) if first_user else 0
+    if token_count >= 3:
+        queries.append(first_user)
+
+    results = await asyncio.gather(
+        *(client.search_facts(q, limit=15) for q in queries),
+        return_exceptions=True,
+    )
+
+    # Merge and deduplicate by fact text
+    seen: set[str] = set()
+    merged: list[Fact] = []
+    for result in results:
+        if isinstance(result, Exception):
+            continue
+        for f in result:
+            normalized = f.fact.strip().lower()
+            if normalized not in seen:
+                seen.add(normalized)
+                merged.append(f)
+
+    # If nothing found (generic opening), fall back to recency
+    if not merged:
+        try:
+            merged = await client.search_facts(_RECENCY_QUERY, limit=20)
+        except Exception:
+            pass
+
+    return _format_injection(merged)
+
+
+async def memory_for_request(
+    client: "MemoryClient", messages: list[dict]
+) -> str | None:
+    """Return the memory snapshot to inject for this request.
+
+    On conversation start: builds a fresh topic-dependent snapshot and persists it.
+    On continuation: returns the cached snapshot (byte-identical for prompt cache).
+    Reuse-not-clobber policy: a colliding key from a new conversation reuses
+    the existing snapshot if the active conversation is still alive (cooldown).
+    """
+    if not config.MEMORY_ENABLED:
+        return None
+
+    key = conversation_key(messages)
+    now = time.time()
+    is_start = is_conversation_start(messages)
+
+    existing = _snapshot_store.get(key)
+
+    if existing is None:
+        # First time seeing this key — always build fresh
+        if not is_start:
+            # Continuation without a stored snapshot (e.g., proxy restart during
+            # an active conversation). Build fresh — one cache miss, then stable.
+            pass
+        snapshot = await build_snapshot(client, messages)
+        if snapshot is not None:
+            _snapshot_store.upsert(key, snapshot, now, now)
+        return snapshot
+
+    # Key exists — check cooldown
+    cooldown = config.MEMORY_SNAPSHOT_COOLDOWN
+    if is_start and (now - existing["last_seen"]) > cooldown:
+        # Stale entry + new conversation start → rebuild
+        snapshot = await build_snapshot(client, messages)
+        if snapshot is not None:
+            _snapshot_store.upsert(key, snapshot, now, now)
+        return snapshot
+
+    # Reuse existing snapshot (continuation OR collision within cooldown)
+    _snapshot_store.upsert(
+        key, existing["snapshot"], existing["first_seen"], now
+    )
+    return existing["snapshot"]
 
 
 # ── Memory client ───────────────────────────────────────────────────────────

@@ -9,7 +9,13 @@ from fastapi.responses import StreamingResponse
 
 from icarus.config import config
 from icarus.logger import RequestLogger
-from icarus.memory import MemoryClient, memory_client
+from icarus.memory import (
+    MemoryClient,
+    memory_client,
+    memory_for_request,
+    is_conversation_start,
+    conversation_key,
+)
 
 
 @asynccontextmanager
@@ -44,8 +50,8 @@ async def health():
 # ── Memory injection ───────────────────────────────────────────────────────
 
 
-def inject_memory(body: bytes) -> bytes:
-    """Inject a second system message after existing system messages.
+def inject_static_memory(body: bytes) -> bytes:
+    """Inject a static system message from MEMORY_INJECTION env var.
 
     If the body contains system messages, the memory is inserted immediately
     after the last system message. If there are no system messages, the memory
@@ -63,7 +69,6 @@ def inject_memory(body: bytes) -> bytes:
     if not messages:
         return body
 
-    # Find insertion point: right after the last system message
     insert_at = 0
     for i, msg in enumerate(messages):
         if msg.get("role") == "system":
@@ -74,6 +79,53 @@ def inject_memory(body: bytes) -> bytes:
     data["messages"] = messages
 
     return json.dumps(data).encode("utf-8")
+
+
+def _insert_memory_into_body(body: bytes, memory_text: str) -> bytes:
+    """Insert `memory_text` as a system message after the last system message."""
+    try:
+        data = json.loads(body)
+    except json.JSONDecodeError:
+        return body
+
+    messages = data.get("messages", [])
+    if not messages:
+        return body
+
+    insert_at = 0
+    for i, msg in enumerate(messages):
+        if msg.get("role") == "system":
+            insert_at = i + 1
+
+    messages.insert(insert_at, {"role": "system", "content": memory_text})
+    data["messages"] = messages
+    return json.dumps(data).encode("utf-8")
+
+
+async def inject_dynamic_memory(body: bytes) -> bytes:
+    """Inject memory from the knowledge graph (if enabled) or fall back to static.
+
+    Dynamic injection only happens for conversation starts. Continuations
+    re-inject the same frozen snapshot (from SQLite cache) for prompt cache stability.
+    """
+    if not config.MEMORY_ENABLED:
+        return inject_static_memory(body)
+
+    try:
+        data = json.loads(body)
+    except json.JSONDecodeError:
+        return body
+
+    messages = data.get("messages", [])
+    if not messages:
+        return body
+
+    memory_text = await memory_for_request(memory_client, messages)
+    if memory_text:
+        return _insert_memory_into_body(body, memory_text)
+
+    # Fall back to static injection if dynamic memory is empty
+    return inject_static_memory(body)
 
 
 # ── Catch-all proxy route ──────────────────────────────────────────────────
@@ -172,7 +224,7 @@ async def proxy(request: Request, path: str, background_tasks: BackgroundTasks):
     modified_body = body
     injected = False
     if path == "v1/chat/completions" and body:
-        modified_body = inject_memory(body)
+        modified_body = await inject_dynamic_memory(body)
         injected = modified_body != body
 
     # Log incoming request — with both original and modified bodies
