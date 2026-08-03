@@ -13,6 +13,22 @@ app = FastAPI(title="Icarus Proxy", version="0.1.0")
 logger = RequestLogger(config.LOG_DIR)
 
 
+# ── Specific routes (must be registered before the catch-all) ──────────────
+
+
+@app.get("/health")
+async def health():
+    """Health check endpoint."""
+    return {
+        "status": "ok",
+        "upstream": config.UPSTREAM_BASE_URL,
+        "memory_injection": bool(config.MEMORY_INJECTION),
+    }
+
+
+# ── Memory injection ───────────────────────────────────────────────────────
+
+
 def inject_memory(body: bytes) -> bytes:
     """Inject a second system message after existing system messages.
 
@@ -43,6 +59,9 @@ def inject_memory(body: bytes) -> bytes:
     data["messages"] = messages
 
     return json.dumps(data).encode("utf-8")
+
+
+# ── Catch-all proxy route ──────────────────────────────────────────────────
 
 
 @app.api_route(
@@ -110,7 +129,7 @@ async def proxy(request: Request, path: str):
             for h in ("transfer-encoding", "content-encoding", "content-length"):
                 response_headers.pop(h, None)
 
-            # Log the streaming response metadata (body is too large to log fully)
+            # Log the streaming response metadata
             logger.log_response(
                 request_id,
                 upstream_resp.status_code,
@@ -152,13 +171,3 @@ async def proxy(request: Request, path: str):
                 status_code=upstream_resp.status_code,
                 headers=response_headers,
             )
-
-
-@app.get("/health")
-async def health():
-    """Health check endpoint."""
-    return {
-        "status": "ok",
-        "upstream": config.UPSTREAM_BASE_URL,
-        "memory_injection": bool(config.MEMORY_INJECTION),
-    }
