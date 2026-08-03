@@ -29,7 +29,7 @@ class Config:
 
     # Graphiti MCP server
     GRAPHITI_URL: str = os.getenv("GRAPHITI_URL", "http://localhost:8001/mcp")
-    GRAPHITI_GROUP_ID: str = os.getenv("GRAPHITI_GROUP_ID", "alex")
+    GRAPHITI_GROUP_ID: str = os.getenv("GRAPHITI_GROUP_ID", "default")
     GRAPHITI_MAX_FACTS: int = int(os.getenv("GRAPHITI_MAX_FACTS", "30"))
 
     # Timeouts: reads are on the hot path (must not block), writes are background
@@ -92,7 +92,7 @@ class Config:
         os.getenv("MEMORY_MAINTENANCE_MAX_STALE_HOURS", "36")
     )
     MEMORY_TRIM_ALERT_PCT: int = int(os.getenv("MEMORY_TRIM_ALERT_PCT", "50"))
-    MEMORY_USER_ENTITY: str = os.getenv("MEMORY_USER_ENTITY", "alex")
+    MEMORY_USER_ENTITY: str = os.getenv("MEMORY_USER_ENTITY", "user")
     MEMORY_EXPIRE_UNCONFIRMED_DAYS: int = int(
         os.getenv("MEMORY_EXPIRE_UNCONFIRMED_DAYS", "0")
     )

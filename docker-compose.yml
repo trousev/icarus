@@ -13,7 +13,7 @@ services:
       - EMBEDDING_MODEL=${GRAPHITI_EMBEDDING_MODEL:-text-embedding-3-small}
       - GRAPHITI_TELEMETRY_ENABLED=false
       - SEMAPHORE_LIMIT=2
-      - GRAPHITI_GROUP_ID=${GRAPHITI_GROUP_ID:-alex}
+      - GRAPHITI_GROUP_ID=${GRAPHITI_GROUP_ID:-default}
     volumes:
       - graphiti_data:/data
     healthcheck:
