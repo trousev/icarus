@@ -39,12 +39,34 @@ HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-8000}"
 LOG_LEVEL="${LOG_LEVEL:-info}"
 LOG_PROMPTS="${LOG_PROMPTS:-${LOG_PROMPTS_OVERRIDE:-}}"
+GRAPHITI_PORT="${GRAPHITI_PORT:-8001}"
+GRAPHITI_URL="${GRAPHITI_URL:-http://localhost:${GRAPHITI_PORT}/mcp/}"
 export LOG_PROMPTS
 
+# ── Ensure infrastructure is running ───────────────────────────────────────
 echo "=== Icarus Proxy ==="
 echo "Upstream: ${UPSTREAM_BASE_URL:-https://api.deepseek.com}"
+echo "Graphiti: ${GRAPHITI_URL}"
 echo "Listening on: http://${HOST}:${PORT}"
 echo "Log prompts: ${LOG_PROMPTS:-false}"
+echo ""
+
+echo "=== Ensuring infrastructure (graphiti + falkordb) is up ==="
+docker compose up -d --wait graphiti 2>/dev/null || true
+
+# Wait for Graphiti to be healthy (if enabled)
+GRAPHITI_HEALTH_URL="http://localhost:${GRAPHITI_PORT}/health"
+for i in $(seq 1 30); do
+    if curl -sf "$GRAPHITI_HEALTH_URL" > /dev/null 2>&1; then
+        echo "Graphiti is ready."
+        break
+    fi
+    if [ "$i" -eq 30 ]; then
+        echo "Warning: Graphiti did not become ready within 30s — starting without it."
+    fi
+    sleep 1
+done
+
 echo ""
 
 exec uv run uvicorn icarus.proxy:app \
