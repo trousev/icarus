@@ -1031,6 +1031,7 @@ async def extract_and_store(
     # Step 1: Call evaluator LLM
     start_time = time.monotonic()
     facts: list[dict] = []
+    logger.info("memory_evaluator_calling", request_id=request_id, model=config.MEMORY_EVALUATOR_MODEL)
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(
             config.MEMORY_EVALUATOR_TIMEOUT_MS / 1000.0
