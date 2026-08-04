@@ -398,7 +398,7 @@ async def admin_tenant_status(
     rec = tenant_registry.get(group_id)
     try:
         facts = await memory_client.search_facts(
-            "", limit=1000, group_id=group_id, include_invalid=True,
+            "user", limit=1000, group_id=group_id, include_invalid=True,
         )
     except Exception:
         facts = []

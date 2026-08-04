@@ -804,7 +804,7 @@ class MemoryClient:
         # Use a broad query — Graphiti returns 0 for empty queries.
         try:
             facts = await self.search_facts(
-                "the user", limit=1000, include_invalid=True,
+                "user", limit=1000, include_invalid=True,
             )
         except Exception:
             facts = []
@@ -1642,7 +1642,7 @@ class MaintenanceWorker:
         # Use a broad query — Graphiti returns 0 for empty queries.
         try:
             dead_facts = await self._client.search_facts(
-                "the user", limit=200, include_invalid=True,
+                "user", limit=200, include_invalid=True,
             )
             for f in dead_facts:
                 if f.invalid_at or f.expired_at:
