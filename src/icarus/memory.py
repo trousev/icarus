@@ -310,12 +310,22 @@ _snapshot_store = SnapshotStore()
 # ── Snapshot building ───────────────────────────────────────────────────────
 
 
-def _format_injection(facts: list[Fact], max_facts: int | None = None) -> str | None:
-    """Format a list of facts into a compact system message."""
+def _format_injection(facts: list[Fact], label: str = "", max_facts: int | None = None) -> str | None:
+    """Format a list of facts into a compact system message.
+
+    When *label* is set (e.g. ``[alice]``), facts are filtered to only
+    those starting with that label, and the label prefix is stripped for
+    display.  This guarantees one tenant never sees another's facts.
+    """
     if not facts:
         return None
     if max_facts is None:
         max_facts = config.GRAPHITI_MAX_FACTS
+
+    # Filter by tenant label (programmatic isolation)
+    if label:
+        prefix = label + " "
+        facts = [f for f in facts if f.fact.startswith(prefix)]
 
     facts = facts[:max_facts]
 
@@ -323,7 +333,11 @@ def _format_injection(facts: list[Fact], max_facts: int | None = None) -> str | 
     lines.append("### Known Facts")
     for f in facts:
         ts = f.valid_at[:10] if f.valid_at else "?"
-        lines.append(f"- [{ts}] {f.fact}")
+        fact_text = f.fact
+        # Strip the tenant label prefix for display
+        if label and fact_text.startswith(label + " "):
+            fact_text = fact_text[len(label) + 1:]
+        lines.append(f"- [{ts}] {fact_text}")
     lines.append("")
     lines.append("---")
     lines.append(
@@ -334,9 +348,12 @@ def _format_injection(facts: list[Fact], max_facts: int | None = None) -> str | 
 
 
 async def build_snapshot(
-    client: "MemoryClient", messages: list[dict]
+    client: "MemoryClient", messages: list[dict], label: str = ""
 ) -> str | None:
     """Build a topic-dependent memory snapshot from the first user message.
+
+    When *label* is set (e.g. ``[alice]``), facts are filtered to only
+    those tagged with that tenant label — programmatic isolation guarantee.
 
     Two-tier search:
     1. Profile tier — stable identity/preferences/constraints (always included)
@@ -381,7 +398,7 @@ async def build_snapshot(
                 seen.add(normalized)
                 merged.append(f)
 
-    return _format_injection(merged)
+    return _format_injection(merged, label=label)
 
 
 async def memory_for_request(
@@ -410,7 +427,8 @@ async def memory_for_request(
             # Continuation without a stored snapshot (e.g., proxy restart during
             # an active conversation). Build fresh — one cache miss, then stable.
             pass
-        snapshot = await build_snapshot(client, messages)
+        label = current_tenant().label if config.MEMORY_MULTI_TENANT else ""
+        snapshot = await build_snapshot(client, messages, label=label)
         if snapshot is not None:
             _snapshot_store.upsert(key, snapshot, now, now)
             logger.info("memory_injected", key=key[:12], snapshot_len=len(snapshot), source="fresh")
@@ -423,7 +441,8 @@ async def memory_for_request(
     cooldown = config.MEMORY_SNAPSHOT_COOLDOWN
     if is_start and (now - existing["last_seen"]) > cooldown:
         # Stale entry + new conversation start → rebuild
-        snapshot = await build_snapshot(client, messages)
+        label = current_tenant().label if config.MEMORY_MULTI_TENANT else ""
+        snapshot = await build_snapshot(client, messages, label=label)
         if snapshot is not None:
             _snapshot_store.upsert(key, snapshot, now, now)
             logger.info("memory_injected", key=key[:12], snapshot_len=len(snapshot), source="rebuilt")
@@ -1505,11 +1524,16 @@ async def extract_and_store(
         secret_hits=secret_hits,
     )
 
-    # Step 3: Enqueue for background storage
+    # Step 3: Tag each fact with the tenant label for programmatic isolation.
+    # Format: "[alice] The user prefers Rust."
+    label = tenant.label  # e.g. "[alice]"
+    labelled = [f"{label} {fact}" for fact in survivors]
+
+    # Step 4: Enqueue for background storage
     job = WriteJob(
         episode_name=f"conv-{conversation_key_str[:12]}-{request_id[:8]}",
         episode_body="\n".join(
-            f"{i}. {fact}" for i, fact in enumerate(survivors, 1)
+            f"{i}. {fact}" for i, fact in enumerate(labelled, 1)
         ),
         reference_time=datetime.now(timezone.utc),
         group_id=tenant.group_id,

@@ -26,7 +26,6 @@ logger = structlog.get_logger("icarus.tenant")
 
 _LIBRECHAT_PLACEHOLDER = "LibreChat_User_ID"
 _MAX_IDENTITY_LENGTH = 128
-_GROUP_ID_PREFIX = "t-"
 
 
 # ── Tenant identity ──────────────────────────────────────────────────────────
@@ -36,25 +35,34 @@ _GROUP_ID_PREFIX = "t-"
 class Tenant:
     """A resolved tenant identity for one request.
 
-    ``group_id`` is the only value that reaches Graphiti / snapshot keys /
-    dedup keys — never the raw ``id``.  In legacy mode ``id`` is ``""`` and
-    ``group_id`` is the configured ``GRAPHITI_GROUP_ID``.
+    ``id`` and ``group_id`` are the same — the raw identity from the header
+    (e.g. LibreChat user ID).  No hashing, no prefix mangling.  Logs and
+    admin commands show the actual username.
+
+    In legacy mode ``id`` is ``""`` and ``group_id`` is the configured
+    ``GRAPHITI_GROUP_ID``.
     """
 
     id: str        # raw identity from header / body ("" in legacy mode)
-    group_id: str  # deterministic graph partition key
+    group_id: str  # same as id; in legacy mode = GRAPHITI_GROUP_ID
     via: str       # resolution channel: header | body | legacy_default | legacy_header_ignored
 
     @classmethod
     def from_identity(cls, tenant_id: str, via: str) -> "Tenant":
-        """Derive a tenant from a raw identity (pseudo-anonymised group_id)."""
-        digest = hashlib.sha256(tenant_id.encode("utf-8")).hexdigest()[:16]
-        return cls(id=tenant_id, group_id=f"{_GROUP_ID_PREFIX}{digest}", via=via)
+        """Derive a tenant from a raw identity."""
+        return cls(id=tenant_id, group_id=tenant_id, via=via)
 
     @classmethod
     def legacy(cls, via: str = "legacy_default") -> "Tenant":
         """Return the singleton legacy tenant."""
         return cls(id="", group_id=config.GRAPHITI_GROUP_ID, via=via)
+
+    @property
+    def label(self) -> str:
+        """A stable label for tagging facts — e.g. ``[alice]``."""
+        if not self.id:
+            return f"[{self.group_id}]"
+        return f"[{self.id}]"
 
 
 # ── ContextVar ───────────────────────────────────────────────────────────────
@@ -71,12 +79,9 @@ def current_tenant() -> Tenant:
     reads this via the ContextVar set by ``TenantMiddleware``.  Outside a
     request context:
 
-    * **LEGACY mode** — falls back to ``config.GRAPHITI_GROUP_ID``.  This
-      keeps the write worker, maintenance, and tests byte-identical to today.
-    * **MULTI_TENANT mode** — there is NO fallback; calling this outside a
-      request is a programming error and raises ``RuntimeError``.  Long-lived
-      tasks (write worker, maintenance loop) must pass explicit ``group_id``
-      and never call this.
+    * **LEGACY mode** — falls back to ``config.GRAPHITI_GROUP_ID``.
+    * **MULTI_TENANT mode** — raises ``RuntimeError``.  Long-lived tasks
+      (write worker, maintenance loop) must pass explicit ``group_id``.
     """
     tenant = _current_tenant.get()
     if tenant is not None:
@@ -225,17 +230,14 @@ class TenantRegistry:
         """Log request-entry tenant resolution (called by the middleware)."""
         if not config.MEMORY_MULTI_TENANT:
             return
-        identity_hash = (
-            hashlib.sha256(tenant.id.encode("utf-8")).hexdigest()
-            if tenant.id else ""
-        )
-        self._append_event(tenant.group_id, identity_hash, "seen")
+        # group_id is the raw username — no hashing needed
+        self._append_event(tenant.group_id, tenant.id, "seen")
 
     def record_write(self, group_id: str) -> None:
         """Log a background write enqueue (called by extract_and_store)."""
         if not config.MEMORY_MULTI_TENANT:
             return
-        self._append_event(group_id, "", "write")
+        self._append_event(group_id, group_id, "write")
 
     def record_purge(self, group_id: str) -> str:
         """Mark a tenant purged; returns the ISO ``purged_at`` timestamp.
@@ -245,8 +247,7 @@ class TenantRegistry:
         runs.
         """
         now = datetime.now(timezone.utc).isoformat()
-        identity_hash = self._tenants.get(group_id, {}).get("identity_hash", "")
-        self._append_event(group_id, identity_hash, "purge", purged_at=now)
+        self._append_event(group_id, self._tenants.get(group_id, {}).get("identity", group_id), "purge", purged_at=now)
         return now
 
     # ── Reads ─────────────────────────────────────────────────────────────
@@ -284,7 +285,7 @@ class TenantRegistry:
         added = 0
         for gid in group_ids:
             if gid and gid not in self._tenants:
-                self._append_event(gid, "", "orphan")
+                self._append_event(gid, gid, "orphan")
                 added += 1
         return added
 
@@ -317,7 +318,7 @@ class TenantRegistry:
     def _append_event(
         self,
         group_id: str,
-        identity_hash: str,
+        identity: str,
         event_type: str,
         purged_at: str | None = None,
     ) -> None:
@@ -326,7 +327,7 @@ class TenantRegistry:
         cur = self._tenants.get(group_id, {})
         rec = {
             "group_id": group_id,
-            "identity_hash": identity_hash or cur.get("identity_hash", ""),
+            "identity": identity or cur.get("identity", group_id),
             "first_seen": cur.get("first_seen", now),
             "last_seen": now,
             "last_write": now if event_type == "write" else cur.get("last_write"),
