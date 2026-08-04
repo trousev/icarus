@@ -1377,9 +1377,12 @@ async def extract_and_store(
         async with httpx.AsyncClient(timeout=httpx.Timeout(
             config.MEMORY_EVALUATOR_TIMEOUT_MS / 1000.0
         )) as http:
+            evaluator_headers = {}
+            if config.UPSTREAM_API_KEY:
+                evaluator_headers["Authorization"] = f"Bearer {config.UPSTREAM_API_KEY}"
             resp = await http.post(
                 f"{config.UPSTREAM_BASE_URL}/v1/chat/completions",
-                headers={"Authorization": f"Bearer {config.UPSTREAM_API_KEY}"},
+                headers=evaluator_headers,
                 json={
                     "model": config.MEMORY_EVALUATOR_MODEL,
                     "messages": [
