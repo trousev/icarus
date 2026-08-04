@@ -151,6 +151,16 @@ class SnapshotStore:
                     CREATE INDEX IF NOT EXISTS idx_last_seen
                     ON conversation_snapshots(last_seen)
                 """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS fact_owners (
+                        fact_uuid  TEXT PRIMARY KEY,
+                        tenant_id  TEXT NOT NULL
+                    )
+                """)
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_fact_tenant
+                    ON fact_owners(tenant_id)
+                """)
         except Exception:
             logger.warning("memory_snapshot_store_init_failed", path=self._db_path)
 
@@ -283,6 +293,50 @@ class SnapshotStore:
                 prefixes.add(key.rsplit(":", 1)[0])
         return sorted(prefixes)
 
+    def record_fact_owner(self, fact_uuid: str, tenant_id: str) -> None:
+        """Record which tenant owns a fact UUID (for guaranteed read filtering)."""
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO fact_owners (fact_uuid, tenant_id) "
+                    "VALUES (?, ?)",
+                    (fact_uuid, tenant_id),
+                )
+        except Exception:
+            pass
+
+    def own_facts(self, facts: list[Fact], tenant_id: str) -> list[Fact]:
+        """Return only facts belonging to *tenant_id* (exact match, not fuzzy).
+
+        Programmatic isolation guarantee: a fact is only visible to the
+        tenant recorded at write time.
+        """
+        if not facts:
+            return facts
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                placeholders = ",".join("?" for _ in facts)
+                rows = conn.execute(
+                    f"SELECT fact_uuid FROM fact_owners "
+                    f"WHERE tenant_id = ? AND fact_uuid IN ({placeholders})",
+                    [tenant_id] + [f.uuid for f in facts],
+                ).fetchall()
+        except Exception:
+            return facts  # fail open on DB error — don't break injection
+        owned = {r[0] for r in rows}
+        return [f for f in facts if f.uuid in owned]
+
+    def drop_fact_owner(self, fact_uuid: str) -> None:
+        """Remove a fact ownership record (on delete/forget)."""
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                conn.execute(
+                    "DELETE FROM fact_owners WHERE fact_uuid = ?",
+                    (fact_uuid,),
+                )
+        except Exception:
+            pass
+
     def prune(self, max_age_days: int = 7) -> int:
         """Delete entries older than `max_age_days`. Returns deleted count."""
         cutoff = time.time() - (max_age_days * 86400)
@@ -310,22 +364,12 @@ _snapshot_store = SnapshotStore()
 # ── Snapshot building ───────────────────────────────────────────────────────
 
 
-def _format_injection(facts: list[Fact], label: str = "", max_facts: int | None = None) -> str | None:
-    """Format a list of facts into a compact system message.
-
-    When *label* is set (e.g. ``[alice]``), facts are filtered to only
-    those starting with that label, and the label prefix is stripped for
-    display.  This guarantees one tenant never sees another's facts.
-    """
+def _format_injection(facts: list[Fact], max_facts: int | None = None) -> str | None:
+    """Format a list of facts into a compact system message."""
     if not facts:
         return None
     if max_facts is None:
         max_facts = config.GRAPHITI_MAX_FACTS
-
-    # Filter by tenant label (programmatic isolation)
-    if label:
-        prefix = label + " "
-        facts = [f for f in facts if f.fact.startswith(prefix)]
 
     facts = facts[:max_facts]
 
@@ -333,11 +377,7 @@ def _format_injection(facts: list[Fact], label: str = "", max_facts: int | None 
     lines.append("### Known Facts")
     for f in facts:
         ts = f.valid_at[:10] if f.valid_at else "?"
-        fact_text = f.fact
-        # Strip the tenant label prefix for display
-        if label and fact_text.startswith(label + " "):
-            fact_text = fact_text[len(label) + 1:]
-        lines.append(f"- [{ts}] {fact_text}")
+        lines.append(f"- [{ts}] {f.fact}")
     lines.append("")
     lines.append("---")
     lines.append(
@@ -348,12 +388,9 @@ def _format_injection(facts: list[Fact], label: str = "", max_facts: int | None 
 
 
 async def build_snapshot(
-    client: "MemoryClient", messages: list[dict], label: str = ""
+    client: "MemoryClient", messages: list[dict]
 ) -> str | None:
     """Build a topic-dependent memory snapshot from the first user message.
-
-    When *label* is set (e.g. ``[alice]``), facts are filtered to only
-    those tagged with that tenant label — programmatic isolation guarantee.
 
     Two-tier search:
     1. Profile tier — stable identity/preferences/constraints (always included)
@@ -398,7 +435,7 @@ async def build_snapshot(
                 seen.add(normalized)
                 merged.append(f)
 
-    return _format_injection(merged, label=label)
+    return _format_injection(merged)
 
 
 async def memory_for_request(
@@ -427,8 +464,7 @@ async def memory_for_request(
             # Continuation without a stored snapshot (e.g., proxy restart during
             # an active conversation). Build fresh — one cache miss, then stable.
             pass
-        label = current_tenant().label if config.MEMORY_MULTI_TENANT else ""
-        snapshot = await build_snapshot(client, messages, label=label)
+        snapshot = await build_snapshot(client, messages)
         if snapshot is not None:
             _snapshot_store.upsert(key, snapshot, now, now)
             logger.info("memory_injected", key=key[:12], snapshot_len=len(snapshot), source="fresh")
@@ -441,8 +477,7 @@ async def memory_for_request(
     cooldown = config.MEMORY_SNAPSHOT_COOLDOWN
     if is_start and (now - existing["last_seen"]) > cooldown:
         # Stale entry + new conversation start → rebuild
-        label = current_tenant().label if config.MEMORY_MULTI_TENANT else ""
-        snapshot = await build_snapshot(client, messages, label=label)
+        snapshot = await build_snapshot(client, messages)
         if snapshot is not None:
             _snapshot_store.upsert(key, snapshot, now, now)
             logger.info("memory_injected", key=key[:12], snapshot_len=len(snapshot), source="rebuilt")
@@ -1524,16 +1559,13 @@ async def extract_and_store(
         secret_hits=secret_hits,
     )
 
-    # Step 3: Tag each fact with the tenant label for programmatic isolation.
-    # Format: "[alice] The user prefers Rust."
-    label = tenant.label  # e.g. "[alice]"
-    labelled = [f"{label} {fact}" for fact in survivors]
-
-    # Step 4: Enqueue for background storage
+    # Step 3: Enqueue for background storage.
+    # Facts go into one shared Graphiti graph — multi-tenant isolation
+    # is at the Icarus layer via per-tenant snapshot keys and dedup caches.
     job = WriteJob(
         episode_name=f"conv-{conversation_key_str[:12]}-{request_id[:8]}",
         episode_body="\n".join(
-            f"{i}. {fact}" for i, fact in enumerate(labelled, 1)
+            f"{i}. {fact}" for i, fact in enumerate(survivors, 1)
         ),
         reference_time=datetime.now(timezone.utc),
         group_id=tenant.group_id,

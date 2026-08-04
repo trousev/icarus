@@ -57,13 +57,6 @@ class Tenant:
         """Return the singleton legacy tenant."""
         return cls(id="", group_id=config.GRAPHITI_GROUP_ID, via=via)
 
-    @property
-    def label(self) -> str:
-        """A stable label for tagging facts — e.g. ``[alice]``."""
-        if not self.id:
-            return f"[{self.group_id}]"
-        return f"[{self.id}]"
-
 
 # ── ContextVar ───────────────────────────────────────────────────────────────
 
