@@ -117,5 +117,12 @@ class Config:
     )
     ICARUS_ADMIN_API_KEY: str = os.getenv("ICARUS_ADMIN_API_KEY", "")
 
+    # Shared secret for client→proxy authentication (optional).
+    # When set, every chat + management request must carry this value in
+    # the AUTH_SECRET_HEADER.  When empty, the check is skipped entirely
+    # (good for local testing or network-isolated deployments).
+    AUTH_SECRET: str = os.getenv("AUTH_SECRET", "")
+    AUTH_SECRET_HEADER: str = os.getenv("AUTH_SECRET_HEADER", "X-Auth-Secret")
+
 
 config = Config()

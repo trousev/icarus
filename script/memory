@@ -13,9 +13,16 @@ if [ -f .env ]; then
 fi
 
 PROXY_URL="${PROXY_URL:-http://localhost:${PORT:-8000}}"
-AUTH_HEADER="Authorization: Bearer ${UPSTREAM_API_KEY:-}"
 ADMIN_AUTH_HEADER="Authorization: Bearer ${ICARUS_ADMIN_API_KEY:-}"
 TENANT_HEADER_NAME="${MEMORY_TENANT_HEADER:-X-User-ID}"
+
+# Shared secret header (only sent when AUTH_SECRET is configured)
+AUTH_SECRET_HEADER="${AUTH_SECRET_HEADER:-X-Auth-Secret}"
+if [ -n "${AUTH_SECRET:-}" ]; then
+    AUTH_SECRET_HDR=(-H "$AUTH_SECRET_HEADER: $AUTH_SECRET")
+else
+    AUTH_SECRET_HDR=()
+fi
 
 # ── Parse --user and --admin flags ─────────────────────────────────────────
 USER_ID="${ICARUS_USER_ID:-}"
@@ -89,7 +96,7 @@ EOF
 
 cmd_status() {
     if [ -n "$USER_ID" ]; then
-        curl -sf -H "$AUTH_HEADER" "${TENANT_HDR[@]}" "$PROXY_URL/memory/status" \
+        curl -sf "${AUTH_SECRET_HDR[@]}" "${TENANT_HDR[@]}" "$PROXY_URL/memory/status" \
             | python3 -m json.tool 2>/dev/null || {
             echo "Error: could not reach $PROXY_URL/memory/status"
             echo "Hint: in MT mode, pass --user <id>"
@@ -105,7 +112,7 @@ cmd_status() {
 
 cmd_search() {
     local query="$1"
-    curl -sf -H "$AUTH_HEADER" "${TENANT_HDR[@]}" \
+    curl -sf "${AUTH_SECRET_HDR[@]}" "${TENANT_HDR[@]}" \
         "$PROXY_URL/memory/facts?q=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$query'))")&limit=20" \
         | python3 -c "
 import json, sys
@@ -123,14 +130,14 @@ if not data.get('facts'):
 
 cmd_forget() {
     local uuid="$1"
-    curl -sf -X POST -H "$AUTH_HEADER" -H "Content-Type: application/json" "${TENANT_HDR[@]}" \
+    curl -sf -X POST "${AUTH_SECRET_HDR[@]}" -H "Content-Type: application/json" "${TENANT_HDR[@]}" \
         -d "{\"fact_uuid\": \"$uuid\"}" "$PROXY_URL/memory/forget" \
         | python3 -m json.tool
 }
 
 cmd_forget_topic() {
     local msg="$1"
-    curl -sf -X POST -H "$AUTH_HEADER" -H "Content-Type: application/json" "${TENANT_HDR[@]}" \
+    curl -sf -X POST "${AUTH_SECRET_HDR[@]}" -H "Content-Type: application/json" "${TENANT_HDR[@]}" \
         -d "{\"message\": \"$msg\"}" "$PROXY_URL/memory/forget" \
         | python3 -m json.tool
 }
@@ -143,7 +150,7 @@ cmd_purge() {
         echo "Aborted."
         exit 0
     fi
-    curl -sf -X POST -H "$AUTH_HEADER" -H "Content-Type: application/json" "${TENANT_HDR[@]}" \
+    curl -sf -X POST "${AUTH_SECRET_HDR[@]}" -H "Content-Type: application/json" "${TENANT_HDR[@]}" \
         -d '{"confirm": "purge-all"}' "$PROXY_URL/memory/purge" \
         | python3 -m json.tool
 }

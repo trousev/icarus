@@ -42,15 +42,16 @@ async def lifespan(application: FastAPI):
     """Startup: connect to Graphiti memory service (non-fatal)."""
     # Multi-tenancy startup validations
     if config.MEMORY_MULTI_TENANT:
-        if not config.UPSTREAM_API_KEY:
-            _proxy_log.error(
-                "tenant_mode_requires_key",
-                msg="MEMORY_MULTI_TENANT requires UPSTREAM_API_KEY — "
-                    "the chat path is authenticated by it in MT mode",
+        if not config.AUTH_SECRET:
+            _proxy_log.warning(
+                "tenant_mode_no_auth",
+                msg="MT mode without AUTH_SECRET — the proxy is open to "
+                    "anyone who can reach it. Set AUTH_SECRET in .env and "
+                    "configure LibreChat to send it via "
+                    f"{config.AUTH_SECRET_HEADER} header.",
             )
-            raise SystemExit(1)
-        if config.ICARUS_ADMIN_API_KEY and (
-            config.ICARUS_ADMIN_API_KEY == config.UPSTREAM_API_KEY
+        if config.ICARUS_ADMIN_API_KEY and config.AUTH_SECRET and (
+            config.ICARUS_ADMIN_API_KEY == config.AUTH_SECRET
         ):
             _proxy_log.error(
                 "tenant_admin_key_equals_upstream",
@@ -155,17 +156,21 @@ app.add_middleware(TenantMiddleware)
 
 
 def _check_auth(request: Request) -> bool:
-    """Verify the request uses the configured upstream API key.
+    """Verify the request carries the shared secret (if configured).
 
-    Uses constant-time comparison to avoid timing side-channels.
+    When ``AUTH_SECRET`` is empty the check is skipped — useful for
+    local testing or network-isolated deployments.
+    When set, the ``AUTH_SECRET_HEADER`` value must match exactly
+    (constant-time comparison).
     """
-    auth = request.headers.get("authorization", "")
-    expected = f"Bearer {config.UPSTREAM_API_KEY}"
-    return hmac_mod.compare_digest(auth, expected)
+    if not config.AUTH_SECRET:
+        return True
+    secret = request.headers.get(config.AUTH_SECRET_HEADER, "")
+    return hmac_mod.compare_digest(secret, config.AUTH_SECRET)
 
 
 def require_operator(request: Request) -> None:
-    """FastAPI dependency: reject requests without the upstream API key."""
+    """FastAPI dependency: reject requests without the shared secret."""
     if not _check_auth(request):
         raise HTTPException(status_code=401, detail="unauthorized")
 
@@ -650,13 +655,12 @@ async def proxy(request: Request, path: str, background_tasks: BackgroundTasks):
     """
     # Auth gate in MT mode — must precede body read / injection / extraction
     if config.MEMORY_MULTI_TENANT and not _check_auth(request):
-        auth = request.headers.get("authorization", "")
-        auth_prefix = auth[:30] if auth else "(absent)"
+        incoming = request.headers.get(config.AUTH_SECRET_HEADER, "")
         _proxy_log.warning(
             "proxy_auth_rejected",
             path=path,
-            auth_prefix=auth_prefix,
-            expected_prefix=f"Bearer {config.UPSTREAM_API_KEY[:8]}...",
+            expected_header=config.AUTH_SECRET_HEADER,
+            incoming_snippet=incoming[:20] if incoming else "(absent)",
         )
         return Response(content='{"error":"unauthorized"}', status_code=401)
 

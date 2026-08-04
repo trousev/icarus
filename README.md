@@ -101,7 +101,9 @@ When `MEMORY_MULTI_TENANT=true`, Icarus isolates memory per user using Graphiti'
 ```bash
 MEMORY_MULTI_TENANT=true           # Enable multi-tenant mode
 MEMORY_TENANT_HEADER=X-User-ID     # Identity header name (default)
-ICARUS_ADMIN_API_KEY=sk-admin-...  # Admin key for GDPR erasure (must differ from UPSTREAM_API_KEY)
+AUTH_SECRET=my-shared-secret       # Optional: shared secret for client→proxy auth
+AUTH_SECRET_HEADER=X-Auth-Secret   # Header name for the shared secret (default)
+ICARUS_ADMIN_API_KEY=sk-admin-...  # Admin key for GDPR erasure
 ```
 
 ### LibreChat Integration
@@ -113,19 +115,20 @@ endpoints:
   custom:
     - name: "Icarus"
       baseURL: "http://icarus:8000/v1"
-      apiKey: "${ICARUS_UPSTREAM_KEY}"
+      apiKey: "${DEEPSEEK_KEY}"           # forwarded upstream, not used by Icarus
       headers:
         X-User-ID: "{{LIBRECHAT_USER_ID}}"
+        X-Auth-Secret: "my-shared-secret"   # must match AUTH_SECRET in Icarus .env
       models:
         default: ["deepseek-v4-flash"]
 ```
 
 ### Security
 
-- In MT mode the chat path requires `UPSTREAM_API_KEY` — only trusted clients can reach the memory system.
-- The admin key for GDPR operations (`ICARUS_ADMIN_API_KEY`) must differ from the upstream key.
-- Optional HMAC-SHA256 header signing (`MEMORY_TENANT_HMAC_SECRET`) provides defense-in-depth when Icarus sits behind a custom gateway.
-- **Network isolation**: Icarus should only be reachable by LibreChat. Direct LAN exposure without HMAC allows header forgery.
+- **Shared secret** (`AUTH_SECRET`): when set, every chat + management request must carry this value in the `X-Auth-Secret` header. When empty, the check is skipped (local testing).
+- The admin key for GDPR operations (`ICARUS_ADMIN_API_KEY`) is separate from the shared secret.
+- Optional HMAC-SHA256 header signing (`MEMORY_TENANT_HMAC_SECRET`) provides defense-in-depth for the identity header.
+- **Network isolation**: when `AUTH_SECRET` is unset, Icarus should only be reachable by LibreChat. Direct LAN exposure allows header forgery.
 
 ### Admin Endpoints
 
