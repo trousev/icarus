@@ -800,10 +800,11 @@ class MemoryClient:
         """
         result = {"facts_deleted": 0, "episodes_deleted": 0, "errors": 0}
 
-        # Enumerate and delete facts (including invalidated ones)
+        # Enumerate and delete facts (including invalidated ones).
+        # Use a broad query — Graphiti returns 0 for empty queries.
         try:
             facts = await self.search_facts(
-                "", limit=1000, include_invalid=True,
+                "the user", limit=1000, include_invalid=True,
             )
         except Exception:
             facts = []
@@ -1637,10 +1638,11 @@ class MaintenanceWorker:
             logger.warning("memory_maintenance_skipped", reason="graphiti_unreachable")
             return
 
-        # Single sweep — all tenants share one FalkorDB graph
+        # Single sweep — all tenants share one FalkorDB graph.
+        # Use a broad query — Graphiti returns 0 for empty queries.
         try:
             dead_facts = await self._client.search_facts(
-                "", limit=200, include_invalid=True,
+                "the user", limit=200, include_invalid=True,
             )
             for f in dead_facts:
                 if f.invalid_at or f.expired_at:

@@ -9,7 +9,7 @@ import httpx
 import structlog
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
-from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from icarus.config import config
 from icarus.logger import RequestLogger
@@ -91,32 +91,39 @@ logger = RequestLogger(config.LOG_DIR)
 
 # ── Tenant middleware ────────────────────────────────────────────────────────
 
-class TenantMiddleware(BaseHTTPMiddleware):
-    """Resolve the request-scoped tenant and set the ContextVar.
+class TenantMiddleware:
+    """Pure ASGI middleware — resolves the request-scoped tenant.
 
-    Authoritative resolver: runs once per request, sets the ContextVar
-    before the handler, resets it in ``finally``.  Fail-closes in
-    MULTI_TENANT mode — absence of identity is an error, never a fallback
-    to the legacy group.
+    Avoids ``BaseHTTPMiddleware`` (which spawns tasks and causes cancel-scope
+    errors on newer Starlette / anyio).  Runs on every request, sets the
+    ContextVar before the ASGI app, resets it on exit.
+
+    Fail-closes in MULTI_TENANT mode — absence of identity is an error,
+    never a fallback to the legacy group.
     """
 
-    async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint
-    ) -> Response:
-        # Public health + admin routes never need a tenant (admin endpoints
-        # take explicit group_id from params, never the ContextVar).
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        request = Request(scope, receive)
         path = request.url.path
+
+        # Public health + admin routes never need a tenant
         if path == "/health" or path.startswith("/admin/"):
-            return await call_next(request)
+            await self.app(scope, receive, send)
+            return
 
         try:
             tenant = await resolve_tenant(request)
         except TenantRejected as exc:
             status = exc.status_code
             if status == 401 and path.startswith("/memory/"):
-                status = 403  # API key authenticated but no tenant
-            # Diagnostic: log all incoming headers so operators can debug
-            # LibreChat / gateway misconfigurations
+                status = 403
             header_names = sorted(request.headers.keys())
             tenant_header_value = request.headers.get(
                 config.MEMORY_TENANT_HEADER, ""
@@ -130,11 +137,13 @@ class TenantMiddleware(BaseHTTPMiddleware):
                 header_value_snippet=tenant_header_value[:80] if tenant_header_value else "(absent)",
                 incoming_headers=header_names,
             )
-            return Response(
+            response = Response(
                 content=json.dumps({"error": exc.reason}),
                 status_code=status,
                 media_type="application/json",
             )
+            await response(scope, receive, send)
+            return
 
         tenant_registry.record_seen(tenant)
         _proxy_log.info(
@@ -144,7 +153,7 @@ class TenantMiddleware(BaseHTTPMiddleware):
         )
         token = _current_tenant.set(tenant)
         try:
-            return await call_next(request)
+            await self.app(scope, receive, send)
         finally:
             _current_tenant.reset(token)
 
