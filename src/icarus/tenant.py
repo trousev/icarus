@@ -26,7 +26,7 @@ logger = structlog.get_logger("icarus.tenant")
 
 _LIBRECHAT_PLACEHOLDER = "LibreChat_User_ID"
 _MAX_IDENTITY_LENGTH = 128
-_GROUP_ID_PREFIX = "t:"
+_GROUP_ID_PREFIX = "t-"
 
 
 # ── Tenant identity ──────────────────────────────────────────────────────────

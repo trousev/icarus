@@ -54,8 +54,8 @@ class TestTenant:
         t1 = Tenant.from_identity("alice", via="header")
         t2 = Tenant.from_identity("alice", via="header")
         assert t1.group_id == t2.group_id
-        assert t1.group_id.startswith("t:")
-        assert len(t1.group_id) == 18  # "t:" + 16 hex
+        assert t1.group_id.startswith("t-")
+        assert len(t1.group_id) == 18  # "t-" + 16 hex
 
     def test_from_identity_different_users(self):
         """Different users get different groups."""
@@ -101,7 +101,7 @@ class TestResolveTenant:
         tenant = await resolve_tenant(req)
         assert tenant.via == "header"
         assert tenant.id == "alice"
-        assert tenant.group_id.startswith("t:")
+        assert tenant.group_id.startswith("t-")
 
     async def test_mt_missing_header_401(self, monkeypatch):
         """MT mode without header → TenantRejected(401)."""
@@ -303,9 +303,9 @@ class TestTenantRegistry:
         monkeypatch.setattr(config, "MEMORY_MULTI_TENANT", True)
         reg_path = tmp_path / "registry.jsonl"
         reg = tenant_registry.__class__(str(reg_path))
-        added = reg.merge_orphans(["t:abc123", "t:def456"])
+        added = reg.merge_orphans(["t-abc123", "t-def456"])
         assert added == 2
-        assert "t:abc123" in {t["group_id"] for t in reg.all()}
+        assert "t-abc123" in {t["group_id"] for t in reg.all()}
 
     def test_persistence(self, monkeypatch, tmp_path):
         """Records survive reload."""
