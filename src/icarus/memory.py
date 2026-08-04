@@ -133,6 +133,18 @@ class SnapshotStore:
         self._purged_at: dict[str, float] = {}  # key prefix → purge timestamp
         self._init_db()
         self._migrate_keys()
+        self._migrate_fact_owners()
+
+    @staticmethod
+    def _fact_hash(text: str) -> str:
+        """Normalize and hash fact text for content-based ownership tracking.
+
+        Uses the same normalization as DedupFilter so hashes are consistent
+        across the write path (extract_and_store) and read path (own_facts).
+        """
+        normalized = re.sub(r"\s+", " ", text.strip().lower())
+        normalized = re.sub(r"[^\w\s]", "", normalized)
+        return hashlib.sha256(normalized.encode()).hexdigest()[:16]
 
     def _init_db(self) -> None:
         try:
@@ -153,8 +165,9 @@ class SnapshotStore:
                 """)
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS fact_owners (
-                        fact_uuid  TEXT PRIMARY KEY,
-                        tenant_id  TEXT NOT NULL
+                        fact_hash  TEXT NOT NULL,
+                        tenant_id  TEXT NOT NULL,
+                        PRIMARY KEY (fact_hash, tenant_id)
                     )
                 """)
                 conn.execute("""
@@ -183,11 +196,45 @@ class SnapshotStore:
         except Exception:
             pass
 
-    def _mkkey(self, content_hash: str) -> str:
+    def _migrate_fact_owners(self) -> None:
+        """One-time migration: drop old UUID-based fact_owners, recreate with hash PK.
+
+        The old schema used ``(fact_uuid TEXT PRIMARY KEY, tenant_id TEXT)``.
+        The new schema uses ``(fact_hash TEXT, tenant_id TEXT, PRIMARY KEY
+        (fact_hash, tenant_id))`` — content-hash-based so we can record
+        ownership without needing Graphiti to return fact UUIDs.
+
+        Idempotent — second run is a no-op because the new table already exists
+        and has the correct columns.
+        """
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                # Check if the old schema (fact_uuid column) exists
+                cols = conn.execute("PRAGMA table_info('fact_owners')").fetchall()
+                col_names = {c[1] for c in cols}
+                if "fact_uuid" in col_names and "fact_hash" not in col_names:
+                    # Old schema — drop and recreate
+                    conn.execute("DROP TABLE IF EXISTS fact_owners")
+                    conn.execute("DROP INDEX IF EXISTS idx_fact_tenant")
+                    conn.execute("""
+                        CREATE TABLE IF NOT EXISTS fact_owners (
+                            fact_hash  TEXT NOT NULL,
+                            tenant_id  TEXT NOT NULL,
+                            PRIMARY KEY (fact_hash, tenant_id)
+                        )
+                    """)
+                    conn.execute("""
+                        CREATE INDEX IF NOT EXISTS idx_fact_tenant
+                        ON fact_owners(tenant_id)
+                    """)
+                    logger.info("memory_fact_owners_migrated", db_path=self._db_path)
+        except Exception:
+            pass
+
+    def _mkkey(self, content_hash: str, group_id: str) -> str:
         """Build a storage key, tenant-prefixed in MT mode."""
         if config.MEMORY_MULTI_TENANT:
-            tenant = current_tenant()
-            return f"{tenant.group_id}:{content_hash}"
+            return f"{group_id}:{content_hash}"
         return f"{config.GRAPHITI_GROUP_ID}:{content_hash}"
 
     def _purged(self, key: str, first_seen: float | None) -> bool:
@@ -293,20 +340,20 @@ class SnapshotStore:
                 prefixes.add(key.rsplit(":", 1)[0])
         return sorted(prefixes)
 
-    def record_fact_owner(self, fact_uuid: str, tenant_id: str) -> None:
-        """Record which tenant owns a fact UUID (for guaranteed read filtering)."""
+    def record_fact_owner(self, fact_hash: str, tenant_id: str) -> None:
+        """Record which tenant owns a fact (by content hash, for guaranteed read filtering)."""
         try:
             with sqlite3.connect(self._db_path) as conn:
                 conn.execute(
-                    "INSERT OR REPLACE INTO fact_owners (fact_uuid, tenant_id) "
+                    "INSERT OR REPLACE INTO fact_owners (fact_hash, tenant_id) "
                     "VALUES (?, ?)",
-                    (fact_uuid, tenant_id),
+                    (fact_hash, tenant_id),
                 )
         except Exception:
             pass
 
     def own_facts(self, facts: list[Fact], tenant_id: str) -> list[Fact]:
-        """Return only facts belonging to *tenant_id* (exact match, not fuzzy).
+        """Return only facts belonging to *tenant_id* (by content hash).
 
         Programmatic isolation guarantee: a fact is only visible to the
         tenant recorded at write time.
@@ -317,22 +364,22 @@ class SnapshotStore:
             with sqlite3.connect(self._db_path) as conn:
                 placeholders = ",".join("?" for _ in facts)
                 rows = conn.execute(
-                    f"SELECT fact_uuid FROM fact_owners "
-                    f"WHERE tenant_id = ? AND fact_uuid IN ({placeholders})",
-                    [tenant_id] + [f.uuid for f in facts],
+                    f"SELECT fact_hash FROM fact_owners "
+                    f"WHERE tenant_id = ? AND fact_hash IN ({placeholders})",
+                    [tenant_id] + [self._fact_hash(f.fact) for f in facts],
                 ).fetchall()
         except Exception:
             return facts  # fail open on DB error — don't break injection
         owned = {r[0] for r in rows}
-        return [f for f in facts if f.uuid in owned]
+        return [f for f in facts if self._fact_hash(f.fact) in owned]
 
-    def drop_fact_owner(self, fact_uuid: str) -> None:
+    def drop_fact_owner(self, fact_hash: str, tenant_id: str) -> None:
         """Remove a fact ownership record (on delete/forget)."""
         try:
             with sqlite3.connect(self._db_path) as conn:
                 conn.execute(
-                    "DELETE FROM fact_owners WHERE fact_uuid = ?",
-                    (fact_uuid,),
+                    "DELETE FROM fact_owners WHERE fact_hash = ? AND tenant_id = ?",
+                    (fact_hash, tenant_id),
                 )
         except Exception:
             pass
@@ -388,7 +435,7 @@ def _format_injection(facts: list[Fact], max_facts: int | None = None) -> str | 
 
 
 async def build_snapshot(
-    client: "MemoryClient", messages: list[dict]
+    client: "MemoryClient", messages: list[dict], group_id: str,
 ) -> str | None:
     """Build a topic-dependent memory snapshot from the first user message.
 
@@ -396,6 +443,9 @@ async def build_snapshot(
     1. Profile tier — stable identity/preferences/constraints (always included)
     2. Topic tier — the first user message as a search query (topic relevance)
     3. Recency fallback — if nothing relevant found (generic openings like "hi")
+
+    All searches are scoped to *group_id* so only the requesting tenant's
+    facts are injected.
     """
     first_user = ""
     for msg in messages:
@@ -419,7 +469,7 @@ async def build_snapshot(
         queries.append((first_user, 10))  # topic match
 
     results = await asyncio.gather(
-        *(client.search_facts(q, limit=lim) for q, lim in queries),
+        *(client.search_facts(q, group_id=group_id, limit=lim) for q, lim in queries),
         return_exceptions=True,
     )
 
@@ -439,7 +489,7 @@ async def build_snapshot(
 
 
 async def memory_for_request(
-    client: "MemoryClient", messages: list[dict]
+    client: "MemoryClient", messages: list[dict], group_id: str,
 ) -> str | None:
     """Return the memory snapshot to inject for this request.
 
@@ -447,12 +497,14 @@ async def memory_for_request(
     On continuation: returns the cached snapshot (byte-identical for prompt cache).
     Reuse-not-clobber policy: a colliding key from a new conversation reuses
     the existing snapshot if the active conversation is still alive (cooldown).
+
+    All lookups and searches are scoped to *group_id*.
     """
     if not config.MEMORY_ENABLED:
         return None
 
     content_hash = conversation_key(messages)
-    key = _snapshot_store._mkkey(content_hash) if config.MEMORY_MULTI_TENANT else content_hash
+    key = _snapshot_store._mkkey(content_hash, group_id)
     now = time.time()
     is_start = is_conversation_start(messages)
 
@@ -464,7 +516,7 @@ async def memory_for_request(
             # Continuation without a stored snapshot (e.g., proxy restart during
             # an active conversation). Build fresh — one cache miss, then stable.
             pass
-        snapshot = await build_snapshot(client, messages)
+        snapshot = await build_snapshot(client, messages, group_id)
         if snapshot is not None:
             _snapshot_store.upsert(key, snapshot, now, now)
             logger.info("memory_injected", key=key[:12], snapshot_len=len(snapshot), source="fresh")
@@ -477,7 +529,7 @@ async def memory_for_request(
     cooldown = config.MEMORY_SNAPSHOT_COOLDOWN
     if is_start and (now - existing["last_seen"]) > cooldown:
         # Stale entry + new conversation start → rebuild
-        snapshot = await build_snapshot(client, messages)
+        snapshot = await build_snapshot(client, messages, group_id)
         if snapshot is not None:
             _snapshot_store.upsert(key, snapshot, now, now)
             logger.info("memory_injected", key=key[:12], snapshot_len=len(snapshot), source="rebuilt")
@@ -522,9 +574,7 @@ class MemoryClient:
         self._tool_add: str = "add_episode"
         self._tool_delete_edge: str = "delete_entity_edge"
         self._tool_delete_episode: str = "delete_episode"
-        self._tool_get_edge: str = "get_entity_edge"
         self._tool_get_episodes: str = "get_episodes"
-        self._tool_clear: str = "clear_graph"
 
         # Write path
         self._write_queue: asyncio.Queue[WriteJob] = asyncio.Queue(maxsize=100)
@@ -611,20 +661,18 @@ class MemoryClient:
     # ── Read path ────────────────────────────────────────────────────────
 
     async def search_facts(
-        self, query: str, limit: int | None = None,
-        group_id: str | None = None,
+        self, query: str, group_id: str,
+        limit: int | None = None,
         include_invalid: bool = False,
     ) -> list[Fact]:
         """Search the knowledge graph for facts matching `query`.
 
-        *group_id* defaults to the request-scoped tenant (or the legacy
-        ``GRAPHITI_GROUP_ID`` outside a request in legacy mode).
-        Returns empty list on timeout or error (graceful degradation).
+        *group_id* is required — the caller must always provide explicit
+        tenant scope.  Returns empty list on timeout or error (graceful
+        degradation).
         """
         if limit is None:
             limit = config.GRAPHITI_MAX_FACTS
-        if group_id is None:
-            group_id = current_tenant().group_id
 
         try:
             result = await self._call_tool(
@@ -656,27 +704,10 @@ class MemoryClient:
                 continue
             facts.append(fact)
 
-        return facts
+        # Tenant isolation: only return facts owned by this tenant
+        facts = _snapshot_store.own_facts(facts, group_id)
 
-    async def search_nodes(
-        self, query: str, limit: int = 10,
-        group_id: str | None = None,
-    ) -> list[dict]:
-        """Search for entity nodes matching `query`."""
-        if group_id is None:
-            group_id = current_tenant().group_id
-        try:
-            result = await self._call_tool(
-                "search_nodes",
-                {
-                    "query": query,
-                    "max_nodes": limit,
-                },
-                timeout=self._read_timeout,
-            )
-            return result.get("nodes", [])
-        except Exception:
-            return []
+        return facts
 
     # ── Write path ───────────────────────────────────────────────────────
 
@@ -704,17 +735,16 @@ class MemoryClient:
             )
 
     async def add_memory(
-        self, name: str,
+        self, name: str, group_id: str,
         episode_body: str = "",
         source_description: str = "icarus evaluator",
         reference_time: datetime | None = None,
-        group_id: str | None = None,
     ) -> bool:
         """Store an episode in the knowledge graph.
 
-        *group_id* defaults to the request-scoped tenant.  The write worker
-        always passes ``job.group_id`` explicitly — it must never read the
-        ContextVar (created at startup, outside any request context).
+        *group_id* is required — the caller must always provide explicit
+        tenant scope.  The write worker passes ``job.group_id`` explicitly
+        (created at startup, outside any request context).
         Returns True on success, False on failure.
         """
         if not episode_body.strip():
@@ -727,9 +757,6 @@ class MemoryClient:
                 body_snippet=episode_body[:80],
             )
             return False
-
-        if group_id is None:
-            group_id = current_tenant().group_id
 
         try:
             result = await self._call_tool(
@@ -756,8 +783,12 @@ class MemoryClient:
 
     # ── Delete / forget ──────────────────────────────────────────────────
 
-    async def delete_fact(self, uuid: str, group_id: str | None = None) -> bool:
-        """Delete a single fact (edge) by UUID."""
+    async def delete_fact(self, uuid: str, group_id: str) -> bool:
+        """Delete a single fact (edge) by UUID.
+
+        *group_id* is required — the caller must always provide explicit
+        tenant scope.
+        """
         try:
             await self._call_tool(
                 self._tool_delete_edge,
@@ -768,8 +799,12 @@ class MemoryClient:
         except Exception:
             return False
 
-    async def delete_episode(self, uuid: str, group_id: str | None = None) -> bool:
-        """Delete an episode and its cascade-owned entities/edges."""
+    async def delete_episode(self, uuid: str, group_id: str) -> bool:
+        """Delete an episode and its cascade-owned entities/edges.
+
+        *group_id* is required — the caller must always provide explicit
+        tenant scope.
+        """
         try:
             await self._call_tool(
                 self._tool_delete_episode,
@@ -780,67 +815,28 @@ class MemoryClient:
         except Exception:
             return False
 
-    async def clear_graph(self, group_id: str | None = None) -> bool:
-        """Remove all data from the knowledge graph."""
-        try:
-            await self._call_tool(
-                self._tool_clear,
-                timeout=self._write_timeout,
-            )
-            return True
-        except Exception:
-            return False
-
     async def purge_tenant(self, group_id: str) -> dict:
-        """Enumerated deletion via episode cascade.
+        """Delete all facts belonging to *group_id*.
 
-        Deleting episodes cascades to owned entities/edges in Graphiti.
-        This avoids the unreliable broad-query search (Graphiti embedding
-        search returns 0 for generic terms like 'user' or 'the user').
+        Tenant-scoped: only facts owned by this tenant (per the fact_owners
+        table) are returned and deleted.  Cross-tenant isolation is enforced
+        by the own_facts filter wired into search_facts.
         """
-        result = {"episodes_deleted": 0, "facts_deleted": 0, "errors": 0}
+        result: dict = {"facts_deleted": 0, "errors": 0}
 
-        try:
-            episodes_raw = await self._call_tool(
-                self._tool_get_episodes,
-                {"limit": 500},
-                timeout=self._read_timeout,
-            )
-            if isinstance(episodes_raw, list):
-                episodes = episodes_raw
-            elif isinstance(episodes_raw, dict):
-                episodes = episodes_raw.get("episodes", [])
-            else:
-                episodes = []
-        except Exception:
-            episodes = []
-
-        for ep in episodes:
-            uuid = ep.get("uuid") if isinstance(ep, dict) else getattr(ep, "uuid", None)
-            if uuid:
-                try:
-                    await self._call_tool(
-                        self._tool_delete_episode,
-                        {"uuid": uuid},
-                        timeout=self._write_timeout,
-                    )
-                    result["episodes_deleted"] += 1
-                except Exception:
-                    result["errors"] += 1
-
-        # Also sweep any remaining facts
+        # Search for the tenant's facts (own_facts filters to this tenant only)
         try:
             facts = await self.search_facts(
-                "user", limit=1000, include_invalid=True,
+                "user", group_id=group_id, limit=1000, include_invalid=True,
             )
         except Exception:
             facts = []
+
         for f in facts:
             try:
-                await self._call_tool(
-                    self._tool_delete_edge,
-                    {"uuid": f.uuid},
-                    timeout=self._write_timeout,
+                await self.delete_fact(f.uuid, group_id=group_id)
+                _snapshot_store.drop_fact_owner(
+                    SnapshotStore._fact_hash(f.fact), group_id,
                 )
                 result["facts_deleted"] += 1
             except Exception:
@@ -1058,22 +1054,10 @@ class MemoryClient:
                 self._tool_delete_episode = candidate
                 break
 
-        # Get edge (for verify-before-delete)
-        for candidate in ("get_entity_edge",):
-            if candidate in tool_names:
-                self._tool_get_edge = candidate
-                break
-
-        # Get episodes (for verify-before-delete + purge enumeration)
+        # Get episodes (for purge enumeration)
         for candidate in ("get_episodes",):
             if candidate in tool_names:
                 self._tool_get_episodes = candidate
-                break
-
-        # Clear graph
-        for candidate in ("clear_graph",):
-            if candidate in tool_names:
-                self._tool_clear = candidate
                 break
 
         logger.debug(
@@ -1082,8 +1066,6 @@ class MemoryClient:
             add=self._tool_add,
             delete_edge=self._tool_delete_edge,
             delete_episode=self._tool_delete_episode,
-            get_edge=self._tool_get_edge,
-            clear=self._tool_clear,
         )
 
 
@@ -1522,9 +1504,14 @@ async def extract_and_store(
                     # L3: Graphiti search (tenant-scoped)
                     try:
                         existing = await client.search_facts(
-                            fact_text, limit=3, group_id=tenant.group_id,
+                            fact_text, group_id=tenant.group_id, limit=3,
                         )
                         if existing:
+                            # Backfill: record ownership for pre-existing facts
+                            for ef in existing:
+                                _snapshot_store.record_fact_owner(
+                                    SnapshotStore._fact_hash(ef.fact), tenant.group_id,
+                                )
                             # Check if the top result is very similar
                             top_fact = existing[0].fact
                             top_emb = await _compute_embedding(top_fact)
@@ -1563,9 +1550,20 @@ async def extract_and_store(
         secret_hits=secret_hits,
     )
 
-    # Step 3: Enqueue for background storage.
+    # Step 3: Record fact ownership BEFORE enqueuing the write.
+    # Ownership is recorded synchronously so that the read-side filter
+    # (own_facts) is effective immediately — even before the async write
+    # completes.  If the write fails, the hash entry is harmless (the
+    # fact won't be returned by Graphiti, so the filter never sees it).
+    for fact_text in survivors:
+        _snapshot_store.record_fact_owner(
+            SnapshotStore._fact_hash(fact_text), tenant.group_id,
+        )
+
+    # Step 4: Enqueue for background storage.
     # Facts go into one shared Graphiti graph — multi-tenant isolation
-    # is at the Icarus layer via per-tenant snapshot keys and dedup caches.
+    # is at the Icarus layer via per-tenant snapshot keys, dedup caches,
+    # and the fact_owners table.
     job = WriteJob(
         episode_name=f"conv-{conversation_key_str[:12]}-{request_id[:8]}",
         episode_body="\n".join(
@@ -1633,7 +1631,7 @@ class MaintenanceWorker:
                 logger.error("memory_maintenance_failed", error=str(exc))
 
     async def _run_maintenance(self) -> None:
-        """Execute one maintenance sweep."""
+        """Execute one maintenance sweep — per-tenant in MT mode."""
         self._last_run = time.time()
         trimmed_edges = 0
 
@@ -1641,21 +1639,30 @@ class MaintenanceWorker:
             logger.warning("memory_maintenance_skipped", reason="graphiti_unreachable")
             return
 
-        # Single sweep — all tenants share one FalkorDB graph.
-        # Use a broad query — Graphiti returns 0 for empty queries.
-        try:
-            dead_facts = await self._client.search_facts(
-                "user", limit=200, include_invalid=True,
-            )
-            for f in dead_facts:
-                if f.invalid_at or f.expired_at:
-                    try:
-                        await self._client.delete_fact(f.uuid)
-                        trimmed_edges += 1
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+        # Enumerate tenants — in MT mode each tenant gets its own sweep;
+        # in legacy mode there is one configured group.
+        if config.MEMORY_MULTI_TENANT:
+            group_ids = tenant_registry.group_ids()
+        else:
+            group_ids = [config.GRAPHITI_GROUP_ID]
+
+        for gid in group_ids:
+            try:
+                dead_facts = await self._client.search_facts(
+                    "user", group_id=gid, limit=200, include_invalid=True,
+                )
+                for f in dead_facts:
+                    if f.invalid_at or f.expired_at:
+                        try:
+                            await self._client.delete_fact(f.uuid, group_id=gid)
+                            _snapshot_store.drop_fact_owner(
+                                SnapshotStore._fact_hash(f.fact), gid,
+                            )
+                            trimmed_edges += 1
+                        except Exception:
+                            pass
+            except Exception:
+                pass
 
         self.trimmed_edges_24h += trimmed_edges
 

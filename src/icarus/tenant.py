@@ -97,6 +97,31 @@ def tenant_context(tenant: Tenant) -> Iterator[Tenant]:
         _current_tenant.reset(token)
 
 
+class TenantIsolationError(RuntimeError):
+    """Raised when a tenant-scoped operation is attempted without a tenant context."""
+
+
+def require_tenant() -> Tenant:
+    """Return the current tenant or raise TenantIsolationError.
+
+    Use at entry points where tenant context is mandatory (request handlers).
+    Background tasks that carry ``group_id`` explicitly should NOT call this —
+    they pass the id directly to MemoryClient methods.
+
+    Usage::
+
+        tenant = require_tenant()
+        facts = await client.search_facts(q, group_id=tenant.group_id)
+    """
+    tenant = _current_tenant.get()
+    if tenant is None:
+        raise TenantIsolationError(
+            "Tenant context required but not set. "
+            "Pass group_id explicitly or wrap in tenant_context()."
+        )
+    return tenant
+
+
 # ── Tenant resolution ────────────────────────────────────────────────────────
 
 

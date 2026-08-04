@@ -26,9 +26,11 @@ from icarus.memory import (
 )
 from icarus.tenant import (
     Tenant,
+    TenantIsolationError,
     TenantRejected,
     _current_tenant,
     current_tenant,
+    require_tenant,
     resolve_tenant,
     tenant_context,
     tenant_registry,
@@ -518,7 +520,8 @@ async def inject_dynamic_memory(body: bytes) -> bytes:
     if not messages:
         return body
 
-    memory_text = await memory_for_request(memory_client, messages)
+    tenant = require_tenant()
+    memory_text = await memory_for_request(memory_client, messages, group_id=tenant.group_id)
     if memory_text:
         return _insert_memory_into_body(body, memory_text)
 

@@ -67,8 +67,7 @@ async def search_facts(client: httpx.AsyncClient, tenant: Tenant, query: str) ->
         headers=tenant.headers,
         params={"q": query, "limit": 30},
     )
-    if resp.status_code != 200:
-        return []
+    assert resp.status_code == 200, f"Search failed: HTTP {resp.status_code} — {resp.text[:300]}"
     return resp.json().get("facts", [])
 
 
@@ -169,13 +168,16 @@ async def test_multi_tenant_isolation_e2e(client, alice, bob):
     print(f"  Bob: {bob_count} fact(s) ✓")
 
     # ── Step 3: Cross-tenant — Alice cannot search Bob's data ───────────
-    # Alice's search endpoint is scoped to her X-User-ID header.  She can
-    # only see facts tagged with her label.  (Known limitation: /memory/facts
-    # currently returns all facts from the shared Graphiti graph.)
+    # Alice's search endpoint is scoped to her X-User-ID header.  The
+    # fact_owners table + own_facts filter enforce tenant isolation at
+    # the Icarus application layer.
     alice_sees_bob = await fact_contains(client, alice, "Figma")
     bob_sees_alice = await fact_contains(client, bob, "Rust")
-    print(f"  Cross-tenant: Alice→Figma={'LEAK' if alice_sees_bob else 'OK'}, "
-          f"Bob→Rust={'LEAK' if bob_sees_alice else 'OK'}")
+    assert alice_sees_bob is None, \
+        f"ISOLATION LEAK: Alice can see Bob's Figma fact: {alice_sees_bob}"
+    assert bob_sees_alice is None, \
+        f"ISOLATION LEAK: Bob can see Alice's Rust fact: {bob_sees_alice}"
+    print("  Cross-tenant isolation: OK ✓")
 
     # ── Step 4: Alice updates a fact ────────────────────────────────────
     print("  Updating Alice's location...")
