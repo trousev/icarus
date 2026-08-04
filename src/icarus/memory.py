@@ -792,32 +792,14 @@ class MemoryClient:
             return False
 
     async def purge_tenant(self, group_id: str) -> dict:
-        """Enumerated deletion of all facts + episodes.
+        """Enumerated deletion via episode cascade.
 
-        Since all tenants share one FalkorDB graph, this enumerates and
-        deletes ALL facts/episodes.  Multi-tenant isolation is at the
-        Icarus layer (snapshot keys, dedup caches), not the Graphiti layer.
+        Deleting episodes cascades to owned entities/edges in Graphiti.
+        This avoids the unreliable broad-query search (Graphiti embedding
+        search returns 0 for generic terms like 'user' or 'the user').
         """
-        result = {"facts_deleted": 0, "episodes_deleted": 0, "errors": 0}
+        result = {"episodes_deleted": 0, "facts_deleted": 0, "errors": 0}
 
-        # Enumerate and delete facts (including invalidated ones).
-        # Use a broad query — Graphiti returns 0 for empty queries.
-        try:
-            facts = await self.search_facts(
-                "user", limit=1000, include_invalid=True,
-            )
-        except Exception:
-            facts = []
-        for f in facts:
-            try:
-                if await self.delete_fact(f.uuid):
-                    result["facts_deleted"] += 1
-                else:
-                    result["errors"] += 1
-            except Exception:
-                result["errors"] += 1
-
-        # Enumerate and delete episodes
         try:
             episodes_raw = await self._call_tool(
                 self._tool_get_episodes,
@@ -832,16 +814,37 @@ class MemoryClient:
                 episodes = []
         except Exception:
             episodes = []
+
         for ep in episodes:
             uuid = ep.get("uuid") if isinstance(ep, dict) else getattr(ep, "uuid", None)
             if uuid:
                 try:
-                    if await self.delete_episode(uuid):
-                        result["episodes_deleted"] += 1
-                    else:
-                        result["errors"] += 1
+                    await self._call_tool(
+                        self._tool_delete_episode,
+                        {"uuid": uuid},
+                        timeout=self._write_timeout,
+                    )
+                    result["episodes_deleted"] += 1
                 except Exception:
                     result["errors"] += 1
+
+        # Also sweep any remaining facts
+        try:
+            facts = await self.search_facts(
+                "user", limit=1000, include_invalid=True,
+            )
+        except Exception:
+            facts = []
+        for f in facts:
+            try:
+                await self._call_tool(
+                    self._tool_delete_edge,
+                    {"uuid": f.uuid},
+                    timeout=self._write_timeout,
+                )
+                result["facts_deleted"] += 1
+            except Exception:
+                result["errors"] += 1
 
         return result
 

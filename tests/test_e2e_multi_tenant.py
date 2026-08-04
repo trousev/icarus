@@ -81,8 +81,10 @@ async def search_facts(
 
 
 async def count_facts(client: httpx.AsyncClient, tenant: Tenant) -> int:
-    # Graphiti returns 0 for empty queries — use a broad keyword.
-    return len(await search_facts(client, tenant, "user"))
+    # Graphiti returns 0 for empty/generic queries.  Try the tenant's
+    # name as a search term — every fact mentions the user by name.
+    facts = await search_facts(client, tenant, tenant.name)
+    return len(facts)
 
 
 async def fact_contains(
