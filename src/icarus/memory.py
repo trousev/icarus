@@ -1310,8 +1310,14 @@ async def extract_and_store(
     conversation_key_str: str,
     known_facts: list[str],
     request_id: str,
+    evaluator_auth: str | None = None,
 ) -> None:
     """Full write pipeline: evaluate → dedup → store. Fire-and-forget.
+
+    *evaluator_auth* is the Authorization header value from the main
+    request.  When provided, the evaluator reuses it to call the upstream
+    LLM — avoiding auth mismatches between the proxy forward and the
+    evaluator's own upstream call.
 
     All errors are swallowed — this runs in the background after the
     response has already been sent to the user.
@@ -1378,7 +1384,12 @@ async def extract_and_store(
             config.MEMORY_EVALUATOR_TIMEOUT_MS / 1000.0
         )) as http:
             evaluator_headers = {}
-            if config.UPSTREAM_API_KEY:
+            # Prefer the forwarded auth from the main request (LibreChat's key);
+            # fall back to the configured UPSTREAM_API_KEY; if neither, send no
+            # Authorization header (keyless upstream like Ollama).
+            if evaluator_auth:
+                evaluator_headers["Authorization"] = evaluator_auth
+            elif config.UPSTREAM_API_KEY:
                 evaluator_headers["Authorization"] = f"Bearer {config.UPSTREAM_API_KEY}"
             resp = await http.post(
                 f"{config.UPSTREAM_BASE_URL}/v1/chat/completions",

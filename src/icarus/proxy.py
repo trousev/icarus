@@ -520,12 +520,17 @@ async def inject_dynamic_memory(body: bytes) -> bytes:
 def _schedule_memory_extraction(
     body: bytes,
     request_id: str,
+    evaluator_auth: str | None = None,
 ) -> None:
     """Schedule fire-and-forget memory extraction after a successful response.
 
     Uses asyncio.create_task rather than BackgroundTasks — the write path
     must survive MCP session timeouts and connection drops, which can
     cancel request-scoped background tasks.
+
+    *evaluator_auth* is the Authorization header value that successfully
+    called the upstream for the main request.  The evaluator reuses it
+    so it authenticates the same way.
     """
     if not config.MEMORY_ENABLED:
         return
@@ -555,6 +560,7 @@ def _schedule_memory_extraction(
             key,
             known_facts,
             request_id,
+            evaluator_auth=evaluator_auth,
         )
     )
 
@@ -684,9 +690,22 @@ async def proxy(request: Request, path: str, background_tasks: BackgroundTasks):
         injected=injected,
     )
 
-    # Schedule fire-and-forget memory extraction after successful response
+    # Build forwarding auth header first — the evaluator needs the same
+    # credentials to call the upstream LLM for fact extraction.
+    forward_auth = None
+    if config.UPSTREAM_API_KEY:
+        forward_auth = f"Bearer {config.UPSTREAM_API_KEY}"
+    else:
+        # No configured key — forward whatever the client sent (LibreChat's key)
+        client_auth = request.headers.get("authorization", "")
+        if client_auth:
+            forward_auth = client_auth
+
+    # Schedule fire-and-forget memory extraction after successful response.
+    # Pass forward_auth so the evaluator uses the same credentials that
+    # successfully called the upstream for the main request.
     if path in ("v1/chat/completions", "chat/completions") and body:
-        _schedule_memory_extraction(body, request_id)
+        _schedule_memory_extraction(body, request_id, evaluator_auth=forward_auth)
 
     # Build forwarding headers: pass through client headers but override auth,
     # and drop headers that would break the upstream request or cause
@@ -699,8 +718,8 @@ async def proxy(request: Request, path: str, background_tasks: BackgroundTasks):
         forward_headers[key] = value
 
     # Always use our configured upstream API key
-    if config.UPSTREAM_API_KEY:
-        forward_headers["authorization"] = f"Bearer {config.UPSTREAM_API_KEY}"
+    if forward_auth:
+        forward_headers["authorization"] = forward_auth
 
     # Check if this is a streaming request
     is_streaming = False
