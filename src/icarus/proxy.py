@@ -114,11 +114,20 @@ class TenantMiddleware(BaseHTTPMiddleware):
             status = exc.status_code
             if status == 401 and path.startswith("/memory/"):
                 status = 403  # API key authenticated but no tenant
+            # Diagnostic: log all incoming headers so operators can debug
+            # LibreChat / gateway misconfigurations
+            header_names = sorted(request.headers.keys())
+            tenant_header_value = request.headers.get(
+                config.MEMORY_TENANT_HEADER, ""
+            )
             _proxy_log.warning(
                 "tenant_rejected",
                 path=path,
                 status=status,
                 reason=exc.reason,
+                expected_header=config.MEMORY_TENANT_HEADER,
+                header_value_snippet=tenant_header_value[:80] if tenant_header_value else "(absent)",
+                incoming_headers=header_names,
             )
             return Response(
                 content=json.dumps({"error": exc.reason}),
