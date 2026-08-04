@@ -17,6 +17,11 @@ while [[ $# -gt 0 ]]; do
             LOG_PROMPTS="true"
             shift
             ;;
+        -vv)
+            VERBOSE="1"
+            LOG_PROMPTS="true"
+            shift
+            ;;
         -v|--verbose)
             VERBOSE="1"
             shift

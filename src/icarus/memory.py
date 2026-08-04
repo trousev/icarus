@@ -1377,7 +1377,8 @@ async def extract_and_store(
         conversation_msgs=len(messages),
         known_facts_count=len(known_facts),
     )
-    logger.debug("memory_evaluator_payload", request_id=request_id, data_block=data_block)
+    if config.LOG_PROMPTS:
+        logger.debug("memory_evaluator_payload", request_id=request_id, data_block=data_block)
 
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(
