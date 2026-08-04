@@ -650,6 +650,14 @@ async def proxy(request: Request, path: str, background_tasks: BackgroundTasks):
     """
     # Auth gate in MT mode — must precede body read / injection / extraction
     if config.MEMORY_MULTI_TENANT and not _check_auth(request):
+        auth = request.headers.get("authorization", "")
+        auth_prefix = auth[:30] if auth else "(absent)"
+        _proxy_log.warning(
+            "proxy_auth_rejected",
+            path=path,
+            auth_prefix=auth_prefix,
+            expected_prefix=f"Bearer {config.UPSTREAM_API_KEY[:8]}...",
+        )
         return Response(content='{"error":"unauthorized"}', status_code=401)
 
     upstream_url = f"{config.UPSTREAM_BASE_URL}/{path}"
