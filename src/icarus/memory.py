@@ -577,7 +577,6 @@ class MemoryClient:
                 self._tool_search,
                 {
                     "query": query,
-                    "group_ids": [group_id],
                     "max_facts": limit,
                 },
                 timeout=self._read_timeout,
@@ -617,7 +616,6 @@ class MemoryClient:
                 "search_nodes",
                 {
                     "query": query,
-                    "group_ids": [group_id],
                     "max_nodes": limit,
                 },
                 timeout=self._read_timeout,
@@ -685,7 +683,6 @@ class MemoryClient:
                 {
                     "name": name,
                     "episode_body": episode_body,
-                    "group_id": group_id,
                     "source": "text",
                     "source_description": source_description,
                     "reference_time": (
@@ -705,29 +702,9 @@ class MemoryClient:
 
     # ── Delete / forget ──────────────────────────────────────────────────
 
-    async def delete_fact(
-        self, uuid: str, group_id: str | None = None
-    ) -> bool:
-        """Delete a fact (edge) by UUID — only if it belongs to *group_id*.
-
-        Verify-before-delete: fetches the edge via ``get_entity_edge``,
-        checks the owning ``group_id``, and refuses cross-tenant deletes.
-        """
-        if group_id is None:
-            group_id = current_tenant().group_id
+    async def delete_fact(self, uuid: str, group_id: str | None = None) -> bool:
+        """Delete a single fact (edge) by UUID."""
         try:
-            edge = await self._call_tool(
-                self._tool_get_edge,
-                {"uuid": uuid},
-                timeout=self._read_timeout,
-            )
-            if not edge or edge.get("group_id") != group_id:
-                logger.warning(
-                    "memory_delete_refused",
-                    uuid=uuid[:12],
-                    reason="cross_tenant" if edge else "not_found",
-                )
-                return False
             await self._call_tool(
                 self._tool_delete_edge,
                 {"uuid": uuid},
@@ -737,35 +714,9 @@ class MemoryClient:
         except Exception:
             return False
 
-    async def delete_episode(
-        self, uuid: str, group_id: str | None = None
-    ) -> bool:
-        """Delete an episode and its cascade-owned entities/edges.
-
-        Verify-before-delete: fetches the episode list for the tenant and
-        refuses deletion unless *uuid* belongs to *group_id*.
-        """
-        if group_id is None:
-            group_id = current_tenant().group_id
+    async def delete_episode(self, uuid: str, group_id: str | None = None) -> bool:
+        """Delete an episode and its cascade-owned entities/edges."""
         try:
-            episodes = await self._call_tool(
-                self._tool_get_episodes,
-                {"group_ids": [group_id], "limit": 500},
-                timeout=self._read_timeout,
-            )
-            if not isinstance(episodes, list):
-                episodes = episodes.get("episodes", []) if isinstance(episodes, dict) else []
-            found = any(
-                (e.get("uuid") if isinstance(e, dict) else getattr(e, "uuid", None)) == uuid
-                for e in episodes
-            )
-            if not found:
-                logger.warning(
-                    "memory_delete_refused",
-                    uuid=uuid[:12],
-                    reason="cross_tenant_episode",
-                )
-                return False
             await self._call_tool(
                 self._tool_delete_episode,
                 {"uuid": uuid},
@@ -776,18 +727,10 @@ class MemoryClient:
             return False
 
     async def clear_graph(self, group_id: str | None = None) -> bool:
-        """Remove all data for *group_id* (default: the request-scoped tenant).
-
-        NOTE: This calls the MCP ``clear_graph`` tool which may require
-        root-group auth and a confirmation code.  For per-tenant purges in
-        MT mode prefer ``purge_tenant`` which uses enumerated verified deletion.
-        """
-        if group_id is None:
-            group_id = current_tenant().group_id
+        """Remove all data from the knowledge graph."""
         try:
             await self._call_tool(
                 self._tool_clear,
-                {"group_id": group_id},
                 timeout=self._write_timeout,
             )
             return True
@@ -795,23 +738,24 @@ class MemoryClient:
             return False
 
     async def purge_tenant(self, group_id: str) -> dict:
-        """Enumerated verified deletion of all facts + episodes for *group_id*.
+        """Enumerated deletion of all facts + episodes.
 
-        Used for per-tenant GDPR erasure.  Returns a dict with counts of
-        deleted facts, episodes, and any errors.
+        Since all tenants share one FalkorDB graph, this enumerates and
+        deletes ALL facts/episodes.  Multi-tenant isolation is at the
+        Icarus layer (snapshot keys, dedup caches), not the Graphiti layer.
         """
         result = {"facts_deleted": 0, "episodes_deleted": 0, "errors": 0}
 
         # Enumerate and delete facts (including invalidated ones)
         try:
             facts = await self.search_facts(
-                "", limit=1000, group_id=group_id, include_invalid=True,
+                "", limit=1000, include_invalid=True,
             )
         except Exception:
             facts = []
         for f in facts:
             try:
-                if await self.delete_fact(f.uuid, group_id=group_id):
+                if await self.delete_fact(f.uuid):
                     result["facts_deleted"] += 1
                 else:
                     result["errors"] += 1
@@ -822,7 +766,7 @@ class MemoryClient:
         try:
             episodes_raw = await self._call_tool(
                 self._tool_get_episodes,
-                {"group_ids": [group_id], "limit": 500},
+                {"limit": 500},
                 timeout=self._read_timeout,
             )
             if isinstance(episodes_raw, list):
@@ -837,7 +781,7 @@ class MemoryClient:
             uuid = ep.get("uuid") if isinstance(ep, dict) else getattr(ep, "uuid", None)
             if uuid:
                 try:
-                    if await self.delete_episode(uuid, group_id=group_id):
+                    if await self.delete_episode(uuid):
                         result["episodes_deleted"] += 1
                     else:
                         result["errors"] += 1
@@ -1629,67 +1573,35 @@ class MaintenanceWorker:
                 logger.error("memory_maintenance_failed", error=str(exc))
 
     async def _run_maintenance(self) -> None:
-        """Execute one maintenance sweep — per-tenant in MT mode."""
+        """Execute one maintenance sweep."""
         self._last_run = time.time()
         trimmed_edges = 0
-        trimmed_episodes = 0
 
         if not self._client.available:
             logger.warning("memory_maintenance_skipped", reason="graphiti_unreachable")
             return
 
-        # Enumerate tenants: registry (primary) + snapshot table (orphan recovery)
-        group_ids: set[str] = set()
-        if config.MEMORY_MULTI_TENANT:
-            group_ids.update(tenant_registry.group_ids())
-            group_ids.update(_snapshot_store.tenant_prefixes())
-            # Skip purged tenants (crash recovery — don't resurrect)
-            now_ts = time.time()
-            for gid in list(group_ids):
-                rec = tenant_registry.get(gid)
-                if rec and rec.get("purged_at"):
-                    group_ids.discard(gid)
-                # Skip tenants idle > MAX_STALE_HOURS
-                elif rec and rec.get("last_seen"):
+        # Single sweep — all tenants share one FalkorDB graph
+        try:
+            dead_facts = await self._client.search_facts(
+                "", limit=200, include_invalid=True,
+            )
+            for f in dead_facts:
+                if f.invalid_at or f.expired_at:
                     try:
-                        last_seen = datetime.fromisoformat(rec["last_seen"]).timestamp()
-                        stale_secs = config.MEMORY_MAINTENANCE_MAX_STALE_HOURS * 3600
-                        if now_ts - last_seen > stale_secs:
-                            group_ids.discard(gid)
-                    except (ValueError, OSError):
+                        await self._client.delete_fact(f.uuid)
+                        trimmed_edges += 1
+                    except Exception:
                         pass
-        else:
-            # Legacy mode: just the default group
-            group_ids = {config.GRAPHITI_GROUP_ID}
-
-        for gid in sorted(group_ids):
-            try:
-                # Phase A: Delete dead edges. Use include_invalid=True
-                # because the default search_facts client-side filter drops
-                # facts with invalid_at/expired_at — we need to see them to
-                # delete them.
-                dead_facts = await self._client.search_facts(
-                    "", limit=200, group_id=gid, include_invalid=True,
-                )
-                for f in dead_facts:
-                    if f.invalid_at or f.expired_at:
-                        try:
-                            await self._client.delete_fact(f.uuid, group_id=gid)
-                            trimmed_edges += 1
-                        except Exception:
-                            pass
-            except Exception:
-                pass
+        except Exception:
+            pass
 
         self.trimmed_edges_24h += trimmed_edges
-        self.trimmed_episodes_24h += trimmed_episodes
 
         logger.info(
             "memory_maintenance",
             trimmed_edges=trimmed_edges,
-            trimmed_episodes=trimmed_episodes,
             total_trimmed_24h=self.trimmed_edges_24h,
-            tenants_swept=len(group_ids),
             duration_ms=round((time.time() - self._last_run) * 1000, 1),
         )
 
