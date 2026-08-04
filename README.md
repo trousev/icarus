@@ -15,7 +15,6 @@ Transparent proxy for OpenAI-compatible APIs with dynamic memory injection power
 Copy `.env.example` to `.env` and edit:
 
 - `UPSTREAM_BASE_URL` — upstream OpenAI-compatible API (default: DeepSeek)
-- `UPSTREAM_API_KEY` — API key forwarded to upstream
 - `MEMORY_INJECTION` — static memory text (used as fallback when dynamic memory is disabled)
 - `MEMORY_ENABLED` — enable dynamic memory via Graphiti knowledge graph (default: false)
 - `HOST` / `PORT` — proxy listen address
@@ -61,7 +60,7 @@ script/memory --admin erase t:<group_id>    # Admin: GDPR erasure
 script/memory purge                         # Wipe all memory for current user
 ```
 
-Or via HTTP API (requires `Authorization: Bearer $UPSTREAM_API_KEY`; multi-tenant adds `X-User-ID` header):
+Or via HTTP API (multi-tenant mode adds `X-User-ID` header; also send `X-Auth-Secret` when `AUTH_SECRET` is configured):
 
 ```bash
 # Single-tenant / legacy mode
@@ -83,7 +82,7 @@ Set `MEMORY_ENABLED=false` (or omit it) to fall back to static `MEMORY_INJECTION
 
 The proxy intercepts `/v1/chat/completions` requests, parses the messages array, and injects a second system message (after any existing system message) containing the configured memory text. This simulates cache-safe memory injection without breaking the prompt structure.
 
-Any API key is accepted by the proxy in single-user mode. In multi-tenant mode the proxy requires the configured `UPSTREAM_API_KEY`.
+The proxy forwards the client's `Authorization` header to the upstream unchanged. When `AUTH_SECRET` is configured, the `X-Auth-Secret` header is also required.
 
 ## Multi-Tenancy (User-Isolated Memory)
 

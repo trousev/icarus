@@ -54,8 +54,8 @@ async def lifespan(application: FastAPI):
             config.ICARUS_ADMIN_API_KEY == config.AUTH_SECRET
         ):
             _proxy_log.error(
-                "tenant_admin_key_equals_upstream",
-                msg="ICARUS_ADMIN_API_KEY must differ from UPSTREAM_API_KEY",
+                "tenant_admin_key_equals_auth_secret",
+                msg="ICARUS_ADMIN_API_KEY must differ from AUTH_SECRET",
             )
             raise SystemExit(1)
         if not config.MEMORY_TENANT_HMAC_SECRET:
@@ -690,16 +690,10 @@ async def proxy(request: Request, path: str, background_tasks: BackgroundTasks):
         injected=injected,
     )
 
-    # Build forwarding auth header first — the evaluator needs the same
-    # credentials to call the upstream LLM for fact extraction.
-    forward_auth = None
-    if config.UPSTREAM_API_KEY:
-        forward_auth = f"Bearer {config.UPSTREAM_API_KEY}"
-    else:
-        # No configured key — forward whatever the client sent (LibreChat's key)
-        client_auth = request.headers.get("authorization", "")
-        if client_auth:
-            forward_auth = client_auth
+    # Forward the client's Authorization header as-is.  The evaluator
+    # reuses the same credentials to call the upstream LLM for fact
+    # extraction.
+    forward_auth = request.headers.get("authorization", "") or None
 
     # Schedule fire-and-forget memory extraction after successful response.
     # Pass forward_auth so the evaluator uses the same credentials that

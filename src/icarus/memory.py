@@ -1384,13 +1384,10 @@ async def extract_and_store(
             config.MEMORY_EVALUATOR_TIMEOUT_MS / 1000.0
         )) as http:
             evaluator_headers = {}
-            # Prefer the forwarded auth from the main request (LibreChat's key);
-            # fall back to the configured UPSTREAM_API_KEY; if neither, send no
-            # Authorization header (keyless upstream like Ollama).
+            # Use the forwarded auth from the main request (LibreChat's key).
+            # If none, send no Authorization header (keyless upstream like Ollama).
             if evaluator_auth:
                 evaluator_headers["Authorization"] = evaluator_auth
-            elif config.UPSTREAM_API_KEY:
-                evaluator_headers["Authorization"] = f"Bearer {config.UPSTREAM_API_KEY}"
             resp = await http.post(
                 f"{config.UPSTREAM_BASE_URL}/v1/chat/completions",
                 headers=evaluator_headers,

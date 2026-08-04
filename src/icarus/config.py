@@ -9,7 +9,6 @@ load_dotenv()
 class Config:
     # ── Upstream ──────────────────────────────────────────────────────────
     UPSTREAM_BASE_URL: str = os.getenv("UPSTREAM_BASE_URL", "https://api.deepseek.com").rstrip("/")
-    UPSTREAM_API_KEY: str = os.getenv("UPSTREAM_API_KEY", "")
 
     # ── Proxy ─────────────────────────────────────────────────────────────
     HOST: str = os.getenv("HOST", "0.0.0.0")
