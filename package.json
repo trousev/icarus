@@ -5,16 +5,24 @@
   "type": "module",
   "description": "Агент для семьи: живой разговор, память, руки — наружу OpenAI-совместимый эндпоинт для LibreChat",
   "license": "MIT",
+  "packageManager": "pnpm@12.4.2",
   "engines": {
     "node": ">=22.19.0"
   },
   "scripts": {
-    "start": "npm --prefix packages/service start",
-    "test": "npm --prefix packages/service test"
+    "start": "./script/server",
+    "server": "./script/server",
+    "test": "./script/test",
+    "lint": "./script/lint",
+    "typecheck": "./script/lint tsc"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "0.85.1",
     "@earendil-works/pi-coding-agent": "0.85.1",
-    "typebox": "1.3.7"
+    "@types/node": "^26.6.1",
+    "eslint": "^10.10.0",
+    "typebox": "1.3.7",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.70.0"
   }
 }

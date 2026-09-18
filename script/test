@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Тесты Icarus. Докер и модель не нужны: pi, контейнеры и сеть подменяются заглушками.
+#
+#   ./script/test                                  весь набор
+#   ./script/test packages/service/test/title.test.ts
+#                                                  один файл
+#   ./script/test --test-name-pattern='память'     фильтр по имени теста
+#
+# Любые флаги node --test передаются насквозь и должны идти до имён файлов.
+# Сценарные тесты с живым докером включаются переменной ICARUS_E2E=1.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+if [ ! -d node_modules ]; then
+  echo '[x] нет node_modules — сначала ./script/update' >&2
+  exit 1
+fi
+
+# Если файлы не названы, берём весь набор; названные — добавляются к флагам.
+files=()
+for arg in "$@"; do
+  case "$arg" in
+  -*) ;;
+  *.ts | *.js | *.mjs | *.cjs) files+=("$arg") ;;
+  esac
+done
+[ ${#files[@]} -gt 0 ] || files=(packages/service/test/*.test.ts)
+
+exec node --test "$@" "${files[@]}"

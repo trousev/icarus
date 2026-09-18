@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "es2023",
+    "lib": ["es2024"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "types": ["node"],
+
+    // Код запускается напрямую через `node file.ts` (type stripping), поэтому импорты
+    // пишутся с расширением .ts, а сборки нет: tsc работает только как проверяльщик.
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+
+    "strict": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+
+    "isolatedModules": true,
+    "resolveJsonModule": true
+  },
+  "include": ["packages/**/*.ts"]
+}

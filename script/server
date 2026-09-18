@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# Запуск сервиса Icarus. По умолчанию поднимается только сам сервис на :8080;
+# стенд LibreChat — по флагу --with-librechat (на :3090), и он же гасится на выходе.
+#
+#   ./script/server
+#   ./script/server --with-librechat
+#   ./script/server --with-librechat --config /path/to/icarus.config.json
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+COMPOSE=(docker compose -f docker/librechat/docker-compose.yml)
+WITH_LIBRECHAT=0
+CONFIG="${ICARUS_CONFIG:-$ROOT/packages/service/icarus.config.json}"
+
+usage() {
+  cat <<'EOF'
+./script/server [--with-librechat] [--config <путь>]
+
+  --with-librechat   поднять рядом стенд LibreChat (docker compose) и погасить его на выходе
+  --config <путь>    конфиг сервиса (по умолчанию packages/service/icarus.config.json, ICARUS_CONFIG)
+  -h, --help         эта справка
+EOF
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+  --with-librechat) WITH_LIBRECHAT=1 ;;
+  --config)
+    shift
+    [ $# -gt 0 ] || { echo 'для --config нужен путь' >&2; exit 2; }
+    CONFIG="$1"
+    ;;
+  -h | --help)
+    usage
+    exit 0
+    ;;
+  *)
+    echo "неизвестный аргумент: $1" >&2
+    usage >&2
+    exit 2
+    ;;
+  esac
+  shift
+done
+
+if [ ! -d node_modules ]; then
+  echo '[x] нет node_modules — сначала ./script/update' >&2
+  exit 1
+fi
+
+if [ ! -f "$CONFIG" ]; then
+  echo "[x] нет конфига $CONFIG" >&2
+  echo '    ./script/update создаёт его из packages/service/icarus.config.example.json' >&2
+  exit 1
+fi
+
+# Образ контейнера пользователя сервис сам не собирает — предупреждаем заранее,
+# чтобы это не всплыло первой же репликой в чате. Заодно берём host/port для подсказки.
+cfg_info="$(
+  node -e '
+    const fs = require("node:fs");
+    const cfg = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+    process.stdout.write([cfg.docker?.image ?? "icarus-user:dev", cfg.host ?? "0.0.0.0", cfg.port ?? 8080].join(" "));
+  ' "$CONFIG" 2>/dev/null || echo 'icarus-user:dev 0.0.0.0 8080'
+)"
+read -r image host port <<<"$cfg_info"
+panel_host="$host"
+if [ "$panel_host" = '0.0.0.0' ]; then panel_host='localhost'; fi
+
+if command -v docker >/dev/null 2>&1; then
+  docker image inspect "$image" >/dev/null 2>&1 \
+    || echo "[!] образа $image нет — собери: docker build -t $image docker/user/" >&2
+else
+  echo '[!] docker не найден: контейнеры пользователей поднять не выйдет' >&2
+fi
+
+librechat_started=0
+librechat_stopped=0
+cleanup() {
+  # EXIT и INT могут сработать подряд — гасим стенд ровно один раз.
+  if [ "$librechat_started" = 1 ] && [ "$librechat_stopped" = 0 ]; then
+    librechat_stopped=1
+    echo '==> гашу стенд LibreChat'
+    "${COMPOSE[@]}" down || true
+  fi
+}
+trap cleanup EXIT INT TERM
+
+if [ "$WITH_LIBRECHAT" = 1 ]; then
+  command -v docker >/dev/null 2>&1 || { echo '[x] для --with-librechat нужен docker' >&2; exit 1; }
+  if [ ! -f docker/librechat/.env ]; then
+    cp docker/librechat/.env.example docker/librechat/.env
+    echo '[!] создал docker/librechat/.env из примера'
+  fi
+  echo '==> поднимаю стенд LibreChat (:3090)'
+  "${COMPOSE[@]}" up -d
+  librechat_started=1
+fi
+
+echo "==> icarus на конфиге $CONFIG"
+echo "    сервис:        http://$panel_host:$port/v1"
+echo "    панель памяти: http://$panel_host:$port/panel?key=<panelKey>"
+if [ "$WITH_LIBRECHAT" = 1 ]; then
+  echo '    LibreChat:     http://localhost:3090'
+fi
+node packages/service/src/index.ts "$CONFIG"

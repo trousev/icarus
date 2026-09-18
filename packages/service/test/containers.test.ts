@@ -1,8 +1,8 @@
 // Владение контейнерами: отпечаток, метки и план реконсиляции.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { containerEnv, labelArgs, specFor } from '../src/docker/spec.ts';
-import { describePlan, planIsQuiet, planReconciliation, type ManagedContainer } from '../src/docker/reconcile.ts';
+import { containerEnv, specFor } from '../src/docker/spec.ts';
+import { describePlan, planIsQuiet, planReconciliation } from '../src/docker/reconcile.ts';
 import { containerRunArgs } from '../src/workspace.ts';
 import type { IcarusConfig, UserConfig } from '../src/config.ts';
 

@@ -35,28 +35,51 @@ LibreChat ──OpenAI API──► icarus ──docker exec + JSONL──► pi
 ## Запуск
 
 ```bash
-# 1. образ контейнера пользователя
+# 1. зависимости и локальные конфиги (запускать после clone и после каждого git pull)
+./script/update
+# он создаст packages/service/icarus.config.json из примера — поправить людей, модели и пути;
+# ключи моделей кладутся в packages/service/.env (см. .gitignore)
+
+# 2. образ контейнера пользователя
 docker build -t icarus-user:dev docker/user/
 
-# 2. конфиг сервиса
-cp packages/service/icarus.config.example.json packages/service/icarus.config.json
-# поправить пути, людей и модели; ключи — в packages/service/.env (см. .gitignore)
-echo 'DEEPSEEK_API_KEY=sk-...' > packages/service/.env && chmod 600 packages/service/.env
-
 # 3. сервис
-npm start                      # icarus на :8080
-npm test                       # 64 теста, докер и модель не нужны
+./script/server                 # icarus на :8080
+./script/server --with-librechat   # он же + стенд LibreChat на :3090 (гасится на выходе)
 
-# 4. стенд LibreChat (кастомный эндпоинт «Icarus»)
-docker compose -f docker/librechat/docker-compose.yml up -d    # :3090
-
-# 5. панель памяти
+# панель памяти
 open 'http://localhost:8080/panel?key=<panelKey>'
 ```
+
+## Команды
+
+| команда | что делает |
+| --- | --- |
+| `./script/update` | ставит зависимости через pnpm и раскладывает конфиги из примеров; в CI — строго по lockfile |
+| `./script/test` | гоняет тесты (`node --test`); докер и модель не нужны, `ICARUS_E2E=1` включает сценарные |
+| `./script/lint` | `tsc --noEmit` + `eslint` (можно по отдельности: `./script/lint tsc`, `./script/lint eslint`) |
+| `./script/server` | поднимает сервис; `--with-librechat` добавляет стенд LibreChat, `--config <путь>` — свой конфиг |
+
+Те же команды доступны через pnpm: `pnpm test`, `pnpm lint`, `pnpm start`. Установка — только
+`./script/update`: у pnpm `pnpm update` означает другое (обновление версий зависимостей).
+
+## Проверки
+
+На каждый PR и на push в `main` крутится [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
+`./script/lint` и `./script/test` на node 22 и 24. Локально ровно то же самое:
+
+```bash
+./script/lint && ./script/test
+```
+
+Сборки нет: код исполняется напрямую как TypeScript (`node src/index.ts`), поэтому `tsc` работает
+только проверяльщиком и ничего не пишет на диск. TypeScript пока 6.x — typescript-eslint ещё не
+умеет 7-ю ветку, так что при обновлении зависимостей это ограничение стоит держать в голове.
 
 ## Устройство репозитория
 
 ```
+script/               команды разработчика: update, test, lint, server
 packages/service/     сервис: HTTP, сессии pi, контейнеры, панель памяти
 packages/extensions/  расширения pi, которые живут в контейнере пользователя
 docker/user/          образ контейнера пользователя

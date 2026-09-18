@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# Подготовка окружения Icarus: поставить зависимости и разложить локальные конфиги.
+# Запускается после `git clone` и после каждого `git pull`.
+#
+#   ./script/update
+#
+# В CI (CI=true) установка идёт строго по lockfile: если package.json и pnpm-lock.yaml
+# разъехались, шаг падает, а не тихо переписывает lockfile.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+say() { printf '\033[1m==>\033[0m %s\n' "$*"; }
+warn() { printf '\033[33m[!]\033[0m %s\n' "$*" >&2; }
+die() { printf '\033[31m[x]\033[0m %s\n' "$*" >&2; exit 1; }
+
+# --- node ---------------------------------------------------------------------
+# Код запускается напрямую как TypeScript (`node file.ts`), это умеет node >= 22.19.
+if ! command -v node >/dev/null 2>&1; then
+  die 'не нашёл node. Нужен node >= 22.19 (см. .nvmrc / engines в package.json)'
+fi
+node -e 'const [maj, min] = process.versions.node.split(".").map(Number);
+  if (maj < 22 || (maj === 22 && min < 19)) {
+    console.error(`[x] node ${process.versions.node} слишком старый: нужен >= 22.19`);
+    process.exit(1);
+  }' || exit 1
+
+# --- pnpm ---------------------------------------------------------------------
+# Версия pnpm прибита полем packageManager в package.json; corepack её подхватит.
+if ! command -v pnpm >/dev/null 2>&1; then
+  if command -v corepack >/dev/null 2>&1; then
+    say 'pnpm не найден — включаю через corepack'
+    corepack enable >/dev/null 2>&1 || true
+  fi
+fi
+command -v pnpm >/dev/null 2>&1 \
+  || die 'не нашёл pnpm. Поставь его: `corepack enable pnpm` или `npm install -g pnpm`'
+
+# --- зависимости --------------------------------------------------------------
+if [ -n "${CI:-}" ]; then
+  say "pnpm install --frozen-lockfile (node $(node -v), pnpm $(pnpm -v))"
+  pnpm install --frozen-lockfile
+else
+  say "pnpm install (node $(node -v), pnpm $(pnpm -v))"
+  pnpm install
+fi
+
+# --- локальные конфиги --------------------------------------------------------
+# Примеры копируем только если файла ещё нет: настроенное не перетираем.
+if [ ! -f packages/service/icarus.config.json ]; then
+  cp packages/service/icarus.config.example.json packages/service/icarus.config.json
+  warn 'создал packages/service/icarus.config.json из примера — поправь людей, модели и пути'
+fi
+
+if [ ! -f packages/service/.env ]; then
+  warn 'нет packages/service/.env — ключи моделей берутся оттуда, например:'
+  warn "  echo 'DEEPSEEK_API_KEY=sk-...' > packages/service/.env && chmod 600 packages/service/.env"
+fi
+
+if [ ! -f docker/librechat/.env ]; then
+  cp docker/librechat/.env.example docker/librechat/.env
+  warn 'создал docker/librechat/.env из примера (ключи стенда, в git не попадает)'
+fi
+
+# --- что дальше ---------------------------------------------------------------
+cat <<'EOF'
+
+Готово. Дальше:
+  ./script/lint            типы и линтер
+  ./script/test            тесты (докер и модель не нужны)
+  ./script/server          icarus на :8080
+  ./script/server --with-librechat
+                           icarus вместе со стендом LibreChat на :3090
+EOF
