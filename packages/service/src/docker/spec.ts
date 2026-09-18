@@ -33,6 +33,11 @@ export function specFor(config: IcarusConfig): string {
   const payload = JSON.stringify({
     image: config.docker.image,
     network: config.docker.network ?? null,
+    // dataDir — не «просто настройка»: из него выводятся пути личной памяти, сессий и
+    // pi-agent, которые монтируются в контейнер. Сменили dataDir — контейнеры обязаны
+    // пересоздаться, иначе они останутся примонтированными к старым каталогам, а сервис
+    // будет писать в новые. Ровно на этом мы и споткнулись при переезде конфига.
+    dataDir: config.dataDir,
     mounts,
     env: Object.fromEntries(Object.entries(env).sort(([a], [b]) => a.localeCompare(b))),
   });
