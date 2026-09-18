@@ -14,6 +14,13 @@ import {
 
 export type ContainerState = 'running' | 'stopped' | 'missing';
 
+/**
+ * Имя процесса pi внутри контейнера. Именно имя: pi переписывает себе cmdline
+ * (в `/proc/<pid>/cmdline` остаётся одно слово), поэтому `pkill -f --mode rpc`
+ * не находит ничего, а `pkill -x pi` — находит.
+ */
+const PI_PROCESS = 'pi';
+
 function dockerEnv(config: IcarusConfig): NodeJS.ProcessEnv {
   // Если задан socket (например, docker-socket-proxy), CLI сам поймёт DOCKER_HOST.
   return config.docker.socket ? { ...process.env, DOCKER_HOST: config.docker.socket } : process.env;
@@ -135,7 +142,9 @@ export async function reconcileContainers(
   // Ради этого тёплого состояния мы и держим контейнеры постоянно запущенными.
   for (const user of users) {
     try {
-      await ensureContainer(config, user);
+      const { name } = await ensureContainer(config, user);
+      // Сессий в этом процессе ещё нет, значит всё живое внутри контейнера — чужое.
+      await reapStalePi(config, name);
     } catch (error) {
       log.error('контейнер не поднялся', { user: user.id, error: String(error) });
     }
@@ -143,6 +152,41 @@ export async function reconcileContainers(
 
   log.info('реконсиляция контейнеров', { план: describePlan(plan) || 'всё на месте' });
   return plan;
+}
+
+/**
+ * Гасит pi, пережившие прошлый запуск сервиса.
+ *
+ * Если icarus убили SIGKILL'ом (OOM, крэш, `docker kill`), клиент `docker exec` умирает,
+ * а pi внутри контейнера продолжает жить — проверено: процессы висят минутами, каждый со
+ * своим MCP-ребёнком. Следующий ход поднял бы второй pi на тот же `--session-id` и ту же
+ * папку сессий. Зовём это только на старте, пока сессий в этом процессе ещё нет.
+ *
+ * Ловим по имени процесса, а не по аргументам: pi переписывает себе cmdline, и в
+ * `/proc/<pid>/cmdline` остаётся одно слово `pi`.
+ */
+export async function reapStalePi(
+  config: IcarusConfig,
+  container: string,
+  runner: typeof runDocker = runDocker,
+): Promise<boolean> {
+  let result: { code: number; stderr: string };
+  try {
+    result = await runner(config, ['exec', container, 'pkill', '-x', PI_PROCESS]);
+  } catch (error) {
+    log.warn('не удалось погасить осиротевшие pi', { container, error: String(error) });
+    return false;
+  }
+
+  // pkill возвращает 1, когда никого не нашёл, — это обычный случай, а не ошибка.
+  if (result.code === 0) {
+    log.warn('погасил pi, пережившие прошлый запуск сервиса', { container });
+    return true;
+  }
+  if (result.code !== 1) {
+    log.warn('не удалось погасить осиротевшие pi', { container, code: result.code, error: result.stderr.trim() });
+  }
+  return false;
 }
 
 /** Контейнер пользователя: поднять, если его нет, он остановлен или устарел. */

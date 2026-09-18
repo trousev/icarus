@@ -11,6 +11,9 @@ build/
 *.log
 .DS_Store
 
+# рабочие копии dsh (изолированные worktree для задач)
+.dsh-worktrees/
+
 # рантайм-данные Icarus (контейнеры, тома памяти, сессии)
 runtime/
 data/
