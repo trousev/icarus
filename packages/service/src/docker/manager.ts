@@ -3,14 +3,8 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { log } from '../log.ts';
 import { userContainer, type IcarusConfig, type UserConfig } from '../config.ts';
-import { containerRunArgs } from '../workspace.ts';
-import { LABEL_MANAGED, LABEL_SPEC, LABEL_USER, specFor } from './spec.ts';
-import {
-  describePlan,
-  planReconciliation,
-  type ManagedContainer,
-  type ReconciliationPlan,
-} from './reconcile.ts';
+import { LABEL_MANAGED, LABEL_SPEC, LABEL_USER } from './spec.ts';
+import type { ManagedContainer } from './reconcile.ts';
 
 export type ContainerState = 'running' | 'stopped' | 'missing';
 
@@ -60,20 +54,6 @@ export async function containerState(
   return inspect.stdout.trim() === 'true' ? 'running' : 'stopped';
 }
 
-/** Метки контейнера: по ним видно, наш ли он и не устарел ли. */
-export async function containerLabels(
-  config: IcarusConfig,
-  name: string,
-): Promise<Record<string, string> | null> {
-  const result = await runDocker(config, ['inspect', '-f', '{{json .Config.Labels}}', name]);
-  if (result.code !== 0) return null;
-  try {
-    return (JSON.parse(result.stdout.trim() || '{}') ?? {}) as Record<string, string>;
-  } catch {
-    return {};
-  }
-}
-
 /** Все контейнеры, которые создавал icarus: по метке и по имени (для старых, без меток). */
 export async function listManaged(config: IcarusConfig): Promise<ManagedContainer[]> {
   const format = [
@@ -108,50 +88,38 @@ export async function listManaged(config: IcarusConfig): Promise<ManagedContaine
   });
 }
 
-export async function stopContainer(config: IcarusConfig, name: string): Promise<boolean> {
-  const result = await runDocker(config, ['stop', name]);
-  return result.code === 0;
-}
-
-export async function removeContainer(config: IcarusConfig, name: string): Promise<boolean> {
-  const result = await runDocker(config, ['rm', '-f', name]);
-  return result.code === 0;
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
- * Приводит контейнеры в соответствие с конфигом: выбывших людей останавливает,
- * устаревшие удаляет, остальных поднимает — контейнеры должны быть тёплыми.
+ * Ждёт, пока compose поднимет контейнеры людей. Сервис их больше не создаёт: владелец —
+ * docker compose (см. compose.ts), иначе хозяев было бы двое, а отвечал бы никто.
+ * Пропавший контейнер — не «сейчас создадим», а понятная ошибка оператору.
  */
-export async function reconcileContainers(
+export async function waitForContainers(
   config: IcarusConfig,
   users: UserConfig[],
-): Promise<ReconciliationPlan> {
-  const containers = await listManaged(config);
-  const plan = planReconciliation({ config, users, containers });
+  options: { timeoutMs?: number; intervalMs?: number } = {},
+): Promise<{ ready: string[]; missing: string[] }> {
+  const { timeoutMs = 20_000, intervalMs = 500 } = options;
+  const pending = new Set(users.map((user) => user.id));
+  const ready: string[] = [];
+  const deadline = Date.now() + timeoutMs;
 
-  for (const name of plan.stop) {
-    await stopContainer(config, name);
-    log.warn('контейнер выбывшего человека остановлен', { container: name });
-  }
-  for (const name of plan.recreate) {
-    await removeContainer(config, name);
-    log.info('контейнер устарел — пересоздаю', { container: name });
-  }
-
-  // Поднимаем всех, кто есть в конфиге: и остановленных, и только что удалённых.
-  // Ради этого тёплого состояния мы и держим контейнеры постоянно запущенными.
-  for (const user of users) {
-    try {
-      const { name } = await ensureContainer(config, user);
-      // Сессий в этом процессе ещё нет, значит всё живое внутри контейнера — чужое.
-      await reapStalePi(config, name);
-    } catch (error) {
-      log.error('контейнер не поднялся', { user: user.id, error: String(error) });
+  while (pending.size > 0 && Date.now() < deadline) {
+    for (const user of users) {
+      if (!pending.has(user.id)) continue;
+      if ((await containerState(config, user)) === 'running') {
+        pending.delete(user.id);
+        ready.push(userContainer(config, user));
+      }
     }
+    if (pending.size > 0) await sleep(intervalMs);
   }
 
-  log.info('реконсиляция контейнеров', { план: describePlan(plan) || 'всё на месте' });
-  return plan;
+  const missing = users.filter((user) => pending.has(user.id)).map((user) => userContainer(config, user));
+  return { ready, missing };
 }
 
 /**
@@ -189,45 +157,26 @@ export async function reapStalePi(
   return false;
 }
 
-/** Контейнер пользователя: поднять, если его нет, он остановлен или устарел. */
-export async function ensureContainer(
-  config: IcarusConfig,
-  user: UserConfig,
-): Promise<{ name: string; state: ContainerState; started: boolean }> {
+/**
+ * Контейнер человека к моменту запроса. Созданием владеет compose, поэтому здесь только
+ * две вещи: остановленный контейнер подтолкнуть (docker сам его не поднимет, если его
+ * остановили руками), а пропавший — назвать вслух. Молчаливое `docker run` вернуло бы нас
+ * к двум хозяевам: контейнер без compose-меток, который следующий `up` пересоздаст.
+ */
+export async function ensureContainerRunning(config: IcarusConfig, user: UserConfig): Promise<string> {
   const name = userContainer(config, user);
-  const expected = specFor(config);
-  let state = await containerState(config, user);
+  const state = await containerState(config, user);
 
-  if (state !== 'missing') {
-    const labels = await containerLabels(config, name);
-    const actual = labels?.[LABEL_SPEC] ?? null;
-    if (actual !== expected) {
-      // Образ пересобрали или поменялись маунты с окружением — иначе старый контейнер
-      // молча продолжал бы работать на старом образе.
-      log.info('контейнер устарел — пересоздаю', { container: name, было: actual, стало: expected });
-      await removeContainer(config, name);
-      state = 'missing';
-    }
-  }
-
-  if (state === 'running') return { name, state, started: false };
+  if (state === 'running') return name;
 
   if (state === 'stopped') {
     const started = await runDocker(config, ['start', name]);
     if (started.code !== 0) throw new Error(`не удалось запустить ${name}: ${started.stderr.trim()}`);
-    log.info('контейнер запущен', { container: name });
-    return { name, state: 'running', started: true };
+    log.warn('контейнер был остановлен — поднял', { container: name });
+    return name;
   }
 
-  const created = await runDocker(config, containerRunArgs(config, user));
-  if (created.code !== 0) throw new Error(`не удалось создать ${name}: ${created.stderr.trim()}`);
-  log.info('контейнер создан', {
-    container: name,
-    image: config.docker.image,
-    mounts: config.mounts.length,
-    spec: expected,
-  });
-  return { name, state: 'running', started: true };
+  throw new Error(`контейнер ${name} не найден — подними стек: ./script/server`);
 }
 
 /** Запускает `docker exec -i` с проброшенным stdio — на этом стоит RPC-мост. */

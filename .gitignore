@@ -29,3 +29,6 @@ docker/librechat/data-node/
 # локальный конфиг и секреты сервиса
 config.yaml
 packages/service/.env
+
+# стек, который ./script/server собирает из config.yaml
+/docker-compose.yml

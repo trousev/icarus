@@ -1,17 +1,34 @@
-// Владение контейнерами: отпечаток, метки и план реконсиляции.
+// Владение контейнерами: отпечаток, метки, стек docker compose и план реконсиляции.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { parse as parseYaml } from 'yaml';
 import { containerEnv, specFor } from '../src/docker/spec.ts';
 import { describePlan, planIsQuiet, planReconciliation } from '../src/docker/reconcile.ts';
 import { reapStalePi } from '../src/docker/manager.ts';
-import { containerRunArgs } from '../src/workspace.ts';
+import { DEFAULT_SERVICE_IMAGE, publishAddress, renderCompose, userLabels } from '../src/docker/compose.ts';
 import type { IcarusConfig } from '../src/config.ts';
 import { makeConfig, probe } from './fixtures.ts';
 
 const config = makeConfig({
   dataDir: '/data',
+  host: '0.0.0.0',
+  port: 8080,
   mounts: [{ host: '/host/scratchpad', container: '/workspace/scratchpad', mode: 'ro' }],
 });
+
+/** Хостовые факты, которые script/server передаёт генератору compose. */
+const composeOptions = {
+  repoRoot: '/repo',
+  configPath: '/repo/config.yaml',
+  runAs: '1000:1000',
+  home: '/home/tester',
+  dockerSocket: '/var/run/docker.sock',
+  extraGroups: ['125'],
+};
+
+function render(input: IcarusConfig = config, extra: Record<string, unknown> = {}): any {
+  return parseYaml(renderCompose(input, { ...composeOptions, ...extra }));
+}
 
 /**
  * Отпечаток зависит в том числе от dataDir, а у фикстуры он каждый раз новый
@@ -53,28 +70,82 @@ test('порядок маунтов не влияет на отпечаток', 
   assert.equal(spec({ mounts: many }), spec({ mounts: [...many].reverse() }));
 });
 
-test('людей различает только имя: отпечаток и окружение у всех одни', () => {
-  const first = containerRunArgs(config, probe('probe'));
-  const second = containerRunArgs(config, probe('probe2'));
+test('стек: сервис, контейнер на человека и тёплый restart', () => {
+  const compose = render();
 
-  assert.match(first.join(' '), /--name icarus-user-probe /);
-  assert.match(second.join(' '), /--name icarus-user-probe2 /);
-  assert.match(first.join(' '), /\/data\/users\/probe\/memory:\/workspace\/memory/);
-  assert.match(second.join(' '), /\/data\/users\/probe2\/memory:\/workspace\/memory/);
-
-  // Если подставить один id вместо другого, команды обязаны совпасть: всё остальное
-  // (образ, маунты, окружение, отпечаток) у людей общее.
-  const withId = (args: string[], id: string): string =>
-    args.map((arg) => arg.replace(new RegExp(`${id}\\b`, 'g'), '<id>')).join(' ');
-  assert.equal(withId(first, 'probe'), withId(second, 'probe2'));
+  assert.equal(compose.name, 'icarus');
+  assert.equal(compose.services.icarus.image, DEFAULT_SERVICE_IMAGE);
+  // Образ сервиса собирает compose: сборка отделена от пересоздания, чтобы простой был короче.
+  assert.deepEqual(compose.services.icarus.build, { context: '/repo/docker/service' });
+  assert.equal(compose.services.icarus.restart, 'unless-stopped');
+  assert.equal(compose.services.icarus.ports[0], '8080:8080');
+  // dataDir монтируется тем же путём: иначе пути маунтов внутри контейнера разъедутся с хостовыми.
+  assert.ok(compose.services.icarus.volumes.includes('/data:/data'));
+  assert.ok(compose.services.icarus.volumes.includes('/repo:/repo'));
+  assert.ok(compose.services.icarus.volumes.includes('/repo/config.yaml:/repo/config.yaml:ro'));
+  assert.ok(compose.services.icarus.volumes.includes('/var/run/docker.sock:/var/run/docker.sock'));
+  assert.equal(compose.services.icarus.environment.HOME, '/home/tester');
+  assert.equal(compose.services.icarus.user, '1000:1000');
+  assert.deepEqual(compose.services.icarus.group_add, ['125']);
+  assert.deepEqual(compose.services.icarus.depends_on, { 'icarus-user-probe': { condition: 'service_started' } });
 });
 
-test('контейнер получает метки владения', () => {
-  const args = containerRunArgs(config, probe());
-  const joined = args.join(' ');
-  assert.match(joined, /--label icarus\.managed=1/);
-  assert.match(joined, /--label icarus\.user=probe/);
-  assert.match(joined, new RegExp(`--label icarus\\.spec=${specFor(config)}`));
+test('стек: контейнер человека — образ, маунты, окружение и метки владения', () => {
+  const compose = render();
+  const service = compose.services['icarus-user-probe'];
+
+  assert.equal(service.image, config.docker.image);
+  assert.equal(service.build, undefined, 'образ у людей общий — его собирает script/server, а не каждый сервис');
+  assert.equal(service.container_name, 'icarus-user-probe');
+  assert.equal(service.restart, 'unless-stopped');
+  assert.deepEqual(service.labels, userLabels(config, probe()));
+  assert.equal(service.labels['icarus.spec'], specFor(config));
+  assert.ok(service.volumes.includes('/data/users/probe/memory:/workspace/memory'));
+  assert.ok(service.volumes.includes('/data/users/probe/sessions:/workspace/.sessions'));
+  assert.ok(service.volumes.includes('/host/scratchpad:/workspace/scratchpad:ro'));
+  assert.equal(service.environment.ICARUS_MODEL_FAST, 'deepseek/deepseek-v4-flash:off');
+});
+
+test('стек: людей различает только имя, остальное у всех общее', () => {
+  const two = makeConfig({ users: [probe('probe'), probe('probe2')] });
+  const compose = render(two);
+
+  assert.ok(compose.services['icarus-user-probe']);
+  assert.ok(compose.services['icarus-user-probe2']);
+  assert.equal(Object.keys(compose.services).length, 3, 'сервис плюс двое людей');
+
+  const first = JSON.stringify(compose.services['icarus-user-probe']).replaceAll('probe', '<id>');
+  const second = JSON.stringify(compose.services['icarus-user-probe2']).replaceAll('probe2', '<id>');
+  assert.equal(first, second);
+});
+
+test('стек: людей больше нет в конфиге — сервисов тоже нет', () => {
+  const compose = render(makeConfig({ users: [probe('probe')] }));
+  assert.equal(compose.services['icarus-user-probe2'], undefined);
+});
+
+test('стек: стенд LibreChat появляется только по флагу', () => {
+  assert.equal(render().services.librechat, undefined);
+
+  const compose = render(config, { librechat: { dir: '/repo/docker/librechat', port: 3090 } });
+  assert.equal(compose.services.librechat.ports[0], '3090:3090');
+  assert.equal(compose.services.librechat.container_name, 'icarus-librechat');
+  assert.equal(compose.services.librechat.environment.MONGO_URI, 'mongodb://icarus-librechat-mongo:27017/LibreChat');
+  assert.ok(compose.services['icarus-librechat-mongo']);
+  assert.ok(compose.volumes['mongo-data']);
+});
+
+test('порт публикуется по адресу из конфига', () => {
+  assert.equal(publishAddress('0.0.0.0', 8080), '8080:8080', 'слушаем везде — публикуем везде');
+  assert.equal(publishAddress('127.0.0.1', 8080), '127.0.0.1:8080:8080');
+  assert.equal(publishAddress('localhost', 8080), '127.0.0.1:8080:8080', 'docker не понимает localhost в публикации');
+  assert.equal(render(makeConfig({ host: '127.0.0.1', port: 9090 })).services.icarus.ports[0], '127.0.0.1:9090:9090');
+});
+
+test('стек: сеть из конфига не создаём, она должна существовать', () => {
+  const compose = render(makeConfig({ docker: { image: 'icarus-user:dev', prefix: 'icarus-user', socket: null, network: 'icarus-net' } }));
+  assert.deepEqual(compose.networks, { 'icarus-net': { external: true } });
+  assert.deepEqual(compose.services.icarus.networks, ['icarus-net']);
 });
 
 test('план: свой контейнер с тем же отпечатком оставляем', () => {

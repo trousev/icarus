@@ -40,16 +40,35 @@ LibreChat ──OpenAI API──► icarus ──docker exec + JSONL──► pi
 # он создаст config.yaml из config.example.yaml — поправить людей, модели и пути;
 # ключи провайдеров кладутся в packages/service/.env (см. .gitignore)
 
-# 2. образ контейнера пользователя
+# 2. образ контейнера пользователя (./script/server тоже умеет его собирать)
 docker build -t icarus-user:dev docker/user/
 
-# 3. сервис
-./script/server                 # icarus на :8080
-./script/server --with-librechat   # он же + стенд LibreChat на :3090 (гасится на выходе)
+# 3. стек: ./script/server собирает docker-compose.yml из config.yaml и поднимает его
+./script/server                     # icarus на :8080, логи в консоли (Ctrl-C гасит стек)
+./script/server -d                  # то же в фоне: переживёт и терминал, и перезагрузку
+./script/server --with-librechat    # он же + стенд LibreChat на :3090
+./script/server --down              # погасить стек
 
 # панель памяти
 open 'http://localhost:8080/panel?key=<panelKey>'
 ```
+
+`./script/server` не запускает процесс, а **собирает `docker-compose.yml`** из `config.yaml`:
+сервис icarus, по контейнеру на человека и, по флагу, стенд LibreChat. Сам icarus тоже едет
+в контейнере (образ `icarus-service:dev` из `docker/service/`, собирается автоматически).
+Жизненным циклом владеет docker, а не сервис: `restart: unless-stopped` возвращает контейнеры
+и после падения, и после перезагрузки машины, а смена образа, маунтов или окружения
+пересоздаёт их при следующем запуске. Сгенерированный `docker-compose.yml` в git не попадает;
+правки в коде доезжают после `docker compose restart icarus` — репозиторий примонтирован.
+
+Порядок запуска выбран ради меньшего простоя при обновлении: сначала `docker compose build`
+и сборка образа человека — **пока старые контейнеры ещё работают**, и только потом `up`,
+которому остаётся пересоздать изменившееся. Поэтому собирать образ руками (шаг 2) не обязательно:
+`./script/server` делает это сам, а `--build` повторяет сборку без кеша.
+
+Первый запуск после перехода со старой схемы: погаси icarus, запущенный обычным процессом на
+хосте (`node packages/service/src/index.ts …`) — он держит :8080 и пересоздаёт контейнеры мимо
+compose. `./script/server` один раз снесёт контейнеры без метки проекта и поднимет их заново.
 
 ## Конфиг
 
@@ -81,7 +100,7 @@ users:                          # люди: только id
 | `./script/update` | ставит зависимости через pnpm и раскладывает конфиги из примеров; в CI — строго по lockfile |
 | `./script/test` | гоняет тесты (`node --test`); докер и модель не нужны, `ICARUS_E2E=1` включает сценарные |
 | `./script/lint` | `tsc --noEmit` + `eslint` (можно по отдельности: `./script/lint tsc`, `./script/lint eslint`) |
-| `./script/server` | поднимает сервис; `--with-librechat` добавляет стенд LibreChat, `--config <путь>` — свой конфиг |
+| `./script/server` | собирает `docker-compose.yml` из `config.yaml`, сначала пересобирает образы, потом поднимает стек через `docker compose up`; `-d` уводит в фон, `--with-librechat` добавляет стенд, `--build` собирает без кеша, `--down` гасит стек |
 
 Те же команды доступны через pnpm: `pnpm test`, `pnpm lint`, `pnpm start`. Установка — только
 `./script/update`: у pnpm `pnpm update` означает другое (обновление версий зависимостей).
@@ -106,7 +125,9 @@ script/               команды разработчика: update, test, lin
 packages/service/     сервис: HTTP, сессии pi, контейнеры, панель памяти
 packages/extensions/  расширения pi, которые живут в контейнере пользователя
 docker/user/          образ контейнера пользователя
+docker/service/       образ самого icarus: node, git и клиент docker
 docker/librechat/     стенд для проверки стыка с LibreChat
+docker-compose.yml    стек, который собирает ./script/server (в git не попадает)
 specs/                спеки этапов
 tools/rpc-probe.mjs   отладочный клиент к pi по RPC
 ```
