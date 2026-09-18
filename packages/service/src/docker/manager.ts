@@ -197,3 +197,19 @@ export function spawnDockerExec(
     stdio: ['pipe', 'pipe', 'pipe'],
   });
 }
+
+/**
+ * Разовая команда в контейнере: stdin закрыт, рабочая папка — /workspace,
+ * наружу идёт только stdout. Для вызовов, которым не нужен ни диалог, ни сессия.
+ */
+export function spawnDockerOnce(
+  config: IcarusConfig,
+  container: string,
+  args: string[],
+  workdir = '/workspace',
+): ChildProcess {
+  return spawn('docker', ['exec', '-w', workdir, container, ...args], {
+    env: dockerEnv(config),
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+}

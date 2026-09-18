@@ -3,11 +3,14 @@
 import { ensureContainer } from '../docker/manager.ts';
 import { log } from '../log.ts';
 import { PiSession } from './pi-session.ts';
+import { runOneShot, type OneShotOptions } from './one-shot.ts';
 import type { IcarusConfig, ModelConfig, UserConfig } from '../config.ts';
 
 export class SessionRegistry {
   private sessions = new Map<string, PiSession>();
   private readyContainers = new Set<string>();
+  /** Поднятие контейнера в полёте: два одновременных запроса не должны создавать его дважды. */
+  private ensuring = new Map<string, Promise<string>>();
   private timer: NodeJS.Timeout | null = null;
   private config: IcarusConfig;
 
@@ -22,7 +25,15 @@ export class SessionRegistry {
     return user.models.find((model) => model.tier === 'fast') ?? user.models[0];
   }
 
-  private async ensureUserContainer(user: UserConfig): Promise<string> {
+  private ensureUserContainer(user: UserConfig): Promise<string> {
+    const pending = this.ensuring.get(user.id);
+    if (pending) return pending;
+    const promise = this.startUserContainer(user).finally(() => this.ensuring.delete(user.id));
+    this.ensuring.set(user.id, promise);
+    return promise;
+  }
+
+  private async startUserContainer(user: UserConfig): Promise<string> {
     if (this.readyContainers.has(user.id)) {
       const existing = [...this.sessions.values()].find((session) => session.user.id === user.id);
       if (existing) return existing.container;
@@ -30,6 +41,15 @@ export class SessionRegistry {
     const { name } = await ensureContainer(this.config, user);
     this.readyContainers.add(user.id);
     return name;
+  }
+
+  /**
+   * Разовый вопрос дешёвой модели в контейнере человека: тулов, сессии и персоны
+   * тут нет. Заголовки разговоров — первый потребитель, но не единственный.
+   */
+  async oneShot(user: UserConfig, prompt: string, options: OneShotOptions = {}): Promise<string> {
+    const container = await this.ensureUserContainer(user);
+    return runOneShot(this.config, container, this.fastModel(user), prompt, options);
   }
 
   /** Находит или поднимает сессию разговора. */
