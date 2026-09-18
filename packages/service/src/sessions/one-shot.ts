@@ -68,26 +68,26 @@ export function runOneShot(
     let stdout = '';
     let stderr = '';
     let settled = false;
-    let timer: NodeJS.Timeout | undefined;
-
-    const finish = (error: Error | null, value = ''): void => {
-      if (settled) return;
-      settled = true;
-      if (timer) clearTimeout(timer);
-      signal?.removeEventListener('abort', onAbort);
-      if (error) reject(error);
-      else resolve(value);
-    };
-
-    const onAbort = (): void => {
-      child.kill('SIGTERM');
-      finish(new Error('запрос отменён'));
-    };
-
-    timer = setTimeout(() => {
+    // Таймер поднимаем до обработчиков: finish и колбэк ниже ссылаются на него,
+    // а const честно говорит, что переприсваивать его не собираются.
+    const timer: NodeJS.Timeout = setTimeout(() => {
       child.kill('SIGTERM');
       finish(new Error(`модель не ответила за ${timeoutMs} мс`));
     }, timeoutMs);
+
+    function finish(error: Error | null, value = ''): void {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      if (error) reject(error);
+      else resolve(value);
+    }
+
+    function onAbort(): void {
+      child.kill('SIGTERM');
+      finish(new Error('запрос отменён'));
+    }
 
     signal?.addEventListener('abort', onAbort, { once: true });
 

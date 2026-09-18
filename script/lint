@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Проверки Icarus: типы и линтер. Сборки нет — код исполняется как есть.
+#
+#   ./script/lint          и типы, и линтер (то же гоняет CI)
+#   ./script/lint tsc      только типы
+#   ./script/lint eslint   только линтер
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+if [ ! -x node_modules/.bin/tsc ] || [ ! -x node_modules/.bin/eslint ]; then
+  echo '[x] нет инструментов проверки — сначала ./script/update' >&2
+  exit 1
+fi
+
+what="${1:-all}"
+case "$what" in
+all | tsc | typecheck | eslint) ;;
+*)
+  echo "не понимаю «$what»: ожидаю tsc, eslint или пусто" >&2
+  exit 2
+  ;;
+esac
+
+if [ "$what" = all ] || [ "$what" = tsc ] || [ "$what" = typecheck ]; then
+  echo '==> tsc --noEmit'
+  node_modules/.bin/tsc -p tsconfig.json
+fi
+
+if [ "$what" = all ] || [ "$what" = eslint ]; then
+  echo '==> eslint'
+  node_modules/.bin/eslint . --max-warnings=0
+fi
