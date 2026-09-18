@@ -1,0 +1,7 @@
+{
+  "name": "@icarus/extensions",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Расширения pi, которые живут внутри контейнера пользователя"
+}

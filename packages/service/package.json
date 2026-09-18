@@ -1,0 +1,14 @@
+{
+  "name": "@icarus/service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "OpenAI-совместимый фасад над живыми сессиями pi в контейнерах пользователей",
+  "engines": { "node": ">=22.19.0" },
+  "scripts": {
+    "start": "node src/index.ts",
+    "test": "node --test test/*.test.ts",
+    "test:e2e": "ICARUS_E2E=1 node --test test/*.test.ts"
+  },
+  "dependencies": {}
+}
