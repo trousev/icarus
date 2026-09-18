@@ -148,7 +148,7 @@ const scope = document.getElementById('scope');
 
 (async () => {
   const state = await api('/panel/api/state');
-  user.innerHTML = state.users.map((u) => '<option value="' + esc(u.id) + '">' + esc(u.name) + '</option>').join('');
+  user.innerHTML = state.users.map((id) => '<option value="' + esc(id) + '">' + esc(id) + '</option>').join('');
   user.onchange = loadFiles;
   scope.onchange = loadFiles;
   document.getElementById('search').onclick = doSearch;

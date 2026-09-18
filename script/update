@@ -48,13 +48,13 @@ fi
 
 # --- локальные конфиги --------------------------------------------------------
 # Примеры копируем только если файла ещё нет: настроенное не перетираем.
-if [ ! -f packages/service/icarus.config.json ]; then
-  cp packages/service/icarus.config.example.json packages/service/icarus.config.json
-  warn 'создал packages/service/icarus.config.json из примера — поправь людей, модели и пути'
+if [ ! -f config.yaml ]; then
+  cp config.example.yaml config.yaml
+  warn 'создал config.yaml из примера — поправь людей, модели и пути'
 fi
 
 if [ ! -f packages/service/.env ]; then
-  warn 'нет packages/service/.env — ключи моделей берутся оттуда, например:'
+  warn 'нет packages/service/.env — оттуда берутся ключи провайдеров (auth: env:...), например:'
   warn "  echo 'DEEPSEEK_API_KEY=sk-...' > packages/service/.env && chmod 600 packages/service/.env"
 fi
 

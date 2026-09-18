@@ -3,12 +3,9 @@
 // модели, откат на эвристику и то, что сессия не трогается ни в одном случае.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { createServer } from '../src/http/server.ts';
-import type { IcarusConfig } from '../src/config.ts';
+import { makeConfig } from './fixtures.ts';
 import {
   buildTitlePrompt,
   cleanModelTitle,
@@ -113,16 +110,7 @@ async function askTitle(options: {
   oneShot?: (prompt: string) => Promise<string>;
   headers?: Record<string, string>;
 }): Promise<{ status: number; content: string; acquire: number; oneShotPrompts: string[] }> {
-  const config: IcarusConfig = {
-    host: '127.0.0.1',
-    port: 0,
-    apiKey: API_KEY,
-    panelKey: API_KEY,
-    dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-title-')),
-    sessionIdleMinutes: 30,
-    docker: { image: 'icarus-user:dev', prefix: 'icarus-user', socket: null },
-    users: [{ id: 'probe', models: [{ provider: 'deepseek', id: 'deepseek-v4-flash', tier: 'fast' }] }],
-  };
+  const config = makeConfig();
 
   const oneShotPrompts: string[] = [];
   let acquire = 0;

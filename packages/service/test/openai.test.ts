@@ -64,14 +64,11 @@ test('подстановка ~ и переменных окружения', () =
 test('контейнер монтирует память, сессии и репозитории', () => {
   const config = {
     dataDir: '/data',
-    docker: { image: 'icarus-user:dev', prefix: 'icarus-user', network: null, socket: null },
-  } as unknown as IcarusConfig;
-  const user = {
-    id: 'probe',
+    docker: { image: 'icarus-user:dev', prefix: 'icarus-user', socket: null },
     models: [{ provider: 'deepseek', id: 'deepseek-v4-flash', tier: 'fast' as const }],
     mounts: [{ host: '/host/scratchpad', container: '/workspace/scratchpad', mode: 'ro' as const }],
-  };
-  const args = containerRunArgs(config, user);
+  } as unknown as IcarusConfig;
+  const args = containerRunArgs(config, { id: 'probe' });
   const joined = args.join(' ');
   assert.match(joined, /--name icarus-user-probe/);
   assert.match(joined, /\/data\/users\/probe\/memory:\/workspace\/memory/);
@@ -82,14 +79,14 @@ test('контейнер монтирует память, сессии и реп
 
 test('пути пользователя выводятся из dataDir', () => {
   const config = { dataDir: '/data' } as unknown as IcarusConfig;
-  const paths = userPaths(config, { id: 'probe', models: [] });
+  const paths = userPaths(config, { id: 'probe' });
   assert.equal(paths.memory, '/data/users/probe/memory');
   assert.equal(paths.sharedMemory, '/data/shared');
 });
 
 test('конфиг без apiKey не принимается', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-cfg-'));
-  const file = path.join(dir, 'config.json');
-  fs.writeFileSync(file, JSON.stringify({ dataDir: '/tmp', users: [{ id: 'a', models: [] }] }));
+  const file = path.join(dir, 'config.yaml');
+  fs.writeFileSync(file, 'dataDir: /tmp\nmodels:\n  - provider: deepseek\n    id: flash\nusers:\n  - a\n');
   assert.throws(() => loadConfig(file, {} as any), /apiKey/);
 });

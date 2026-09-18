@@ -1,15 +1,20 @@
 // Подготовка рабочего окружения пользователя на хосте: каталоги, AGENTS.md,
 // auth.json для pi и наши расширения.
+//
+// Всё содержимое — общее (модели, ключи, MCP, маунты из config.yaml); от человека
+// зависит только то, куда это кладётся: каталог в dataDir и имя контейнера.
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { log } from './log.ts';
-import { userPaths, userContainer, type IcarusConfig, type UserConfig } from './config.ts';
+import {
+  REPO_ROOT,
+  userPaths,
+  userContainer,
+  type IcarusConfig,
+  type UserConfig,
+} from './config.ts';
 import { containerEnv, labelArgs } from './docker/spec.ts';
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-/** Расширения и icarus.md лежат в репозитории, а не в пакете сервиса. */
-const REPO_ROOT = path.resolve(HERE, '../../..');
 const EXTENSIONS_DIR = path.join(REPO_ROOT, 'packages', 'extensions');
 
 export type PreparedUser = ReturnType<typeof prepareUser>;
@@ -25,13 +30,13 @@ export function ensureDirs(config: IcarusConfig, user: UserConfig): void {
 }
 
 /** Карта окружения: то, что агент читает как AGENTS.md. */
-export function renderAgentsMd(user: UserConfig): string {
+export function renderAgentsMd(config: IcarusConfig): string {
   const rows = [
     '| `/workspace/memory/` | **личная память** этого человека | читай смело, пиши когда просят запомнить |',
     '| `/workspace/shared-memory/` | **семейная память**, общая для всех | писать **только по явной просьбе** |',
     '| `/workspace/incoming/` | вложения из чата | разбирай сам: прочитай, посмотри, разложи |',
     '| `/workspace/icarus.md` | твой системный промпт | не редактируй |',
-    ...(user.mounts ?? []).map(
+    ...config.mounts.map(
       (mount) =>
         `| \`${mount.container}\` | репозиторий или каталог с кодом | ${
           mount.mode === 'ro' ? 'только чтение' : 'можно менять, если попросят'
@@ -66,26 +71,23 @@ ${rows.join('\n')}
 }
 
 /** Ключи провайдеров в формате pi: ~/.pi/agent/auth.json. */
-export function renderAuthJson(user: UserConfig): string {
-  const entries = Object.entries(user.auth ?? {}).map(([provider, key]) => [
-    provider,
-    { type: 'api_key', key },
-  ]);
+export function renderAuthJson(config: IcarusConfig): string {
+  const entries = Object.entries(config.auth).map(([provider, key]) => [provider, { type: 'api_key', key }]);
   return JSON.stringify(Object.fromEntries(entries), null, 2) + '\n';
 }
 
-/** Пакеты pi: подключаем MCP-мост только если у человека есть MCP-серверы. */
-export function renderSettingsJson(user: UserConfig): string {
-  const servers = Object.keys(user.mcp ?? {});
+/** Пакеты pi: подключаем MCP-мост только если в конфиге есть MCP-серверы. */
+export function renderSettingsJson(config: IcarusConfig): string {
+  const servers = Object.keys(config.mcp);
   const settings: Record<string, unknown> = {};
   if (servers.length > 0) settings.packages = ['npm:pi-mcp-extension@1.5.0'];
   return JSON.stringify(settings, null, 2) + '\n';
 }
 
 /** ~/.pi/agent/mcp.json — то, что читает pi-mcp-extension. */
-export function renderMcpJson(user: UserConfig): string {
+export function renderMcpJson(config: IcarusConfig): string {
   const servers = Object.fromEntries(
-    Object.entries(user.mcp ?? {}).map(([name, server]) => [
+    Object.entries(config.mcp).map(([name, server]) => [
       name,
       {
         transport: server.transport ?? (server.url ? 'streamable-http' : 'stdio'),
@@ -143,14 +145,14 @@ export function prepareUser(config: IcarusConfig, user: UserConfig) {
   ensureDirs(config, user);
   const paths = userPaths(config, user);
 
-  writeFileSafe(paths.agentsMd, renderAgentsMd(user));
+  writeFileSafe(paths.agentsMd, renderAgentsMd(config));
 
   const authPath = path.join(paths.piAgent, 'auth.json');
-  writeFileSafe(authPath, renderAuthJson(user), 0o600);
+  writeFileSafe(authPath, renderAuthJson(config), 0o600);
   fs.chmodSync(authPath, 0o600);
 
-  writeFileSafe(path.join(paths.piAgent, 'settings.json'), renderSettingsJson(user));
-  writeFileSafe(path.join(paths.piAgent, 'mcp.json'), renderMcpJson(user));
+  writeFileSafe(path.join(paths.piAgent, 'settings.json'), renderSettingsJson(config));
+  writeFileSafe(path.join(paths.piAgent, 'mcp.json'), renderMcpJson(config));
 
   // Персона одна на всех, источник истины — репозиторий: при старте перезаписываем копию
   // в каталоге пользователя, иначе правки в icarus.md не доедут до существующих людей.
@@ -175,16 +177,6 @@ export function prepareUser(config: IcarusConfig, user: UserConfig) {
   return { paths, extensions };
 }
 
-/** Уровни моделей уезжают в контейнер переменными — их читает расширение эскалации. */
-export function modelTierEnv(user: UserConfig): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const model of user.models ?? []) {
-    if (!model.tier) continue;
-    env[`ICARUS_MODEL_${model.tier.toUpperCase()}`] = `${model.provider}/${model.id}:${model.thinking ?? 'off'}`;
-  }
-  return env;
-}
-
 /** Аргументы `docker run` для контейнера пользователя. */
 export function containerRunArgs(config: IcarusConfig, user: UserConfig): string[] {
   const paths = userPaths(config, user);
@@ -200,6 +192,7 @@ export function containerRunArgs(config: IcarusConfig, user: UserConfig): string
     // Метки — единственный способ отличить свои контейнеры от чужих на том же хосте
     // и понять, что образ или маунты поменялись и контейнер пора пересоздать.
     ...labelArgs(config, user),
+    // Личные каталоги: у каждого свои, выводятся из id.
     '-v',
     `${paths.memory}:/workspace/memory`,
     '-v',
@@ -216,11 +209,12 @@ export function containerRunArgs(config: IcarusConfig, user: UserConfig): string
     `${paths.icarusMd}:/workspace/icarus.md:ro`,
   ];
 
-  for (const mount of user.mounts ?? []) {
+  // Общие каталоги с хоста — одни и те же у всех.
+  for (const mount of config.mounts) {
     args.push('-v', `${mount.host}:${mount.container}${mount.mode === 'ro' ? ':ro' : ''}`);
   }
 
-  for (const [key, value] of Object.entries(containerEnv(user))) {
+  for (const [key, value] of Object.entries(containerEnv(config))) {
     args.push('-e', `${key}=${value}`);
   }
 

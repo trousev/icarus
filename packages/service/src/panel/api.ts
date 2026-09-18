@@ -64,7 +64,7 @@ export async function handlePanel(
     await Promise.all(config.users.map((user) => ensureRepo(userPaths(config, user).memory)));
     await ensureRepo(userPaths(config, config.users[0]).sharedMemory);
     json(res, 200, {
-      users: config.users.map((user) => ({ id: user.id, name: user.name ?? user.id })),
+      users: config.users.map((user) => user.id),
       scopes: ['personal', 'shared'],
     });
     return true;
