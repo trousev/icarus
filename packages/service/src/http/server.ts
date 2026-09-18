@@ -6,6 +6,8 @@ import type { SessionRegistry } from '../sessions/registry.ts';
 import { errorBody } from './sse.ts';
 import { handleChatCompletions, headerValue } from './openai.ts';
 import { handlePanel } from '../panel/api.ts';
+import { listManaged } from '../docker/manager.ts';
+import { planReconciliation } from '../docker/reconcile.ts';
 
 export const PUBLIC_MODEL_ID = 'icarus';
 
@@ -27,12 +29,30 @@ export function createServer(config: IcarusConfig, registry: SessionRegistry): h
     }
 
     if (req.method === 'GET' && url.pathname === '/healthz') {
+      // Контейнеры — часть состояния сервиса, а не что-то за кадром: показываем их
+      // состояние и расхождения с конфигом прямо здесь.
+      let containers: Record<string, number> = { managed: 0 };
+      try {
+        const managed = await listManaged(config);
+        const plan = planReconciliation({ config, users: config.users, containers: managed });
+        containers = {
+          managed: managed.length,
+          running: managed.filter((container) => container.running).length,
+          stale: plan.recreate.length,
+          orphaned: plan.stop.length,
+          missing: plan.create.length,
+        };
+      } catch (error) {
+        log.warn('не удалось собрать состояние контейнеров', { error: redact(String(error)) });
+      }
+
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(
         JSON.stringify({
           ok: true,
           sessions: registry.list(),
           users: config.users.map((user) => user.id),
+          containers,
         }),
       );
       return;

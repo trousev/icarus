@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { loadConfig } from './config.ts';
 import { log } from './log.ts';
 import { prepareUser } from './workspace.ts';
+import { reconcileContainers } from './docker/manager.ts';
 import { SessionRegistry } from './sessions/registry.ts';
 import { createServer } from './http/server.ts';
 
@@ -16,6 +17,14 @@ log.info('конфиг загружен', { path: configPath, users: config.user
 
 for (const user of config.users) {
   prepareUser(config, user);
+}
+
+// Контейнеры принадлежат нам: приводим их в соответствие с конфигом до первых запросов —
+// выбывших людей останавливаем, устаревшие (сменился образ, маунты или окружение) удаляем.
+try {
+  await reconcileContainers(config, config.users);
+} catch (error) {
+  log.error('реконсиляция контейнеров не удалась — продолжаю без неё', { error: String(error) });
 }
 
 const registry = new SessionRegistry(config);
