@@ -1,6 +1,7 @@
-// Отпечаток контейнера пользователя: то, что определяет его личность.
-// Если меняется образ, маунты или окружение — контейнер надо пересоздать,
-// иначе он тихо живёт на старом образе (мы на это наступали).
+// Отпечаток контейнера: то, что определяет его содержимое.
+// Образ, маунты и окружение теперь общие для всех (см. config.yaml), поэтому
+// отпечаток один на весь сервис: поменял образ или маунт — пересоздаются все
+// контейнеры, а не только тот, который первым попал под руку.
 import { createHash } from 'node:crypto';
 import { userContainer, type IcarusConfig, type UserConfig } from '../config.ts';
 
@@ -9,26 +10,26 @@ export const LABEL_USER = 'icarus.user';
 export const LABEL_SPEC = 'icarus.spec';
 
 /** Уровни моделей уезжают в контейнер переменными — их читает расширение эскалации. */
-export function modelTierEnv(user: UserConfig): Record<string, string> {
+export function modelTierEnv(config: IcarusConfig): Record<string, string> {
   const env: Record<string, string> = {};
-  for (const model of user.models ?? []) {
+  for (const model of config.models) {
     if (!model.tier) continue;
     env[`ICARUS_MODEL_${model.tier.toUpperCase()}`] = `${model.provider}/${model.id}:${model.thinking ?? 'off'}`;
   }
   return env;
 }
 
-/** Окружение контейнера целиком: уровни моделей плюс то, что задал человек. */
-export function containerEnv(user: UserConfig): Record<string, string> {
-  return { ...modelTierEnv(user), ...(user.env ?? {}) };
+/** Окружение контейнера целиком: уровни моделей плюс заданное в config.yaml. */
+export function containerEnv(config: IcarusConfig): Record<string, string> {
+  return { ...modelTierEnv(config), ...config.env };
 }
 
 /** Всё, что влияет на содержимое контейнера, но не является секретом. */
-export function specFor(config: IcarusConfig, user: UserConfig): string {
-  const mounts = [...(user.mounts ?? [])]
+export function specFor(config: IcarusConfig): string {
+  const mounts = [...config.mounts]
     .map((mount) => `${mount.host}:${mount.container}:${mount.mode ?? 'rw'}`)
     .sort();
-  const env = containerEnv(user);
+  const env = containerEnv(config);
   const payload = JSON.stringify({
     image: config.docker.image,
     network: config.docker.network ?? null,
@@ -45,7 +46,7 @@ export function labelArgs(config: IcarusConfig, user: UserConfig): string[] {
     '--label',
     `${LABEL_USER}=${user.id}`,
     '--label',
-    `${LABEL_SPEC}=${specFor(config, user)}`,
+    `${LABEL_SPEC}=${specFor(config)}`,
   ];
 }
 

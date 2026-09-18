@@ -39,7 +39,7 @@ export function planReconciliation(input: {
     }
     // Контейнеры, созданные до появления меток, приходят с spec = null и попадают
     // в пересоздание — так проходит миграция на новый формат.
-    if (container.spec !== specFor(config, user)) {
+    if (container.spec !== specFor(config)) {
       plan.recreate.push(container.name);
       continue;
     }

@@ -4,7 +4,7 @@
 #
 #   ./script/server
 #   ./script/server --with-librechat
-#   ./script/server --with-librechat --config /path/to/icarus.config.json
+#   ./script/server --with-librechat --config /path/to/config.yaml
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -12,14 +12,14 @@ cd "$ROOT"
 
 COMPOSE=(docker compose -f docker/librechat/docker-compose.yml)
 WITH_LIBRECHAT=0
-CONFIG="${ICARUS_CONFIG:-$ROOT/packages/service/icarus.config.json}"
+CONFIG="${ICARUS_CONFIG:-$ROOT/config.yaml}"
 
 usage() {
   cat <<'EOF'
 ./script/server [--with-librechat] [--config <путь>]
 
   --with-librechat   поднять рядом стенд LibreChat (docker compose) и погасить его на выходе
-  --config <путь>    конфиг сервиса (по умолчанию packages/service/icarus.config.json, ICARUS_CONFIG)
+  --config <путь>    конфиг сервиса (по умолчанию config.yaml в корне, ICARUS_CONFIG)
   -h, --help         эта справка
 EOF
 }
@@ -52,19 +52,34 @@ fi
 
 if [ ! -f "$CONFIG" ]; then
   echo "[x] нет конфига $CONFIG" >&2
-  echo '    ./script/update создаёт его из packages/service/icarus.config.example.json' >&2
+  echo '    ./script/update создаёт его из config.example.yaml' >&2
   exit 1
 fi
 
-# Образ контейнера пользователя сервис сам не собирает — предупреждаем заранее,
-# чтобы это не всплыло первой же репликой в чате. Заодно берём host/port для подсказки.
-cfg_info="$(
-  node -e '
-    const fs = require("node:fs");
-    const cfg = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-    process.stdout.write([cfg.docker?.image ?? "icarus-user:dev", cfg.host ?? "0.0.0.0", cfg.port ?? 8080].join(" "));
-  ' "$CONFIG" 2>/dev/null || echo 'icarus-user:dev 0.0.0.0 8080'
-)"
+# Ключи провайдеров: в config.yaml на них ссылаются как env:VAR, поэтому подкладываем
+# packages/service/.env. Уже заданные в окружении переменные он не перетирает.
+env_file=()
+if [ -f packages/service/.env ]; then
+  env_file=(--env-file=packages/service/.env)
+fi
+
+# Конфиг разбираем тем же загрузчиком, что и сервис: один формат — один парсер,
+# и опечатка в config.yaml всплывает здесь, а не посреди запуска.
+# Заодно берём оттуда образ и адрес: сервис образ пользователя сам не собирает.
+if ! cfg_info="$(node ${env_file[@]+"${env_file[@]}"} --input-type=module -e '
+  const { loadConfig } = await import("./packages/service/src/config.ts");
+  try {
+    const cfg = loadConfig(process.argv[1]);
+    process.stdout.write([cfg.docker.image, cfg.host, cfg.port].join(" "));
+  } catch (error) {
+    process.stdout.write(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
+' "$CONFIG" 2>&1)"; then
+  echo "[x] конфиг $CONFIG не читается:" >&2
+  echo "    $cfg_info" >&2
+  exit 1
+fi
 read -r image host port <<<"$cfg_info"
 panel_host="$host"
 if [ "$panel_host" = '0.0.0.0' ]; then panel_host='localhost'; fi
@@ -105,4 +120,4 @@ echo "    панель памяти: http://$panel_host:$port/panel?key=<panelKe
 if [ "$WITH_LIBRECHAT" = 1 ]; then
   echo '    LibreChat:     http://localhost:3090'
 fi
-node packages/service/src/index.ts "$CONFIG"
+node ${env_file[@]+"${env_file[@]}"} packages/service/src/index.ts "$CONFIG"

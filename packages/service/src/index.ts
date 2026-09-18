@@ -1,16 +1,12 @@
 // Точка входа icarus.
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { loadConfig } from './config.ts';
+import { DEFAULT_CONFIG_PATH, loadConfig } from './config.ts';
 import { log } from './log.ts';
 import { prepareUser } from './workspace.ts';
 import { reconcileContainers } from './docker/manager.ts';
 import { SessionRegistry } from './sessions/registry.ts';
 import { createServer } from './http/server.ts';
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const configPath =
-  process.argv[2] ?? process.env.ICARUS_CONFIG ?? path.resolve(HERE, '..', 'icarus.config.json');
+const configPath = process.argv[2] ?? process.env.ICARUS_CONFIG ?? DEFAULT_CONFIG_PATH;
 
 const config = loadConfig(configPath);
 log.info('конфиг загружен', { path: configPath, users: config.users.map((user) => user.id) });

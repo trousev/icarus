@@ -151,7 +151,7 @@ export async function ensureContainer(
   user: UserConfig,
 ): Promise<{ name: string; state: ContainerState; started: boolean }> {
   const name = userContainer(config, user);
-  const expected = specFor(config, user);
+  const expected = specFor(config);
   let state = await containerState(config, user);
 
   if (state !== 'missing') {
@@ -180,7 +180,7 @@ export async function ensureContainer(
   log.info('контейнер создан', {
     container: name,
     image: config.docker.image,
-    mounts: (user.mounts ?? []).length,
+    mounts: config.mounts.length,
     spec: expected,
   });
   return { name, state: 'running', started: true };

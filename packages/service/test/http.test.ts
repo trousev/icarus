@@ -2,27 +2,9 @@
 // вместо pi подсовываем фиктивную сессию. Модель и докер не нужны.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { createServer } from '../src/http/server.ts';
-import type { IcarusConfig } from '../src/config.ts';
-
-const API_KEY = 'test-token';
-
-function makeConfig(): IcarusConfig {
-  return {
-    host: '127.0.0.1',
-    port: 0,
-    apiKey: API_KEY,
-    panelKey: API_KEY,
-    dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-http-')),
-    sessionIdleMinutes: 30,
-    docker: { image: 'icarus-user:dev', prefix: 'icarus-user', socket: null },
-    users: [{ id: 'probe', models: [{ provider: 'deepseek', id: 'deepseek-v4-flash', tier: 'fast' }] }],
-  };
-}
+import { API_KEY, makeConfig } from './fixtures.ts';
 
 function makeSession() {
   const listeners = new Set<(event: Record<string, unknown>) => void>();

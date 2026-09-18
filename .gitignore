@@ -24,5 +24,5 @@ docker/librechat/images/
 docker/librechat/data-node/
 
 # локальный конфиг и секреты сервиса
-packages/service/icarus.config.json
+config.yaml
 packages/service/.env

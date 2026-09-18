@@ -21,7 +21,7 @@ packages/
   service/                     # сам icarus
     src/
       index.ts                 # точка входа
-      config.ts                # разбор icarus.config.json
+      config.ts                # разбор config.yaml
       http/server.ts           # http-сервер и аутентификация
       http/openai.ts           # /v1/models, /v1/chat/completions
       http/sse.ts              # упаковка в OpenAI-чанки
@@ -77,33 +77,33 @@ tools/rpc-probe.mjs            # отладочный клиент (уже ес�
 
 ## Конфигурация
 
-`icarus.config.json`:
+`config.yaml` в корне репозитория (образец — `config.example.yaml`, рабочий файл в git не попадает).
+Общее для всех людей лежит на верхнем уровне, у человека остаётся только id:
 
-```jsonc
-{
-  "host": "0.0.0.0",
-  "port": 8080,
-  "apiKey": "…",                                   // Bearer для LibreChat
-  "docker": { "image": "icarus-user:dev", "socket": "http://docker-socket-proxy:2375", "network": "icarus" },
-  "sharedMemory": "~/icarus/shared",              // общая память семьи (git)
-  "users": [
-    {
-      "id": "trousev",
-      "name": "Саня",
-      "memory": "~/icarus/users/trousev/memory",  // личная память (git)
-      "mounts": [{ "host": "~/src/scratchpad", "container": "/workspace/scratchpad", "mode": "rw" }],
-      "models": [
-        { "provider": "deepseek", "id": "deepseek-v4-flash", "thinking": "off", "tier": "fast" },
-        { "provider": "deepseek", "id": "deepseek-v4-pro",   "thinking": "medium", "tier": "strong" }
-      ],
-      "auth": { "deepseek": "env:DEEPSEEK_API_KEY" }
-    }
-  ]
-}
+```yaml
+apiKey: …                                    # Bearer для LibreChat
+dataDir: ~/icarus-data
+docker: { image: icarus-user:dev, socket: unix:///var/run/docker.sock, network: icarus }
+
+models:
+  - { provider: deepseek, id: deepseek-v4-flash, thinking: off,    tier: fast }
+  - { provider: deepseek, id: deepseek-v4-pro,   thinking: medium, tier: strong }
+auth: { deepseek: env:DEEPSEEK_API_KEY }
+mounts:
+  - { host: ~/src/scratchpad, container: /workspace/scratchpad, mode: rw }
+
+users:
+  - trousev
+  - second
 ```
 
-Из этого сервис генерирует `models.json` и `auth.json` в примонтированный `~/.pi/agent` и `AGENTS.md`
-с картой окружения. Ключи в логи не попадают никогда.
+Из этого сервис генерирует `auth.json` и `settings.json` в примонтированный `~/.pi/agent` и `AGENTS.md`
+с картой окружения. Ключи в логи не попадают никогда. Уровни моделей уезжают в контейнер переменными
+`ICARUS_MODEL_FAST` / `…_STRONG` / `…_VISION` — их читает расширение эскалации.
+
+Изначально конфиг был JSON'ом и дублировал модели с ключами у каждого человека; формат упростили
+(см. историю коммитов), потому что настройки у людей незаметно разъезжались, а добавление человека
+превращалось в копипасту на сорок строк.
 
 ## Готово, когда
 

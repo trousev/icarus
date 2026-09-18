@@ -37,8 +37,8 @@ LibreChat ──OpenAI API──► icarus ──docker exec + JSONL──► pi
 ```bash
 # 1. зависимости и локальные конфиги (запускать после clone и после каждого git pull)
 ./script/update
-# он создаст packages/service/icarus.config.json из примера — поправить людей, модели и пути;
-# ключи моделей кладутся в packages/service/.env (см. .gitignore)
+# он создаст config.yaml из config.example.yaml — поправить людей, модели и пути;
+# ключи провайдеров кладутся в packages/service/.env (см. .gitignore)
 
 # 2. образ контейнера пользователя
 docker build -t icarus-user:dev docker/user/
@@ -50,6 +50,29 @@ docker build -t icarus-user:dev docker/user/
 # панель памяти
 open 'http://localhost:8080/panel?key=<panelKey>'
 ```
+
+## Конфиг
+
+Один файл — `config.yaml` в корне (образец `config.example.yaml`, рабочий файл в git не попадает):
+
+```yaml
+apiKey: icarus-local-token      # Bearer, под которым ходит LibreChat
+dataDir: ~/icarus-data          # память, сессии и каталоги людей
+
+models:                         # общие модели: tier раздаёт эскалация
+  - { provider: deepseek, id: deepseek-v4-flash, thinking: off, tier: fast }
+auth: { deepseek: env:DEEPSEEK_API_KEY }   # ключи: сам ключ, env:VAR или ${VAR}
+mounts: []                      # каталоги с хоста — пока общие для всех
+mcp: {}                         # MCP-серверы
+
+users:                          # люди: только id
+  - probe
+  - probe2
+```
+
+Человек описывается одним id: из него выводятся имя контейнера (`icarus-user-probe`), каталоги
+`dataDir/users/probe` и id сессии pi. Тот же id должен быть у человека в LibreChat — он приезжает
+заголовком `x-icarus-user-id`. Модели, ключи и MCP общие, так что новый человек — это одна строка.
 
 ## Команды
 

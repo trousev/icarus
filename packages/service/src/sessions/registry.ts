@@ -21,8 +21,8 @@ export class SessionRegistry {
     this.timer.unref?.();
   }
 
-  private fastModel(user: UserConfig): ModelConfig {
-    return user.models.find((model) => model.tier === 'fast') ?? user.models[0];
+  private fastModel(): ModelConfig {
+    return this.config.models.find((model) => model.tier === 'fast') ?? this.config.models[0];
   }
 
   private ensureUserContainer(user: UserConfig): Promise<string> {
@@ -49,7 +49,7 @@ export class SessionRegistry {
    */
   async oneShot(user: UserConfig, prompt: string, options: OneShotOptions = {}): Promise<string> {
     const container = await this.ensureUserContainer(user);
-    return runOneShot(this.config, container, this.fastModel(user), prompt, options);
+    return runOneShot(this.config, container, this.fastModel(), prompt, options);
   }
 
   /** Находит или поднимает сессию разговора. */
@@ -63,7 +63,7 @@ export class SessionRegistry {
     if (existing) this.sessions.delete(key);
 
     const container = await this.ensureUserContainer(user);
-    const session = new PiSession(this.config, user, conversationId, this.fastModel(user), container);
+    const session = new PiSession(this.config, user, conversationId, this.fastModel(), container);
     this.sessions.set(key, session);
     return session;
   }

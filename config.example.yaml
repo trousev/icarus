@@ -1,0 +1,71 @@
+# Конфигурация Icarus.
+#
+# Рабочий файл — config.yaml рядом с этим; он в git не попадает, а ./script/update
+# копирует его отсюда при первом запуске.
+#
+# Здесь всё общее для всех людей: модели, ключи, MCP, маунты. У человека — только id
+# (см. users внизу), из него выводятся имя контейнера, каталоги в dataDir и id сессии pi.
+
+host: 0.0.0.0
+port: 8080
+
+# Токен, под которым LibreChat ходит в icarus (endpoint Icarus в librechat.yaml)
+apiKey: icarus-local-token
+# Ключ панели памяти; не задан — берётся apiKey
+# panelKey: ...
+
+# Где живут память, сессии и каталоги людей
+dataDir: ~/icarus-data
+# Через сколько минут простоя гасить сессию pi (контейнер при этом остаётся поднятым)
+sessionIdleMinutes: 30
+
+docker:
+  image: icarus-user:dev
+  prefix: icarus-user
+  # network: icarus-net
+  # socket: unix:///var/run/docker.sock
+
+# Модели: tier раздаёт эскалация — fast для болтовни, strong для работы, vision для картинок
+models:
+  - provider: deepseek
+    id: deepseek-v4-flash
+    thinking: off
+    tier: fast
+  - provider: deepseek
+    id: deepseek-v4-pro
+    thinking: medium
+    tier: strong
+  - provider: deepseek
+    id: deepseek-v4-flash-vision-exp
+    thinking: off
+    tier: vision
+
+# Ключи провайдеров: сам ключ, env:VAR или ${VAR}. Уезжают в auth.json внутри контейнера.
+# Переменная должна быть в окружении сервиса: ./script/server читает packages/service/.env.
+auth:
+  deepseek: env:DEEPSEEK_API_KEY
+
+# Окружение контейнера — им настраиваются наши расширения
+env:
+  ICARUS_EXTRACT_AFTER_MS: '20000'
+  ICARUS_EXTRACT_MODEL: deepseek/deepseek-v4-flash
+
+# Каталоги с хоста: пока общие для всех, у каждого человека те же (плюс его личные)
+mounts: []
+# mounts:
+#   - host: ~/src/scratchpad
+#     container: /workspace/scratchpad
+#     mode: ro
+
+# MCP-серверы: то, чем Икар обрастает без правки кода
+mcp:
+  echo:
+    command: node
+    args: ['/opt/icarus/mcp/echo-server.mjs']
+    lifecycle: eager
+
+# Люди: только id. Тот же id должен быть у человека в LibreChat — он приезжает
+# заголовком x-icarus-user-id (в стенде это {{LIBRECHAT_USER_USERNAME}}).
+users:
+  - probe
+  - probe2
