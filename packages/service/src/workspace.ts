@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { log } from './log.ts';
 import { userPaths, userContainer, type IcarusConfig, type UserConfig } from './config.ts';
+import { containerEnv, labelArgs } from './docker/spec.ts';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 /** Расширения и icarus.md лежат в репозитории, а не в пакете сервиса. */
@@ -196,6 +197,9 @@ export function containerRunArgs(config: IcarusConfig, user: UserConfig): string
     name,
     '--restart',
     'unless-stopped',
+    // Метки — единственный способ отличить свои контейнеры от чужих на том же хосте
+    // и понять, что образ или маунты поменялись и контейнер пора пересоздать.
+    ...labelArgs(config, user),
     '-v',
     `${paths.memory}:/workspace/memory`,
     '-v',
@@ -216,7 +220,7 @@ export function containerRunArgs(config: IcarusConfig, user: UserConfig): string
     args.push('-v', `${mount.host}:${mount.container}${mount.mode === 'ro' ? ':ro' : ''}`);
   }
 
-  for (const [key, value] of Object.entries({ ...modelTierEnv(user), ...(user.env ?? {}) })) {
+  for (const [key, value] of Object.entries(containerEnv(user))) {
     args.push('-e', `${key}=${value}`);
   }
 

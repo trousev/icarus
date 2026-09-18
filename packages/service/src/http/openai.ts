@@ -11,8 +11,47 @@ import { phraseForToolEnd, phraseForToolStart } from '../reasoning.ts';
 import type { SessionRegistry } from '../sessions/registry.ts';
 import type { PiSession } from '../sessions/pi-session.ts';
 import { chunk, completion, completionId, DONE, errorBody, usageChunk, type Usage } from './sse.ts';
+import { isTitleRequest, titleFromPrompt, TITLE_MODEL_ID } from './title.ts';
 
 const MAX_BODY_BYTES = 16 * 1024 * 1024;
+
+const ZERO_USAGE: Usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+
+/**
+ * Заголовок разговора: LibreChat зовёт модель отдельным запросом. В сессию pi
+ * его не пускаем — отвечаем сразу и без агентского прогона (см. title.ts).
+ */
+function respondTitle(
+  res: ServerResponse,
+  body: Record<string, unknown>,
+  messages: ChatMessage[],
+): void {
+  const lastUser = [...messages].reverse().find((message) => message?.role === 'user');
+  const prompt = normalizeContent(lastUser?.content);
+  const title = titleFromPrompt(prompt);
+  const model = typeof body.model === 'string' ? body.model : TITLE_MODEL_ID;
+  const id = completionId();
+
+  log.info('заголовок разговора', { title });
+
+  if (body.stream === false) {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(completion(id, model, title, ZERO_USAGE)));
+    return;
+  }
+
+  res.writeHead(200, {
+    'content-type': 'text/event-stream',
+    'cache-control': 'no-cache, no-transform',
+    connection: 'keep-alive',
+    'x-accel-buffering': 'no',
+  });
+  res.write(chunk(id, model, { role: 'assistant', content: '' }));
+  res.write(chunk(id, model, { content: title }));
+  res.write(chunk(id, model, {}, 'stop'));
+  res.write(DONE);
+  res.end();
+}
 
 export async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
@@ -150,6 +189,13 @@ export async function handleChatCompletions(
   }
 
   const messages = (body.messages ?? []) as ChatMessage[];
+
+  // Заголовок разговора отвечаем до всякой сессии: это не ход Икара.
+  if (isTitleRequest(body.model, messages)) {
+    respondTitle(res, body, messages);
+    return;
+  }
+
   const { userId, conversationId } = resolveIdentity(req, body, messages);
   const user: UserConfig | undefined = findUser(config, userId);
   if (!user) {
