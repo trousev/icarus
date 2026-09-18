@@ -91,10 +91,10 @@ function stripLeadWords(phrase: string): string {
   return list.join(' ');
 }
 
-function cap(phrase: string): string {
-  let list = words(phrase).slice(0, MAX_WORDS);
+function cap(phrase: string, maxWords = MAX_WORDS, maxChars = MAX_CHARS): string {
+  let list = words(phrase).slice(0, maxWords);
   let text = list.join(' ');
-  while (text.length > MAX_CHARS && list.length > 1) {
+  while (text.length > maxChars && list.length > 1) {
     list = list.slice(0, -1);
     text = list.join(' ');
   }
@@ -128,4 +128,44 @@ export function titleFromText(text: string): string {
 /** Заголовок из промпта LibreChat: берём разговор и сжимаем его до заголовка. */
 export function titleFromPrompt(prompt: string): string {
   return titleFromText(conversationFromTitlePrompt(prompt));
+}
+
+/** Модели можно дать чуть больше свободы, чем эвристике: она умеет сжимать смысл. */
+const MODEL_MAX_WORDS = 8;
+const MODEL_MAX_CHARS = 64;
+
+/**
+ * Что спрашиваем у дешёвой модели. Свой промпт, а не промпт LibreChat: там разговор
+ * обёрнут в служебную рамку и обрывается на «AI: » — модели это мешает.
+ */
+export function buildTitlePrompt(conversation: string): string {
+  return `Придумай короткий заголовок этого разговора: 3–6 слов, на языке разговора, без кавычек и без точки в конце. Верни только заголовок.
+
+Разговор:
+${conversation}
+
+Заголовок:`;
+}
+
+/**
+ * Ответ модели как заголовок: одна строка без размышлений, кавычек, Markdown
+ * и служебных подписей вроде «Заголовок:». Пустая строка — сигнал, что ответ
+ * бесполезен и вызывающему стоит взять эвристику.
+ */
+export function cleanModelTitle(raw: string): string {
+  const withoutThinking = String(raw ?? '').replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '\n');
+  const line =
+    withoutThinking
+      .split('\n')
+      .map((part) => part.trim())
+      .find((part) => part !== '') ?? '';
+
+  const cleaned = line
+    .replace(/^(заголовок|название|title)\s*[:\-—]\s*/i, '')
+    .replace(/^[#*>`"«»'“”\s]+/, '')
+    .replace(/[#*`"«»'“”\s]+$/, '')
+    .trim();
+
+  if (!cleaned) return '';
+  return upFirst(cap(cleaned, MODEL_MAX_WORDS, MODEL_MAX_CHARS).replace(/[.,;:!?]+$/, '').trim());
 }

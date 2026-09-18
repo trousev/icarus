@@ -11,18 +11,16 @@ endpoints:
         default: ['icarus']
         fetch: false
       # Заголовок разговора. LibreChat спросит его отдельным запросом; icarus
-      # узнаёт этот запрос по titleModel и по метке в titlePrompt и отвечает
-      # сам, не поднимая сессию pi (см. packages/service/src/http/title.ts).
+      # узнаёт этот запрос по titleModel и по метке в titlePrompt, отвечает сам
+      # и в сессию pi его не пускает (см. packages/service/src/http/title.ts).
+      # Текст промпта роли не играет: он только несёт метку и разговор — саму
+      # просьбу к дешёвой модели icarus формулирует сам.
       titleConvo: true
       titleMethod: 'completion'
       titleModel: 'icarus-title'
       titleTiming: 'immediate'
       titlePrompt: |
         [[ICARUS_TITLE]]
-        Придумай короткий заголовок этого разговора: 3–6 слов, на языке разговора,
-        без кавычек и без точки в конце. Верни только заголовок.
-
-        Conversation:
         {convo}
       modelDisplayLabel: 'Икар'
       headers:

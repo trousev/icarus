@@ -4,35 +4,89 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createHash } from 'node:crypto';
-import { log } from '../log.ts';
+import { log, redact } from '../log.ts';
 import { findUser, userPaths, type IcarusConfig, type UserConfig } from '../config.ts';
 import { compareHistory, normalizeContent, type IncomingMessage as ChatMessage } from '../sessions/divergence.ts';
 import { phraseForToolEnd, phraseForToolStart } from '../reasoning.ts';
 import type { SessionRegistry } from '../sessions/registry.ts';
 import type { PiSession } from '../sessions/pi-session.ts';
 import { chunk, completion, completionId, DONE, errorBody, usageChunk, type Usage } from './sse.ts';
-import { isTitleRequest, titleFromPrompt, TITLE_MODEL_ID } from './title.ts';
+import {
+  buildTitlePrompt,
+  cleanModelTitle,
+  conversationFromTitlePrompt,
+  isTitleRequest,
+  titleFromPrompt,
+  TITLE_MODEL_ID,
+} from './title.ts';
 
 const MAX_BODY_BYTES = 16 * 1024 * 1024;
+
+/** Сколько ждём дешёвую модель на заголовок; дальше отвечаем эвристикой. */
+const TITLE_TIMEOUT_MS = 12_000;
 
 const ZERO_USAGE: Usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
 
 /**
- * Заголовок разговора: LibreChat зовёт модель отдельным запросом. В сессию pi
- * его не пускаем — отвечаем сразу и без агентского прогона (см. title.ts).
+ * Заголовок разговора: LibreChat зовёт модель отдельным запросом, и в живую сессию
+ * pi мы его не пускаем — иначе это лишний агентский прогон и гонка с основным ходом.
+ *
+ * Заголовок просим у дешёвой модели разовым вопросом в контейнере человека; на любом
+ * сбое (нет пользователя, таймаут, пустой ответ) молча отдаём эвристику — заголовок
+ * не то, ради чего стоит задерживать или ломать ответ.
  */
-function respondTitle(
+async function respondTitle(
+  req: IncomingMessage,
   res: ServerResponse,
   body: Record<string, unknown>,
   messages: ChatMessage[],
-): void {
+  ctx: ChatContext,
+): Promise<void> {
   const lastUser = [...messages].reverse().find((message) => message?.role === 'user');
   const prompt = normalizeContent(lastUser?.content);
-  const title = titleFromPrompt(prompt);
+  const fallback = titleFromPrompt(prompt);
+  let title = fallback;
+  let source = 'эвристика';
+
+  const user = findUser(ctx.config, resolveIdentity(req, body, messages).userId);
+  if (user) {
+    const controller = new AbortController();
+    // Клиент ушёл (в LibreChat нажали «стоп») — незачем держать вызов модели.
+    const onClose = () => controller.abort();
+    res.on('close', onClose);
+    try {
+      const asked = await ctx.registry.oneShot(user, buildTitlePrompt(conversationFromTitlePrompt(prompt)), {
+        timeoutMs: TITLE_TIMEOUT_MS,
+        signal: controller.signal,
+      });
+      const cleaned = cleanModelTitle(asked);
+      if (cleaned) {
+        title = cleaned;
+        source = 'модель';
+      } else {
+        log.warn('модель вернула пустой заголовок — оставляю эвристику', { user: user.id });
+      }
+    } catch (error) {
+      if (controller.signal.aborted) {
+        log.debug('заголовок отменён вместе с ходом', { user: user.id });
+      } else {
+        log.warn('заголовок от модели не вышел — оставляю эвристику', {
+          user: user.id,
+          error: redact(String(error)),
+        });
+      }
+    } finally {
+      res.off('close', onClose);
+    }
+  }
+
   const model = typeof body.model === 'string' ? body.model : TITLE_MODEL_ID;
   const id = completionId();
 
-  log.info('заголовок разговора', { title });
+  log.info('заголовок разговора', { title, source, user: user?.id ?? 'неизвестный' });
+
+  // Клиент уже ушёл — писать некуда, и это не ошибка.
+  if (res.writableEnded || res.destroyed) return;
 
   if (body.stream === false) {
     res.writeHead(200, { 'content-type': 'application/json' });
@@ -192,7 +246,7 @@ export async function handleChatCompletions(
 
   // Заголовок разговора отвечаем до всякой сессии: это не ход Икара.
   if (isTitleRequest(body.model, messages)) {
-    respondTitle(res, body, messages);
+    await respondTitle(req, res, body, messages, { config, registry });
     return;
   }
 
