@@ -1,0 +1,227 @@
+// Подготовка рабочего окружения пользователя на хосте: каталоги, AGENTS.md,
+// auth.json для pi и наши расширения.
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { log } from './log.ts';
+import { userPaths, userContainer, type IcarusConfig, type UserConfig } from './config.ts';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+/** Расширения и icarus.md лежат в репозитории, а не в пакете сервиса. */
+const REPO_ROOT = path.resolve(HERE, '../../..');
+const EXTENSIONS_DIR = path.join(REPO_ROOT, 'packages', 'extensions');
+
+export type PreparedUser = ReturnType<typeof prepareUser>;
+
+export function ensureDirs(config: IcarusConfig, user: UserConfig): void {
+  const paths = userPaths(config, user);
+  for (const dir of [paths.memory, paths.incoming, paths.sessions, paths.piAgent, paths.sharedMemory]) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  for (const sub of ['people', 'projects', 'journal']) {
+    fs.mkdirSync(path.join(paths.memory, sub), { recursive: true });
+  }
+}
+
+/** Карта окружения: то, что агент читает как AGENTS.md. */
+export function renderAgentsMd(user: UserConfig): string {
+  const rows = [
+    '| `/workspace/memory/` | **личная память** этого человека | читай смело, пиши когда просят запомнить |',
+    '| `/workspace/shared-memory/` | **семейная память**, общая для всех | писать **только по явной просьбе** |',
+    '| `/workspace/incoming/` | вложения из чата | разбирай сам: прочитай, посмотри, разложи |',
+    '| `/workspace/icarus.md` | твой системный промпт | не редактируй |',
+    ...(user.mounts ?? []).map(
+      (mount) =>
+        `| \`${mount.container}\` | репозиторий или каталог с кодом | ${
+          mount.mode === 'ro' ? 'только чтение' : 'можно менять, если попросят'
+        } |`,
+    ),
+  ];
+
+  return `# Где ты находишься
+
+Ты работаешь в контейнере. Всё, что тебе нужно, лежит в \`/workspace\`:
+
+| Путь | Что это | Как обращаться |
+|---|---|---|
+${rows.join('\n')}
+
+## Как устроена память
+
+- \`memory/identity.md\` — кто этот человек: имя, привычки, устойчивые предпочтения.
+- \`memory/people/\` — люди вокруг: по файлу на человека.
+- \`memory/preferences.md\` — вкусы, табу, как с ним разговаривать.
+- \`memory/projects/\` — долгие темы и дела, по файлу на тему.
+- \`memory/journal/YYYY-MM.md\` — журнал: что происходило, построчно, с датами.
+
+Правила простые: не дублируй то, что уже написано; противоречия не копи, а правь старую запись;
+в журнал пиши коротко и с датой. Структуру можно расширять, если смысла не хватает.
+
+## Границы
+
+- \`shared-memory/\` — только по явной просьбе. Сомневаешься — пиши в личное.
+- Не удаляй чужие файлы и не трогай ничего за пределами \`/workspace\`.
+`;
+}
+
+/** Ключи провайдеров в формате pi: ~/.pi/agent/auth.json. */
+export function renderAuthJson(user: UserConfig): string {
+  const entries = Object.entries(user.auth ?? {}).map(([provider, key]) => [
+    provider,
+    { type: 'api_key', key },
+  ]);
+  return JSON.stringify(Object.fromEntries(entries), null, 2) + '\n';
+}
+
+/** Пакеты pi: подключаем MCP-мост только если у человека есть MCP-серверы. */
+export function renderSettingsJson(user: UserConfig): string {
+  const servers = Object.keys(user.mcp ?? {});
+  const settings: Record<string, unknown> = {};
+  if (servers.length > 0) settings.packages = ['npm:pi-mcp-extension@1.5.0'];
+  return JSON.stringify(settings, null, 2) + '\n';
+}
+
+/** ~/.pi/agent/mcp.json — то, что читает pi-mcp-extension. */
+export function renderMcpJson(user: UserConfig): string {
+  const servers = Object.fromEntries(
+    Object.entries(user.mcp ?? {}).map(([name, server]) => [
+      name,
+      {
+        transport: server.transport ?? (server.url ? 'streamable-http' : 'stdio'),
+        ...(server.command ? { command: server.command } : {}),
+        ...(server.args ? { args: server.args } : {}),
+        ...(server.env ? { env: server.env } : {}),
+        ...(server.url ? { url: server.url } : {}),
+        lifecycle: server.lifecycle ?? 'eager',
+      },
+    ]),
+  );
+  return JSON.stringify({ settings: { toolPrefix: 'mcp', requestTimeoutMs: 30000 }, mcpServers: servers }, null, 2) + '\n';
+}
+
+/**
+ * Записывает файл, снося каталог с тем же именем.
+ * Docker при монтировании несуществующего пути создаёт каталог — после этого обычная
+ * запись файла падает с EISDIR, поэтому подстраховываемся.
+ */
+function writeFileSafe(target: string, content: string, mode?: number): void {
+  if (fs.existsSync(target) && fs.statSync(target).isDirectory()) {
+    fs.rmSync(target, { recursive: true, force: true });
+  }
+  fs.writeFileSync(target, content, mode ? { mode } : undefined);
+}
+
+function copyDirFiles(from: string, to: string, depth = 0): string[] {
+  if (!fs.existsSync(from)) {
+    // Молча ничего не скопировать — худший вариант: агент останется без персоны и памяти,
+    // а мы будем думать, что расширения на месте.
+    throw new Error(`каталог расширений не найден: ${from}`);
+  }
+  fs.mkdirSync(to, { recursive: true });
+  const copied: string[] = [];
+
+  for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
+    if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
+    const source = path.join(from, entry.name);
+    const target = path.join(to, entry.name);
+    if (entry.isDirectory()) {
+      // подкаталоги вроде lib/ — это общие модули, pi их расширениями не считает
+      copied.push(...copyDirFiles(source, target, depth + 1).map((name) => `${entry.name}/${name}`));
+      continue;
+    }
+    if (!entry.name.endsWith('.ts')) continue;
+    fs.copyFileSync(source, target);
+    copied.push(entry.name);
+  }
+
+  if (depth === 0 && copied.length === 0) throw new Error(`в ${from} нет ни одного .ts расширения`);
+  return copied;
+}
+
+export function prepareUser(config: IcarusConfig, user: UserConfig) {
+  ensureDirs(config, user);
+  const paths = userPaths(config, user);
+
+  writeFileSafe(paths.agentsMd, renderAgentsMd(user));
+
+  const authPath = path.join(paths.piAgent, 'auth.json');
+  writeFileSafe(authPath, renderAuthJson(user), 0o600);
+  fs.chmodSync(authPath, 0o600);
+
+  writeFileSafe(path.join(paths.piAgent, 'settings.json'), renderSettingsJson(user));
+  writeFileSafe(path.join(paths.piAgent, 'mcp.json'), renderMcpJson(user));
+
+  // Персона одна на всех, источник истины — репозиторий: при старте перезаписываем копию
+  // в каталоге пользователя, иначе правки в icarus.md не доедут до существующих людей.
+  const personaSource = path.join(REPO_ROOT, 'icarus.md');
+  if (fs.existsSync(personaSource)) {
+    writeFileSafe(paths.icarusMd, fs.readFileSync(personaSource, 'utf8'));
+  } else {
+    log.warn('icarus.md не найден — агент останется на дефолтном промпте', { source: personaSource });
+  }
+
+  // Каталог расширений — управляемый: чистим его, иначе после переименований там
+  // остаются старые копии, которые pi продолжит загружать как расширения.
+  const extensionsDir = path.join(paths.piAgent, 'extensions');
+  fs.rmSync(extensionsDir, { recursive: true, force: true });
+  const extensions = copyDirFiles(EXTENSIONS_DIR, extensionsDir);
+  log.debug('окружение пользователя готово', {
+    user: user.id,
+    extensions: extensions.length,
+    container: userContainer(config, user),
+  });
+
+  return { paths, extensions };
+}
+
+/** Уровни моделей уезжают в контейнер переменными — их читает расширение эскалации. */
+export function modelTierEnv(user: UserConfig): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const model of user.models ?? []) {
+    if (!model.tier) continue;
+    env[`ICARUS_MODEL_${model.tier.toUpperCase()}`] = `${model.provider}/${model.id}:${model.thinking ?? 'off'}`;
+  }
+  return env;
+}
+
+/** Аргументы `docker run` для контейнера пользователя. */
+export function containerRunArgs(config: IcarusConfig, user: UserConfig): string[] {
+  const paths = userPaths(config, user);
+  const name = userContainer(config, user);
+
+  const args = [
+    'run',
+    '-d',
+    '--name',
+    name,
+    '--restart',
+    'unless-stopped',
+    '-v',
+    `${paths.memory}:/workspace/memory`,
+    '-v',
+    `${paths.incoming}:/workspace/incoming`,
+    '-v',
+    `${paths.sessions}:/workspace/.sessions`,
+    '-v',
+    `${paths.sharedMemory}:/workspace/shared-memory`,
+    '-v',
+    `${paths.piAgent}:/home/node/.pi/agent`,
+    '-v',
+    `${paths.agentsMd}:/workspace/AGENTS.md:ro`,
+    '-v',
+    `${paths.icarusMd}:/workspace/icarus.md:ro`,
+  ];
+
+  for (const mount of user.mounts ?? []) {
+    args.push('-v', `${mount.host}:${mount.container}${mount.mode === 'ro' ? ':ro' : ''}`);
+  }
+
+  for (const [key, value] of Object.entries({ ...modelTierEnv(user), ...(user.env ?? {}) })) {
+    args.push('-e', `${key}=${value}`);
+  }
+
+  if (config.docker.network) args.push('--network', config.docker.network);
+
+  args.push(config.docker.image);
+  return args;
+}

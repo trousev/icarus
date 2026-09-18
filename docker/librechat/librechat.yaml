@@ -1,0 +1,31 @@
+# Стенд M0/M1: icarus смотрит на тот же эхо-сервер и на самого себя.
+# Рабочий вариант — endpoint Icarus, эхо оставлен для отладки стыка.
+version: 1.3.13
+cache: true
+endpoints:
+  custom:
+    - name: 'Icarus'
+      apiKey: 'icarus-local-token'
+      baseURL: 'http://host.docker.internal:8080/v1'
+      models:
+        default: ['icarus']
+        fetch: false
+      titleConvo: false
+      modelDisplayLabel: 'Икар'
+      headers:
+        x-icarus-user-id: '{{LIBRECHAT_USER_USERNAME}}'
+        x-icarus-user-email: '{{LIBRECHAT_USER_EMAIL}}'
+        x-icarus-conversation-id: '{{LIBRECHAT_BODY_CONVERSATIONID}}'
+        x-icarus-message-id: '{{LIBRECHAT_BODY_MESSAGEID}}'
+
+    - name: 'EchoProbe'
+      apiKey: 'probe'
+      baseURL: 'http://host.docker.internal:4099/v1'
+      models:
+        default: ['echo-probe']
+        fetch: false
+      titleConvo: false
+      modelDisplayLabel: 'Echo Probe'
+      headers:
+        X-Probe-User-Id: '{{LIBRECHAT_USER_ID}}'
+        X-Probe-Conversation-Id: '{{LIBRECHAT_BODY_CONVERSATIONID}}'

@@ -1,0 +1,28 @@
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example
+.pytest_cache/
+dist/
+build/
+*.log
+.DS_Store
+
+# рантайм-данные Icarus (контейнеры, тома памяти, сессии)
+runtime/
+data/
+
+# стенд LibreChat (M0)
+docker/librechat/.env
+docker/librechat/probe-log.jsonl
+docker/librechat/logs/
+docker/librechat/uploads/
+docker/librechat/images/
+docker/librechat/data-node/
+
+# локальный конфиг и секреты сервиса
+packages/service/icarus.config.json
+packages/service/.env
