@@ -44,17 +44,6 @@ export function specFor(config: IcarusConfig): string {
   return createHash('sha1').update(payload).digest('hex').slice(0, 16);
 }
 
-export function labelArgs(config: IcarusConfig, user: UserConfig): string[] {
-  return [
-    '--label',
-    `${LABEL_MANAGED}=1`,
-    '--label',
-    `${LABEL_USER}=${user.id}`,
-    '--label',
-    `${LABEL_SPEC}=${specFor(config)}`,
-  ];
-}
-
 export function containerNameFor(config: IcarusConfig, user: UserConfig): string {
   return userContainer(config, user);
 }

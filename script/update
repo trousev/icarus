@@ -69,7 +69,10 @@ cat <<'EOF'
 Готово. Дальше:
   ./script/lint            типы и линтер
   ./script/test            тесты (докер и модель не нужны)
-  ./script/server          icarus на :8080
+  ./script/server          собрать docker-compose.yml и поднять стек на :8080
+                           (образ человека ./script/server соберёт сам)
+  ./script/server -d       то же в фоне: переживёт терминал и перезагрузку
   ./script/server --with-librechat
-                           icarus вместе со стендом LibreChat на :3090
+                           то же вместе со стендом LibreChat на :3090
+  ./script/server --down   погасить стек
 EOF

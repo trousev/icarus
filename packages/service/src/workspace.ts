@@ -13,7 +13,6 @@ import {
   type IcarusConfig,
   type UserConfig,
 } from './config.ts';
-import { containerEnv, labelArgs } from './docker/spec.ts';
 
 const EXTENSIONS_DIR = path.join(REPO_ROOT, 'packages', 'extensions');
 
@@ -175,51 +174,4 @@ export function prepareUser(config: IcarusConfig, user: UserConfig) {
   });
 
   return { paths, extensions };
-}
-
-/** Аргументы `docker run` для контейнера пользователя. */
-export function containerRunArgs(config: IcarusConfig, user: UserConfig): string[] {
-  const paths = userPaths(config, user);
-  const name = userContainer(config, user);
-
-  const args = [
-    'run',
-    '-d',
-    '--name',
-    name,
-    '--restart',
-    'unless-stopped',
-    // Метки — единственный способ отличить свои контейнеры от чужих на том же хосте
-    // и понять, что образ или маунты поменялись и контейнер пора пересоздать.
-    ...labelArgs(config, user),
-    // Личные каталоги: у каждого свои, выводятся из id.
-    '-v',
-    `${paths.memory}:/workspace/memory`,
-    '-v',
-    `${paths.incoming}:/workspace/incoming`,
-    '-v',
-    `${paths.sessions}:/workspace/.sessions`,
-    '-v',
-    `${paths.sharedMemory}:/workspace/shared-memory`,
-    '-v',
-    `${paths.piAgent}:/home/node/.pi/agent`,
-    '-v',
-    `${paths.agentsMd}:/workspace/AGENTS.md:ro`,
-    '-v',
-    `${paths.icarusMd}:/workspace/icarus.md:ro`,
-  ];
-
-  // Общие каталоги с хоста — одни и те же у всех.
-  for (const mount of config.mounts) {
-    args.push('-v', `${mount.host}:${mount.container}${mount.mode === 'ro' ? ':ro' : ''}`);
-  }
-
-  for (const [key, value] of Object.entries(containerEnv(config))) {
-    args.push('-e', `${key}=${value}`);
-  }
-
-  if (config.docker.network) args.push('--network', config.docker.network);
-
-  args.push(config.docker.image);
-  return args;
 }

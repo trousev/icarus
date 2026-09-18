@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { buildPrompt, extractLatestUserMessage, resolveIdentity } from '../src/http/openai.ts';
-import { containerRunArgs } from '../src/workspace.ts';
+import { userVolumes } from '../src/docker/compose.ts';
 import { expandValue, loadConfig, userPaths, type IcarusConfig } from '../src/config.ts';
 
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
@@ -68,13 +68,10 @@ test('контейнер монтирует память, сессии и реп
     models: [{ provider: 'deepseek', id: 'deepseek-v4-flash', tier: 'fast' as const }],
     mounts: [{ host: '/host/scratchpad', container: '/workspace/scratchpad', mode: 'ro' as const }],
   } as unknown as IcarusConfig;
-  const args = containerRunArgs(config, { id: 'probe' });
-  const joined = args.join(' ');
-  assert.match(joined, /--name icarus-user-probe/);
+  const joined = userVolumes(config, { id: 'probe' }).join(' ');
   assert.match(joined, /\/data\/users\/probe\/memory:\/workspace\/memory/);
   assert.match(joined, /\/data\/users\/probe\/sessions:\/workspace\/\.sessions/);
   assert.match(joined, /\/host\/scratchpad:\/workspace\/scratchpad:ro/);
-  assert.equal(args[args.length - 1], 'icarus-user:dev');
 });
 
 test('пути пользователя выводятся из dataDir', () => {

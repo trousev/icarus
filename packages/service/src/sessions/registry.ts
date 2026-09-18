@@ -1,6 +1,6 @@
 // Реестр сессий: (пользователь, разговор) → живой процесс pi.
-// Держит контейнеры поднятыми, гасит простаивающие сессии, защищает от параллельных ходов.
-import { ensureContainer } from '../docker/manager.ts';
+// Держит контейнеры тёплыми, гасит простаивающие сессии, защищает от параллельных ходов.
+import { ensureContainerRunning } from '../docker/manager.ts';
 import { log } from '../log.ts';
 import { PiSession } from './pi-session.ts';
 import { runOneShot, type OneShotOptions } from './one-shot.ts';
@@ -38,7 +38,7 @@ export class SessionRegistry {
       const existing = [...this.sessions.values()].find((session) => session.user.id === user.id);
       if (existing) return existing.container;
     }
-    const { name } = await ensureContainer(this.config, user);
+    const name = await ensureContainerRunning(this.config, user);
     this.readyContainers.add(user.id);
     return name;
   }
