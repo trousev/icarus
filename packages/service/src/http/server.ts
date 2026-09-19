@@ -50,6 +50,9 @@ export function createServer(config: IcarusConfig, registry: SessionRegistry, pa
       res.end(
         JSON.stringify({
           ok: true,
+          // Отпечаток кода из compose: по нему видно, тот ли код работает в контейнере.
+          // Без этого «деплой зелёный, а на стенде старый код» не отличить от нормы.
+          revision: process.env.ICARUS_REVISION ?? null,
           sessions: registry.list(),
           users: config.users.map((user) => user.id),
           containers,

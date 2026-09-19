@@ -113,3 +113,18 @@ test('usage отдаётся только когда клиент его поп�
     assert.match(withUsage, /"total_tokens":15/);
   });
 });
+
+test('/healthz отдаёт отпечаток кода: по нему видно, какая версия работает в контейнере', async () => {
+  const previous = process.env.ICARUS_REVISION;
+  process.env.ICARUS_REVISION = 'rev-test';
+  try {
+    await withServer(async (base) => {
+      const body = (await (await fetch(`${base}/healthz`)).json()) as { ok: boolean; revision: string | null };
+      assert.equal(body.ok, true);
+      assert.equal(body.revision, 'rev-test', 'без ревизии «деплой зелёный, а код старый» не отличить');
+    });
+  } finally {
+    if (previous === undefined) delete process.env.ICARUS_REVISION;
+    else process.env.ICARUS_REVISION = previous;
+  }
+});

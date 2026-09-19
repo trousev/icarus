@@ -11,6 +11,7 @@ import { parseEnv } from 'node:util';
 import { DEFAULT_CONFIG_PATH, ENV_FILE, ensurePanelSecret, loadConfig, loadEnvFile, publicHost, REPO_ROOT, userContainer } from '../config.ts';
 import { prepareUser } from '../workspace.ts';
 import { COMPOSE_PROJECT, DEFAULT_SERVICE_IMAGE, renderCompose, type ComposeOptions } from './compose.ts';
+import { sourceRevision } from './revision.ts';
 
 const DEFAULT_LIBRECHAT_PORT = 3090;
 
@@ -131,6 +132,10 @@ function main(): void {
     extraGroups,
     serviceImage: args.serviceImage,
     panelSecret,
+    // Отпечаток кода считаем здесь, на хосте, и кладём в окружение сервиса: иначе
+    // `docker compose up` не заметит, что код в bind-mount'е сменился, и оставит
+    // работать старый процесс (см. revision.ts).
+    revision: sourceRevision(REPO_ROOT),
     ...(fs.existsSync(ENV_FILE) ? { envFile: ENV_FILE } : {}),
     ...(args.withLibrechat ? { librechat: { dir: librechatDir, port: librechatPort(librechatDir) } } : {}),
   };

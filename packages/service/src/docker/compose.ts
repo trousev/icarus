@@ -7,6 +7,8 @@
 // а жизненным циклом распоряжается docker: `restart: unless-stopped` поднимает контейнеры
 // после падения и перезагрузки, `docker compose up` пересоздаёт их при смене образа, маунтов
 // или окружения, а выбывшие люди уходят вместе с исчезнувшим сервисом (--remove-orphans).
+// Смену кода сервиса в это сравнение добавляет отпечаток ICARUS_REVISION (см. revision.ts):
+// исходники монтируются, и без него контейнер оставался бы жить со старым кодом.
 //
 // Здесь только чистая сборка YAML: никакого docker и никаких побочных эффектов — так её
 // можно проверять тестами, а решения о запуске остаются в script/server.
@@ -52,6 +54,12 @@ export type ComposeOptions = {
   envFile?: string;
   /** Секрет панели: из него выводятся личные ключи ссылок на память (см. ensurePanelSecret). */
   panelSecret: string;
+  /**
+   * Отпечаток кода сервиса (см. revision.ts). Исходники монтируются в контейнер, а не
+   * запекаются в образ, поэтому без отпечатка `docker compose up` не считает смену кода
+   * поводом пересоздать контейнер, и старый процесс живёт со старым кодом в памяти.
+   */
+  revision: string;
   /** Стенд LibreChat — по флагу --with-librechat. */
   librechat?: LibrechatOptions;
 };
@@ -105,6 +113,8 @@ function serviceEnvironment(config: IcarusConfig, options: ComposeOptions): Reco
     // Без этого `~` в конфиге развернулся бы в /root внутри контейнера и все маунты уехали бы.
     HOME: options.home,
     ICARUS_CONFIG: options.configPath,
+    // Отпечаток кода: меняется код — меняется окружение — compose пересоздаёт сервис.
+    ICARUS_REVISION: options.revision,
     ...(options.dockerHost ? { DOCKER_HOST: options.dockerHost } : {}),
   };
 }
