@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Проверки Icarus: типы и линтер. Сборки нет — код исполняется как есть.
+# Проверки Icarus: типы, линтер и bash-скрипты. Сборки нет — код исполняется как есть.
 #
-#   ./script/lint          и типы, и линтер (то же гоняет CI)
+#   ./script/lint          всё перечисленное (то же гоняет CI)
 #   ./script/lint tsc      только типы
 #   ./script/lint eslint   только линтер
+#   ./script/lint shell    только shellcheck по script/*
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -16,9 +17,9 @@ fi
 
 what="${1:-all}"
 case "$what" in
-all | tsc | typecheck | eslint) ;;
+all | tsc | typecheck | eslint | shell) ;;
 *)
-  echo "не понимаю «$what»: ожидаю tsc, eslint или пусто" >&2
+  echo "не понимаю «$what»: ожидаю tsc, eslint, shell или пусто" >&2
   exit 2
   ;;
 esac
@@ -31,4 +32,21 @@ fi
 if [ "$what" = all ] || [ "$what" = eslint ]; then
   echo '==> eslint'
   node_modules/.bin/eslint . --max-warnings=0
+fi
+
+if [ "$what" = all ] || [ "$what" = shell ]; then
+  # bash в проекте — тоже код: script/* собирает compose, ставит зависимости и правит
+  # конфиги. Берём severity=warning: style/info у shellcheck слишком шумные для наших
+  # осознанных приёмов (${arr[@]+"${arr[@]}"} и одинарные кавычки с node -e).
+  if command -v shellcheck >/dev/null 2>&1; then
+    echo '==> shellcheck'
+    shellcheck --severity=warning script/*
+  elif [ -n "${CI:-}" ]; then
+    # На ubuntu-образе GitHub shellcheck есть из коробки, так что в CI это не «нет
+    # инструмента», а сломанный раннер: молча пропускать проверку нельзя.
+    echo '[x] в CI нет shellcheck — проверка script/* обязательна' >&2
+    exit 1
+  else
+    echo '[!] нет shellcheck — bash-скрипты не проверены (apt install shellcheck)' >&2
+  fi
 fi

@@ -18,7 +18,9 @@ if [ ! -d node_modules ]; then
   exit 1
 fi
 
-# Если файлы не названы, берём весь набор; названные — добавляются к флагам.
+# Если файлы не названы, берём все тесты под packages/. Именно find, а не маска
+# одного каталога: тест, положенный в новый подкаталог, не должен молча выпасть
+# из прогона — незапущенный тест хуже упавшего.
 files=()
 for arg in "$@"; do
   case "$arg" in
@@ -26,6 +28,24 @@ for arg in "$@"; do
   *.ts | *.js | *.mjs | *.cjs) files+=("$arg") ;;
   esac
 done
-[ ${#files[@]} -gt 0 ] || files=(packages/service/test/*.test.ts)
 
+if [ ${#files[@]} -eq 0 ]; then
+  [ -d packages ] || {
+    echo '[x] нет каталога packages — запускать нечего' >&2
+    exit 1
+  }
+  mapfile -t files < <(
+    find packages \
+      -type d -name node_modules -prune -o \
+      -type f \( -name '*.test.ts' -o -name '*.test.mjs' -o -name '*.test.js' \) -print |
+      LC_ALL=C sort
+  )
+fi
+
+if [ ${#files[@]} -eq 0 ]; then
+  echo '[x] не нашёл ни одного теста: ожидаю packages/**/*.test.ts' >&2
+  exit 1
+fi
+
+echo "==> node --test: ${#files[@]} файл(ов)"
 exec node --test "$@" "${files[@]}"

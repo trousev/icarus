@@ -19,7 +19,7 @@ const server = http.createServer((req, res) => {
   let raw = '';
   req.on('data', (c) => { raw += c; });
   req.on('end', () => {
-    let body = null;
+    let body;
     try { body = JSON.parse(raw); } catch { body = raw; }
 
     const id = ++seq;
