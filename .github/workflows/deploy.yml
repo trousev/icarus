@@ -1,0 +1,61 @@
+name: Deploy
+
+# Прод — trousev.pro: чекаут в ~/deployments/icarus и стек docker compose, который
+# поднимает ./script/server -d. LibreChat рядом с ним деплоится отдельно, этот
+# workflow его не трогает. Любой push в main уезжает на прод; вручную — workflow_dispatch.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      full_rebuild:
+        description: "Собрать образы без кеша (медленнее)"
+        type: boolean
+        default: false
+
+# Прод один: два деплоя одновременно передерутся за один и тот же стек на хосте,
+# поэтому новый не отменяет текущий, а ждёт его.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # Секреты и переменные лежат в environment production, а у него правило
+    # «разрешена только main»: репозиторий публичный, и секреты уровня репозитория
+    # читала бы любая ветка.
+    environment: production
+    steps:
+      - name: Деплой по SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: trousev
+          key: ${{ secrets.DEPLOY_SSH_SECRET }}
+          # Люди — из variables (список меняется без правки кода), ключи — из секретов.
+          envs: ICARUS_USERS,ICARUS_API_KEY,DEEPSEEK_API_KEY
+          # 30m вместо 10m по умолчанию: убитая на середине сессия оставляет стек
+          # недособранным (у youtubarr так и случилось: контейнер в состоянии Created,
+          # сервис лежит до ручного запуска).
+          command_timeout: 30m
+          # ВНИМАНИЕ: script_stop вставляет проверку кода возврата после КАЖДОЙ строки,
+          # поэтому здесь только простые команды — многострочный if обрывает деплой
+          # (проверка после `if ...; then` читает код возврата самого условия).
+          # Вся логика живёт в ./script/redeploy.
+          script_stop: true
+          script: |
+            mkdir -p ~/deployments
+            test -d ~/deployments/icarus/.git || git clone git@github.com:${{ github.repository }}.git ~/deployments/icarus
+            cd ~/deployments/icarus
+            git fetch origin main
+            git reset --hard origin/main
+            ./script/redeploy ${{ inputs.full_rebuild && '--no-cache' || '' }}
+        env:
+          ICARUS_USERS: ${{ vars.ICARUS_USERS }}
+          ICARUS_API_KEY: ${{ secrets.ICARUS_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}

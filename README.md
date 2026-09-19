@@ -117,6 +117,7 @@ BRAVE_API_KEY=...         # прочие ключи просто уезжают 
 | `./script/test` | гоняет тесты (`node --test`) по всем `packages/**/*.test.ts` — обходом дерева, чтобы тест из нового каталога не выпал из прогона молча; докер и модель не нужны, `ICARUS_E2E=1` включает сценарные |
 | `./script/lint` | `tsc --noEmit` + `eslint` + `shellcheck` по `script/*` (можно по отдельности: `./script/lint tsc`, `./script/lint eslint`, `./script/lint shell`) |
 | `./script/server` | собирает `docker-compose.yml` из `config.yaml`, сначала пересобирает образы, потом поднимает стек через `docker compose up`; `-d` уводит в фон, `--with-librechat` добавляет стенд, `--build` собирает без кеша, `--down` гасит стек |
+| `./script/redeploy` | боевой деплой на trousev.pro: его зовёт workflow, руками — уже на хосте (`--no-cache` собирает образы с нуля) |
 | `./script/regenerate_user_passwords <пароль>` | сбрасывает пароли всех пользователей локального стенда LibreChat на заданный (в базе от них только bcrypt-хеши, восстановить забытый нельзя) |
 
 Те же команды доступны через pnpm: `pnpm test`, `pnpm lint`, `pnpm start`. Установка — только
@@ -168,10 +169,47 @@ reported».
 только проверяльщиком и ничего не пишет на диск. TypeScript пока 6.x — typescript-eslint ещё не
 умеет 7-ю ветку, так что при обновлении зависимостей это ограничение стоит держать в голове.
 
+## Деплой
+
+Прод — `trousev.pro`: чекаут в `~/deployments/icarus` и стек `docker compose`, который
+поднимает `./script/server -d`. LibreChat живёт рядом и деплоится отдельно — этот
+workflow его не трогает, поэтому `--with-librechat` на проде не используется.
+
+Push в `main` запускает [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml):
+GitHub по SSH заходит на `trousev.pro` под `trousev`, обновляет чекаут (`git fetch` +
+`git reset --hard origin/main`) и зовёт [`./script/redeploy`](script/redeploy). Тот
+ставит node, если на хосте он старее 22.19 (официальная сборка в `~/.local/share/icarus`),
+гоняет `./script/update`, переносит секреты в `.env`, правит `config.yaml` через
+`render-config.ts` (люди, порт, `dataDir`, `apiKey`), поднимает стек и падает, если
+`/healthz` не подтвердил, что сервис и контейнеры людей на месте. Руками то же самое:
+`ssh trousev@trousev.pro`, `cd ~/deployments/icarus`, `./script/redeploy` (`--no-cache`
+собирает образы с нуля).
+
+`config.yaml` и `.env` на хосте деплой переживают — они в git не попадают. А вот
+правки трекаемых файлов `git reset --hard` стирает: код на проде меняется только через PR.
+
+Настройки прода живут в GitHub:
+
+| имя | где | что |
+| --- | --- | --- |
+| `ICARUS_USERS` | переменная environment `production` | люди через пробел или запятую — из неё собирается `users:` в `config.yaml` |
+| `ICARUS_API_KEY` | секрет environment `production` | Bearer, под которым LibreChat ходит в icarus (`apiKey` в `config.yaml`) |
+| `DEEPSEEK_API_KEY` | секрет environment `production` | ключ провайдера — уезжает в `.env` |
+| `DEPLOY_HOST` | секрет environment `production` | `trousev.pro` |
+| `DEPLOY_SSH_SECRET` | секрет environment `production` | приватный ключ `github-actions-deploy@icarus`; его публичная часть — в `~/.ssh/authorized_keys` на хосте |
+
+Секреты лежат именно в environment `production`, а у него правило «разрешена только
+ветка `main`»: репозиторий публичный, и секреты уровня репозитория читала бы любая ветка.
+
+Прод-специфику деплой подставляет сам: порт `8081` (на хосте `8080` занят jitsi-jvb) и
+`dataDir` внутри чекаута (`runtime/`, в git не попадает). Поэтому endpoint Icarus в
+LibreChat на проде — `http://host.docker.internal:8081/v1` с ключом `ICARUS_API_KEY`;
+`librechat.yaml` правится вместе с деплоем LibreChat, а не здесь.
+
 ## Устройство репозитория
 
 ```
-script/               команды разработчика: update, test, lint, server, regenerate_user_passwords
+script/               команды разработчика: update, test, lint, server, redeploy, regenerate_user_passwords
 packages/service/     сервис: HTTP, сессии pi, контейнеры, панель памяти
 packages/extensions/  расширения pi, которые живут в контейнере пользователя
 docker/user/          образ контейнера пользователя
