@@ -201,6 +201,14 @@ GitHub по SSH заходит на `trousev.pro` под `trousev`, обновл
 Секреты лежат именно в environment `production`, а у него правило «разрешена только
 ветка `main`»: репозиторий публичный, и секреты уровня репозитория читала бы любая ветка.
 
+`ICARUS_USERS` — это **username из LibreChat**, а не имя человека: заголовок
+`x-icarus-user-id`, которым LibreChat зовёт icarus, собирается из него
+(`{{LIBRECHAT_USER_USERNAME}}` в `librechat.yaml`). Поэтому на проде там
+`alexander vitaliia julia`, а не короткие `trousev vita julia` — с чужим id icarus
+отвечает 403 «пользователь … не заведён в конфиге», и человек не может поговорить.
+Проверить, кого видит icarus, можно по `/healthz`: он отдаёт `users` и состояние
+контейнеров (`missing` должен быть 0).
+
 Прод-специфику деплой подставляет сам: порт `8081` (на хосте `8080` занят jitsi-jvb) и
 `dataDir` внутри чекаута (`runtime/`, в git не попадает). Поэтому endpoint Icarus в
 LibreChat на проде — `http://host.docker.internal:8081/v1` с ключом `ICARUS_API_KEY`;
