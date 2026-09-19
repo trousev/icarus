@@ -106,6 +106,27 @@ test('стек: контейнер человека — образ, маунты
   assert.equal(service.environment.ICARUS_MODEL_FAST, 'deepseek/deepseek-v4-flash:off');
 });
 
+test('стек: docker.dns доезжает до сервиса и до контейнеров людей', () => {
+  const withDns = makeConfig({
+    docker: { ...config.docker, dns: ['1.1.1.1', '8.8.8.8'] },
+    dataDir: config.dataDir,
+    mounts: config.mounts,
+  });
+  const compose = render(withDns);
+
+  assert.deepEqual(compose.services.icarus.dns, ['1.1.1.1', '8.8.8.8']);
+  assert.deepEqual(compose.services['icarus-user-probe'].dns, ['1.1.1.1', '8.8.8.8']);
+
+  assert.equal(render().services.icarus.dns, undefined, 'без docker.dns контейнеры берут резолвер хоста');
+  assert.equal(render().services['icarus-user-probe'].dns, undefined);
+
+  assert.notEqual(
+    specFor(withDns),
+    specFor(makeConfig({ dataDir: config.dataDir, mounts: config.mounts })),
+    'смена DNS меняет отпечаток: старые контейнеры должны пересоздаться',
+  );
+});
+
 test('стек: .env подключается файлом, а не значениями в YAML', () => {
   const compose = render(config, { envFile: '/repo/.env' });
   assert.deepEqual(compose.services.icarus.env_file, ['/repo/.env'], 'сервису ключи нужны для auth.json');

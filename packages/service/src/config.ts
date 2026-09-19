@@ -44,6 +44,8 @@ export type DockerConfig = {
   image: string;
   network?: string;
   prefix?: string;
+  /** DNS-серверы контейнеров; не заданы — берётся резолвер хоста (обычный случай). */
+  dns?: string[];
   socket?: string | null;
 };
 
@@ -277,6 +279,26 @@ function parseMounts(value: unknown, env: NodeJS.ProcessEnv): MountConfig[] {
 
 const TRANSPORTS: Array<NonNullable<McpServerConfig['transport']>> = ['stdio', 'streamable-http', 'sse'];
 
+/**
+ * DNS-серверы контейнеров (docker.dns). Нужны там, где резолвер хоста не пускает
+ * docker-подсети (например, unbound с access-control только на 10.0.0.0/8 отвечает
+ * контейнерам REFUSED, и тогда каждый внешний запрос ждёт таймаут ~4 с, прежде чем
+ * Docker уйдёт на следующий сервер из resolv.conf). Проверяем форму записи здесь,
+ * чтобы опечатка не всплыла посреди `docker compose up`.
+ */
+const DNS_ENTRY = /^[0-9a-fA-F:.]{3,45}$/;
+
+function parseDns(value: unknown): string[] {
+  return asArray(value, 'docker.dns').map((item, index) => {
+    const where = `docker.dns[${index}]`;
+    const entry = requiredString(item, where);
+    if (!DNS_ENTRY.test(entry)) {
+      throw new Error(`${where}: «${entry}» — ожидался адрес DNS-сервера, например 1.1.1.1`);
+    }
+    return entry;
+  });
+}
+
 function parseMcp(value: unknown, env: NodeJS.ProcessEnv): Record<string, McpServerConfig> {
   const record = value === undefined || value === null ? {} : asRecord(value, 'mcp');
   const servers: Record<string, McpServerConfig> = {};
@@ -358,6 +380,7 @@ export function loadConfig(file: string, env: NodeJS.ProcessEnv = process.env): 
   const dockerRaw = raw.docker === undefined || raw.docker === null ? {} : asRecord(raw.docker, 'docker');
   const network = optionalString(dockerRaw.network, 'docker.network');
   const socket = optionalString(dockerRaw.socket, 'docker.socket');
+  const dns = parseDns(dockerRaw.dns);
 
   const apiKey = expandValue(requiredString(raw.apiKey, 'apiKey'), env);
   if (apiKey === '') throw new Error('apiKey: пустой (возможно, не подставилась переменная окружения)');
@@ -374,6 +397,7 @@ export function loadConfig(file: string, env: NodeJS.ProcessEnv = process.env): 
     docker: {
       image: optionalString(dockerRaw.image, 'docker.image') ?? 'icarus-user:dev',
       ...(network === undefined ? {} : { network }),
+      ...(dns.length === 0 ? {} : { dns }),
       prefix: optionalString(dockerRaw.prefix, 'docker.prefix') ?? 'icarus-user',
       socket: socket ?? null,
     },
