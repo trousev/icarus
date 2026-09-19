@@ -1,0 +1,177 @@
+#!/usr/bin/env bash
+# Боевой деплой Icarus: этот скрипт запускает .github/workflows/deploy.yml на trousev.pro.
+#
+#   ./script/redeploy              обычный деплой (образы собираются по кешу)
+#   ./script/redeploy --no-cache   то же, но образы собираются с нуля
+#
+# Workflow делает только git fetch + reset --hard и зовёт этот скрипт: у
+# appleboy/ssh-action с script_stop после каждой строки вставляется проверка кода
+# возврата, и многострочные if/while прямо в workflow обрывают деплой — вся логика
+# живёт здесь.
+#
+# Шаги:
+#   1. node >= 22.19 (код исполняется как TypeScript) — если на хосте его нет,
+#      кладём официальную сборку node в ~/.local/share/icarus: sudo на хосте нет;
+#   2. ./script/update — зависимости строго по lockfile и локальные .env/config.yaml;
+#   3. секреты из GitHub уезжают в .env, а config.yaml правит render-config.ts:
+#      люди (ICARUS_USERS), порт, dataDir, ключ API;
+#   4. ./script/server -d — собирает docker-compose.yml и поднимает стек в фоне;
+#   5. ждём /healthz: пока контейнеры людей не на месте, деплой не зелёный.
+#
+# Переменные окружения приходят из workflow (секреты — из environment production):
+#   ICARUS_USERS      люди через пробел или запятую (variables.ICARUS_USERS)
+#   ICARUS_API_KEY    ключ, под которым LibreChat ходит в icarus
+#   DEEPSEEK_API_KEY  ключ провайдера из models
+#   ICARUS_PORT       порт сервиса (по умолчанию 8081: 8080 на хосте занят jitsi)
+#   ICARUS_DATA_DIR   каталог памяти (по умолчанию runtime/ внутри чекаута)
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+PORT="${ICARUS_PORT:-8081}"
+DATA_DIR="${ICARUS_DATA_DIR:-$ROOT/runtime}"
+NODE_HOME="${ICARUS_NODE_HOME:-$HOME/.local/share/icarus/node}"
+NODE_URL_BASE="${ICARUS_NODE_URL:-https://nodejs.org/dist/latest-v24.x}"
+HEALTH_TIMEOUT=180
+NO_CACHE=0
+
+say() { printf '\033[1m==>\033[0m %s\n' "$*"; }
+warn() { printf '\033[33m[!]\033[0m %s\n' "$*" >&2; }
+die() {
+  printf '\033[31m[x]\033[0m %s\n' "$*" >&2
+  exit 1
+}
+
+for arg in "$@"; do
+  case "$arg" in
+  --no-cache) NO_CACHE=1 ;;
+  *) die "неизвестный аргумент: $arg (ожидаю --no-cache)" ;;
+  esac
+done
+
+# --- что уже есть на хосте -----------------------------------------------------
+command -v docker >/dev/null 2>&1 || die 'не нашёл docker'
+docker compose version >/dev/null 2>&1 || die 'не нашёл docker compose (плагин compose v2)'
+
+# pnpm ставит npm в ~/.local, поэтому его bin должен быть в PATH до ./script/update.
+export PATH="$HOME/.local/bin:$PATH"
+
+# --- node ----------------------------------------------------------------------
+# Код исполняется как TypeScript (`node file.ts`) — это умеет node >= 22.19. На хосте
+# может стоять системный node старее (на trousev.pro это 20.x), а ставить пакеты
+# через apt нечем: sudo без пароля нет. Поэтому свежую сборку кладём в домашний
+# каталог и переиспользуем её при следующих деплоях.
+node_ok() {
+  local bin="${1:-}" major minor
+  [ -n "$bin" ] && [ -x "$bin" ] || return 1
+  major="$("$bin" -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
+  minor="$("$bin" -p 'process.versions.node.split(".")[1]' 2>/dev/null || echo 0)"
+  [ "$major" -gt 22 ] || { [ "$major" -eq 22 ] && [ "$minor" -ge 19 ]; }
+}
+
+install_node() {
+  local sums line file tmp
+  say "на хосте нет node >= 22.19 — ставлю свежий node в $NODE_HOME"
+  command -v curl >/dev/null 2>&1 || die 'нет curl — нечем скачать node'
+  sums="$(curl -fsSL "$NODE_URL_BASE/SHASUMS256.txt")" || die 'не скачал SHASUMS256.txt с nodejs.org'
+  line="$(printf '%s\n' "$sums" | awk '/linux-x64\.tar\.xz$/ {print; exit}')"
+  [ -n "$line" ] || die 'в SHASUMS256.txt нет сборки linux-x64'
+  file="${line##* }"
+  tmp="$(mktemp -d)"
+  # shellcheck disable=SC2064 # раскрываем $tmp сразу: подчищать надо именно свой каталог
+  trap "rm -rf '$tmp'" EXIT
+  curl -fsSL -o "$tmp/$file" "$NODE_URL_BASE/$file" || die "не скачал $file"
+  (cd "$tmp" && printf '%s\n' "$line" | sha256sum -c -) || die 'сборка node не сошлась по sha256'
+  tar -xJf "$tmp/$file" -C "$tmp" || die "не распаковал $file"
+  rm -rf "$NODE_HOME"
+  mkdir -p "$(dirname "$NODE_HOME")"
+  mv "$tmp/${file%.tar.xz}" "$NODE_HOME"
+  rm -rf "$tmp"
+  trap - EXIT
+  PATH="$NODE_HOME/bin:$PATH"
+  export PATH
+}
+
+if ! node_ok "$(command -v node 2>/dev/null)"; then
+  if node_ok "$NODE_HOME/bin/node"; then
+    PATH="$NODE_HOME/bin:$PATH"
+    export PATH
+  else
+    install_node
+  fi
+fi
+say "node $(node -v)"
+
+# --- pnpm ----------------------------------------------------------------------
+# Версия — из packageManager в package.json, как и в CI. corepack на хосте (0.24.0)
+# pnpm 12 не умеет: у пакета бинарь вместо bin/pnpm.cjs, который corepack ищет.
+if ! command -v pnpm >/dev/null 2>&1; then
+  PNPM_VERSION="$(node -p "JSON.parse(require('node:fs').readFileSync('package.json', 'utf8')).packageManager" | sed 's/^pnpm@//')"
+  say "ставлю pnpm@$PNPM_VERSION в ~/.local"
+  npm install -g --prefix "$HOME/.local" "pnpm@$PNPM_VERSION" || die "не поставился pnpm@$PNPM_VERSION"
+fi
+say "pnpm $(pnpm -v)"
+
+# --- зависимости и локальные конфиги -------------------------------------------
+# CI=1 — установка строго по lockfile: разъехавшиеся package.json и pnpm-lock.yaml
+# должны ронять деплой, а не тихо переписывать lockfile на проде.
+say 'зависимости и локальные конфиги (./script/update)'
+CI=1 ./script/update
+
+# --- секреты из GitHub → .env --------------------------------------------------
+# Ключи не пишутся ни в docker-compose.yml, ни в лог: файл уезжает в контейнеры
+# через env_file, а права 600 ему оставляет ./script/update.
+upsert_env() {
+  local key="$1" value="${2:-}" file="$ROOT/.env" tmp
+  [ -n "$value" ] || return 0
+  tmp="$(mktemp "$file.XXXXXX")"
+  {
+    grep -v "^${key}=" "$file" 2>/dev/null || true
+    printf '%s=%s\n' "$key" "$value"
+  } >"$tmp"
+  chmod 600 "$tmp"
+  mv "$tmp" "$file"
+}
+
+upsert_env DEEPSEEK_API_KEY "${DEEPSEEK_API_KEY:-}"
+[ -z "${DEEPSEEK_API_KEY:-}" ] || say 'DEEPSEEK_API_KEY обновлён в .env'
+
+# --- config.yaml ---------------------------------------------------------------
+# Люди — из variables, ключ API — из секрета; остальное в config.yaml не трогаем,
+# чтобы правки на хосте (модели, маунты, MCP) пережили деплой.
+say 'правлю config.yaml (люди, порт, dataDir, apiKey)'
+ICARUS_PORT="$PORT" ICARUS_DATA_DIR="$DATA_DIR" node packages/service/src/docker/render-config.ts
+
+# --- запуск --------------------------------------------------------------------
+if [ "$NO_CACHE" = 1 ]; then
+  say 'собираю образы с нуля и поднимаю стек (./script/server -d --build)'
+  ./script/server -d --build
+else
+  say 'собираю и поднимаю стек (./script/server -d)'
+  ./script/server -d
+fi
+
+# --- проверка ------------------------------------------------------------------
+if ! command -v curl >/dev/null 2>&1; then
+  warn 'нет curl — /healthz не проверяю'
+  say 'деплой завершён'
+  exit 0
+fi
+
+# /healthz отдаёт состояние контейнеров людей: missing != 0 — это людей нет в докере,
+# и «деплой прошёл» было бы враньём. Сервис поднимается не мгновенно, поэтому ждём.
+say "жду /healthz на порту $PORT"
+deadline=$((SECONDS + HEALTH_TIMEOUT))
+health=''
+while [ "$SECONDS" -lt "$deadline" ]; do
+  health="$(curl -fsS "http://127.0.0.1:$PORT/healthz" 2>/dev/null || true)"
+  if printf '%s' "$health" | grep -q '"ok":true' && printf '%s' "$health" | grep -q '"missing":0'; then
+    break
+  fi
+  sleep 3
+done
+
+printf '%s' "$health" | grep -q '"ok":true' || die "сервис не ответил на /healthz за ${HEALTH_TIMEOUT}s — смотри docker compose -f docker-compose.yml logs icarus"
+printf '%s' "$health" | grep -q '"missing":0' || die "icarus поднялся, но контейнеры людей не все на месте: $health"
+say "готово: $health"
