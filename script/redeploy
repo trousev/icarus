@@ -14,7 +14,7 @@
 #      кладём официальную сборку node в ~/.local/share/icarus: sudo на хосте нет;
 #   2. ./script/update — зависимости строго по lockfile и локальные .env/config.yaml;
 #   3. секреты из GitHub уезжают в .env, а config.yaml правит render-config.ts:
-#      люди (ICARUS_USERS), порт, dataDir, ключ API;
+#      люди (ICARUS_USERS), порт, dataDir, ключ API, адрес панели;
 #   4. ./script/server -d — собирает docker-compose.yml и поднимает стек в фоне;
 #   5. ждём /healthz: пока контейнеры людей не на месте, деплой не зелёный.
 #
@@ -26,6 +26,8 @@
 #                     8080 занят jitsi)
 #   ICARUS_DATA_DIR   каталог памяти (по умолчанию runtime/ внутри чекаута)
 #   ICARUS_DNS        DNS-серверы контейнеров (по умолчанию 1.1.1.1 8.8.8.8, см. ниже)
+#   ICARUS_PANEL_URL  внешний адрес панели для личных ссылок Икара; не задан — ссылки
+#                     поведут на localhost и снаружи не откроются
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -147,8 +149,10 @@ upsert_env DEEPSEEK_API_KEY "${DEEPSEEK_API_KEY:-}"
 # --- config.yaml ---------------------------------------------------------------
 # Люди — из variables, ключ API — из секрета, DNS — из кода (ICARUS_DNS); остальное
 # в config.yaml не трогаем, чтобы правки на хосте (модели, маунты, MCP) пережили деплой.
-say 'правлю config.yaml (люди, порт, dataDir, docker.dns, apiKey)'
+# Пустой ICARUS_PANEL_URL — это «не трогать»: адрес панели можно задать и в config.yaml.
+say 'правлю config.yaml (люди, порт, dataDir, docker.dns, apiKey, panelUrl)'
 ICARUS_PORT="$PORT" ICARUS_DATA_DIR="$DATA_DIR" ICARUS_DNS="$DNS" \
+  ICARUS_PANEL_URL="${ICARUS_PANEL_URL:-}" \
   node packages/service/src/docker/render-config.ts
 
 # --- запуск --------------------------------------------------------------------

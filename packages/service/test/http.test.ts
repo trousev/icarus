@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import { createServer } from '../src/http/server.ts';
-import { API_KEY, makeConfig } from './fixtures.ts';
+import { API_KEY, makeConfig, PANEL_SECRET } from './fixtures.ts';
 
 function makeSession() {
   const listeners = new Set<(event: Record<string, unknown>) => void>();
@@ -45,7 +45,7 @@ async function withServer(
   const config = makeConfig();
   const session = makeSession();
   const registry = { acquire: async () => session, list: () => [] };
-  const server = createServer(config, registry as never);
+  const server = createServer(config, registry as never, PANEL_SECRET);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address() as AddressInfo;
   try {

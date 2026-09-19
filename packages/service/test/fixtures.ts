@@ -6,6 +6,8 @@ import path from 'node:path';
 import type { IcarusConfig, UserConfig } from '../src/config.ts';
 
 export const API_KEY = 'test-token';
+/** Секрет панели для тестов: из него выводятся личные ключи ссылок на память. */
+export const PANEL_SECRET = 'test-panel-secret';
 
 /** Свежий dataDir на каждый вызов: тесты пишут в память и incoming. */
 export function makeConfig(overrides: Partial<IcarusConfig> = {}): IcarusConfig {
@@ -13,7 +15,7 @@ export function makeConfig(overrides: Partial<IcarusConfig> = {}): IcarusConfig 
     host: '127.0.0.1',
     port: 0,
     apiKey: API_KEY,
-    panelKey: API_KEY,
+    panelUrl: 'http://localhost:8081',
     dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-test-')),
     sessionIdleMinutes: 30,
     docker: { image: 'icarus-user:dev', prefix: 'icarus-user', socket: null },

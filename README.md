@@ -30,7 +30,7 @@ LibreChat ──OpenAI API──► icarus ──docker exec + JSONL──► pi
 - вложения из чата: картинки уходят модели нативно, файлы ложатся в `incoming/`;
 - веб-поиск и MCP-серверы без правки кода;
 - эскалация моделей: болтовня на быстрой, работа на сильной, картинки на зрячей;
-- панель памяти: смотреть, искать, откатывать коммит, забывать строку.
+- панель памяти: личная ссылка от Икара — смотреть, искать, откатывать коммит, забывать строку.
 
 ## Запуск
 
@@ -49,8 +49,8 @@ docker build -t icarus-user:dev docker/user/
 ./script/server --with-librechat    # он же + стенд LibreChat на :3090
 ./script/server --down              # погасить стек
 
-# панель памяти
-open 'http://localhost:8081/panel?key=<panelKey>'
+# панель памяти: общего ключа нет — попроси у Икара личную ссылку
+# («дай ссылку на управление памятью»), она живёт сутки и открывает только твою память
 ```
 
 `./script/server` не запускает процесс, а **собирает `docker-compose.yml`** из `config.yaml`:
@@ -76,6 +76,7 @@ compose. `./script/server` один раз снесёт контейнеры б�
 
 ```yaml
 apiKey: icarus-local-token      # Bearer, под которым ходит LibreChat
+# panelUrl: http://trousev.pro:8081   # внешний адрес панели для личных ссылок Икара
 dataDir: ~/icarus-data          # память, сессии и каталоги людей
 
 models:                         # общие модели: tier раздаёт эскалация
@@ -194,6 +195,7 @@ GitHub по SSH заходит на `trousev.pro` под `trousev`, обновл
 | --- | --- | --- |
 | `ICARUS_USERS` | переменная environment `production` | люди через пробел или запятую — из неё собирается `users:` в `config.yaml` |
 | `ICARUS_DNS` | необязательная переменная environment `production` | DNS-серверы контейнеров (`docker.dns`); не задана — дефолт из `script/redeploy`, `none` — убрать |
+| `ICARUS_PANEL_URL` | необязательная переменная environment `production` | внешний адрес панели памяти (`panelUrl`) для личных ссылок Икара; не задана — прежнее значение в `config.yaml`, а без него ссылки ведут на `localhost` |
 | `ICARUS_API_KEY` | секрет environment `production` | Bearer, под которым LibreChat ходит в icarus (`apiKey` в `config.yaml`) |
 | `DEEPSEEK_API_KEY` | секрет environment `production` | ключ провайдера — уезжает в `.env` |
 | `DEPLOY_HOST` | секрет environment `production` | `trousev.pro` |

@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { DEFAULT_CONFIG_PATH, REPO_ROOT, detectAuth, loadConfig, loadEnvFile } from '../src/config.ts';
+import { DEFAULT_CONFIG_PATH, REPO_ROOT, detectAuth, ensurePanelSecret, loadConfig, loadEnvFile, publicHost } from '../src/config.ts';
 
 function writeConfig(text: string): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-config-'));
@@ -31,7 +31,7 @@ test('минимальный конфиг дочитывается умолча�
   const config = loadConfig(writeConfig(MINIMAL), {});
 
   assert.equal(config.apiKey, 'test-token');
-  assert.equal(config.panelKey, 'test-token', 'ключ панели по умолчанию — apiKey');
+  assert.equal(config.panelUrl, 'http://localhost:8081', 'без panelUrl ссылка ведёт на localhost');
   assert.equal(config.host, '0.0.0.0');
   assert.equal(config.port, 8081);
   assert.equal(config.sessionIdleMinutes, 30);
@@ -47,7 +47,7 @@ test('минимальный конфиг дочитывается умолча�
 
 test('общее для всех читается целиком: модели, ключи, маунты, MCP', () => {
   const file = writeConfig(`apiKey: token
-panelKey: panel
+panelUrl: https://icarus.example:8443
 dataDir: /data
 sessionIdleMinutes: 5
 docker:
@@ -81,7 +81,7 @@ users:
 `);
   const config = loadConfig(file, { MY_KEY: 'secret' } as NodeJS.ProcessEnv);
 
-  assert.equal(config.panelKey, 'panel');
+  assert.equal(config.panelUrl, 'https://icarus.example:8443', 'явный panelUrl не переписываем');
   assert.equal(config.docker.image, 'icarus-user:v2');
   assert.equal(config.docker.network, 'icarus-net');
   assert.deepEqual(config.docker.dns, undefined, 'без docker.dns контейнеры берут резолвер хоста');
@@ -283,3 +283,23 @@ test('несуществующий файл — понятная ошибка, �
 test('пустой файл не притворяется конфигом', () => {
   assert.throws(() => loadConfig(writeConfig(''), {}), /ожидался объект/);
 });
+
+// --- секрет панели ------------------------------------------------------------
+
+test('publicHost прячет «слушать везде»', () => {
+  assert.equal(publicHost('0.0.0.0'), 'localhost');
+  assert.equal(publicHost('::'), 'localhost');
+  assert.equal(publicHost(''), 'localhost');
+  assert.equal(publicHost('icarus.example'), 'icarus.example');
+});
+
+test('секрет панели заводится один раз и переживает перезапуск', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-secret-'));
+  const first = ensurePanelSecret(dir);
+  assert.match(first, /^[0-9a-f]{64}$/);
+  assert.equal(ensurePanelSecret(dir), first, 'второй вызов читает тот же файл');
+
+  const mode = fs.statSync(path.join(dir, 'panel-secret')).mode & 0o777;
+  assert.equal(mode, 0o600, 'секрет не должен быть читаем всем');
+});
+

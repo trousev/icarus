@@ -117,3 +117,16 @@ test('docker.dns приезжает из ICARUS_DNS, none убирает его,
 
   assert.throws(() => renderConfig(EXAMPLE, { users: 'probe', dns: 'мой-резолвер' }), /ICARUS_DNS: «мой-резолвер»/);
 });
+
+test('panelUrl приезжает из ICARUS_PANEL_URL и переживает деплой', () => {
+  const set = renderConfig(CUSTOM, { users: 'probe', panelUrl: 'http://trousev.pro:8081' });
+  assert.equal(set.panelUrl, 'http://trousev.pro:8081');
+  assert.equal(load(set.text).panelUrl, 'http://trousev.pro:8081');
+
+  const kept = renderConfig(set.text, { users: 'probe' });
+  assert.equal(kept.panelUrl, 'http://trousev.pro:8081', 'пустая переменная прежний адрес не трогает');
+
+  const absent = renderConfig(CUSTOM, { users: 'probe' });
+  assert.equal(absent.panelUrl, null, 'без panelUrl адрес считается незаданным');
+  assert.equal(load(absent.text).panelUrl, 'http://localhost:9000', 'конфиг подставит localhost по порту');
+});

@@ -1,5 +1,11 @@
 // Страница панели памяти: один HTML, никакой сборки и зависимостей.
-export function panelHtml(authorized: boolean): string {
+//
+// Общего входа с ключом нет: страница открывается личной ссылкой от Икара, и пропуск
+// из неё же уходит в заголовке каждого запроса к API. Протухший или битый пропуск —
+// это не форма входа, а подсказка попросить у Икара свежую ссылку.
+export type PanelSession = { user: string } | null;
+
+export function panelHtml(session: PanelSession): string {
   return `<!doctype html>
 <html lang="ru">
 <head>
@@ -12,6 +18,7 @@ export function panelHtml(authorized: boolean): string {
   body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 ui-sans-serif, system-ui, sans-serif; }
   header { display:flex; gap:12px; align-items:center; padding:12px 16px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
   h1 { font-size:15px; margin:0 12px 0 0; font-weight:600; }
+  .who { color:var(--accent); margin-right:4px; }
   select, input, button { background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:6px 10px; font:inherit; }
   button { cursor:pointer; }
   button:hover { border-color:var(--accent); }
@@ -34,15 +41,15 @@ export function panelHtml(authorized: boolean): string {
   .commit small { color:var(--dim); display:block; }
   .row { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
   .muted { color:var(--dim); }
-  .banner { padding:24px; max-width:520px; margin:60px auto; background:var(--panel); border:1px solid var(--line); border-radius:10px; }
+  .banner { padding:24px; max-width:560px; margin:60px auto; background:var(--panel); border:1px solid var(--line); border-radius:10px; }
 </style>
 </head>
 <body>
 ${
-  authorized
+  session
     ? `<header>
   <h1>Икар · память</h1>
-  <select id="user"></select>
+  <span class="who">${escapeHtml(session.user)}</span>
   <select id="scope">
     <option value="personal">личная</option>
     <option value="shared">семейная</option>
@@ -58,20 +65,18 @@ ${
 </main>
 <script>
 const params = new URLSearchParams(location.search);
-const stored = localStorage.getItem('icarus-panel-key');
-const key = params.get('key') || stored || '';
-if (params.get('key')) { localStorage.setItem('icarus-panel-key', params.get('key')); history.replaceState({}, '', '/panel'); }
+const token = params.get('t') || '';
 let current = null;
 
 const api = async (path, options = {}) => {
   const response = await fetch(path, {
     ...options,
-    headers: { authorization: 'Bearer ' + key, 'content-type': 'application/json', ...(options.headers || {}) },
+    headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json', ...(options.headers || {}) },
   });
   if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error?.message || response.statusText);
   return response.json();
 };
-const qs = (extra = {}) => new URLSearchParams({ user: user.value, scope: scope.value, ...extra }).toString();
+const qs = (extra = {}) => new URLSearchParams({ scope: scope.value, ...extra }).toString();
 const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 const status = (text) => { document.getElementById('status').textContent = text || ''; };
 
@@ -101,7 +106,7 @@ async function openFile(path) {
 
 async function forget(path, line) {
   if (!confirm('Убрать строку из памяти?\\n\\n' + line)) return;
-  const result = await api('/panel/api/forget', { method: 'POST', body: JSON.stringify({ user: user.value, scope: scope.value, path, line }) });
+  const result = await api('/panel/api/forget', { method: 'POST', body: JSON.stringify({ scope: scope.value, path, line }) });
   status(result.message);
   await openFile(path);
   await loadFiles();
@@ -137,19 +142,18 @@ async function showCommit(hash) {
 
 async function revertCommit(hash) {
   if (!confirm('Откатить коммит ' + hash.slice(0, 8) + '? Изменения вернутся обратным коммитом.')) return;
-  const result = await api('/panel/api/revert', { method: 'POST', body: JSON.stringify({ user: user.value, scope: scope.value, commit: hash }) });
+  const result = await api('/panel/api/revert', { method: 'POST', body: JSON.stringify({ scope: scope.value, commit: hash }) });
   status(result.message);
   await loadFiles();
   if (current) await openFile(current);
 }
 
-const user = document.getElementById('user');
 const scope = document.getElementById('scope');
 
 (async () => {
   const state = await api('/panel/api/state');
-  user.innerHTML = state.users.map((id) => '<option value="' + esc(id) + '">' + esc(id) + '</option>').join('');
-  user.onchange = loadFiles;
+  document.title = 'Икар — память · ' + state.user;
+  document.querySelector('.who').textContent = state.user;
   scope.onchange = loadFiles;
   document.getElementById('search').onclick = doSearch;
   document.getElementById('q').onkeydown = (e) => { if (e.key === 'Enter') doSearch(); };
@@ -158,10 +162,18 @@ const scope = document.getElementById('scope');
 </script>`
     : `<div class="banner">
   <h1>Икар · память</h1>
-  <p class="muted">Нужен ключ панели. Он лежит в конфиге сервиса (поле panelKey или apiKey).</p>
-  <div class="row"><input id="key" placeholder="ключ" size="32"><button onclick="location.href='/panel?key='+encodeURIComponent(document.getElementById('key').value)">войти</button></div>
+  <p class="muted">Ссылка не сработала: она истекла или подпись не та.</p>
+  <p class="muted">Попроси Икара: «дай ссылку на управление памятью» — он выдаст свежую,
+  и она откроет только твою память.</p>
 </div>`
 }
 </body>
 </html>`;
+}
+
+/** Экранирование для единственного недоверенного значения — имени пользователя. */
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (char) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char] ?? char,
+  );
 }

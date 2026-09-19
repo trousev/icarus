@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import { createServer } from '../src/http/server.ts';
-import { makeConfig } from './fixtures.ts';
+import { makeConfig, PANEL_SECRET } from './fixtures.ts';
 import {
   buildTitlePrompt,
   cleanModelTitle,
@@ -127,7 +127,7 @@ async function askTitle(options: {
     list: () => [],
   };
 
-  const server = createServer(config, registry as never);
+  const server = createServer(config, registry as never, PANEL_SECRET);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address() as AddressInfo;
 

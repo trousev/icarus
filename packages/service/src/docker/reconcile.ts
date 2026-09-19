@@ -27,8 +27,9 @@ export function planReconciliation(input: {
   config: IcarusConfig;
   users: UserConfig[];
   containers: ManagedContainer[];
+  panelSecret: string;
 }): ReconciliationPlan {
-  const { config, users, containers } = input;
+  const { config, users, containers, panelSecret } = input;
   const plan: ReconciliationPlan = { keep: [], start: [], recreate: [], stop: [], create: [] };
 
   for (const container of containers) {
@@ -39,7 +40,7 @@ export function planReconciliation(input: {
     }
     // Контейнеры, созданные до появления меток, приходят с spec = null и попадают
     // в пересоздание — так проходит миграция на новый формат.
-    if (container.spec !== specFor(config)) {
+    if (container.spec !== specFor(config, user, panelSecret)) {
       plan.recreate.push(container.name);
       continue;
     }

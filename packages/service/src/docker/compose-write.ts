@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { parseEnv } from 'node:util';
-import { DEFAULT_CONFIG_PATH, ENV_FILE, loadConfig, loadEnvFile, REPO_ROOT, userContainer } from '../config.ts';
+import { DEFAULT_CONFIG_PATH, ENV_FILE, ensurePanelSecret, loadConfig, loadEnvFile, publicHost, REPO_ROOT, userContainer } from '../config.ts';
 import { prepareUser } from '../workspace.ts';
 import { COMPOSE_PROJECT, DEFAULT_SERVICE_IMAGE, renderCompose, type ComposeOptions } from './compose.ts';
 
@@ -109,6 +109,10 @@ function main(): void {
   // недостающие маунты root-овыми, и агент внутри контейнера не сможет писать в память.
   for (const user of config.users) prepareUser(config, user);
 
+  // Секрет панели — до сборки compose: из него выводятся личные ключи ссылок,
+  // которые уезжают в окружение контейнеров.
+  const panelSecret = ensurePanelSecret(config.dataDir);
+
   let extraGroups: string[] = [];
   if (docker.socketPath) {
     const gid = fs.statSync(docker.socketPath).gid;
@@ -126,14 +130,18 @@ function main(): void {
     dockerHost: docker.dockerHost,
     extraGroups,
     serviceImage: args.serviceImage,
+    panelSecret,
     ...(fs.existsSync(ENV_FILE) ? { envFile: ENV_FILE } : {}),
     ...(args.withLibrechat ? { librechat: { dir: librechatDir, port: librechatPort(librechatDir) } } : {}),
   };
 
   const yaml = renderCompose(config, options);
-  fs.writeFileSync(args.out, yaml);
+  // В окружении людей теперь есть личные ключи ссылок на память — файл держим 600,
+  // как config.yaml и .env: читает его только тот, кто запускает docker compose.
+  fs.writeFileSync(args.out, yaml, { mode: 0o600 });
+  fs.chmodSync(args.out, 0o600);
 
-  const panelHost = config.host === '0.0.0.0' || config.host === '::' || config.host === '' ? 'localhost' : config.host;
+  const panelHost = publicHost(config.host);
   const lines = [
     ['project', COMPOSE_PROJECT],
     ['compose', args.out],

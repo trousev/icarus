@@ -201,7 +201,7 @@ fi
 echo
 echo "==> поднимаю стек"
 echo "    сервис:        http://$PANEL_HOST:$PANEL_PORT/v1"
-echo "    панель памяти: http://$PANEL_HOST:$PANEL_PORT/panel?key=<panelKey>"
+echo "    панель памяти: только по личной ссылке — её выдаёт Икар по просьбе"
 if [ -n "$LIBRECHAT_URL" ]; then
   echo "    LibreChat:     $LIBRECHAT_URL"
 fi
