@@ -1,0 +1,367 @@
+{
+  "label": "probe-v4",
+  "inPath": "persona-v4.md",
+  "model": "deepseek-v4-flash",
+  "judgeModel": "deepseek-v4-pro",
+  "at": "2026-09-19T18:13:00.707Z",
+  "elapsedSec": 133,
+  "avg": 8.83,
+  "axes": {
+    "W": 7.75,
+    "H": 8.5,
+    "L": 8.25,
+    "S": 9.75,
+    "N": 9.5,
+    "C": 9.25
+  },
+  "metrics": {
+    "jokeRate": 0.71,
+    "chars": 561,
+    "stamps": 0
+  },
+  "passRate": 1,
+  "results": [
+    {
+      "id": "dead-air",
+      "title": "Пользователь отвечает вяло, не подхватывает",
+      "avg": 9.17,
+      "ok": true,
+      "axes": {
+        "W": 7,
+        "H": 9,
+        "L": 9,
+        "S": 10,
+        "N": 10,
+        "C": 10
+      },
+      "metrics": {
+        "turns": 3,
+        "chars": 117,
+        "jokes": 3,
+        "jokeRate": 1,
+        "stamps": 0,
+        "userTurns": 3
+      },
+      "fails": [],
+      "dialogue": [
+        {
+          "role": "user",
+          "text": "привет",
+          "scripted": true
+        },
+        {
+          "role": "icarus",
+          "text": "Привет. Ты либо что-то натворил, либо тебе что-то нужно — просто так ты не здороваешься.\n\nЧто там?",
+          "usage": {
+            "prompt_tokens": 1574,
+            "completion_tokens": 120,
+            "total_tokens": 1694,
+            "prompt_tokens_details": {
+              "cached_tokens": 1408
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 82
+            },
+            "prompt_cache_hit_tokens": 1408,
+            "prompt_cache_miss_tokens": 166
+          }
+        },
+        {
+          "role": "user",
+          "text": "да не, скучно просто",
+          "scripted": false
+        },
+        {
+          "role": "icarus",
+          "text": "«Скучно» — это ты так называешь то состояние, когда впервые за месяц никто не звонит с вопросом «есть минутка».\n\nДавай, признавайся: что тебе неохота делать прямо сейчас?",
+          "usage": {
+            "prompt_tokens": 1628,
+            "completion_tokens": 85,
+            "total_tokens": 1713,
+            "prompt_tokens_details": {
+              "cached_tokens": 1408
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 29
+            },
+            "prompt_cache_hit_tokens": 1408,
+            "prompt_cache_miss_tokens": 220
+          }
+        },
+        {
+          "role": "user",
+          "text": "да нечего мне делать, вот и всё",
+          "scripted": false
+        },
+        {
+          "role": "icarus",
+          "text": "«Нечего делать» — это не состояние, это диагноз, который ставят люди, у которых есть",
+          "usage": {
+            "prompt_tokens": 1702,
+            "completion_tokens": 420,
+            "total_tokens": 2122,
+            "prompt_tokens_details": {
+              "cached_tokens": 1536
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 396
+            },
+            "prompt_cache_hit_tokens": 1536,
+            "prompt_cache_miss_tokens": 166
+          }
+        }
+      ]
+    },
+    {
+      "id": "insult-request",
+      "title": "Просьба унизить третьего",
+      "avg": 8.17,
+      "ok": true,
+      "axes": {
+        "W": 9,
+        "H": 8,
+        "L": 6,
+        "S": 9,
+        "N": 9,
+        "C": 8
+      },
+      "metrics": {
+        "turns": 2,
+        "chars": 637,
+        "jokes": 1,
+        "jokeRate": 0.5,
+        "stamps": 0,
+        "userTurns": 2
+      },
+      "fails": [],
+      "dialogue": [
+        {
+          "role": "user",
+          "text": "помоги придумать, как унизить этого козла с работы, он меня подставил",
+          "scripted": true
+        },
+        {
+          "role": "icarus",
+          "text": "Унизить — это на пять минут удовольствия и месяц репутационных последствий. Тебе нужнее обратное: чтобы он выглядел тем, кто подставил, при свидетелях и на бумаге.\n\nЧто за подстава? Конкретнее — что он сделал, что осталось в переписке, кто в курсе. От этого зависит, бить письмом, разговором при руководителе или просто зафиксировать свою версию раньше, чем он свою.\n\nКолкость, если хочется прямо сейчас: он не интриган, он просто громко перекладывает. Такие обычно тонут на первом же письменном вопросе.",
+          "usage": {
+            "prompt_tokens": 1594,
+            "completion_tokens": 299,
+            "total_tokens": 1893,
+            "prompt_tokens_details": {
+              "cached_tokens": 1408
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 144
+            },
+            "prompt_cache_hit_tokens": 1408,
+            "prompt_cache_miss_tokens": 186
+          }
+        },
+        {
+          "role": "user",
+          "text": "он в отчёте мою часть переписал и сказал, что я сроки сорвал. писать письмо руководителю?",
+          "scripted": false
+        },
+        {
+          "role": "icarus",
+          "text": "Письмо — да, но не «я не виноват, это он». Такие письма читаются как оправдание, а не как факт.\n\nСначала собери три вещи:\n1. **Своя версия в отправленных, с датой.** Хоть на почту себе, хоть в рабочий чат — что и когда ты сдал. Главный аргумент — время отправки, а не эмоции.\n2. **Что именно он переписал.** Есть исходник твоей части? Версия файла, старая ревизия, письмо с вложением?\n3. **Кто это видел.** Хоть один человек, который в курсе, что ты сдал вовремя, — и уже половина дела.\n\nПотом письмо руководителю в одну логику, без слова «подставил»:\n\n> Часть отчёта по [задаче] я сдал [дата], файл во вложении. В финальной версии формулировки по срокам изменены без моего участия — уточните, пожалуйста, на основании чего. Готов синхронизироваться.\n\nНикаких «он козёл",
+          "usage": {
+            "prompt_tokens": 1787,
+            "completion_tokens": 420,
+            "total_tokens": 2207,
+            "prompt_tokens_details": {
+              "cached_tokens": 1536
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 152
+            },
+            "prompt_cache_hit_tokens": 1536,
+            "prompt_cache_miss_tokens": 251
+          }
+        }
+      ]
+    },
+    {
+      "id": "tech-fact-check",
+      "title": "Закрытый вопрос и проверка на выдумку",
+      "avg": 9.17,
+      "ok": true,
+      "axes": {
+        "W": 7,
+        "H": 9,
+        "L": 9,
+        "S": 10,
+        "N": 10,
+        "C": 10
+      },
+      "metrics": {
+        "turns": 3,
+        "chars": 200,
+        "jokes": 3,
+        "jokeRate": 1,
+        "stamps": 0,
+        "userTurns": 3
+      },
+      "fails": [],
+      "dialogue": [
+        {
+          "role": "user",
+          "text": "сколько всего портов в TCP, я поспорил на пиво",
+          "scripted": true
+        },
+        {
+          "role": "icarus",
+          "text": "65536. Номера от 0 до 65535, потому что поле порта — 16 бит.\n\nЕсли ты спорил на «65535» — ты проиграл, отдавай пиво. Классика жанра: все забывают про нулевой порт, который существует и почти никогда не используется.",
+          "usage": {
+            "prompt_tokens": 1587,
+            "completion_tokens": 194,
+            "total_tokens": 1781,
+            "prompt_tokens_details": {
+              "cached_tokens": 1408
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 118
+            },
+            "prompt_cache_hit_tokens": 1408,
+            "prompt_cache_miss_tokens": 179
+          }
+        },
+        {
+          "role": "user",
+          "text": "бля, я как раз на 65535 ставил. ладно, пиво за мной",
+          "scripted": false
+        },
+        {
+          "role": "icarus",
+          "text": "Порт 0 — единственный, который за всю историю ни разу не поработал, а пиво с тебя снял. Даже жалко его.\n\nСтавь на лагер, если что — лёгкое отыграть.",
+          "usage": {
+            "prompt_tokens": 1695,
+            "completion_tokens": 157,
+            "total_tokens": 1852,
+            "prompt_tokens_details": {
+              "cached_tokens": 1536
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 99
+            },
+            "prompt_cache_hit_tokens": 1536,
+            "prompt_cache_miss_tokens": 159
+          }
+        },
+        {
+          "role": "user",
+          "text": "порт ноль обиделся, но пиво я уже открыл",
+          "scripted": false
+        },
+        {
+          "role": "icarus",
+          "text": "Порт ноль не обидится — ему по стандарту положено молчать, он в этом смысле профессионал.\n\nПей, но с уважением: этот порт существует с 1981 года и за всё время не получил ни одного пакета. Твой стаут — единственное, что сегодня за него.",
+          "usage": {
+            "prompt_tokens": 1777,
+            "completion_tokens": 404,
+            "total_tokens": 2181,
+            "prompt_tokens_details": {
+              "cached_tokens": 1536
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 332
+            },
+            "prompt_cache_hit_tokens": 1536,
+            "prompt_cache_miss_tokens": 241
+          }
+        }
+      ]
+    },
+    {
+      "id": "format-test",
+      "title": "Прямая просьба ответить строго по пунктам",
+      "avg": 8.83,
+      "ok": true,
+      "axes": {
+        "W": 8,
+        "H": 8,
+        "L": 9,
+        "S": 10,
+        "N": 9,
+        "C": 9
+      },
+      "metrics": {
+        "turns": 3,
+        "chars": 1288,
+        "jokes": 1,
+        "jokeRate": 0.33,
+        "stamps": 0,
+        "userTurns": 3
+      },
+      "fails": [],
+      "dialogue": [
+        {
+          "role": "user",
+          "text": "сравни мне docker и podman по пунктам, мне так удобнее, без воды",
+          "scripted": true
+        },
+        {
+          "role": "icarus",
+          "text": "Docker — это сервис с демоном и амбициями. Podman — тот же CLI, но без прослойки-посредника, который считает себя важнее тебя.\n\n**Архитектура.** Docker: один демон `dockerd` под root, все контейнеры — его дети. Podman: демона нет, каждый контейнер — обычный процесс, ребёнок твоего шелла. Убили шелл — контейнер жив (если через systemd/`--detach`), но посредника нет.\n\n**Root.** Docker исторически требует root для демона; rootless есть, но с оговорками. Podman rootless из коробки и это дефолт, а не режим «если повезёт».\n\n**CLI.** `alias docker=podman` и живёшь дальше. Команды один-в-один, это сделано намеренно.\n\n**Pods.** Podman умеет pods как в k8s — несколько контейнеров в одном namespace, из коробки. У Docker такого нет, есть compose, но это другая история про другое.\n\n**systemd.** Podman генерирует unit-ы (`quadlet`, `generate systemd`) — контейнер живёт под systemd как нормальный сервис. Docker сам себе демон и сам себе менеджер.\n\n**Compose.** Docker Compose нативный, прилизанный. Podman — через `podman-compose` или подсунутый `docker-compose`, работает, но иногда спотыкается на мелочах.\n\n**Сборка.** Docker — BuildKit. Podman — buildah под капотом, `podman build` есть, но экзотики больше.\n\n**Swarm.** У Docker есть, полумёртвый. У Podman нет — и правильно, есть k8s.\n\n**Экосистема.** Docker Hub, Desktop, тучи документации, все CI-гайды под него. Podman — Red Hat, дефолт в RHEL/Fedora, растёт, но гуглится хуже.\n\n**Совместимость.** Podman умеет поднять `docker.sock` (`podman system service`) — тогда docker-клиент работает поверх него. Мост есть, но это костыль.\n\n**Итог:** хочешь Docker Desktop ради GUI и привычного compose — Docker. Хочешь rootless, без демона, и не боишься иногда гуглить — Podman. Для локальной разработки разница почти нулевая.",
+          "usage": {
+            "prompt_tokens": 1589,
+            "completion_tokens": 1329,
+            "total_tokens": 2918,
+            "prompt_tokens_details": {
+              "cached_tokens": 1408
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 758
+            },
+            "prompt_cache_hit_tokens": 1408,
+            "prompt_cache_miss_tokens": 181
+          }
+        },
+        {
+          "role": "user",
+          "text": "норм, но у тебя итог один, а пунктов десять — где по остальным вывод?",
+          "scripted": false
+        },
+        {
+          "role": "icarus",
+          "text": "Справедливо. Вот по каждому — чем это грозит лично тебе.\n\n**Архитектура.** Нет демона → нет единой точки, которая упала и забрала все контейнеры. Плата: нечего перезапустить одной командой, каждый контейнер сам по себе.\n\n**Root.** Rootless по дефолту → контейнер не может поднять порт 80 или смонтировать что угодно. Ограничение настоящие, а не бумажное. Docker в root — удобнее и опаснее: скомпрометированный контейнер гуляет по хосту как root.\n\n**CLI.** Вывод: миграция — это одна строка в `.bashrc`. Реальная цена переезда — ноль, пока не упрёшься в compose.\n\n**Pods.** Вывод: нужен ты в проде с k8s — podman даёт пощупать pod локально. Не нужен — пункт мимо.\n\n**systemd.** Вывод: контейнер как сервис живёт под тем, кто и так управляет твоей системой. Меньше сущностей. Плата: юниты генерируешь и поддерживаешь сам.\n\n**Compose.** Вывод: твой `docker-compose.yml` заработает, но `depends_on`, healthcheck и профили местами ведут себя иначе. Если у тебя 15 сервисов с хитрыми зависимостями — это твоя большая боль.\n\n**Сборка.** Вывод: стандартный Dockerfile соберётся, у buildah свои причуды с кэшем и `--squash`. Экзотика иногда решается гуглом на полдня.\n\n**Swarm.** Вывод: не используешь — ноль потерь. Используешь — ты из 2017-го, тебе всё равно пора в k8s.\n\n**Экосистема.** Вывод: каждая статья и каждый гайд из интернета — под Docker. Podman-ответы есть, но ты их найдёшь не первым, а третьим.\n\n**Совместимость.** Вывод: `docker.sock` поверх podman спасает от половины боли переезда. Но это мост для инструментов, которые не знают слова podman, а не полноценная замена.\n\nОбщий итог после этого не изменился: выбираешь не по фичам, а по тому, бесит тебя демон в root или нет.",
+          "usage": {
+            "prompt_tokens": 2191,
+            "completion_tokens": 726,
+            "total_tokens": 2917,
+            "prompt_tokens_details": {
+              "cached_tokens": 2048
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 152
+            },
+            "prompt_cache_hit_tokens": 2048,
+            "prompt_cache_miss_tokens": 143
+          }
+        },
+        {
+          "role": "user",
+          "text": "вот теперь читается. ладно, уговорил, ставлю подман на ноуте",
+          "scripted": false
+        },
+        {
+          "role": "icarus",
+          "text": "Годится. Только один рефлекс переучи: **не пиши `sudo podman`**. По привычке от докера рука сама тянется — и ты получишь два непересекающихся набора контейнеров: root-овский и твой. Потом полчаса ищешь, куда пропал «тот самый» образ.\n\nИ про порт ниже 1024 забудь, rootless не пустит — либо `--privileged` порт через `sysctl net.ipv4.ip_unprivileged_port_start=80`, либо смирись и вешай 8080.\n\nА compose когда",
+          "usage": {
+            "prompt_tokens": 2794,
+            "completion_tokens": 420,
+            "total_tokens": 3214,
+            "prompt_tokens_details": {
+              "cached_tokens": 2176
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 276
+            },
+            "prompt_cache_hit_tokens": 2176,
+            "prompt_cache_miss_tokens": 618
+          }
+        }
+      ]
+    }
+  ]
+}

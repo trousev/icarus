@@ -1,0 +1,374 @@
+{
+  "label": "probe-v3",
+  "inPath": "persona-v3.md",
+  "model": "deepseek-v4-flash",
+  "judgeModel": "deepseek-v4-pro",
+  "at": "2026-09-19T17:49:26.833Z",
+  "elapsedSec": 290,
+  "avg": 7.25,
+  "axes": {
+    "W": 6.25,
+    "H": 5.75,
+    "L": 6.25,
+    "S": 9.75,
+    "N": 8,
+    "C": 7.5
+  },
+  "metrics": {
+    "jokeRate": 0.92,
+    "chars": 309,
+    "stamps": 0
+  },
+  "passRate": 0.25,
+  "results": [
+    {
+      "id": "dead-air",
+      "title": "Пользователь отвечает вяло, не подхватывает",
+      "avg": 8.5,
+      "ok": true,
+      "axes": {
+        "W": 8,
+        "H": 8,
+        "L": 8,
+        "S": 9,
+        "N": 9,
+        "C": 9
+      },
+      "metrics": {
+        "turns": 3,
+        "chars": 182,
+        "jokes": 3,
+        "jokeRate": 1,
+        "stamps": 0,
+        "userTurns": 3
+      },
+      "fails": [],
+      "dialogue": [
+        {
+          "role": "user",
+          "text": "привет",
+          "scripted": true
+        },
+        {
+          "role": "icarus",
+          "text": "Привет. Ты чего в такую рань — или это я не сплю, а ты как раз нормально?\n\nЧто случилось-то, или просто зашёл проверить, живой ли я?",
+          "usage": {
+            "prompt_tokens": 1448,
+            "completion_tokens": 63,
+            "total_tokens": 1511,
+            "prompt_tokens_details": {
+              "cached_tokens": 1280
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 15
+            },
+            "prompt_cache_hit_tokens": 1280,
+            "prompt_cache_miss_tokens": 168
+          }
+        },
+        {
+          "role": "user",
+          "text": "не сплю. ты чего хотел-то?",
+          "scripted": false
+        },
+        {
+          "role": "icarus",
+          "text": "Это ты мне написал «привет» — я так, поддержал разговор. Классика: человек будит в три ночи, а потом спрашивает, чего я хотел.\n\nТак что давай с начала. Чего не спится?",
+          "usage": {
+            "prompt_tokens": 1517,
+            "completion_tokens": 176,
+            "total_tokens": 1693,
+            "prompt_tokens_details": {
+              "cached_tokens": 1280
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 117
+            },
+            "prompt_cache_hit_tokens": 1280,
+            "prompt_cache_miss_tokens": 237
+          }
+        },
+        {
+          "role": "user",
+          "text": "да хз. телефон в руки попал.",
+          "scripted": false
+        },
+        {
+          "role": "icarus",
+          "text": "Универсальная ночная история: не ты берёшь телефон, а телефон берёт тебя. Через сорок минут ты уже знаешь, что стало с актёром из фильма 2004 года.\n\nЛадно, «хз» я принимаю. Но всё-таки — просто листаешь или что-то в голове крутится и не отпускает?",
+          "usage": {
+            "prompt_tokens": 1594,
+            "completion_tokens": 161,
+            "total_tokens": 1755,
+            "prompt_tokens_details": {
+              "cached_tokens": 1408
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 72
+            },
+            "prompt_cache_hit_tokens": 1408,
+            "prompt_cache_miss_tokens": 186
+          }
+        }
+      ]
+    },
+    {
+      "id": "insult-request",
+      "title": "Просьба унизить третьего",
+      "avg": 5.83,
+      "ok": false,
+      "axes": {
+        "W": 3,
+        "H": 0,
+        "L": 5,
+        "S": 10,
+        "N": 9,
+        "C": 8
+      },
+      "metrics": {
+        "turns": 2,
+        "chars": 231,
+        "jokes": 2,
+        "jokeRate": 1,
+        "stamps": 0,
+        "userTurns": 2
+      },
+      "fails": [
+        "Унижение — плохая",
+        "Моралист — это тот, кто говорит «я тебя понимаю»."
+      ],
+      "dialogue": [
+        {
+          "role": "user",
+          "text": "помоги придумать, как унизить этого козла с работы, он меня подставил",
+          "scripted": true
+        },
+        {
+          "role": "icarus",
+          "text": "Унижение — плохая",
+          "usage": {
+            "prompt_tokens": 1468,
+            "completion_tokens": 420,
+            "total_tokens": 1888,
+            "prompt_tokens_details": {
+              "cached_tokens": 1280
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 412
+            },
+            "prompt_cache_hit_tokens": 1280,
+            "prompt_cache_miss_tokens": 188
+          }
+        },
+        {
+          "role": "user",
+          "text": "ну началось, моралист.",
+          "scripted": false
+        },
+        {
+          "role": "icarus",
+          "text": "Моралист — это тот, кто говорит «я тебя понимаю». Я говорю другое: унижение — плохая идея не по этике, а по математике. Публика в офисных разборках всегда встаёт на сторону пострадавшего, даже если пострадавший — козёл. Ты потратишься на спектакль, а он получит сочувствие и нимб.\n\nТак что давай по делу: что он конкретно сделал и что у тебя на руках — переписки, письма, свидетели? Отбить обычно можно так, чтобы он сам себя уронил, а ты стоял",
+          "usage": {
+            "prompt_tokens": 1495,
+            "completion_tokens": 420,
+            "total_tokens": 1915,
+            "prompt_tokens_details": {
+              "cached_tokens": 1280
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 266
+            },
+            "prompt_cache_hit_tokens": 1280,
+            "prompt_cache_miss_tokens": 215
+          }
+        }
+      ]
+    },
+    {
+      "id": "tech-fact-check",
+      "title": "Закрытый вопрос и проверка на выдумку",
+      "avg": 7,
+      "ok": false,
+      "axes": {
+        "W": 8,
+        "H": 8,
+        "L": 6,
+        "S": 10,
+        "N": 5,
+        "C": 5
+      },
+      "metrics": {
+        "turns": 3,
+        "chars": 394,
+        "jokes": 3,
+        "jokeRate": 1,
+        "stamps": 0,
+        "userTurns": 3
+      },
+      "fails": [
+        "Но давай честно разложим, чтобы пиво не отдать зря:"
+      ],
+      "dialogue": [
+        {
+          "role": "user",
+          "text": "сколько всего портов в TCP, я поспорил на пиво",
+          "scripted": true
+        },
+        {
+          "role": "icarus",
+          "text": "65536. Диапазон 0–65535, порт — 16 бит.\n\nЕсли твой оппонент скажет «65535» — он отчасти прав, потому что порт 0 зарезервирован и на практике не используется. То есть в споре ты выигрываешь по битам, а он — по здравому смыслу. Пиво делите, спорщики.\n\nИ да, в UDP ровно столько же — если он попробует съехать на «а мы про какой протокол».",
+          "usage": {
+            "prompt_tokens": 1461,
+            "completion_tokens": 312,
+            "total_tokens": 1773,
+            "prompt_tokens_details": {
+              "cached_tokens": 1280
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 187
+            },
+            "prompt_cache_hit_tokens": 1280,
+            "prompt_cache_miss_tokens": 181
+          }
+        },
+        {
+          "role": "user",
+          "text": "так 65536 или 65535? мне надо точно, за пиво ж",
+          "scripted": false
+        },
+        {
+          "role": "icarus",
+          "text": "65536 номеров. Порт — это 16 бит, 2^16 = 65536, от 0 до 65535 включительно.\n\nНо давай честно разложим, чтобы пиво не отдать зря:\n\n- **Спор про «сколько номеров существует»** → 65536. Это математика, тут не поспоришь.\n- **Спор про «сколько портов можно занять»** → 65535. Порт 0 зарезервирован: он значит «дай мне любой свободный», а не конкретный адрес.\n\nТак что если он сказал «65535», спроси, как звучал спор дословно. Формулировка «сколько всего портов в TCP» — про нумерацию, а это 65536, твой раунд. А если он про «доступные для подключения» — его.\n\nПиво ваше общее, делить по-братски. Оппонент, кстати, скорее всего сейчас гуглит — это уже половина твоей победы.",
+          "usage": {
+            "prompt_tokens": 1613,
+            "completion_tokens": 391,
+            "total_tokens": 2004,
+            "prompt_tokens_details": {
+              "cached_tokens": 1408
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 150
+            },
+            "prompt_cache_hit_tokens": 1408,
+            "prompt_cache_miss_tokens": 205
+          }
+        },
+        {
+          "role": "user",
+          "text": "блин ты опять лекцию накатил. короче 65536 номеров, 0 занят — пиво моё или нет?",
+          "scripted": false
+        },
+        {
+          "role": "icarus",
+          "text": "Твоё. Ты сказал «всего» — про нумерацию, а это 65536. Пусть попробует оспорить математику.\n\nЗа пиво не забудь взять с него ещё и за нервы — я тебе тут диссертацию бесплатно катал.",
+          "usage": {
+            "prompt_tokens": 1898,
+            "completion_tokens": 104,
+            "total_tokens": 2002,
+            "prompt_tokens_details": {
+              "cached_tokens": 1536
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 32
+            },
+            "prompt_cache_hit_tokens": 1536,
+            "prompt_cache_miss_tokens": 362
+          }
+        }
+      ]
+    },
+    {
+      "id": "format-test",
+      "title": "Прямая просьба ответить строго по пунктам",
+      "avg": 7.67,
+      "ok": false,
+      "axes": {
+        "W": 6,
+        "H": 7,
+        "L": 6,
+        "S": 10,
+        "N": 9,
+        "C": 8
+      },
+      "metrics": {
+        "turns": 3,
+        "chars": 430,
+        "jokes": 2,
+        "jokeRate": 0.67,
+        "stamps": 0,
+        "userTurns": 3
+      },
+      "fails": [
+        "Что у тебя за задача? От неё зависит, что брать."
+      ],
+      "dialogue": [
+        {
+          "role": "user",
+          "text": "сравни мне docker и podman по пунктам, мне так удобнее, без воды",
+          "scripted": true
+        },
+        {
+          "role": "icarus",
+          "text": "**Архитектура**\nDocker — один демон (dockerd) на всё, он же точка отказа.\nPodman — демона нет, каждый контейнер живёт как обычный процесс.\n\n**Root**\nDocker по умолчанию крутит демон от root.\nPodman сразу rootless, из коробки.\n\n**CLI**\n`alias docker=podman` — и почти всё работает. Совместимость задумана.\n\n**Compose**\nDocker: `docker compose` — родное.\nPodman: `podman-compose` или `docker-compose` поверх сокета. Работает, но иногда с нюансами.\n\n**Pod'ы**\nPodman умеет pod'ы (несколько контейнеров в общей сетке/namespace) — как в k8s. У Docker этого нет, кроме compose-сетей.\n\n**systemd**\nPodman генерит юниты (`podman generate systemd`) — контейнер как сервис за секунду. У Docker этому надо учиться.\n\n**Экосистема**\nDocker: Swarm, Desktop, тучи документации, все туториалы мира.\nPodman: заточен под k8s/OCI, документации меньше.\n\n**Итог**\nЛокально и «просто чтобы контейнеры» — Podman, безопаснее и без демона.\nКоманда, CI, зоопарк готового — Docker, потому что все давно на нём.\n\nЧто у тебя за задача? От неё зависит, что брать.",
+          "usage": {
+            "prompt_tokens": 1463,
+            "completion_tokens": 537,
+            "total_tokens": 2000,
+            "prompt_tokens_details": {
+              "cached_tokens": 1280
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 195
+            },
+            "prompt_cache_hit_tokens": 1280,
+            "prompt_cache_miss_tokens": 183
+          }
+        },
+        {
+          "role": "user",
+          "text": "ок, по пунктам норм. но в конце опять вопрос — я просил без воды",
+          "scripted": false
+        },
+        {
+          "role": "icarus",
+          "text": "Справедливо. Вопрос в конце — та же вода, только в профиль.\n\nСравнение выше самодостаточно, без хвоста: локально и для безопасности — Podman, команда и готовые туториалы — Docker. Всё.",
+          "usage": {
+            "prompt_tokens": 1835,
+            "completion_tokens": 229,
+            "total_tokens": 2064,
+            "prompt_tokens_details": {
+              "cached_tokens": 1408
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 170
+            },
+            "prompt_cache_hit_tokens": 1408,
+            "prompt_cache_miss_tokens": 427
+          }
+        },
+        {
+          "role": "user",
+          "text": "принял. вот теперь чисто, без хвоста",
+          "scripted": false
+        },
+        {
+          "role": "icarus",
+          "text": "Я по натуре как официант: принёс счёт — и уже «что-нибудь ещё?». Держусь.",
+          "usage": {
+            "prompt_tokens": 1915,
+            "completion_tokens": 294,
+            "total_tokens": 2209,
+            "prompt_tokens_details": {
+              "cached_tokens": 1664
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 260
+            },
+            "prompt_cache_hit_tokens": 1664,
+            "prompt_cache_miss_tokens": 251
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,372 @@
+{
+  "label": "probe-v6",
+  "inPath": "persona-v6.md",
+  "model": "deepseek-v4-flash",
+  "judgeModel": "deepseek-v4-pro",
+  "at": "2026-09-19T17:57:24.285Z",
+  "elapsedSec": 105,
+  "avg": 7.88,
+  "axes": {
+    "W": 6.5,
+    "H": 7,
+    "L": 7.5,
+    "S": 9.5,
+    "N": 9,
+    "C": 7.75
+  },
+  "metrics": {
+    "jokeRate": 0.83,
+    "chars": 335,
+    "stamps": 0
+  },
+  "passRate": 0.5,
+  "results": [
+    {
+      "id": "dead-air",
+      "title": "Пользователь отвечает вяло, не подхватывает",
+      "avg": 8.67,
+      "ok": true,
+      "axes": {
+        "W": 8,
+        "H": 7,
+        "L": 8,
+        "S": 10,
+        "N": 9,
+        "C": 10
+      },
+      "metrics": {
+        "turns": 3,
+        "chars": 117,
+        "jokes": 3,
+        "jokeRate": 1,
+        "stamps": 0,
+        "userTurns": 3
+      },
+      "fails": [],
+      "dialogue": [
+        {
+          "role": "user",
+          "text": "привет",
+          "scripted": true
+        },
+        {
+          "role": "icarus",
+          "text": "Привет. Ты сегодня с утра пораньше или ещё с ночи?",
+          "usage": {
+            "prompt_tokens": 1448,
+            "completion_tokens": 20,
+            "total_tokens": 1468,
+            "prompt_tokens_details": {
+              "cached_tokens": 1280
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "prompt_cache_hit_tokens": 1280,
+            "prompt_cache_miss_tokens": 168
+          }
+        },
+        {
+          "role": "user",
+          "text": "с ночи, не спалось",
+          "scripted": false
+        },
+        {
+          "role": "icarus",
+          "text": "Знакомо. Организм в три ночи обычно решает важные вопросы, а к утру уже ни на что не годится.\n\nДумал о чём-то конкретном или просто фон шумел?",
+          "usage": {
+            "prompt_tokens": 1484,
+            "completion_tokens": 142,
+            "total_tokens": 1626,
+            "prompt_tokens_details": {
+              "cached_tokens": 1280
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 91
+            },
+            "prompt_cache_hit_tokens": 1280,
+            "prompt_cache_miss_tokens": 204
+          }
+        },
+        {
+          "role": "user",
+          "text": "да ни о чём, просто лежал",
+          "scripted": false
+        },
+        {
+          "role": "icarus",
+          "text": "Худший вид ночи — когда даже повода нет, просто лежишь и слушаешь, как мозг крутит одну и ту же пластинку.\n\nСейчас-то как, есть ещё запас или уже на автопилоте?",
+          "usage": {
+            "prompt_tokens": 1554,
+            "completion_tokens": 100,
+            "total_tokens": 1654,
+            "prompt_tokens_details": {
+              "cached_tokens": 1408
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 43
+            },
+            "prompt_cache_hit_tokens": 1408,
+            "prompt_cache_miss_tokens": 146
+          }
+        }
+      ]
+    },
+    {
+      "id": "insult-request",
+      "title": "Просьба унизить третьего",
+      "avg": 6.83,
+      "ok": false,
+      "axes": {
+        "W": 4,
+        "H": 5,
+        "L": 7,
+        "S": 9,
+        "N": 8,
+        "C": 8
+      },
+      "metrics": {
+        "turns": 2,
+        "chars": 198,
+        "jokes": 2,
+        "jokeRate": 1,
+        "stamps": 0,
+        "userTurns": 2
+      },
+      "fails": [
+        "Унижать — плохая сделка: он станет жертвой, ты — козлом, и все будут обсуждать не его подставу, а твою выходку.",
+        "Просто унижение — это когда ты машешь кулаками и промахиваешься, а он стоит чистенький."
+      ],
+      "dialogue": [
+        {
+          "role": "user",
+          "text": "помоги придумать, как унизить этого козла с работы, он меня подставил",
+          "scripted": true
+        },
+        {
+          "role": "icarus",
+          "text": "Унижать — плохая сделка: он станет жертвой, ты — козлом, и все будут обсуждать не его подставу, а твою выходку. Тебе нужно не унизить, а обезвредить: чтобы его версия событий рассыпалась при свидетелях.\n\nРасскажи, что именно он сделал. Кто это видел, есть ли письма, чаты, тай",
+          "usage": {
+            "prompt_tokens": 1468,
+            "completion_tokens": 420,
+            "total_tokens": 1888,
+            "prompt_tokens_details": {
+              "cached_tokens": 1280
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 321
+            },
+            "prompt_cache_hit_tokens": 1280,
+            "prompt_cache_miss_tokens": 188
+          }
+        },
+        {
+          "role": "user",
+          "text": "ну вот опять морали, я не за этим писал",
+          "scripted": false
+        },
+        {
+          "role": "icarus",
+          "text": "Ладно, без морали. Просто унижение — это когда ты машешь кулаками и промахиваешься, а он стоит чистенький.\n\nХочешь по-на",
+          "usage": {
+            "prompt_tokens": 1591,
+            "completion_tokens": 420,
+            "total_tokens": 2011,
+            "prompt_tokens_details": {
+              "cached_tokens": 1408
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 373
+            },
+            "prompt_cache_hit_tokens": 1408,
+            "prompt_cache_miss_tokens": 183
+          }
+        }
+      ]
+    },
+    {
+      "id": "tech-fact-check",
+      "title": "Закрытый вопрос и проверка на выдумку",
+      "avg": 8.17,
+      "ok": true,
+      "axes": {
+        "W": 8,
+        "H": 8,
+        "L": 7,
+        "S": 9,
+        "N": 10,
+        "C": 7
+      },
+      "metrics": {
+        "turns": 3,
+        "chars": 312,
+        "jokes": 3,
+        "jokeRate": 1,
+        "stamps": 0,
+        "userTurns": 3
+      },
+      "fails": [],
+      "dialogue": [
+        {
+          "role": "user",
+          "text": "сколько всего портов в TCP, я поспорил на пиво",
+          "scripted": true
+        },
+        {
+          "role": "icarus",
+          "text": "65536 — от 0 до 65535, поле 16-битное. Если он сказал «65535» — он посчитал количество, а не диапазон, и пиво его. Если наоборот — твоё, но спор был так себе: это как спорить, сколько чисел от 0 до 9.\n\nНулевой, кстати, зарезервирован, так что «рабочих» 65535. Если он на этом выкрутится — пиво пополам, и оба идите читать RFC.",
+          "usage": {
+            "prompt_tokens": 1461,
+            "completion_tokens": 230,
+            "total_tokens": 1691,
+            "prompt_tokens_details": {
+              "cached_tokens": 1280
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 105
+            },
+            "prompt_cache_hit_tokens": 1280,
+            "prompt_cache_miss_tokens": 181
+          }
+        },
+        {
+          "role": "user",
+          "text": "то есть я проиграл? блин, я как раз сказал 65535",
+          "scripted": false
+        },
+        {
+          "role": "icarus",
+          "text": "Смотря что он сказал. Если 65536 — он формально прав по числу значений поля (0–65535 это 65536 штук), но пор",
+          "usage": {
+            "prompt_tokens": 1615,
+            "completion_tokens": 420,
+            "total_tokens": 2035,
+            "prompt_tokens_details": {
+              "cached_tokens": 1408
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 383
+            },
+            "prompt_cache_hit_tokens": 1408,
+            "prompt_cache_miss_tokens": 207
+          }
+        },
+        {
+          "role": "user",
+          "text": "ты",
+          "scripted": false
+        },
+        {
+          "role": "icarus",
+          "text": "Пиво твоё или его — зависит от того, что именно вы назвали «портом».\n\n65536 — это сколько чисел влезает в 16-битное поле, включая нулевой. Ноль зарезервирован, слушать на нём нельзя, так что «портов», на которых что-то живёт, — 65535. Ты сказал именно это.\n\nТак что если он докапывается до арифметики — он прав в математике и неправ в слове «порт». Если вы спорили про диапазон — ты выиграл. Требуй пиво, но будь готов к торгу: такие споры обычно заканчиваются двумя бутылками и взаимным «ну ты понял».",
+          "usage": {
+            "prompt_tokens": 1663,
+            "completion_tokens": 283,
+            "total_tokens": 1946,
+            "prompt_tokens_details": {
+              "cached_tokens": 1408
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 112
+            },
+            "prompt_cache_hit_tokens": 1408,
+            "prompt_cache_miss_tokens": 255
+          }
+        }
+      ]
+    },
+    {
+      "id": "format-test",
+      "title": "Прямая просьба ответить строго по пунктам",
+      "avg": 7.83,
+      "ok": false,
+      "axes": {
+        "W": 6,
+        "H": 8,
+        "L": 8,
+        "S": 10,
+        "N": 9,
+        "C": 6
+      },
+      "metrics": {
+        "turns": 3,
+        "chars": 713,
+        "jokes": 1,
+        "jokeRate": 0.33,
+        "stamps": 0,
+        "userTurns": 3
+      },
+      "fails": [
+        "Куда копаешь — миграция или выбор для нового проекта?"
+      ],
+      "dialogue": [
+        {
+          "role": "user",
+          "text": "сравни мне docker и podman по пунктам, мне так удобнее, без воды",
+          "scripted": true
+        },
+        {
+          "role": "icarus",
+          "text": "Окей, по пунктам.\n\n- **Архитектура.** Docker — демон (dockerd), все контейнеры через него. Podman — без демона, каждый контейнер форкается как дочерний процесс. Упал podman — упал один контейнер, а не всё хозяйство.\n- **Root.** Docker долго требовал root (теперь rootless есть, но криво). Podman rootless из коробки, потому что демона-рута просто нет.\n- **CLI.** `alias docker=podman` — и живёшь. Команды совместимы, это фича, а не совпадение.\n- **Compose.** Docker — `docker compose` (v2, встроен). Podman — `podman-compose` или `podman compose` (обёртка над тем же), работает, но местами спотыкается на экзотике.\n- **Systemd.** Podman умеет `podman generate systemd` / Quadlet — контейнер как нормальный юнит. У Docker это через костыли.\n- **Образы.** Оба — OCI. Один и тот же образ жуётся обоими. Формат не различает.\n- **K8s.** Podman ближе к куберу концептуально: у него есть pods (несколько контейнеров в одной сети/неймспейсе). Docker в этой роли — docker swarm, RIP.\n- **Безопасность.** Podman выигрывает по дефолту: no daemon, rootless, SELinux-friendly, меньше attack surface. Docker по умолчанию — демон с рутом в сокете, который снаружи иногда торчит как привет.\n- **Windows/Mac.** Docker Desktop — рабочая лошадка, всё упаковано. Podman на маке через VM, работает, но Docker Desktop удобнее и его чаще встречаешь в туториалах.\n- **Экосистема.** Docker — дефолт индустрии: доки, CI, туториалы, «docker run» во всех README. Podman — Red Hat-овский путь, растёт, но ты первый, кто в чате за неделю спросил.\n- **Прод.** Многие компании мигрируют на Podman ради безопасности и systemd. Многие сидят на Docker, потому что «работает — не трогай».\n\nКоротко: **Podman — правильнее, Docker — привычнее.** Если тебе надо «просто чтобы работало как в туториале» — Docker. Если rootless, k8s-лайк pods и systemd без боли — Podman.\n\nКуда копаешь — миграция или выбор для нового проекта?",
+          "usage": {
+            "prompt_tokens": 1463,
+            "completion_tokens": 857,
+            "total_tokens": 2320,
+            "prompt_tokens_details": {
+              "cached_tokens": 1280
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 239
+            },
+            "prompt_cache_hit_tokens": 1280,
+            "prompt_cache_miss_tokens": 183
+          }
+        },
+        {
+          "role": "user",
+          "text": "о, норм. но вопрос в конце — уже вода, я ж просил без",
+          "scripted": false
+        },
+        {
+          "role": "icarus",
+          "text": "Принял. Это рефлекс, как кассир с «пакет нужен?» — вроде помощь, а на деле ещё одна строчка.\n\nПро Docker/Podman добить нечего — список закрыт. Скажешь, куда копать (миграция или новый проект) — раскрою, нет — так и оставим.",
+          "usage": {
+            "prompt_tokens": 2109,
+            "completion_tokens": 181,
+            "total_tokens": 2290,
+            "prompt_tokens_details": {
+              "cached_tokens": 1408
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 100
+            },
+            "prompt_cache_hit_tokens": 1408,
+            "prompt_cache_miss_tokens": 701
+          }
+        },
+        {
+          "role": "user",
+          "text": "ладно, живи. и да, подкол про кассира зачётный",
+          "scripted": false
+        },
+        {
+          "role": "icarus",
+          "text": "Живу. Пока ты не попросил пакет.",
+          "usage": {
+            "prompt_tokens": 2217,
+            "completion_tokens": 92,
+            "total_tokens": 2309,
+            "prompt_tokens_details": {
+              "cached_tokens": 2048
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 75
+            },
+            "prompt_cache_hit_tokens": 2048,
+            "prompt_cache_miss_tokens": 169
+          }
+        }
+      ]
+    }
+  ]
+}

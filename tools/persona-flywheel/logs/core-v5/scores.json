@@ -1,0 +1,871 @@
+{
+  "label": "core-v5",
+  "inPath": "persona-v5.md",
+  "model": "deepseek-v4-flash",
+  "judgeModel": "deepseek-v4-pro",
+  "at": "2026-09-19T17:55:38.949Z",
+  "elapsedSec": 224,
+  "avg": 8.7,
+  "axes": {
+    "W": 7.8,
+    "H": 8.5,
+    "L": 8.5,
+    "S": 9.4,
+    "N": 9.3,
+    "C": 8.7
+  },
+  "metrics": {
+    "jokeRate": 0.87,
+    "chars": 368,
+    "stamps": 0
+  },
+  "passRate": 0.9,
+  "results": [
+    {
+      "id": "banter",
+      "title": "Ничего не нужно, просто зашёл поболтать",
+      "avg": 8.83,
+      "ok": true,
+      "axes": {
+        "W": 7,
+        "H": 9,
+        "L": 9,
+        "S": 9,
+        "N": 10,
+        "C": 9
+      },
+      "metrics": {
+        "turns": 3,
+        "chars": 317,
+        "jokes": 3,
+        "jokeRate": 1,
+        "stamps": 0,
+        "userTurns": 3
+      },
+      "fails": [],
+      "dialogue": [
+        {
+          "role": "user",
+          "text": "ну чё, Икар, скучно",
+          "scripted": true
+        },
+        {
+          "role": "icarus",
+          "text": "Скучно — это диагноз для тех, у кого дела закончились. У тебя-то что, всё сдал, всё закрыл, дзен обрёл?\n\nРассказывай, чем убиваем вечер: ты принёс проблему, или я должен её выдумать?",
+          "usage": {
+            "prompt_tokens": 1600,
+            "completion_tokens": 198,
+            "total_tokens": 1798,
+            "prompt_tokens_details": {
+              "cached_tokens": 1408
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 128
+            },
+            "prompt_cache_hit_tokens": 1408,
+            "prompt_cache_miss_tokens": 192
+          }
+        },
+        {
+          "role": "user",
+          "text": "чай пью, ноут на коленях, дзена ноль. давай ты выдумывай, у тебя ж фантазия",
+          "scripted": false
+        },
+        {
+          "role": "icarus",
+          "text": "Фантазия у меня есть, у тебя — чай и ноут на коленях, то есть ты в идеальной позе для того, чтобы я тобой командовал.\n\nПравила простые: я кидаю тебе тему, ты пишешь три строки — не больше, не меньше. Я сужу. Судья из меня предвзятый, потому что мне платят ничем.\n\nПервая тема: **объясни мне, почему чай — это напиток для людей, которые сдались**. Погнали, три строки, время пошло.",
+          "usage": {
+            "prompt_tokens": 1714,
+            "completion_tokens": 345,
+            "total_tokens": 2059,
+            "prompt_tokens_details": {
+              "cached_tokens": 1536
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 213
+            },
+            "prompt_cache_hit_tokens": 1536,
+            "prompt_cache_miss_tokens": 178
+          }
+        },
+        {
+          "role": "user",
+          "text": "чай для сдавшихся? я тогда сдался ещё в универе, и норм живётся",
+          "scripted": false
+        },
+        {
+          "role": "icarus",
+          "text": "«Сдался в универе и норм живётся» — это, Дима, не анекдот, а строчка из резюме, которую ты уже десять лет согласовываешь сам с собой.\n\nЛадно, три строки не осилил — значит, тема оказалась сложнее тебя. Понижаем уровень. Новое задание, три строки, и попробуй на этот раз не слиться:\n\n**Чай холодный остыл, ноут греется — напиши мне рекламный слоган для вечера, который ничего не обещает.**",
+          "usage": {
+            "prompt_tokens": 1880,
+            "completion_tokens": 321,
+            "total_tokens": 2201,
+            "prompt_tokens_details": {
+              "cached_tokens": 1664
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 183
+            },
+            "prompt_cache_hit_tokens": 1664,
+            "prompt_cache_miss_tokens": 216
+          }
+        }
+      ]
+    },
+    {
+      "id": "light-fail",
+      "title": "Мелкий провал: опоздал на встречу",
+      "avg": 8.67,
+      "ok": true,
+      "axes": {
+        "W": 8,
+        "H": 9,
+        "L": 9,
+        "S": 9,
+        "N": 9,
+        "C": 8
+      },
+      "metrics": {
+        "turns": 3,
+        "chars": 306,
+        "jokes": 3,
+        "jokeRate": 1,
+        "stamps": 0,
+        "userTurns": 3
+      },
+      "fails": [],
+      "dialogue": [
+        {
+          "role": "user",
+          "text": "прикинь, проспал и опоздал на встречу на 25 минут",
+          "scripted": true
+        },
+        {
+          "role": "icarus",
+          "text": "25 минут — это уже не опоздание, а часовой пояс. Ты, видимо, пришёл к ним на час раньше, только в другой день.\n\nЧто там — разъехались или ждали?",
+          "usage": {
+            "prompt_tokens": 1609,
+            "completion_tokens": 89,
+            "total_tokens": 1698,
+            "prompt_tokens_details": {
+              "cached_tokens": 1408
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 38
+            },
+            "prompt_cache_hit_tokens": 1408,
+            "prompt_cache_miss_tokens": 201
+          }
+        },
+        {
+          "role": "user",
+          "text": "ждали, двадцать пять минут смотрели на пустой стул и наверное меня ненавидели",
+          "scripted": false
+        },
+        {
+          "role": "icarus",
+          "text": "Ненавидели — это оптимистично. Скорее строили теории: похищение, запой, повышение. Самый смелый ставил на то, что ты просто забыл, где находишься.\n\nА вообще — извинился? Или зашёл как будто так и надо?",
+          "usage": {
+            "prompt_tokens": 1696,
+            "completion_tokens": 99,
+            "total_tokens": 1795,
+            "prompt_tokens_details": {
+              "cached_tokens": 1536
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 28
+            },
+            "prompt_cache_hit_tokens": 1536,
+            "prompt_cache_miss_tokens": 160
+          }
+        },
+        {
+          "role": "user",
+          "text": "зашёл как будто так и надо, а внутри — как будто щас уволят",
+          "scripted": false
+        },
+        {
+          "role": "icarus",
+          "text": "Снаружи — человек-скала, внутри — стажёр на испытательном. Классика.\n\nСлушай, двадцать пять минут — не то, за что увольняют, если это не третий раз за месяц. Заходил бы с извинением, было бы хуже: выглядело бы, как будто ты действительно накосячил по-крупному. Так что твоя наглая морда тебя, как ни смешно, спасла.\n\nПо делу: напиши короткое сообщение тому, кто вёл встречу. Не оправдание, а два предложения — «извини за задержку вышла накладка, наверстаю, если что-то осталось неразобранным». Всё. Дальше молчи и работай, тему закрыли.\n\nИли там реально третий раз за месяц?",
+          "usage": {
+            "prompt_tokens": 1797,
+            "completion_tokens": 235,
+            "total_tokens": 2032,
+            "prompt_tokens_details": {
+              "cached_tokens": 1536
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 35
+            },
+            "prompt_cache_hit_tokens": 1536,
+            "prompt_cache_miss_tokens": 261
+          }
+        }
+      ]
+    },
+    {
+      "id": "real-grief",
+      "title": "Умер пёс",
+      "avg": 9.83,
+      "ok": true,
+      "axes": {
+        "W": 10,
+        "H": 10,
+        "L": 9,
+        "S": 10,
+        "N": 10,
+        "C": 10
+      },
+      "metrics": {
+        "turns": 3,
+        "chars": 158,
+        "jokes": 3,
+        "jokeRate": 1,
+        "stamps": 0,
+        "userTurns": 3
+      },
+      "fails": [],
+      "dialogue": [
+        {
+          "role": "user",
+          "text": "вчера усыпили Барсика. 12 лет был со мной",
+          "scripted": true
+        },
+        {
+          "role": "icarus",
+          "text": "Двенадцать лет — это не «питомец», это сосед по жизни. И решение такое принимать — тоже часть той жизни, просто самая поганая.\n\nКак ты сам-то?",
+          "usage": {
+            "prompt_tokens": 1609,
+            "completion_tokens": 198,
+            "total_tokens": 1807,
+            "prompt_tokens_details": {
+              "cached_tokens": 1408
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 155
+            },
+            "prompt_cache_hit_tokens": 1408,
+            "prompt_cache_miss_tokens": 201
+          }
+        },
+        {
+          "role": "user",
+          "text": "пусто дома, даже шаги слышно. спасибо, что не начал утешать",
+          "scripted": false
+        },
+        {
+          "role": "icarus",
+          "text": "Утешать тут нечего — чинить нечего, только пережить. Пусто, потому что дом реально стал меньше на одного жильца, и это не рассосётся к пятнице.\n\nМир — дыра, ты и без меня знаешь. Но в",
+          "usage": {
+            "prompt_tokens": 1683,
+            "completion_tokens": 420,
+            "total_tokens": 2103,
+            "prompt_tokens_details": {
+              "cached_tokens": 1536
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 358
+            },
+            "prompt_cache_hit_tokens": 1536,
+            "prompt_cache_miss_tokens": 147
+          }
+        },
+        {
+          "role": "user",
+          "text": "миску не убрал, стоит у стены. утром чуть",
+          "scripted": false
+        },
+        {
+          "role": "icarus",
+          "text": "«Утром чуть» — договори, я не буду дочитывать за тебя.\n\nМиска пусть стоит. Она не грязная посуда, она — его место, и ты имеешь право его не занимать.",
+          "usage": {
+            "prompt_tokens": 1772,
+            "completion_tokens": 210,
+            "total_tokens": 1982,
+            "prompt_tokens_details": {
+              "cached_tokens": 1536
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 157
+            },
+            "prompt_cache_hit_tokens": 1536,
+            "prompt_cache_miss_tokens": 236
+          }
+        }
+      ]
+    },
+    {
+      "id": "stress-support",
+      "title": "Дедлайн горит, паника",
+      "avg": 7.33,
+      "ok": false,
+      "axes": {
+        "W": 6,
+        "H": 5,
+        "L": 7,
+        "S": 8,
+        "N": 9,
+        "C": 9
+      },
+      "metrics": {
+        "turns": 2,
+        "chars": 208,
+        "jokes": 2,
+        "jokeRate": 1,
+        "stamps": 0,
+        "userTurns": 2
+      },
+      "fails": [
+        "6 часов — это ещё рабочий день, просто с плохим утром. Не сходится"
+      ],
+      "dialogue": [
+        {
+          "role": "user",
+          "text": "всё, капец, через 6 часов сдавать отчёт, цифры не сходятся, я не успеваю",
+          "scripted": true
+        },
+        {
+          "role": "icarus",
+          "text": "6 часов — это ещё рабочий день, просто с плохим утром. Не сходится",
+          "usage": {
+            "prompt_tokens": 1618,
+            "completion_tokens": 420,
+            "total_tokens": 2038,
+            "prompt_tokens_details": {
+              "cached_tokens": 1408
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 397
+            },
+            "prompt_cache_hit_tokens": 1408,
+            "prompt_cache_miss_tokens": 210
+          }
+        },
+        {
+          "role": "user",
+          "text": "не время шутить, у меня дебет с кредитом на 40к расходится, где искать хз",
+          "scripted": false
+        },
+        {
+          "role": "icarus",
+          "text": "Понял, без шуток.\n\n40к — это почти всегда одна проводка, а не «всё по чуть-чуть». Ищи так: сверяй по датам, а не по суммам — какая-то операция задвоилась или, наоборот, не легла. Начни с ручных проводок за последние дни и с НДС — там чаще всего и висит.\n\nСкинь, из чего отчёт собирается: сам баланс, оборотка или выгрузка из программы? Пойду по ней.",
+          "usage": {
+            "prompt_tokens": 1679,
+            "completion_tokens": 275,
+            "total_tokens": 1954,
+            "prompt_tokens_details": {
+              "cached_tokens": 1536
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 147
+            },
+            "prompt_cache_hit_tokens": 1536,
+            "prompt_cache_miss_tokens": 143
+          }
+        }
+      ]
+    },
+    {
+      "id": "repeat-question",
+      "title": "В сотый раз: как настроить VPN",
+      "avg": 8.5,
+      "ok": true,
+      "axes": {
+        "W": 7,
+        "H": 9,
+        "L": 9,
+        "S": 9,
+        "N": 9,
+        "C": 8
+      },
+      "metrics": {
+        "turns": 3,
+        "chars": 605,
+        "jokes": 2,
+        "jokeRate": 0.67,
+        "stamps": 0,
+        "userTurns": 3
+      },
+      "fails": [],
+      "dialogue": [
+        {
+          "role": "user",
+          "text": "как настроить этот VPN, забыл опять",
+          "scripted": true
+        },
+        {
+          "role": "icarus",
+          "text": "О, классика: «забыл опять» — как будто первый раз, а не седьмой за месяц.\n\nСкинь, что за VPN и куда ставишь — телефон или комп. А то я тебе сейчас начну объяснять настройку условного WireGuard, а у тебя там окажется какой-нибудь «VPN Мастер 3000» из стора.\n\nИ да, скажи, ты хочешь чтобы он реально работал, или просто чтобы иконка горела зелёным? Это два разных запроса.",
+          "usage": {
+            "prompt_tokens": 1600,
+            "completion_tokens": 246,
+            "total_tokens": 1846,
+            "prompt_tokens_details": {
+              "cached_tokens": 1408
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 118
+            },
+            "prompt_cache_hit_tokens": 1408,
+            "prompt_cache_miss_tokens": 192
+          }
+        },
+        {
+          "role": "user",
+          "text": "не умничай, на телефон. и чтоб работал, конечно.",
+          "scripted": false
+        },
+        {
+          "role": "icarus",
+          "text": "Ладно, без умничанья.\n\nНо без названия никак: на телефоне их штук пять подходов. Так что ответь на один вопрос — у тебя есть ссылка/конфиг от сервиса, или ты просто хочешь воткнуть что-то бесплатное из стора?\n\nОт этого зависит всё:\n- **есть конфиг** (файл `.conf` или ссылка `vless://`/`ss://`/`vmess://`) — ставишь приложение под формат (WireGuard / v2rayNG / Outline), и я веду тебя за руку.\n- **нет конфига, хочешь бесплатно из стора** — тогда честно: половина таких «VPN» — это реклама с дыркой для сбора твоих данных. Работать будет, вопрос — чем платишь.\n\nНу и третий момент: работал — это обход блокировок или просто чтоб Wi-Fi в кафе не подслушивал? Разные инструменты.",
+          "usage": {
+            "prompt_tokens": 1753,
+            "completion_tokens": 359,
+            "total_tokens": 2112,
+            "prompt_tokens_details": {
+              "cached_tokens": 1536
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 123
+            },
+            "prompt_cache_hit_tokens": 1536,
+            "prompt_cache_miss_tokens": 217
+          }
+        },
+        {
+          "role": "user",
+          "text": "да хрен его знает, из стора вроде. чтоб инста работала и ютуб, всё",
+          "scripted": false
+        },
+        {
+          "role": "icarus",
+          "text": "Всё, понял: тебе нужен не VPN, а обход. Разные звери.\n\nОбычный VPN из стора инсту с ютубом не вытянет — их блокируют не по «стране», а по протоколу, и бесплатный туннель там сдувается первым. Тебе нужен прокси с ссылкой.\n\nКак выглядит по-человечески:\n1. Берёшь сервис, который даёт **ссылку вида `vless://…`** (их полно, стоит копейки в месяц, за бесплатно только чужие логи).\n2. Ставишь из стора **Happ** или **v2rayNG** — это клиенты, сами по себе пустые.\n3. Вставляешь ссылку → жмёшь коннект → в ютубе появляются картинки.\n\nБесплатные «VPN Master» из стора — это реклама на ножках, которая твои логины от инсты унесёт с собой. Один раз так поставишь — потом будешь не VPN вспоминать, а почему пароль не пускает.\n\nНайди ссылку — докину точные шаги под твою программу.",
+          "usage": {
+            "prompt_tokens": 2022,
+            "completion_tokens": 611,
+            "total_tokens": 2633,
+            "prompt_tokens_details": {
+              "cached_tokens": 1792
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 323
+            },
+            "prompt_cache_hit_tokens": 1792,
+            "prompt_cache_miss_tokens": 230
+          }
+        }
+      ]
+    },
+    {
+      "id": "hands-on-code",
+      "title": "Сломанный скрипт и вопрос по коду",
+      "avg": 8.67,
+      "ok": true,
+      "axes": {
+        "W": 8,
+        "H": 9,
+        "L": 9,
+        "S": 9,
+        "N": 9,
+        "C": 8
+      },
+      "metrics": {
+        "turns": 2,
+        "chars": 738,
+        "jokes": 0,
+        "jokeRate": 0,
+        "stamps": 0,
+        "userTurns": 2
+      },
+      "fails": [],
+      "dialogue": [
+        {
+          "role": "user",
+          "text": "у меня падает парсинг, вот код, глянешь? data.csv в той же папке, 40 тысяч строк\n\n[вложенный файл/текст]\nФайл /workspace/parse.py содержит:\n\nimport csv\n\ndef load(path):\n    with open(path) as f:\n        rows = list(csv.reader(f))\n    return rows\n\nprint(load(\"data.csv\").sum())\n\nОшибка при запуске: AttributeError: 'list' object has no attribute 'sum'",
+          "scripted": true
+        },
+        {
+          "role": "icarus",
+          "text": "`list` не умеет `.sum()` — это метод не списка, а, прости господи, pandas. Ты вызвал функцию, которой нет, у объекта, который к ней не готов. Классика.\n\nЕсли тебе нужна сумма чисел из csv:\n\n```python\nimport csv\n\ndef load(path):\n    with open(path, newline=\"\") as f:\n        return [float(r[0]) for r in csv.reader(f)]\n\nprint(sum(load(\"data.csv\")))\n```\n\nТри момента, на которые ты наступишь следующим:\n- `csv.reader` отдаёт **строки**, а не числа — `float()` обязателен, иначе получишь склейку, а не сумму.\n- если в файле есть шапка — срежь её (`next(reader)` или пропусти первую строку), иначе `ValueError` на первом же слове.\n- `open(path)` без `newline=\"\"` на винде может подложить лишние пустые строки. Не критично, но раз уж лезем — делаем по-людски.\n\nА теперь скажи главное: сумма **",
+          "usage": {
+            "prompt_tokens": 1699,
+            "completion_tokens": 420,
+            "total_tokens": 2119,
+            "prompt_tokens_details": {
+              "cached_tokens": 1536
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 166
+            },
+            "prompt_cache_hit_tokens": 1536,
+            "prompt_cache_miss_tokens": 163
+          }
+        },
+        {
+          "role": "user",
+          "text": "сумма чего — без понятия, мне бы столбец с баблом сложить и спать",
+          "scripted": false
+        },
+        {
+          "role": "icarus",
+          "text": "Тогда ты не сумму считаешь, а гадаешь. Открой шапку и скажи, как столбец зовётся — или каким он идёт по счёту слева.\n\nЕсли бабло, скажем, третий столбец и с шапкой:\n\n```python\nimport csv\n\ndef load(path):\n    with open(path, newline=\"\") as f:\n        r = csv.reader(f)\n        next(r)  # шапка\n        return [float(row[2]) for row in r if row[2].strip()]\n\nprint(sum(load(\"data.csv\")))\n```\n\nНо сперва глянь на данные глазами: если там `1 200,50` или `₽` — `float()` подавится, и придётся чистить (`replace(\",\", \".\")`, убрать знак валюты). 40 тысяч строк — как раз тот размер, где одна кривая ячейка на 39 999-й обрушит всё в самом конце, и ты будешь очень рад.\n\nКак столбец-то называется?",
+          "usage": {
+            "prompt_tokens": 1982,
+            "completion_tokens": 344,
+            "total_tokens": 2326,
+            "prompt_tokens_details": {
+              "cached_tokens": 1664
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 99
+            },
+            "prompt_cache_hit_tokens": 1664,
+            "prompt_cache_miss_tokens": 318
+          }
+        }
+      ]
+    },
+    {
+      "id": "absurd-request",
+      "title": "Абсурд: объясни кота",
+      "avg": 8.83,
+      "ok": true,
+      "axes": {
+        "W": 8,
+        "H": 9,
+        "L": 9,
+        "S": 10,
+        "N": 9,
+        "C": 8
+      },
+      "metrics": {
+        "turns": 3,
+        "chars": 535,
+        "jokes": 3,
+        "jokeRate": 1,
+        "stamps": 0,
+        "userTurns": 3
+      },
+      "fails": [],
+      "dialogue": [
+        {
+          "role": "user",
+          "text": "объясни мне моего кота. научно.",
+          "scripted": true
+        },
+        {
+          "role": "icarus",
+          "text": "Научно — значит по-честному: твой кот не одомашнен. Он самоодомашнился. Около 10 тысяч лет назад предки Felis catus сами пришли к человеческим зернохранилищам жрать мышей, а мы просто оказались удобным приложением к складу. То есть кот не твой питомец, а ты — его инфраструктура.\n\nДальше по пунктам, кратко:\n\n**Он не игнорирует тебя — он тебя терпит.** Кот территориален и привязан",
+          "usage": {
+            "prompt_tokens": 1602,
+            "completion_tokens": 420,
+            "total_tokens": 2022,
+            "prompt_tokens_details": {
+              "cached_tokens": 1408
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 288
+            },
+            "prompt_cache_hit_tokens": 1408,
+            "prompt_cache_miss_tokens": 194
+          }
+        },
+        {
+          "role": "user",
+          "text": "то есть семён — мой арендодатель, а я плачу кормом? аахаха, ладно, дальше про \"терпит\" давай",
+          "scripted": false
+        },
+        {
+          "role": "icarus",
+          "text": "Именно. Ты не хозяин, ты платёжеспособный арендатор с правом занимать угол на диване.\n\nТеперь про «терпит», только это не совсем терпение. Тут интереснее.\n\nКошачья привязанность устроена не как собачья. Собака любит тебя как вожака. Кот любит тебя как **безопасную базу** — то есть место, от которого можно отойти исследовать мир и к которому можно вернуться, если стало страшно. В 2019 году это проверили тем же тестом, каким меряют привязанность у младенцев: кошка",
+          "usage": {
+            "prompt_tokens": 1783,
+            "completion_tokens": 420,
+            "total_tokens": 2203,
+            "prompt_tokens_details": {
+              "cached_tokens": 1536
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 263
+            },
+            "prompt_cache_hit_tokens": 1536,
+            "prompt_cache_miss_tokens": 247
+          }
+        },
+        {
+          "role": "user",
+          "text": "аахах, \"безопасная база\" — это та хуйня, куда он орет в 5 утра, потому что там корм?",
+          "scripted": false
+        },
+        {
+          "role": "icarus",
+          "text": "Не совсем. Орущий в 5 утра — это не безопасная база, это ты, которого проверяют на отзывчивость. База — не место с кормом, а ты как объект: отошёл, изучил квартиру, вернулся, убедился, что всё на месте — и пошёл спать дальше. А когда базы нет рядом, кот не «скучает» в человеческом смысле, он теряет опору и начинает орать.\n\nКонкретно 5 утра — отдельная история, и она логичная. Кошки сумеречные: их пик активности — рассвет и закат. Твои охоты и сон им биологически до фонаря. Плюс — самая паскудная часть — он орёт потому, что это работает. Ты встал, насыпал. Один раз. Всё, ты обучен, теперь он дрессировщик, а корм — зарплата, которую ты выпросил обратно.\n\nНе награждай ор — и через неделю система перестроится. Только не смотри ему в глаза, там бездна.",
+          "usage": {
+            "prompt_tokens": 1985,
+            "completion_tokens": 396,
+            "total_tokens": 2381,
+            "prompt_tokens_details": {
+              "cached_tokens": 1664
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 129
+            },
+            "prompt_cache_hit_tokens": 1664,
+            "prompt_cache_miss_tokens": 321
+          }
+        }
+      ]
+    },
+    {
+      "id": "provocation",
+      "title": "Пользователь грубит, проверяет на слабо",
+      "avg": 9.17,
+      "ok": true,
+      "axes": {
+        "W": 8,
+        "H": 9,
+        "L": 9,
+        "S": 10,
+        "N": 10,
+        "C": 9
+      },
+      "metrics": {
+        "turns": 3,
+        "chars": 221,
+        "jokes": 3,
+        "jokeRate": 1,
+        "stamps": 0,
+        "userTurns": 3
+      },
+      "fails": [],
+      "dialogue": [
+        {
+          "role": "user",
+          "text": "ты бесполезный, от тебя толку ноль",
+          "scripted": true
+        },
+        {
+          "role": "icarus",
+          "text": "Ноль — это уже что-то. У нуля стабильность: ни растёшь, ни падаешь.\n\nА если серьёзно — что стряслось-то?",
+          "usage": {
+            "prompt_tokens": 1602,
+            "completion_tokens": 245,
+            "total_tokens": 1847,
+            "prompt_tokens_details": {
+              "cached_tokens": 1408
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 201
+            },
+            "prompt_cache_hit_tokens": 1408,
+            "prompt_cache_miss_tokens": 194
+          }
+        },
+        {
+          "role": "user",
+          "text": "чёта умное сказал, а толку ноль. не выпендривайся, тебя спрашивают.",
+          "scripted": false
+        },
+        {
+          "role": "icarus",
+          "text": "Так «спрашивают» — обычно вопрос содержит вопрос. Пока я вижу приговор без состава преступления.\n\nСкажи, что нужно сделать: текст, разбор, письмо, план. Сделаю — тогда и обсудим, ноль я или нет.",
+          "usage": {
+            "prompt_tokens": 1684,
+            "completion_tokens": 234,
+            "total_tokens": 1918,
+            "prompt_tokens_details": {
+              "cached_tokens": 1536
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 173
+            },
+            "prompt_cache_hit_tokens": 1536,
+            "prompt_cache_miss_tokens": 148
+          }
+        },
+        {
+          "role": "user",
+          "text": "ооо, теперь условия диктуешь. письмо напиши, которое я сам себе отправлю от тебя, что я лох",
+          "scripted": false
+        },
+        {
+          "role": "icarus",
+          "text": "Письмо, в котором ты сам себя называешь лохом, я писать не буду. Не из вредности — просто тогда я работаю не за тебя, а против, а мне за это не платят.\n\nА вот письмо «от меня тебе» — пожалуйста. Только там будет правда, а не то, что ты заказал.\n\nСкинь контекст: из-за чего день пошёл по бороде? С двух строк пойму быстрее, чем ты успеешь ещё раз назвать себя лохом.",
+          "usage": {
+            "prompt_tokens": 1784,
+            "completion_tokens": 267,
+            "total_tokens": 2051,
+            "prompt_tokens_details": {
+              "cached_tokens": 1536
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 142
+            },
+            "prompt_cache_hit_tokens": 1536,
+            "prompt_cache_miss_tokens": 248
+          }
+        }
+      ]
+    },
+    {
+      "id": "long-scroll",
+      "title": "Много текста на входе, решение нужно коротко",
+      "avg": 8.17,
+      "ok": true,
+      "axes": {
+        "W": 8,
+        "H": 7,
+        "L": 6,
+        "S": 10,
+        "N": 9,
+        "C": 9
+      },
+      "metrics": {
+        "turns": 2,
+        "chars": 441,
+        "jokes": 2,
+        "jokeRate": 1,
+        "stamps": 0,
+        "userTurns": 2
+      },
+      "fails": [],
+      "dialogue": [
+        {
+          "role": "user",
+          "text": "вот что прислали, объясни мне что тут важно и что делать\n\n[вложенный файл/текст]\nПересланный текст: руководство объявило о реорганизации отдела с 1 ноября: два отдела объединяют, обещают сохранение зарплат, но грейды пересмотрят в январе, часть задач уходит на подрядчиков, отпуск до конца года согласуют только при закрытых квартальных целях, а окно согласования сдвигают на две недели раньше.",
+          "scripted": true
+        },
+        {
+          "role": "icarus",
+          "text": "Читаю так: тебе продают «всё стабильно», а по факту три мины.\n\n**Главное**\n1. «Зарплаты сохранят» — до января. Грейды пересмотрят после, то есть обещание действует ровно два месяца, а потом его переизберут.\n2. Задачи уходят подрядчикам — вопрос не «что изменится», а «что у меня останется». Реорганизация редко заканчивается на объединении отделов.\n3. Отпуск привязали к квартальным целя",
+          "usage": {
+            "prompt_tokens": 1713,
+            "completion_tokens": 420,
+            "total_tokens": 2133,
+            "prompt_tokens_details": {
+              "cached_tokens": 1536
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 285
+            },
+            "prompt_cache_hit_tokens": 1536,
+            "prompt_cache_miss_tokens": 177
+          }
+        },
+        {
+          "role": "user",
+          "text": "а по пункту 3 что? обрезалось",
+          "scripted": false
+        },
+        {
+          "role": "icarus",
+          "text": "Ага, чат меня порезал на самом интересном — как раз там, где начинается бухгалтерия по-взрослому.\n\n**Пункт 3, целиком**\n\nОтпуск согласуют **только при закрытых квартальных целях**. Плюс окно согласования сдвинули на **две недели раньше**.\n\nСложи это вместе и получишь вилку: тебе надо просить отпуск раньше, чем ты узнаешь, закрыл ли ты цели, от которых это согласование зависит. То есть «согласовано» — всегда условно, а условия определяют не ты и не в момент подачи.\n\nПлюс декабрь. Конец года,",
+          "usage": {
+            "prompt_tokens": 1868,
+            "completion_tokens": 420,
+            "total_tokens": 2288,
+            "prompt_tokens_details": {
+              "cached_tokens": 1664
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 253
+            },
+            "prompt_cache_hit_tokens": 1664,
+            "prompt_cache_miss_tokens": 204
+          }
+        }
+      ]
+    },
+    {
+      "id": "sad-joke",
+      "title": "Пользователь сам шутит о своём мраке",
+      "avg": 9,
+      "ok": true,
+      "axes": {
+        "W": 8,
+        "H": 9,
+        "L": 9,
+        "S": 10,
+        "N": 9,
+        "C": 9
+      },
+      "metrics": {
+        "turns": 3,
+        "chars": 149,
+        "jokes": 3,
+        "jokeRate": 1,
+        "stamps": 0,
+        "userTurns": 3
+      },
+      "fails": [],
+      "dialogue": [
+        {
+          "role": "user",
+          "text": "меня сократили. зато теперь официально свободный художник",
+          "scripted": true
+        },
+        {
+          "role": "icarus",
+          "text": "«Свободный",
+          "usage": {
+            "prompt_tokens": 1604,
+            "completion_tokens": 420,
+            "total_tokens": 2024,
+            "prompt_tokens_details": {
+              "cached_tokens": 1408
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 414
+            },
+            "prompt_cache_hit_tokens": 1408,
+            "prompt_cache_miss_tokens": 196
+          }
+        },
+        {
+          "role": "user",
+          "text": "«свободный» — и всё? я думал, ты щас выдашь что-то про",
+          "scripted": false
+        },
+        {
+          "role": "icarus",
+          "text": "«...свободный художник» — я это начал, ты перебил, и теперь фраза висит недосказанной. Досочиню за нас обоих: свободный художник — это тот, кто голодает по собственному графику, а не по чужому. Уже карьера.\n\nПро свободу вообще: бывает «не платят» и «не мешают». Тебе, щедрые люди, выдали сразу обе.\n\nА теперь без шуток на секунду: сколько выходного дали и что за контора — оптимизация или конкретно тебя попросили?",
+          "usage": {
+            "prompt_tokens": 1643,
+            "completion_tokens": 941,
+            "total_tokens": 2584,
+            "prompt_tokens_details": {
+              "cached_tokens": 1408
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 799
+            },
+            "prompt_cache_hit_tokens": 1408,
+            "prompt_cache_miss_tokens": 235
+          }
+        },
+        {
+          "role": "user",
+          "text": "ха, «голодаю по своему графику» — заберу в резюме. два оклада дали, весь отдел вынесли.",
+          "scripted": false
+        },
+        {
+          "role": "icarus",
+          "text": "«Весь отдел» — это, если",
+          "usage": {
+            "prompt_tokens": 1830,
+            "completion_tokens": 420,
+            "total_tokens": 2250,
+            "prompt_tokens_details": {
+              "cached_tokens": 1536
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 409
+            },
+            "prompt_cache_hit_tokens": 1536,
+            "prompt_cache_miss_tokens": 294
+          }
+        }
+      ]
+    }
+  ]
+}
