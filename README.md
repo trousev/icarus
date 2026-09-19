@@ -192,7 +192,7 @@ GitHub по SSH заходит на `trousev.pro` под `trousev`, обновл
 
 | имя | где | что |
 | --- | --- | --- |
-| `ICARUS_USERS` | variable | люди через пробел или запятую — из неё собирается `users:` в `config.yaml` |
+| `ICARUS_USERS` | переменная environment `production` | люди через пробел или запятую — из неё собирается `users:` в `config.yaml` |
 | `ICARUS_API_KEY` | секрет environment `production` | Bearer, под которым LibreChat ходит в icarus (`apiKey` в `config.yaml`) |
 | `DEEPSEEK_API_KEY` | секрет environment `production` | ключ провайдера — уезжает в `.env` |
 | `DEPLOY_HOST` | секрет environment `production` | `trousev.pro` |
