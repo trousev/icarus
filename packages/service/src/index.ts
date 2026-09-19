@@ -1,5 +1,5 @@
 // Точка входа icarus.
-import { DEFAULT_CONFIG_PATH, loadConfig, loadEnvFile } from './config.ts';
+import { DEFAULT_CONFIG_PATH, ensurePanelSecret, loadConfig, loadEnvFile } from './config.ts';
 import { log } from './log.ts';
 import { prepareUser } from './workspace.ts';
 import { reapStalePi, waitForContainers } from './docker/manager.ts';
@@ -36,7 +36,8 @@ if (missing.length > 0) {
 }
 
 const registry = new SessionRegistry(config);
-const server = createServer(config, registry);
+// Панель памяти пускает только по личным ссылкам: проверять их подпись нечем без секрета.
+const server = createServer(config, registry, ensurePanelSecret(config.dataDir));
 
 server.listen(config.port, config.host, () => {
   log.info('icarus слушает', { url: `http://${config.host}:${config.port}`, users: config.users.length });

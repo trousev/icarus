@@ -50,6 +50,8 @@ export type ComposeOptions = {
   serviceImage?: string;
   /** env-файл с ключами (.env в корне репозитория), если он есть: едет в сервис и людям. */
   envFile?: string;
+  /** Секрет панели: из него выводятся личные ключи ссылок на память (см. ensurePanelSecret). */
+  panelSecret: string;
   /** Стенд LibreChat — по флагу --with-librechat. */
   librechat?: LibrechatOptions;
 };
@@ -76,11 +78,15 @@ export function userVolumes(config: IcarusConfig, user: UserConfig): string[] {
 }
 
 /** Метки владения: по ним /healthz понимает, чей контейнер и не устарел ли он. */
-export function userLabels(config: IcarusConfig, user: UserConfig): Record<string, string> {
+export function userLabels(
+  config: IcarusConfig,
+  user: UserConfig,
+  panelSecret: string,
+): Record<string, string> {
   return {
     [LABEL_MANAGED]: '1',
     [LABEL_USER]: user.id,
-    [LABEL_SPEC]: specFor(config),
+    [LABEL_SPEC]: specFor(config, user, panelSecret),
   };
 }
 
@@ -186,8 +192,8 @@ export function renderCompose(config: IcarusConfig, options: ComposeOptions): st
       image: config.docker.image,
       container_name: name,
       restart: 'unless-stopped',
-      labels: userLabels(config, user),
-      environment: containerEnv(config),
+      labels: userLabels(config, user, options.panelSecret),
+      environment: containerEnv(config, user, options.panelSecret),
       volumes: userVolumes(config, user),
       ...dnsServers,
       ...envFile,

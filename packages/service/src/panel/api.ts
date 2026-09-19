@@ -1,14 +1,21 @@
 // HTTP-часть панели памяти: тонкий JSON-слой над файлами и git.
+//
+// Доступа по общему ключу здесь нет намеренно: один ключ на всех открывал память
+// всех. Вместо него — личная ссылка от Икара: пропуск подписан секретом сервиса,
+// живёт ограниченное время и называет ровно одного человека. Чей это пропуск,
+// решает только он: параметр user из запроса игнорируется, поэтому чужую память
+// через свою ссылку не открыть.
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { findUser, userPaths, type IcarusConfig, type UserConfig } from '../config.ts';
+import { findUser, userPaths, type IcarusConfig } from '../config.ts';
 import { readJsonBody, headerValue } from '../http/openai.ts';
 import { errorBody } from '../http/sse.ts';
+import { verifyPanelCredential } from '../../../extensions/lib/panel-link.ts';
 import { listFiles, readMemoryFile, removeLine, searchMemory } from './memory.ts';
 import { commitAll, ensureRepo, log, revert, show } from './git.ts';
 import { panelHtml } from './ui.ts';
 import { log as logger } from '../log.ts';
 
-export type PanelContext = { config: IcarusConfig };
+export type PanelContext = { config: IcarusConfig; panelSecret: string };
 
 type Scope = 'personal' | 'shared';
 
@@ -17,16 +24,24 @@ function json(res: ServerResponse, status: number, payload: unknown): void {
   res.end(JSON.stringify(payload));
 }
 
-function authorized(req: IncomingMessage, url: URL, config: IcarusConfig): boolean {
-  const key = config.panelKey;
-  if (!key) return false;
+/** Пропуск приходит заголовком (запросы API) или в самой ссылке (страница). */
+function credentialOf(req: IncomingMessage, url: URL): string | null {
   const header = headerValue(req, 'authorization');
-  if (header === `Bearer ${key}`) return true;
-  return url.searchParams.get('key') === key;
+  if (header?.startsWith('Bearer ')) return header.slice('Bearer '.length).trim();
+  return url.searchParams.get('t');
+}
+
+/** Чей это пропуск и не истёк ли он. null — доступа нет. */
+function authorize(req: IncomingMessage, url: URL, ctx: PanelContext): string | null {
+  const credential = credentialOf(req, url);
+  if (!credential) return null;
+  const verified = verifyPanelCredential(ctx.panelSecret, credential);
+  if (!verified.ok) return null;
+  return findUser(ctx.config, verified.userId) ? verified.userId : null;
 }
 
 function resolveRoot(config: IcarusConfig, userId: string, scope: Scope): string | null {
-  const user: UserConfig | undefined = findUser(config, userId);
+  const user = findUser(config, userId);
   if (!user) return null;
   const paths = userPaths(config, user);
   return scope === 'shared' ? paths.sharedMemory : paths.memory;
@@ -41,38 +56,38 @@ export async function handlePanel(
   const { config } = ctx;
 
   if (url.pathname === '/panel' || url.pathname === '/panel/') {
-    if (!authorized(req, url, config)) {
-      res.writeHead(401, { 'content-type': 'text/html; charset=utf-8' });
-      res.end(panelHtml(false));
-      return true;
-    }
-    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-    res.end(panelHtml(true));
+    const userId = authorize(req, url, ctx);
+    res.writeHead(userId ? 200 : 401, { 'content-type': 'text/html; charset=utf-8' });
+    res.end(panelHtml(userId ? { user: userId } : null));
     return true;
   }
 
   if (!url.pathname.startsWith('/panel/api/')) return false;
 
-  if (!authorized(req, url, config)) {
-    json(res, 401, errorBody('нужен ключ панели', 'authentication_error'));
+  const userId = authorize(req, url, ctx);
+  if (!userId) {
+    json(res, 401, errorBody('ссылка неверна или истекла — попроси у Икара свежую', 'authentication_error'));
     return true;
   }
 
   const route = url.pathname.slice('/panel/api/'.length);
 
   if (req.method === 'GET' && route === 'state') {
-    await Promise.all(config.users.map((user) => ensureRepo(userPaths(config, user).memory)));
-    await ensureRepo(userPaths(config, config.users[0]).sharedMemory);
-    json(res, 200, {
-      users: config.users.map((user) => user.id),
-      scopes: ['personal', 'shared'],
-    });
+    const user = findUser(config, userId);
+    if (!user) {
+      json(res, 404, errorBody(`пользователь ${userId} не заведён`));
+      return true;
+    }
+    const paths = userPaths(config, user);
+    await ensureRepo(paths.memory);
+    await ensureRepo(paths.sharedMemory);
+    json(res, 200, { user: userId, scopes: ['personal', 'shared'] });
     return true;
   }
 
-  // У GET пользователь приходит в query, у POST — в теле.
+  // У GET область приходит в query, у POST — в теле. Человека в запросе нет:
+  // он уже назван пропуском, и подменить его нельзя.
   const body = req.method === 'POST' ? ((await readJsonBody(req)) as Record<string, unknown>) : {};
-  const userId = url.searchParams.get('user') ?? String(body.user ?? '');
   const scope: Scope = (url.searchParams.get('scope') ?? String(body.scope ?? '')) === 'shared' ? 'shared' : 'personal';
   const root = resolveRoot(config, userId, scope);
   if (!root) {

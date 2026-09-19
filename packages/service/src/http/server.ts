@@ -11,13 +11,13 @@ import { planReconciliation } from '../docker/reconcile.ts';
 
 export const PUBLIC_MODEL_ID = 'icarus';
 
-export function createServer(config: IcarusConfig, registry: SessionRegistry): http.Server {
+export function createServer(config: IcarusConfig, registry: SessionRegistry, panelSecret: string): http.Server {
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
 
     if (url.pathname === '/panel' || url.pathname.startsWith('/panel/')) {
       try {
-        if (await handlePanel(req, res, url, { config })) return;
+        if (await handlePanel(req, res, url, { config, panelSecret })) return;
       } catch (error) {
         log.error('ошибка панели памяти', { error: redact(String(error)) });
         if (!res.headersSent) {
@@ -34,7 +34,7 @@ export function createServer(config: IcarusConfig, registry: SessionRegistry): h
       let containers: Record<string, number> = { managed: 0 };
       try {
         const managed = await listManaged(config);
-        const plan = planReconciliation({ config, users: config.users, containers: managed });
+        const plan = planReconciliation({ config, users: config.users, containers: managed, panelSecret });
         containers = {
           managed: managed.length,
           running: managed.filter((container) => container.running).length,

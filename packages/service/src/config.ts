@@ -4,6 +4,7 @@
 // лежит на верхнем уровне; у человека остаётся только id — из него выводятся имя
 // контейнера, каталоги в dataDir и id сессии pi. Иначе конфиг растёт с каждым
 // человеком, а настройки у людей незаметно разъезжаются.
+import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -53,8 +54,11 @@ export type IcarusConfig = {
   host: string;
   port: number;
   apiKey: string;
-  /** Ключ панели памяти; по умолчанию совпадает с apiKey. */
-  panelKey: string;
+  /**
+   * Внешний адрес панели памяти: его получает человек в личной ссылке от Икара.
+   * Внутри контейнера localhost бесполезен, поэтому на проде это публичный адрес.
+   */
+  panelUrl: string;
   dataDir: string;
   sessionIdleMinutes: number;
   docker: DockerConfig;
@@ -386,12 +390,15 @@ export function loadConfig(file: string, env: NodeJS.ProcessEnv = process.env): 
   if (apiKey === '') throw new Error('apiKey: пустой (возможно, не подставилась переменная окружения)');
 
   const models = parseModels(raw.models);
+  const host = optionalString(raw.host, 'host') ?? '0.0.0.0';
+  const port = numberOr(raw.port, 'port', 8081);
 
   return {
-    host: optionalString(raw.host, 'host') ?? '0.0.0.0',
-    port: numberOr(raw.port, 'port', 8081),
+    host,
+    port,
     apiKey,
-    panelKey: expandValue(optionalString(raw.panelKey, 'panelKey') ?? apiKey, env),
+    // В ссылке не покажешь «слушать везде»: без явного panelUrl человек получит localhost.
+    panelUrl: expandValue(optionalString(raw.panelUrl, 'panelUrl') ?? `http://${publicHost(host)}:${port}`, env),
     dataDir: expandValue(optionalString(raw.dataDir, 'dataDir') ?? '~/icarus', env),
     sessionIdleMinutes: numberOr(raw.sessionIdleMinutes, 'sessionIdleMinutes', 30),
     docker: {
@@ -432,4 +439,34 @@ export function userPaths(config: IcarusConfig, user: UserConfig) {
 /** Контейнеры: один на пользователя, живёт постоянно. */
 export function userContainer(config: IcarusConfig, user: UserConfig): string {
   return `${config.docker.prefix}-${user.id}`;
+}
+
+/** 0.0.0.0 и :: — это «слушать везде»; в ссылке им делать нечего, остаётся localhost. */
+export function publicHost(host: string): string {
+  return host === '0.0.0.0' || host === '::' || host === '' ? 'localhost' : host;
+}
+
+/**
+ * Секрет панели: им подписываются личные ссылки. Лежит в dataDir и монтируется
+ * только сервису — в контейнеры людей он не попадает ни файлом, ни переменной
+ * окружения (общий .env уехал бы всем, и по нему можно было бы подделать чужую
+ * ссылку). Нет файла — заводим. Сервис читает секрет на старте, так что для
+ * ротации мало удалить файл: старые ссылки обесценит новый секрет, контейнеры
+ * пересоздаст изменившийся отпечаток, а сервис надо ещё и перезапустить.
+ */
+export function ensurePanelSecret(dataDir: string): string {
+  const file = path.join(dataDir, 'panel-secret');
+  try {
+    const existing = fs.readFileSync(file, 'utf8').trim();
+    if (existing) return existing;
+  } catch {
+    /* файла ещё нет — заведём ниже */
+  }
+
+  const secret = randomBytes(32).toString('hex');
+  fs.mkdirSync(dataDir, { recursive: true });
+  // 600 и на новый файл, и на существующий: writeFileSync режим старого не меняет.
+  fs.writeFileSync(file, `${secret}\n`, { mode: 0o600 });
+  fs.chmodSync(file, 0o600);
+  return secret;
 }

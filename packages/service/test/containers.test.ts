@@ -7,7 +7,7 @@ import { describePlan, planIsQuiet, planReconciliation } from '../src/docker/rec
 import { reapStalePi } from '../src/docker/manager.ts';
 import { DEFAULT_SERVICE_IMAGE, publishAddress, renderCompose, userLabels } from '../src/docker/compose.ts';
 import type { IcarusConfig } from '../src/config.ts';
-import { makeConfig, probe } from './fixtures.ts';
+import { makeConfig, PANEL_SECRET, probe } from './fixtures.ts';
 
 const config = makeConfig({
   dataDir: '/data',
@@ -24,6 +24,7 @@ const composeOptions = {
   home: '/home/tester',
   dockerSocket: '/var/run/docker.sock',
   extraGroups: ['125'],
+  panelSecret: PANEL_SECRET,
 };
 
 function render(input: IcarusConfig = config, extra: Record<string, unknown> = {}): any {
@@ -34,17 +35,33 @@ function render(input: IcarusConfig = config, extra: Record<string, unknown> = {
  * Отпечаток зависит в том числе от dataDir, а у фикстуры он каждый раз новый
  * (свежий временный каталог) — поэтому здесь dataDir и маунты зафиксированы.
  */
-function spec(overrides: Partial<IcarusConfig> = {}): string {
-  return specFor(makeConfig({ dataDir: config.dataDir, mounts: config.mounts, ...overrides }));
+function spec(overrides: Partial<IcarusConfig> = {}, user = probe()): string {
+  return specFor(makeConfig({ dataDir: config.dataDir, mounts: config.mounts, ...overrides }), user, PANEL_SECRET);
 }
 
-test('уровни моделей уезжают в окружение', () => {
-  const env = containerEnv(config);
+test('уровни моделей и личность уезжают в окружение', () => {
+  const env = containerEnv(config, probe(), PANEL_SECRET);
   assert.equal(env.ICARUS_MODEL_FAST, 'deepseek/deepseek-v4-flash:off');
   assert.equal(env.ICARUS_MODEL_STRONG, 'deepseek/deepseek-v4-pro:medium');
+  assert.equal(env.ICARUS_USER_ID, 'probe');
+  assert.equal(env.ICARUS_PANEL_URL, config.panelUrl);
+  assert.match(env.ICARUS_PANEL_KEY, /^[0-9a-f]{64}$/, 'ключ ссылки — HMAC, а не открытый секрет');
 
   const own = makeConfig({ env: { ICARUS_MODEL_FAST: 'своё' } });
-  assert.equal(containerEnv(own).ICARUS_MODEL_FAST, 'своё', 'явное окружение важнее');
+  assert.equal(containerEnv(own, probe(), PANEL_SECRET).ICARUS_MODEL_FAST, 'своё', 'явное окружение важнее');
+});
+
+test('ключ ссылки у каждого свой, а секрет сервиса его меняет', () => {
+  assert.notEqual(
+    containerEnv(config, probe('probe'), PANEL_SECRET).ICARUS_PANEL_KEY,
+    containerEnv(config, probe('probe2'), PANEL_SECRET).ICARUS_PANEL_KEY,
+    'по чужому ключу чужую ссылку не подписать',
+  );
+  assert.notEqual(
+    specFor(config, probe(), 'один-секрет'),
+    specFor(config, probe(), 'другой-секрет'),
+    'смена секрета обесценивает старые ссылки — контейнеры пересоздаются',
+  );
 });
 
 test('отпечаток меняется от образа, dataDir, маунтов, окружения и моделей', () => {
@@ -98,12 +115,13 @@ test('стек: контейнер человека — образ, маунты
   assert.equal(service.build, undefined, 'образ у людей общий — его собирает script/server, а не каждый сервис');
   assert.equal(service.container_name, 'icarus-user-probe');
   assert.equal(service.restart, 'unless-stopped');
-  assert.deepEqual(service.labels, userLabels(config, probe()));
-  assert.equal(service.labels['icarus.spec'], specFor(config));
+  assert.deepEqual(service.labels, userLabels(config, probe(), PANEL_SECRET));
+  assert.equal(service.labels['icarus.spec'], specFor(config, probe(), PANEL_SECRET));
   assert.ok(service.volumes.includes('/data/users/probe/memory:/workspace/memory'));
   assert.ok(service.volumes.includes('/data/users/probe/sessions:/workspace/.sessions'));
   assert.ok(service.volumes.includes('/host/scratchpad:/workspace/scratchpad:ro'));
   assert.equal(service.environment.ICARUS_MODEL_FAST, 'deepseek/deepseek-v4-flash:off');
+  assert.equal(service.environment.ICARUS_USER_ID, 'probe');
 });
 
 test('стек: docker.dns доезжает до сервиса и до контейнеров людей', () => {
@@ -121,8 +139,8 @@ test('стек: docker.dns доезжает до сервиса и до конт
   assert.equal(render().services['icarus-user-probe'].dns, undefined);
 
   assert.notEqual(
-    specFor(withDns),
-    specFor(makeConfig({ dataDir: config.dataDir, mounts: config.mounts })),
+    specFor(withDns, probe(), PANEL_SECRET),
+    specFor(makeConfig({ dataDir: config.dataDir, mounts: config.mounts }), probe(), PANEL_SECRET),
     'смена DNS меняет отпечаток: старые контейнеры должны пересоздаться',
   );
 });
@@ -140,7 +158,7 @@ test('стек: .env подключается файлом, а не значен
   assert.equal(render().services['icarus-user-probe'].env_file, undefined);
 });
 
-test('стек: людей различает только имя, остальное у всех общее', () => {
+test('стек: людей различают id и личный ключ панели, остальное общее', () => {
   const two = makeConfig({ users: [probe('probe'), probe('probe2')] });
   const compose = render(two);
 
@@ -148,9 +166,24 @@ test('стек: людей различает только имя, осталь�
   assert.ok(compose.services['icarus-user-probe2']);
   assert.equal(Object.keys(compose.services).length, 3, 'сервис плюс двое людей');
 
-  const first = JSON.stringify(compose.services['icarus-user-probe']).replaceAll('probe', '<id>');
-  const second = JSON.stringify(compose.services['icarus-user-probe2']).replaceAll('probe2', '<id>');
-  assert.equal(first, second);
+  // Всё, кроме личности (имя, id, личный ключ, отпечаток), у людей одинаково.
+  const shape = (name: string, userId: string) => {
+    const service = compose.services[name];
+    const environment = { ...service.environment };
+    const labels = { ...service.labels };
+    delete environment.ICARUS_USER_ID;
+    delete environment.ICARUS_PANEL_KEY;
+    delete labels['icarus.spec'];
+    delete labels['icarus.user'];
+    return JSON.stringify({ ...service, environment, labels }).replaceAll(userId, '<id>');
+  };
+  assert.equal(shape('icarus-user-probe', 'probe'), shape('icarus-user-probe2', 'probe2'));
+
+  assert.notEqual(
+    compose.services['icarus-user-probe'].environment.ICARUS_PANEL_KEY,
+    compose.services['icarus-user-probe2'].environment.ICARUS_PANEL_KEY,
+    'ключ ссылки на память у каждого свой',
+  );
 });
 
 test('стек: людей больше нет в конфиге — сервисов тоже нет', () => {
@@ -186,7 +219,8 @@ test('план: свой контейнер с тем же отпечатком 
   const plan = planReconciliation({
     config,
     users: [probe()],
-    containers: [{ name: 'icarus-user-probe', user: 'probe', spec: specFor(config), running: true }],
+    panelSecret: PANEL_SECRET,
+    containers: [{ name: 'icarus-user-probe', user: 'probe', spec: specFor(config, probe(), PANEL_SECRET), running: true }],
   });
   assert.deepEqual(plan.keep, ['icarus-user-probe']);
   assert.equal(planIsQuiet(plan), true);
@@ -197,7 +231,8 @@ test('план: остановленный контейнер поднимаем
   const plan = planReconciliation({
     config,
     users: [probe()],
-    containers: [{ name: 'icarus-user-probe', user: 'probe', spec: specFor(config), running: false }],
+    panelSecret: PANEL_SECRET,
+    containers: [{ name: 'icarus-user-probe', user: 'probe', spec: specFor(config, probe(), PANEL_SECRET), running: false }],
   });
   assert.deepEqual(plan.start, ['icarus-user-probe']);
 });
@@ -206,6 +241,7 @@ test('план: сменился образ — пересоздаём', () => {
   const plan = planReconciliation({
     config,
     users: [probe()],
+    panelSecret: PANEL_SECRET,
     containers: [{ name: 'icarus-user-probe', user: 'probe', spec: 'старый-отпечаток', running: true }],
   });
   assert.deepEqual(plan.recreate, ['icarus-user-probe']);
@@ -216,6 +252,7 @@ test('план: контейнер без меток опознаётся по �
   const plan = planReconciliation({
     config,
     users: [probe()],
+    panelSecret: PANEL_SECRET,
     containers: [{ name: 'icarus-user-probe', user: 'probe', spec: null, running: true }],
   });
   assert.deepEqual(plan.recreate, ['icarus-user-probe']);
@@ -226,19 +263,20 @@ test('план: человек выбыл — контейнер останав�
   const plan = planReconciliation({
     config,
     users: [],
+    panelSecret: PANEL_SECRET,
     containers: [{ name: 'icarus-user-ушедший', user: 'ушедший', spec: 'любой', running: true }],
   });
   assert.deepEqual(plan.stop, ['icarus-user-ушедший']);
 });
 
 test('план: контейнера ещё нет — создадим по запросу', () => {
-  const plan = planReconciliation({ config, users: [probe()], containers: [] });
+  const plan = planReconciliation({ config, users: [probe()], panelSecret: PANEL_SECRET, containers: [] });
   assert.deepEqual(plan.create, ['probe']);
 });
 
 test('план: двое людей — два контейнера с одним отпечатком', () => {
   const two: IcarusConfig = makeConfig({ users: [probe('probe'), probe('probe2')] });
-  const plan = planReconciliation({ config: two, users: two.users, containers: [] });
+  const plan = planReconciliation({ config: two, users: two.users, panelSecret: PANEL_SECRET, containers: [] });
   assert.deepEqual(plan.create, ['probe', 'probe2']);
 });
 
