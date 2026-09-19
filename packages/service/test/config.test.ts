@@ -33,7 +33,7 @@ test('минимальный конфиг дочитывается умолча�
   assert.equal(config.apiKey, 'test-token');
   assert.equal(config.panelKey, 'test-token', 'ключ панели по умолчанию — apiKey');
   assert.equal(config.host, '0.0.0.0');
-  assert.equal(config.port, 8080);
+  assert.equal(config.port, 8081);
   assert.equal(config.sessionIdleMinutes, 30);
   assert.equal(config.docker.image, 'icarus-user:dev');
   assert.equal(config.docker.prefix, 'icarus-user');

@@ -44,13 +44,13 @@ LibreChat ──OpenAI API──► icarus ──docker exec + JSONL──► pi
 docker build -t icarus-user:dev docker/user/
 
 # 3. стек: ./script/server собирает docker-compose.yml из config.yaml и поднимает его
-./script/server                     # icarus на :8080, логи в консоли (Ctrl-C гасит стек)
+./script/server                     # icarus на :8081, логи в консоли (Ctrl-C гасит стек)
 ./script/server -d                  # то же в фоне: переживёт и терминал, и перезагрузку
 ./script/server --with-librechat    # он же + стенд LibreChat на :3090
 ./script/server --down              # погасить стек
 
 # панель памяти
-open 'http://localhost:8080/panel?key=<panelKey>'
+open 'http://localhost:8081/panel?key=<panelKey>'
 ```
 
 `./script/server` не запускает процесс, а **собирает `docker-compose.yml`** из `config.yaml`:
@@ -67,7 +67,7 @@ open 'http://localhost:8080/panel?key=<panelKey>'
 `./script/server` делает это сам, а `--build` повторяет сборку без кеша.
 
 Первый запуск после перехода со старой схемы: погаси icarus, запущенный обычным процессом на
-хосте (`node packages/service/src/index.ts …`) — он держит :8080 и пересоздаёт контейнеры мимо
+хосте (`node packages/service/src/index.ts …`) — он держит :8081 и пересоздаёт контейнеры мимо
 compose. `./script/server` один раз снесёт контейнеры без метки проекта и поднимет их заново.
 
 ## Конфиг
@@ -210,10 +210,11 @@ GitHub по SSH заходит на `trousev.pro` под `trousev`, обновл
 Проверить, кого видит icarus, можно по `/healthz`: он отдаёт `users` и состояние
 контейнеров (`missing` должен быть 0).
 
-Прод-специфику деплой подставляет сам: порт `8081` (на хосте `8080` занят jitsi-jvb) и
-`dataDir` внутри чекаута (`runtime/`, в git не попадает). Поэтому endpoint Icarus в
-LibreChat на проде — `http://host.docker.internal:8081/v1` с ключом `ICARUS_API_KEY`;
-`librechat.yaml` правится вместе с деплоем LibreChat, а не здесь.
+Прод-специфику деплой подставляет сам: `dataDir` внутри чекаута (`runtime/`, в git не попадает).
+Порт `8081` — общий дефолт (`config.example.yaml` локально и `script/redeploy` на проде): он выбран
+потому, что на прод-хосте `8080` занят jitsi-jvb, а локально удобнее тот же порт, что в бою. По той же
+причине endpoint Icarus в LibreChat на проде — `http://host.docker.internal:8081/v1` с ключом
+`ICARUS_API_KEY`; `librechat.yaml` правится вместе с деплоем LibreChat, а не здесь.
 
 Отдельная грабля хоста — резолвер. Docker отдаёт контейнерам серверы из `/etc/resolv.conf`
 хозяина, и если локальный резолвер не пускает docker-подсети, каждый внешний запрос

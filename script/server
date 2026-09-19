@@ -115,7 +115,7 @@ fi
 PROJECT='icarus'
 USER_IMAGE=''
 PANEL_HOST='localhost'
-PANEL_PORT='8080'
+PANEL_PORT='8081'
 LIBRECHAT_URL=''
 USER_CONTAINERS=()
 while IFS=$'\t' read -r key first second; do

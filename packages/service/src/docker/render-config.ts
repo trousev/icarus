@@ -133,7 +133,7 @@ export function renderConfig(
   doc.users = users;
 
   if (overrides.port?.trim()) doc.port = parsePort(overrides.port);
-  const port = Number(doc.port ?? 8080);
+  const port = Number(doc.port ?? 8081);
 
   if (overrides.dataDir?.trim()) doc.dataDir = overrides.dataDir.trim();
   const dataDir = String(doc.dataDir ?? '~/icarus-data');

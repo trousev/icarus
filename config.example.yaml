@@ -8,7 +8,9 @@
 # контейнера, каталоги в dataDir и id сессии pi.
 
 host: 0.0.0.0
-port: 8080
+# 8081 — тот же порт, что и на проде (там 8080 занят jitsi-jvb): одинаковый порт
+# избавляет от «локально одно, в бою другое».
+port: 8081
 
 # Токен, под которым LibreChat ходит в icarus (endpoint Icarus в librechat.yaml)
 apiKey: icarus-local-token
