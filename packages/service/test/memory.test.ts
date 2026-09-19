@@ -7,8 +7,10 @@ import path from 'node:path';
 import {
   applyExtraction,
   buildExtractionPrompt,
+  formatTranscript,
   isAllowedTarget,
   isDuplicate,
+  isEvidenceOf,
   memoryIndex,
   parseExtraction,
 } from '../../extensions/memory-extractor.ts';
@@ -34,11 +36,108 @@ test('писать можно только в известные полки', ()
 });
 
 test('JSON достаётся из ответа с пояснениями и ```', () => {
-  const raw = 'Вот результат:\n```json\n{"journal":"говорили о кофе","notes":[{"file":"preferences.md","append":"- Кофе без сахара"}]}\n```\nГотово.';
+  const raw = 'Вот результат:\n```json\n{"journal":"говорили о кофе","notes":[{"file":"preferences.md","append":"- Кофе без сахара","evidence":"я без сахара"}]}\n```\nГотово.';
   const parsed = parseExtraction(raw);
   assert.ok(parsed);
   assert.equal(parsed?.journal, 'говорили о кофе');
-  assert.deepEqual(parsed?.notes, [{ file: 'preferences.md', append: '- Кофе без сахара' }]);
+  assert.deepEqual(parsed?.notes, [
+    { file: 'preferences.md', append: '- Кофе без сахара', evidence: 'я без сахара' },
+  ]);
+});
+
+test('запись без цитаты из слов человека отбрасывается', () => {
+  // Та самая беда: модель пересказала совет Икара, не сверившись со словами человека.
+  const raw = '{"notes":[{"file":"preferences.md","append":"- Заваривает сенчу при 70 °C"}]}';
+  assert.equal(parseExtraction(raw), null, 'нет evidence — нет записи');
+
+  const withGap = '{"notes":[{"file":"preferences.md","append":"- Заваривает сенчу при 70 °C","evidence":"   "}]}';
+  assert.equal(parseExtraction(withGap), null, 'пустая цитата не считается');
+});
+
+test('цитата обязана быть дословно из реплики пользователя', () => {
+  const transcript = [
+    { role: 'assistant' as const, text: 'Сенчу заваривают при 70–75 °C.' },
+    { role: 'user' as const, text: 'спасибо, попробую' },
+  ];
+  assert.equal(isEvidenceOf('Сенчу заваривают при 70–75 °C.', transcript), false, 'слова Икара не источник');
+  assert.equal(isEvidenceOf('спасибо, попробую', transcript), true);
+  assert.equal(isEvidenceOf('сенчу заваривают при 70', transcript), false);
+});
+
+test('реплики Икара помечены как контекст, а не как источник', () => {
+  const formatted = formatTranscript([
+    { role: 'user', text: 'пью сенчу' },
+    { role: 'assistant', text: 'заваривай при 70 °C' },
+  ]);
+  assert.match(formatted, /ЧЕЛОВЕК: пью сенчу/);
+  assert.match(formatted, /ИКАР \(контекст, не источник\): заваривай при 70 °C/);
+});
+
+test('факт из слов человека пишется вместе с цитатой', () => {
+  const root = tempMemory();
+  const result = applyExtraction(
+    root,
+    {
+      notes: [
+        { file: 'preferences.md', append: '- Пьёт сенчу', evidence: 'пью сенчу каждый день' },
+      ],
+    },
+    new Date('2026-09-18T10:00:00Z'),
+    [
+      { role: 'user', text: 'пью сенчу каждый день' },
+      { role: 'assistant', text: 'заваривай при 70 °C' },
+    ],
+  );
+  assert.deepEqual(result.changed, ['preferences.md']);
+  assert.match(fs.readFileSync(path.join(root, 'preferences.md'), 'utf8'), /- Пьёт сенчу \(его слова: «пью сенчу каждый день»\)/);
+});
+
+test('запись на основе слов Икара не доходит до полки', () => {
+  const root = tempMemory();
+  const result = applyExtraction(
+    root,
+    {
+      notes: [
+        // совет Икара про 70 °C, выданный за факт о человеке
+        { file: 'preferences.md', append: '- Заваривает сенчу при 70 °C', evidence: 'заваривай при 70 °C' },
+      ],
+    },
+    new Date('2026-09-18T10:00:00Z'),
+    [
+      { role: 'user', text: 'как заваривать сенчу?' },
+      { role: 'assistant', text: 'заваривай при 70 °C' },
+    ],
+  );
+  assert.deepEqual(result.changed, []);
+  assert.deepEqual(result.rejected, ['preferences.md']);
+  assert.equal(fs.existsSync(path.join(root, 'preferences.md')), false, 'файл не должен появиться');
+});
+
+test('короткое «да» в ответ на вопрос Икара подтверждает сказанное человеком', () => {
+  const root = tempMemory();
+  const entries = [
+    { role: 'user' as const, text: 'пью сенчу' },
+    { role: 'assistant' as const, text: 'то есть зелёный чай?' },
+    { role: 'user' as const, text: 'да, именно так' },
+  ];
+  const result = applyExtraction(
+    root,
+    {
+      notes: [
+        { file: 'preferences.md', append: '- Пьёт сенчу', evidence: 'пью сенчу' },
+        { file: 'preferences.md', append: '- Подтвердил: это зелёный чай', evidence: 'да, именно так' },
+      ],
+    },
+    new Date('2026-09-18T10:00:00Z'),
+    entries,
+  );
+  // «да» — не пустая реплика: оно подтверждает сказанное человеком выше, и запись с такой
+  // цитатой проходит. Совет Икара в подтверждение не годится — его в репликах человека нет.
+  assert.deepEqual(result.changed, ['preferences.md', 'preferences.md']);
+  assert.deepEqual(result.rejected, []);
+  const saved = fs.readFileSync(path.join(root, 'preferences.md'), 'utf8');
+  assert.match(saved, /- Пьёт сенчу \(его слова: «пью сенчу»\)/);
+  assert.match(saved, /- Подтвердил: это зелёный чай \(его слова: «да, именно так»\)/);
 });
 
 test('мусор и пустые записи отбрасываются', () => {
@@ -84,6 +183,19 @@ test('промпт разбора содержит разговор и сего�
   assert.match(prompt, /Пользователь: привет/);
   assert.match(prompt, /2026-09-18/);
   assert.match(prompt, /"notes"/);
+});
+
+test('промпт разбора запрещает брать факты из слов Икара', () => {
+  const prompt = buildExtractionPrompt(
+    [
+      { role: 'user', text: 'как заваривать сенчу?' },
+      { role: 'assistant', text: 'заваривай при 70 °C' },
+    ],
+    new Date('2026-09-18T00:00:00Z'),
+  );
+  assert.match(prompt, /Память строится ТОЛЬКО из слов человека/);
+  assert.match(prompt, /ИКАР \(контекст, не источник\): заваривай при 70 °C/);
+  assert.match(prompt, /"evidence"/);
 });
 
 test('похожие формулировки не превращаются в дубли', () => {
