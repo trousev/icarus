@@ -58,7 +58,7 @@ export type IcarusConfig = {
    * Внешний адрес панели памяти: его получает человек в личной ссылке от Икара.
    * Внутри контейнера localhost бесполезен, поэтому на проде это публичный адрес.
    */
-  panelUrl: string;
+  url: string;
   dataDir: string;
   sessionIdleMinutes: number;
   docker: DockerConfig;
@@ -397,8 +397,8 @@ export function loadConfig(file: string, env: NodeJS.ProcessEnv = process.env): 
     host,
     port,
     apiKey,
-    // В ссылке не покажешь «слушать везде»: без явного panelUrl человек получит localhost.
-    panelUrl: expandValue(optionalString(raw.panelUrl, 'panelUrl') ?? `http://${publicHost(host)}:${port}`, env),
+    // В ссылке не покажешь «слушать везде»: без явного url человек получит localhost.
+    url: expandValue(optionalString(raw.url, 'url') ?? `http://${publicHost(host)}:${port}`, env),
     dataDir: expandValue(optionalString(raw.dataDir, 'dataDir') ?? '~/icarus', env),
     sessionIdleMinutes: numberOr(raw.sessionIdleMinutes, 'sessionIdleMinutes', 30),
     docker: {

@@ -12,7 +12,7 @@ import { linkTtlMinutes, panelLinkUrl, signPanelCredential } from "./lib/panel-l
 export type PanelEnv = {
   userId?: string;
   panelKey?: string;
-  panelUrl?: string;
+  url?: string;
   ttlMinutes?: string;
 };
 
@@ -25,12 +25,12 @@ export type PanelLinkResult = { url: string } | { error: string };
 export function memoryManagementLink(env: PanelEnv, now: number = Date.now()): PanelLinkResult {
   const userId = env.userId?.trim();
   const panelKey = env.panelKey?.trim();
-  const panelUrl = env.panelUrl?.trim();
-  if (!userId || !panelKey || !panelUrl) {
+  const url = env.url?.trim();
+  if (!userId || !panelKey || !url) {
     return { error: 'Ссылка на память недоступна: сервис не передал личный ключ или адрес панели.' };
   }
   const expiresAt = now + linkTtlMinutes(env.ttlMinutes) * 60_000;
-  return { url: panelLinkUrl(panelUrl, signPanelCredential(panelKey, userId, expiresAt)) };
+  return { url: panelLinkUrl(url, signPanelCredential(panelKey, userId, expiresAt)) };
 }
 
 /** Человеческое «сколько живёт»: сутки — «24 ч», полтора часа — «1.5 ч». */
@@ -52,7 +52,7 @@ export default function (pi: ExtensionAPI) {
       const env: PanelEnv = {
         userId: process.env.ICARUS_USER_ID,
         panelKey: process.env.ICARUS_PANEL_KEY,
-        panelUrl: process.env.ICARUS_PANEL_URL,
+        url: process.env.ICARUS_URL,
         ttlMinutes: process.env.ICARUS_MEMORY_LINK_TTL_MINUTES,
       };
       const result = memoryManagementLink(env);

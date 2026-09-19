@@ -36,7 +36,7 @@ export function containerEnv(
     ...config.env,
     ICARUS_USER_ID: user.id,
     ICARUS_PANEL_KEY: derivePanelKey(panelSecret, user.id),
-    ICARUS_PANEL_URL: config.panelUrl,
+    ICARUS_URL: config.url,
   };
 }
 
