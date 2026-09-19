@@ -1,5 +1,7 @@
 // Плоский конфиг ESLint. Проверяем только наш код: node_modules, рантайм-данные
 // (там живут сессии и память пользователей) и сгенерированное не трогаем.
+import js from '@eslint/js';
+import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
@@ -13,7 +15,21 @@ export default tseslint.config(
       '**/*.d.ts',
     ],
   },
+  // Базовый набор правил самого ESLint. Без него остаются только правила
+  // typescript-eslint, то есть мимо проходят no-duplicate-case, no-fallthrough,
+  // no-constant-condition, no-useless-escape и прочее. Для .ts конфликтующие
+  // правила следом гасит typescript-eslint/eslint-recommended: tsc строже.
+  js.configs.recommended,
   ...tseslint.configs.recommended,
+  {
+    // Скрипты и пробники — обычный node-код, им нужны node-глобали и общий набор.
+    files: ['**/*.{js,mjs,cjs}'],
+    languageOptions: {
+      ecmaVersion: 2024,
+      sourceType: 'module',
+      globals: globals.node,
+    },
+  },
   {
     files: ['**/*.ts'],
     languageOptions: {

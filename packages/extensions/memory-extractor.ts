@@ -69,7 +69,7 @@ export function parseExtraction(raw: string): Extraction | null {
 export function memoryIndex(root: string, maxFiles = 25, maxLines = 8): string {
   const lines: string[] = [];
   const walk = (dir: string, prefix = ''): void => {
-    let entries: fs.Dirent[] = [];
+    let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
     } catch {

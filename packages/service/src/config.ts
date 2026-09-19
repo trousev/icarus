@@ -235,7 +235,9 @@ export function loadConfig(file: string, env: NodeJS.ProcessEnv = process.env): 
   try {
     text = fs.readFileSync(resolved, 'utf8');
   } catch (error) {
-    throw new Error(`не читается конфиг ${resolved}: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`не читается конфиг ${resolved}: ${error instanceof Error ? error.message : String(error)}`, {
+      cause: error,
+    });
   }
 
   let parsed: unknown;
@@ -244,6 +246,7 @@ export function loadConfig(file: string, env: NodeJS.ProcessEnv = process.env): 
   } catch (error) {
     throw new Error(
       `конфиг ${resolved} не разбирается как YAML: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
     );
   }
 

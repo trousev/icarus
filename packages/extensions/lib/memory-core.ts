@@ -24,7 +24,7 @@ function clip(text: string, limit = LIMIT_PER_FILE): string {
 
 /** Первые содержательные строки файла: для списков людей и проектов хватает шапки. */
 function headings(dir: string, perFile = 240): string[] {
-  let entries: string[] = [];
+  let entries: string[];
   try {
     entries = fs.readdirSync(dir).filter((name) => name.endsWith('.md'));
   } catch {

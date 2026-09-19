@@ -98,8 +98,8 @@ users:                          # люди: только id
 | команда | что делает |
 | --- | --- |
 | `./script/update` | ставит зависимости через pnpm и раскладывает конфиги из примеров; в CI — строго по lockfile |
-| `./script/test` | гоняет тесты (`node --test`); докер и модель не нужны, `ICARUS_E2E=1` включает сценарные |
-| `./script/lint` | `tsc --noEmit` + `eslint` (можно по отдельности: `./script/lint tsc`, `./script/lint eslint`) |
+| `./script/test` | гоняет тесты (`node --test`) по всем `packages/**/*.test.ts` — обходом дерева, чтобы тест из нового каталога не выпал из прогона молча; докер и модель не нужны, `ICARUS_E2E=1` включает сценарные |
+| `./script/lint` | `tsc --noEmit` + `eslint` + `shellcheck` по `script/*` (можно по отдельности: `./script/lint tsc`, `./script/lint eslint`, `./script/lint shell`) |
 | `./script/server` | собирает `docker-compose.yml` из `config.yaml`, сначала пересобирает образы, потом поднимает стек через `docker compose up`; `-d` уводит в фон, `--with-librechat` добавляет стенд, `--build` собирает без кеша, `--down` гасит стек |
 
 Те же команды доступны через pnpm: `pnpm test`, `pnpm lint`, `pnpm start`. Установка — только
@@ -113,6 +113,24 @@ users:                          # люди: только id
 ```bash
 ./script/lint && ./script/test
 ```
+
+`eslint` идёт с базовым набором правил самого ESLint (`js.configs.recommended`) и с node-глобалями
+для `.js`/`.mjs` — иначе правила typescript-eslint не ловят ни `no-duplicate-case`, ни
+`no-fallthrough`, ни `no-useless-assignment`. `shellcheck` нужен только шагу `shell`: машина без
+него получит предупреждение и пропуск, а CI упадёт, потому что в ubuntu-образе GitHub он есть
+из коробки.
+
+`main` защищена настройками ветки, а не уговорами:
+
+- прямой push запрещён, включая админский (`enforce_admins`) — только PR;
+- merge PR заблокирован, пока не позеленели все четыре проверки CI (job'ы `lint` и `test`
+  на node 22 и 24);
+- ветку PR нужно держать на актуальном `main` (strict required status checks);
+- force-push и удаление `main` запрещены.
+
+Имена job'ов и матрица — часть этой защиты. Меняешь `name` в `ci.yml` — обнови required status
+checks в настройках ветки, иначе PR навсегда повиснет на «Expected — Waiting for status to be
+reported».
 
 Сборки нет: код исполняется напрямую как TypeScript (`node src/index.ts`), поэтому `tsc` работает
 только проверяльщиком и ничего не пишет на диск. TypeScript пока 6.x — typescript-eslint ещё не

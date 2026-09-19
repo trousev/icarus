@@ -21,7 +21,7 @@ export function resolveInside(root: string, relative: string): string | null {
 }
 
 export function listFiles(root: string, prefix = ''): MemoryFile[] {
-  let entries: fs.Dirent[] = [];
+  let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(path.join(root, prefix), { withFileTypes: true });
   } catch {

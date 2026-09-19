@@ -14,16 +14,24 @@ concurrency:
 permissions:
   contents: read
 
+# Имена job'ов — часть защиты ветки main: они перечислены в required status checks.
+# Переименуешь job или тронешь матрицу — поправь список в настройках ветки, иначе PR
+# навсегда повиснет на «Expected — Waiting for status to be reported».
 jobs:
   lint:
     name: типы и линтер (node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
+    # Зависший прогон с обязательными проверками блокирует все мержи: лучше упасть.
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         node-version: ['22.x', '24.x']
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Токен в git-конфиге PR-у не нужен: пусть чужой код его не найдёт.
+          persist-credentials: false
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -31,18 +39,23 @@ jobs:
           cache: pnpm
       - name: Зависимости
         run: ./script/update
-      - name: tsc + eslint
+      - name: tsc + eslint + shellcheck
+        # shellcheck в ubuntu-образе GitHub есть из коробки; ./script/lint в CI падает,
+        # если его вдруг не окажется, — молча пропустить bash-скрипты нельзя.
         run: ./script/lint
 
   test:
     name: тесты (node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         node-version: ['22.x', '24.x']
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
