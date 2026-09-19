@@ -33,6 +33,9 @@ export function specFor(config: IcarusConfig): string {
   const payload = JSON.stringify({
     image: config.docker.image,
     network: config.docker.network ?? null,
+    // DNS — часть содержимого контейнера: сменили серверы, старые контейнеры надо
+    // пересоздать, иначе они останутся на прежнем резолвере.
+    dns: config.docker.dns ?? [],
     // dataDir — не «просто настройка»: из него выводятся пути личной памяти, сессий и
     // pi-agent, которые монтируются в контейнер. Сменили dataDir — контейнеры обязаны
     // пересоздаться, иначе они останутся примонтированными к старым каталогам, а сервис

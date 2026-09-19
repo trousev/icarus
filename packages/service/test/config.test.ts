@@ -84,6 +84,7 @@ users:
   assert.equal(config.panelKey, 'panel');
   assert.equal(config.docker.image, 'icarus-user:v2');
   assert.equal(config.docker.network, 'icarus-net');
+  assert.deepEqual(config.docker.dns, undefined, 'без docker.dns контейнеры берут резолвер хоста');
   assert.equal(config.sessionIdleMinutes, 5);
   assert.equal(config.models.length, 2);
   assert.equal(config.models[0].tier, 'fast');
@@ -95,6 +96,24 @@ users:
   assert.equal(config.mcp.echo.command, 'node');
   assert.deepEqual(config.mcp.echo.args, ['/opt/echo.mjs']);
   assert.deepEqual(config.users, [{ id: 'probe' }, { id: 'probe2' }]);
+});
+
+test('docker.dns: список адресов, опечатка — ошибка с путём до поля', () => {
+  const withDns = writeConfig(`apiKey: token
+docker:
+  dns: ['1.1.1.1', '2606:4700:4700::1111']
+models: [{ provider: deepseek, id: flash, tier: fast }]
+users: [probe]
+`);
+  assert.deepEqual(loadConfig(withDns, {}).docker.dns, ['1.1.1.1', '2606:4700:4700::1111']);
+
+  const broken = writeConfig(`apiKey: token
+docker:
+  dns: ['1.1.1.1 8.8.8.8']
+models: [{ provider: deepseek, id: flash, tier: fast }]
+users: [probe]
+`);
+  assert.throws(() => loadConfig(broken, {}), /docker\.dns\[0\]: «1\.1\.1\.1 8\.8\.8\.8» — ожидался адрес DNS-сервера/);
 });
 
 test('~ и переменные окружения подставляются, где обещаны', () => {

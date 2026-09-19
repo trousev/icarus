@@ -174,6 +174,10 @@ export function renderCompose(config: IcarusConfig, options: ComposeOptions): st
   // Ключи подключаем файлом, а не значениями в YAML: docker-compose.yml остаётся без
   // секретов, а compose сам пересоздаёт контейнеры при правке .env.
   const envFile = options.envFile ? { env_file: [options.envFile] } : {};
+  // Свой DNS — только если человек попросил: по умолчанию контейнеры получают резолвер
+  // хоста, а вместе с ним имена других контейнеров (см. docker.dns в конфиге).
+  const dns = config.docker.dns ?? [];
+  const dnsServers = dns.length > 0 ? { dns } : {};
 
   const userServices: Record<string, ComposeService> = {};
   for (const user of config.users) {
@@ -185,6 +189,7 @@ export function renderCompose(config: IcarusConfig, options: ComposeOptions): st
       labels: userLabels(config, user),
       environment: containerEnv(config),
       volumes: userVolumes(config, user),
+      ...dnsServers,
       ...envFile,
       ...attach,
     };
@@ -208,6 +213,7 @@ export function renderCompose(config: IcarusConfig, options: ComposeOptions): st
     working_dir: options.repoRoot,
     command: ['node', 'packages/service/src/index.ts', options.configPath],
     environment: serviceEnvironment(config, options),
+    ...dnsServers,
     ...envFile,
     ports: [publishAddress(config.host, config.port)],
     volumes: [
