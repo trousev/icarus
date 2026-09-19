@@ -48,8 +48,8 @@ export type ComposeOptions = {
   extraGroups?: string[];
   /** Образ сервиса. */
   serviceImage?: string;
-  /** env-файл сервиса (packages/service/.env), если он есть. */
-  serviceEnvFile?: string;
+  /** env-файл с ключами (.env в корне репозитория), если он есть: едет в сервис и людям. */
+  envFile?: string;
   /** Стенд LibreChat — по флагу --with-librechat. */
   librechat?: LibrechatOptions;
 };
@@ -171,6 +171,9 @@ export function renderCompose(config: IcarusConfig, options: ComposeOptions): st
   const network = config.docker.network ?? null;
   const attach = network ? { networks: [network] } : {};
   const serviceImage = options.serviceImage ?? DEFAULT_SERVICE_IMAGE;
+  // Ключи подключаем файлом, а не значениями в YAML: docker-compose.yml остаётся без
+  // секретов, а compose сам пересоздаёт контейнеры при правке .env.
+  const envFile = options.envFile ? { env_file: [options.envFile] } : {};
 
   const userServices: Record<string, ComposeService> = {};
   for (const user of config.users) {
@@ -182,6 +185,7 @@ export function renderCompose(config: IcarusConfig, options: ComposeOptions): st
       labels: userLabels(config, user),
       environment: containerEnv(config),
       volumes: userVolumes(config, user),
+      ...envFile,
       ...attach,
     };
   }
@@ -204,7 +208,7 @@ export function renderCompose(config: IcarusConfig, options: ComposeOptions): st
     working_dir: options.repoRoot,
     command: ['node', 'packages/service/src/index.ts', options.configPath],
     environment: serviceEnvironment(config, options),
-    ...(options.serviceEnvFile ? { env_file: [options.serviceEnvFile] } : {}),
+    ...envFile,
     ports: [publishAddress(config.host, config.port)],
     volumes: [
       ...(options.dockerSocket ? [bind(options.dockerSocket, options.dockerSocket)] : []),

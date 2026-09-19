@@ -2,6 +2,7 @@ node_modules/
 .venv/
 __pycache__/
 *.pyc
+# ключи: провайдеры и инструменты (.env в корне, образец — .env.example)
 .env
 .env.*
 !.env.example
@@ -26,9 +27,8 @@ docker/librechat/uploads/
 docker/librechat/images/
 docker/librechat/data-node/
 
-# локальный конфиг и секреты сервиса
+# локальный конфиг сервиса (ключи — в .env, см. выше)
 config.yaml
-packages/service/.env
 
 # стек, который ./script/server собирает из config.yaml
 /docker-compose.yml

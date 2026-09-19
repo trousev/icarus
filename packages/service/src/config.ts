@@ -8,12 +8,15 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseEnv } from 'node:util';
 import { parse as parseYaml } from 'yaml';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-/** Корень репозитория: в нём лежат config.yaml, icarus.md и расширения. */
+/** Корень репозитория: в нём лежат config.yaml, .env, icarus.md и расширения. */
 export const REPO_ROOT = path.resolve(HERE, '../../..');
 export const DEFAULT_CONFIG_PATH = path.join(REPO_ROOT, 'config.yaml');
+/** Файл с ключами: в git не попадает, образец — .env.example. */
+export const ENV_FILE = path.join(REPO_ROOT, '.env');
 
 export type ModelConfig = {
   provider: string;
@@ -55,7 +58,7 @@ export type IcarusConfig = {
   docker: DockerConfig;
   /** Модели всех людей: уровни (tier) раздаёт эскалация. */
   models: ModelConfig[];
-  /** Ключи провайдеров: сам ключ, env:VAR или ${VAR}. */
+  /** Ключи провайдеров: подобранные из .env и явные из auth в config.yaml. */
   auth: Record<string, string>;
   /** Переменные окружения контейнера: ими настраиваются наши расширения. */
   env: Record<string, string>;
@@ -73,6 +76,40 @@ export function expandValue(value: string, env: NodeJS.ProcessEnv = process.env)
     const name = braced ?? prefixed;
     return env[name] ?? '';
   });
+}
+
+/**
+ * Читает .env в process.env, не перетирая уже заданное: окружение сильнее файла —
+ * ровно как ведёт себя docker compose с env_file, так что порядок не зависит от того,
+ * запущен сервис в контейнере или прямо на хосте. Файла нет — это норма: ключи могут
+ * прийти из окружения. Сами значения нужны только здесь (auth); в контейнеры людей
+ * compose отдаёт файл целиком, поэтому секреты не попадают в docker-compose.yml.
+ */
+export function loadEnvFile(file: string = ENV_FILE): void {
+  if (!fs.existsSync(file)) return;
+
+  let text: string;
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch (error) {
+    throw new Error(`не читается .env ${file}: ${error instanceof Error ? error.message : String(error)}`, {
+      cause: error,
+    });
+  }
+
+  let parsed: Record<string, string | undefined>;
+  try {
+    parsed = parseEnv(text);
+  } catch (error) {
+    throw new Error(`.env ${file} не разбирается: ${error instanceof Error ? error.message : String(error)}`, {
+      cause: error,
+    });
+  }
+
+  for (const [name, value] of Object.entries(parsed)) {
+    if (typeof value !== 'string') continue;
+    if (process.env[name] === undefined) process.env[name] = value;
+  }
 }
 
 // --- разбор и проверка ---------------------------------------------------------
@@ -121,18 +158,85 @@ function stringMap(value: unknown, what: string, env: NodeJS.ProcessEnv): Record
 }
 
 /**
- * Ключи провайдеров. Пустое значение — это почти всегда неподставленная переменная
+ * Провайдер pi → переменная окружения с его ключом. Список повторяет карту pi
+ * (@earendil-works/pi-ai, env-api-keys), чтобы провайдера из models не приходилось
+ * дублировать в config.yaml: положил ключ в .env — он уже в auth.json. Провайдера
+ * в списке нет — ключ задаётся явно через auth. Один ключ на нескольких
+ * провайдеров — норма: у moonshotai и moonshotai-cn он общий.
+ *
+ * Особые случаи pi сюда не помещаются, для них остаётся auth: — anthropic
+ * принимает ещё ANTHROPIC_AUTH_TOKEN и ANTHROPIC_OAUTH_TOKEN, amazon-bedrock
+ * обходится AWS-кредами, google-vertex — Application Default Credentials.
+ */
+const PROVIDER_ENV: Record<string, string> = {
+  anthropic: 'ANTHROPIC_API_KEY',
+  openai: 'OPENAI_API_KEY',
+  deepseek: 'DEEPSEEK_API_KEY',
+  google: 'GEMINI_API_KEY',
+  'google-vertex': 'GOOGLE_CLOUD_API_KEY',
+  'azure-openai-responses': 'AZURE_OPENAI_API_KEY',
+  groq: 'GROQ_API_KEY',
+  cerebras: 'CEREBRAS_API_KEY',
+  xai: 'XAI_API_KEY',
+  openrouter: 'OPENROUTER_API_KEY',
+  'vercel-ai-gateway': 'AI_GATEWAY_API_KEY',
+  mistral: 'MISTRAL_API_KEY',
+  minimax: 'MINIMAX_API_KEY',
+  'minimax-cn': 'MINIMAX_CN_API_KEY',
+  moonshotai: 'MOONSHOT_API_KEY',
+  'moonshotai-cn': 'MOONSHOT_API_KEY',
+  zai: 'ZAI_API_KEY',
+  'zai-coding-cn': 'ZAI_CODING_CN_API_KEY',
+  nvidia: 'NVIDIA_API_KEY',
+  together: 'TOGETHER_API_KEY',
+  fireworks: 'FIREWORKS_API_KEY',
+  huggingface: 'HF_TOKEN',
+  baseten: 'BASETEN_API_KEY',
+  opencode: 'OPENCODE_API_KEY',
+  'opencode-go': 'OPENCODE_API_KEY',
+  'kimi-coding': 'KIMI_API_KEY',
+  'qwen-token-plan': 'QWEN_TOKEN_PLAN_API_KEY',
+  'qwen-token-plan-cn': 'QWEN_TOKEN_PLAN_CN_API_KEY',
+  'qwen-token-plan-individual': 'QWEN_TOKEN_PLAN_API_KEY',
+  'ant-ling': 'ANT_LING_API_KEY',
+  radius: 'RADIUS_API_KEY',
+  xiaomi: 'XIAOMI_API_KEY',
+  'xiaomi-token-plan-cn': 'XIAOMI_TOKEN_PLAN_CN_API_KEY',
+  'xiaomi-token-plan-ams': 'XIAOMI_TOKEN_PLAN_AMS_API_KEY',
+  'xiaomi-token-plan-sgp': 'XIAOMI_TOKEN_PLAN_SGP_API_KEY',
+  'cloudflare-workers-ai': 'CLOUDFLARE_API_KEY',
+  'cloudflare-ai-gateway': 'CLOUDFLARE_API_KEY',
+  'github-copilot': 'COPILOT_GITHUB_TOKEN',
+};
+
+/**
+ * Ключи, которые уже лежат в окружении. Берём только провайдеров из models:
+ * ключ от провайдера, которого в конфиге нет, в auth.json не нужен.
+ */
+export function detectAuth(models: ModelConfig[], env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const auth: Record<string, string> = {};
+  for (const provider of new Set(models.map((model) => model.provider))) {
+    const name = PROVIDER_ENV[provider];
+    const key = (name === undefined ? undefined : env[name])?.trim();
+    if (key) auth[provider] = key;
+  }
+  return auth;
+}
+
+/**
+ * Ключи провайдеров: то, что нашлось в окружении (.env), плюс явный auth из config.yaml —
+ * он сильнее. Пустое явное значение — это почти всегда неподставленная переменная
  * окружения, а не желание работать без ключа: ругаемся сразу, иначе сервис молча
  * перезапишет auth.json пустышкой и агент сломается на первом же запросе.
  */
-function parseAuth(value: unknown, env: NodeJS.ProcessEnv): Record<string, string> {
-  const auth = stringMap(value, 'auth', env);
-  for (const [provider, key] of Object.entries(auth)) {
+function parseAuth(value: unknown, env: NodeJS.ProcessEnv, models: ModelConfig[]): Record<string, string> {
+  const explicit = stringMap(value, 'auth', env);
+  for (const [provider, key] of Object.entries(explicit)) {
     if (key === '') {
-      throw new Error(`auth.${provider}: пусто — проверь, что переменная окружения задана (env:VAR)`);
+      throw new Error(`auth.${provider}: пусто — проверь, что переменная задана в .env или в окружении (env:VAR)`);
     }
   }
-  return auth;
+  return { ...detectAuth(models, env), ...explicit };
 }
 
 const TIERS: Array<NonNullable<ModelConfig['tier']>> = ['fast', 'strong', 'vision'];function parseModels(value: unknown): ModelConfig[] {
@@ -258,6 +362,8 @@ export function loadConfig(file: string, env: NodeJS.ProcessEnv = process.env): 
   const apiKey = expandValue(requiredString(raw.apiKey, 'apiKey'), env);
   if (apiKey === '') throw new Error('apiKey: пустой (возможно, не подставилась переменная окружения)');
 
+  const models = parseModels(raw.models);
+
   return {
     host: optionalString(raw.host, 'host') ?? '0.0.0.0',
     port: numberOr(raw.port, 'port', 8080),
@@ -271,8 +377,8 @@ export function loadConfig(file: string, env: NodeJS.ProcessEnv = process.env): 
       prefix: optionalString(dockerRaw.prefix, 'docker.prefix') ?? 'icarus-user',
       socket: socket ?? null,
     },
-    models: parseModels(raw.models),
-    auth: parseAuth(raw.auth, env),
+    models,
+    auth: parseAuth(raw.auth, env, models),
     env: stringMap(raw.env, 'env', env),
     mounts: parseMounts(raw.mounts, env),
     mcp: parseMcp(raw.mcp, env),

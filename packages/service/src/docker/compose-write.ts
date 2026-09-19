@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { parseEnv } from 'node:util';
-import { DEFAULT_CONFIG_PATH, loadConfig, REPO_ROOT, userContainer } from '../config.ts';
+import { DEFAULT_CONFIG_PATH, ENV_FILE, loadConfig, loadEnvFile, REPO_ROOT, userContainer } from '../config.ts';
 import { prepareUser } from '../workspace.ts';
 import { COMPOSE_PROJECT, DEFAULT_SERVICE_IMAGE, renderCompose, type ComposeOptions } from './compose.ts';
 
@@ -99,6 +99,9 @@ function librechatPort(dir: string): number {
 
 function main(): void {
   const args = parseArgs(process.argv.slice(2));
+  // Ключи читаем до конфига: провайдерские подхватываются в auth.json (его пишет
+  // prepareUser ниже), остальные compose отдаёт контейнерам через env_file.
+  loadEnvFile();
   const config = loadConfig(args.config);
   const docker = resolveDocker(config);
 
@@ -123,9 +126,7 @@ function main(): void {
     dockerHost: docker.dockerHost,
     extraGroups,
     serviceImage: args.serviceImage,
-    ...(fs.existsSync(path.join(REPO_ROOT, 'packages', 'service', '.env'))
-      ? { serviceEnvFile: path.join(REPO_ROOT, 'packages', 'service', '.env') }
-      : {}),
+    ...(fs.existsSync(ENV_FILE) ? { envFile: ENV_FILE } : {}),
     ...(args.withLibrechat ? { librechat: { dir: librechatDir, port: librechatPort(librechatDir) } } : {}),
   };
 
