@@ -4,6 +4,11 @@
 // процессом pi (без тулов и без контекста проекта) → полученные факты раскладываются
 // по полкам, журнал дописывается, всё коммитится в git.
 //
+// Память строится только из слов человека. Реплики Икара идут в промпт как контекст
+// (чтобы понять короткие «да» и «верно»), но факт о человеке — это лишь то, что он сказал
+// или подтвердил сам. Его собственные советы и рассуждения в память не попадают: без
+// дословной цитаты из реплики пользователя запись отбрасывается (см. applyExtraction).
+//
 // В семейную память расширение не пишет никогда: туда только по явной просьбе, и это
 // делает сам агент своими тулами.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -17,9 +22,10 @@ const MODEL = process.env.ICARUS_EXTRACT_MODEL ?? "deepseek/deepseek-v4-flash";
 const QUIET_MS = Number(process.env.ICARUS_EXTRACT_AFTER_MS ?? 90_000);
 const MAX_TRANSCRIPT = 6000;
 
-export type Fact = { file: string; append: string };
+export type Fact = { file: string; append: string; evidence?: string };
 export type Extraction = { journal?: string; notes: Fact[] };
 export type ApplyResult = { changed: string[]; skipped: string[]; rejected: string[] };
+export type TranscriptEntry = { role: 'user' | 'assistant'; text: string };
 
 function log(message: string): void {
   process.stderr.write(`[memory-extractor] ${message}\n`);
@@ -35,6 +41,33 @@ export function isAllowedTarget(file: string): boolean {
 
 function normalizeLine(line: string): string {
   return line.replace(/^\s*[-*]\s*/, "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+/** Пробелы и переводы строк — в один пробел: цитату сверяем по словам, не по вёрстке. */
+export function squash(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+/** Дословная ли цитата: свидетельство обязано встретиться в реплике пользователя. */
+export function isEvidenceOf(evidence: string, entries: TranscriptEntry[]): boolean {
+  const needle = squash(evidence);
+  if (needle.length === 0) return false;
+  return entries.some((entry) => entry.role === 'user' && squash(entry.text).includes(needle));
+}
+
+/** Дословная ли цитата: в одной реплике человека целиком или в его словах по порядку. */
+export function evidenceInUserWords(
+  evidence: string,
+  entries: TranscriptEntry[],
+  userWords = '',
+): boolean {
+  const needle = squash(evidence);
+  if (needle.length === 0) return false;
+  if (isEvidenceOf(needle, entries)) return true;
+  // Иногда человек говорит одно и то же двумя репликами подряд: кусок, собранный из них,
+  // дословно в одной реплике не лежит. Но только из реплик человека — слова Икара сюда
+  // не подмешиваются, иначе его же совет сойдёт за свидетельство.
+  return squash(userWords).includes(needle);
 }
 
 /** Достаём JSON из ответа модели: она любит обернуть его в пояснения или ```json. */
@@ -53,11 +86,18 @@ export function parseExtraction(raw: string): Extraction | null {
   if (Array.isArray(source.notes)) {
     for (const note of source.notes) {
       if (!note || typeof note !== "object") continue;
-      const { file, append } = note as { file?: unknown; append?: unknown };
+      const { file, append, evidence } = note as {
+        file?: unknown;
+        append?: unknown;
+        evidence?: unknown;
+      };
       if (typeof file !== "string" || typeof append !== "string") continue;
       const text = append.trim();
       if (!text) continue;
-      notes.push({ file, append: text });
+      // У записи обязана быть цитата из слов пользователя: без неё неизвестно, чей это
+      // факт, и в память легко уедет совет самого Икара.
+      if (typeof evidence !== "string" || squash(evidence).length === 0) continue;
+      notes.push({ file, append: text, evidence: squash(evidence) });
     }
   }
   const journal = typeof source.journal === "string" ? source.journal.trim() : undefined;
@@ -122,18 +162,51 @@ export function isDuplicate(existing: string[], candidate: string, threshold = 0
   return false;
 }
 
-export function buildExtractionPrompt(transcript: string, today = new Date(), index = ''): string {
+/** Разговор глазами разбора: слова пользователя — источник, реплики Икара — только контекст. */
+export function formatTranscript(entries: TranscriptEntry[], limit = MAX_TRANSCRIPT): string {
+  const lines = entries
+    .filter((entry) => entry.text.trim().length > 0)
+    .map((entry) => {
+      const who = entry.role === 'user' ? 'ЧЕЛОВЕК' : 'ИКАР (контекст, не источник)';
+      return `${who}: ${entry.text.trim()}`;
+    });
+  return lines.join('\n\n').slice(-limit);
+}
+
+export function buildExtractionPrompt(
+  transcript: string | TranscriptEntry[],
+  today = new Date(),
+  index = '',
+): string {
   const date = today.toISOString().slice(0, 10);
+  const entries: TranscriptEntry[] =
+    typeof transcript === 'string' ? [{ role: 'user', text: transcript }] : transcript;
+  const lines = formatTranscript(entries);
+  const hasUserWords = entries.some((entry) => entry.role === 'user' && entry.text.trim());
   const indexBlock = index
     ? `\nВот что уже записано. Если факт уже есть — не повторяй его. Если уточняет — пиши в тот же файл, путь бери ровно отсюда:\n${index}\n`
     : '\nПамять пока пуста.\n';
   return `Ты — подсистема памяти. Ниже кусок разговора. Вытащи из него только то, что стоит помнить надолго.
+Память строится ТОЛЬКО из слов человека. Реплики Икара — это контекст, а не факты о человеке.
 
 Правила:
+- Источник каждой записи — прямая реплика человека или его явное согласие с чем-то
+  осмысленным (короткие «да», «верно», «именно так» читай вместе с вопросом Икара перед
+  ними). Больше ниоткуда факты не берутся.
+- Совет, рекомендация, объяснение, пример или вывод Икара — это НЕ факт о человеке.
+  Советует Икар заваривать чай при 70 °C — это не значит, что человек так делает: пока он
+  сам этого не сказал, в память это не идёт.
+- Не додумывай по «здравому смыслу»: выбор, вкус, привычка или план человека должны быть
+  сказаны или подтверждены им самим. Сомневаешься, говорил ли он это, — не пиши.
+- У каждой записи должна быть дословная цитата из слов человека (поле evidence): целая его
+  реплика или кусок подряд. Короткое «да», «верно», «именно так» в ответ на вопрос Икара —
+  годится. Слова самого Икара цитатой быть не могут: если человек только попросил «запомни
+  это» про твой совет, факта о нём здесь нет. Цитаты нет — запись отбрасывается.
 - Личное и бытовое — да. Секреты, пароли, номера карт — нет.
-- Не выдумывай: если факта в разговоре нет, не добавляй.
 - Пиши короткими строками в виде пунктов списка, от третьего лица или безлично.
 - Не повторяй то, что уже записано, и не заводи второй файл про то же самое.
+- Разовая просьба («найди», «переведи») — это не факт о человеке. Но если он сам назвал
+  признак, привычку, вкус или постоянное дело — это факт.
 - Если помнить нечего — верни пустые notes и journal.
 ${indexBlock}
 Куда писать (поле file):
@@ -143,22 +216,44 @@ ${indexBlock}
 - projects/<тема>.md — долгая тема или дело
 
 Ответ строго одним JSON без пояснений:
-{"journal": "одна строка о том, что было в разговоре", "notes": [{"file": "preferences.md", "append": "- Кофе пьёт без сахара"}]}
+{"journal": "одна строка о том, что было в разговоре", "notes": [{"file": "preferences.md", "append": "- Кофе пьёт без сахара", "evidence": "я без сахара пью"}]}
+
+Если человек в этом куске разговора ничего не сказал сам${hasUserWords ? '' : ' (а здесь его слов нет)'} — notes и journal пустые.
 
 Сегодня ${date}.
 
 Разговор:
-${transcript}`;
+${lines}`;
 }
 
 /** Раскладывает факты по полкам, не плодя дубликатов. */
-export function applyExtraction(root: string, extraction: Extraction, now = new Date()): ApplyResult {
+export function applyExtraction(
+  root: string,
+  extraction: Extraction,
+  now = new Date(),
+  userEntries: TranscriptEntry[] = [],
+): ApplyResult {
   const changed: string[] = [];
   const skipped: string[] = [];
   const rejected: string[] = [];
 
+  // Свидетельство сверяем только со словами человека: реплики Икара в эту проверку не
+  // попадают, иначе его же совет вернулся бы в память как факт о собеседнике.
+  const userWords = userEntries
+    .filter((entry) => entry.role === 'user')
+    .map((entry) => entry.text)
+    .join('\n');
+
   for (const note of extraction.notes) {
     if (!isAllowedTarget(note.file)) {
+      rejected.push(note.file);
+      continue;
+    }
+    if (
+      userEntries.length > 0 &&
+      (!note.evidence || !evidenceInUserWords(note.evidence, userEntries, userWords))
+    ) {
+      log(`отклоняю запись без слов человека в подтверждение: ${note.append}`);
       rejected.push(note.file);
       continue;
     }
@@ -167,13 +262,16 @@ export function applyExtraction(root: string, extraction: Extraction, now = new 
     const existing = fs.existsSync(target) ? fs.readFileSync(target, "utf8") : "";
     const existingLines = existing.split("\n");
     const known = new Set(existingLines.map(normalizeLine));
-    if (known.has(normalizeLine(note.append)) || isDuplicate(existingLines, note.append)) {
+    const line = note.append.startsWith("-") ? note.append : `- ${note.append}`;
+    if (known.has(normalizeLine(line)) || isDuplicate(existingLines, line)) {
       skipped.push(note.file);
       continue;
     }
-    const line = note.append.startsWith("-") ? note.append : `- ${note.append}`;
+    // Рядом с фактом оставляем его источник — фразу человека. Это не украшение:
+    // по ней потом видно, откуда запись взялась, и её не спишут на выдумку Икара.
+    const quote = note.evidence ? ` (его слова: «${note.evidence.replace(/[»\n\r]/g, " ")}»)` : "";
     const separator = existing.length === 0 ? "" : existing.endsWith("\n") ? "" : "\n";
-    fs.writeFileSync(target, `${existing}${separator}${line}\n`);
+    fs.writeFileSync(target, `${existing}${separator}${line}${quote}\n`);
     changed.push(note.file);
   }
 
@@ -284,7 +382,7 @@ function textOf(message: unknown): string {
 }
 
 export default function (pi: ExtensionAPI) {
-  let pending: string[] = [];
+  let pending: TranscriptEntry[] = [];
   let timer: NodeJS.Timeout | null = null;
   let running = false;
 
@@ -296,16 +394,20 @@ export default function (pi: ExtensionAPI) {
   const runExtraction = async () => {
     if (running || pending.length === 0) return;
     running = true;
-    const transcript = pending.join("\n").slice(-MAX_TRANSCRIPT);
+    const entries = pending;
     pending = [];
+    // Реплики храним с ролями до самого промпта: разбор должен видеть, кто что сказал,
+    // иначе совет Икара легко уезжает в память как факт о человеке.
     try {
-      const raw = await runOneShot(buildExtractionPrompt(transcript, new Date(), memoryIndex(MEMORY)));
+      const raw = await runOneShot(
+        buildExtractionPrompt(entries, new Date(), memoryIndex(MEMORY)),
+      );
       const extraction = parseExtraction(raw);
       if (!extraction) {
         log("модель не вернула разбираемый JSON — пропускаю");
         return;
       }
-      const result = applyExtraction(MEMORY, extraction);
+      const result = applyExtraction(MEMORY, extraction, new Date(), entries);
       if (result.changed.length === 0) {
         log(`новых фактов нет (пропущено ${result.skipped.length})`);
         return;
@@ -329,8 +431,8 @@ export default function (pi: ExtensionAPI) {
   pi.on("message_end", (event) => {
     const text = textOf(event.message);
     if (!text) return;
-    const role = (event.message as { role?: string })?.role === "user" ? "Пользователь" : "Икар";
-    pending.push(`${role}: ${text}`);
+    const role = (event.message as { role?: string })?.role === "user" ? "user" : "assistant";
+    pending.push({ role, text });
   });
 
   pi.on("agent_start", () => cancel());
