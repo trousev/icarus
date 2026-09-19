@@ -97,19 +97,15 @@ fi
 # --- сборка docker-compose.yml ------------------------------------------------
 # Конфиг разбираем тем же загрузчиком, что и сервис: один формат — один парсер, и
 # опечатка всплывает здесь, а не посреди запуска. Заодно готовим каталоги людей,
-# чтобы маунты принадлежали человеку, а не root-у.
-env_file=()
-if [ -f packages/service/.env ]; then
-  env_file=(--env-file=packages/service/.env)
-fi
-
+# чтобы маунты принадлежали человеку, а не root-у. Ключи из .env генератор читает сам,
+# а в compose попадает только путь к файлу — значения в docker-compose.yml не пишутся.
 summary="$(mktemp)"
 trap 'rm -f "$summary"' EXIT
 
 compose_args=(packages/service/src/docker/compose-write.ts --config "$CONFIG" --out "$COMPOSE_FILE" --summary "$summary" --service-image "$SERVICE_IMAGE")
 if [ "$WITH_LIBRECHAT" = 1 ]; then compose_args+=(--with-librechat); fi
 
-if ! log="$(node ${env_file[@]+"${env_file[@]}"} "${compose_args[@]}" 2>&1)"; then
+if ! log="$(node "${compose_args[@]}" 2>&1)"; then
   echo "[x] не удалось собрать docker-compose.yml из $CONFIG:" >&2
   echo "$log" | sed 's/^/    /' >&2
   exit 1

@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { DEFAULT_CONFIG_PATH, REPO_ROOT, loadConfig } from '../src/config.ts';
+import { DEFAULT_CONFIG_PATH, REPO_ROOT, detectAuth, loadConfig, loadEnvFile } from '../src/config.ts';
 
 function writeConfig(text: string): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-config-'));
@@ -124,6 +124,77 @@ test('пример конфига из репозитория разбирает
 
   assert.ok(config.users.length > 0, 'в примере должны быть люди');
   assert.ok(config.models.some((model) => model.tier === 'fast'), 'нужна быстрая модель');
+  assert.deepEqual(config.auth, { deepseek: 'sk-test' }, 'ключ из .env подхватывается без auth в конфиге');
+});
+
+// --- ключи из .env ------------------------------------------------------------
+
+test('ключ провайдера из окружения сам уезжает в auth', () => {
+  const config = loadConfig(writeConfig(MINIMAL), { DEEPSEEK_API_KEY: 'sk-env' } as NodeJS.ProcessEnv);
+  assert.deepEqual(config.auth, { deepseek: 'sk-env' });
+});
+
+test('detectAuth знает имена переменных pi и чистит пробелы', () => {
+  const models = [{ provider: 'google', id: 'gemini-flash' }, { provider: 'deepseek', id: 'flash' }];
+  const auth = detectAuth(models, { GEMINI_API_KEY: ' g ', DEEPSEEK_API_KEY: '' } as NodeJS.ProcessEnv);
+  assert.deepEqual(auth, { google: 'g' }, 'пустое значение — это отсутствие ключа');
+});
+
+test('detectAuth знает и редких провайдеров pi, включая общий ключ на двоих', () => {
+  const models = ['moonshotai-cn', 'qwen-token-plan-cn', 'xiaomi-token-plan-ams', 'opencode-go'].map(
+    (provider) => ({ provider, id: `${provider}-model` }),
+  );
+  const auth = detectAuth(models, {
+    MOONSHOT_API_KEY: 'moonshot',
+    QWEN_TOKEN_PLAN_CN_API_KEY: 'qwen',
+    XIAOMI_TOKEN_PLAN_AMS_API_KEY: 'xiaomi',
+    OPENCODE_API_KEY: 'opencode',
+  } as NodeJS.ProcessEnv);
+  assert.deepEqual(auth, {
+    'moonshotai-cn': 'moonshot',
+    'qwen-token-plan-cn': 'qwen',
+    'xiaomi-token-plan-ams': 'xiaomi',
+    'opencode-go': 'opencode',
+  });
+});
+
+test('в auth попадают только провайдеры из models', () => {
+  const config = loadConfig(writeConfig(MINIMAL), {
+    DEEPSEEK_API_KEY: 'sk-deepseek',
+    OPENAI_API_KEY: 'sk-openai',
+  } as NodeJS.ProcessEnv);
+  assert.deepEqual(config.auth, { deepseek: 'sk-deepseek' });
+});
+
+test('пустой ключ в окружении — всё равно что нет', () => {
+  const config = loadConfig(writeConfig(MINIMAL), { DEEPSEEK_API_KEY: '  ' } as NodeJS.ProcessEnv);
+  assert.deepEqual(config.auth, {});
+});
+
+test('явный auth в config.yaml сильнее ключа из окружения', () => {
+  const file = writeConfig(`${MINIMAL}auth:\n  deepseek: env:MY_KEY\n`);
+  const config = loadConfig(file, { MY_KEY: 'явный', DEEPSEEK_API_KEY: 'из-окружения' } as NodeJS.ProcessEnv);
+  assert.deepEqual(config.auth, { deepseek: 'явный' });
+});
+
+test('.env читается в окружение, но не перетирает уже заданное', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-env-'));
+  const file = path.join(dir, '.env');
+  fs.writeFileSync(file, '# ключи\nICARUS_TEST_FROM_FILE=файл\nICARUS_TEST_PRESET="из файла"\n');
+
+  process.env.ICARUS_TEST_PRESET = 'из окружения';
+  try {
+    loadEnvFile(file);
+    assert.equal(process.env.ICARUS_TEST_FROM_FILE, 'файл', 'значение из файла видно в окружении');
+    assert.equal(process.env.ICARUS_TEST_PRESET, 'из окружения', 'окружение сильнее файла');
+  } finally {
+    delete process.env.ICARUS_TEST_FROM_FILE;
+    delete process.env.ICARUS_TEST_PRESET;
+  }
+});
+
+test('нет .env — не ошибка: ключи могут прийти из окружения', () => {
+  assert.doesNotThrow(() => loadEnvFile('/nope/.env'));
 });
 
 // --- ошибки -------------------------------------------------------------------

@@ -106,6 +106,19 @@ test('стек: контейнер человека — образ, маунты
   assert.equal(service.environment.ICARUS_MODEL_FAST, 'deepseek/deepseek-v4-flash:off');
 });
 
+test('стек: .env подключается файлом, а не значениями в YAML', () => {
+  const compose = render(config, { envFile: '/repo/.env' });
+  assert.deepEqual(compose.services.icarus.env_file, ['/repo/.env'], 'сервису ключи нужны для auth.json');
+  assert.deepEqual(
+    compose.services['icarus-user-probe'].env_file,
+    ['/repo/.env'],
+    'человеку ключи нужны для расширений',
+  );
+
+  assert.equal(render().services.icarus.env_file, undefined, 'нет .env — нет env_file');
+  assert.equal(render().services['icarus-user-probe'].env_file, undefined);
+});
+
 test('стек: людей различает только имя, остальное у всех общее', () => {
   const two = makeConfig({ users: [probe('probe'), probe('probe2')] });
   const compose = render(two);

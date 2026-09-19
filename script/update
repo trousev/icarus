@@ -53,9 +53,21 @@ if [ ! -f config.yaml ]; then
   warn 'создал config.yaml из примера — поправь людей, модели и пути'
 fi
 
-if [ ! -f packages/service/.env ]; then
-  warn 'нет packages/service/.env — оттуда берутся ключи провайдеров (auth: env:...), например:'
-  warn "  echo 'DEEPSEEK_API_KEY=sk-...' > packages/service/.env && chmod 600 packages/service/.env"
+# Ключи живут в .env в корне. Файла нет — берём образец, а если остался старый
+# packages/service/.env, переносим ключи оттуда: до переезда он был рабочим местом ключей.
+if [ ! -f .env ]; then
+  if [ -f packages/service/.env ]; then
+    cp packages/service/.env .env
+    warn 'перенёс ключи из packages/service/.env в .env (старый файл не трогал)'
+  else
+    cp .env.example .env
+    warn 'создал .env из примера — положи туда ключи провайдеров (в git не попадает)'
+  fi
+  chmod 600 .env
+fi
+
+if [ -f packages/service/.env ]; then
+  warn 'packages/service/.env больше не читается: ключи берутся из .env в корне — старый можно удалить'
 fi
 
 if [ ! -f docker/librechat/.env ]; then

@@ -38,7 +38,7 @@ LibreChat ──OpenAI API──► icarus ──docker exec + JSONL──► pi
 # 1. зависимости и локальные конфиги (запускать после clone и после каждого git pull)
 ./script/update
 # он создаст config.yaml из config.example.yaml — поправить людей, модели и пути;
-# ключи провайдеров кладутся в packages/service/.env (см. .gitignore)
+# ключи провайдеров кладутся в .env (образец .env.example, в git не попадает)
 
 # 2. образ контейнера пользователя (./script/server тоже умеет его собирать)
 docker build -t icarus-user:dev docker/user/
@@ -72,7 +72,7 @@ compose. `./script/server` один раз снесёт контейнеры б�
 
 ## Конфиг
 
-Один файл — `config.yaml` в корне (образец `config.example.yaml`, рабочий файл в git не попадает):
+Конфиг — `config.yaml` в корне (образец `config.example.yaml`, рабочий файл в git не попадает):
 
 ```yaml
 apiKey: icarus-local-token      # Bearer, под которым ходит LibreChat
@@ -80,7 +80,7 @@ dataDir: ~/icarus-data          # память, сессии и каталоги
 
 models:                         # общие модели: tier раздаёт эскалация
   - { provider: deepseek, id: deepseek-v4-flash, thinking: off, tier: fast }
-auth: { deepseek: env:DEEPSEEK_API_KEY }   # ключи: сам ключ, env:VAR или ${VAR}
+# auth: { deepseek: env:DEEPSEEK_API_KEY }   # обычно не нужно: ключ подхватится из .env
 mounts: []                      # каталоги с хоста — пока общие для всех
 mcp: {}                         # MCP-серверы
 
@@ -88,6 +88,22 @@ users:                          # люди: только id
   - probe
   - probe2
 ```
+
+Ключи живут в `.env` в корне (образец — `.env.example`, рабочий файл в git не попадает и
+создаётся `./script/update`):
+
+```bash
+DEEPSEEK_API_KEY=sk-...   # ключ провайдера из models: кроме окружения, попадает в auth.json
+BRAVE_API_KEY=...         # прочие ключи просто уезжают в окружение контейнеров людей —
+                          # этим пользуются расширения (brave — для web_search)
+```
+
+Ключ провайдера из `models`, для которого в `.env` нашлось значение, подставляется сам:
+дублировать его в `config.yaml` не нужно. Блоки `auth:` и `env:` остаются для переопределения
+и для провайдеров, которых нет в списке известных (`PROVIDER_ENV` в
+`packages/service/src/config.ts`). Окружение сильнее файла: `export DEEPSEEK_API_KEY=…`
+перебьёт строку в `.env`. После правки `.env` хватит `./script/server` — compose пересоздаст
+контейнеры; сами значения в `docker-compose.yml` не пишутся, туда едет только путь к файлу.
 
 Человек описывается одним id: из него выводятся имя контейнера (`icarus-user-probe`), каталоги
 `dataDir/users/probe` и id сессии pi. Тот же id должен быть у человека в LibreChat — он приезжает
