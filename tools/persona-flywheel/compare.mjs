@@ -1,8 +1,8 @@
 // Сравнение: один и тот же сценарий гоняем на нескольких промптах и на стоковом ассистенте.
 // node compare.mjs --in ../../icarus.md --personas stock.txt,icarus-v0.md [--scenarios a,b]
 import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
-import { join, resolve, isAbsolute } from "node:path";
-import { ROOT, MODELS, loadScenarios, loadText, mapLimit, mean, round2 } from "./lib/api.mjs";
+import { join, isAbsolute } from "node:path";
+import { ROOT, loadScenarios, loadText, mapLimit, mean, round2 } from "./lib/api.mjs";
 import { runScenario } from "./lib/dialogue.mjs";
 import { judge, AXES } from "./lib/judge.mjs";
 

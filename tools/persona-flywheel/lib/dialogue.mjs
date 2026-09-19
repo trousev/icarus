@@ -24,7 +24,7 @@ export function transcript(dialogue) {
     .join("\n\n");
 }
 
-export async function runScenario({ system, context, scenario, maxTokens = 560 }) {
+export async function runScenario({ system, scenario, maxTokens = 560 }) {
   const dialogue = [];
   const userHistory = [];
 
@@ -65,16 +65,16 @@ function scrub(text) {
   return cleaned || text;
 }
 
-function buildMessages({ system, dialogue }) {
+function buildMessages({ dialogue }) {
   return [{ role: "user", content: `${icarusStart}\n\n---\n\n${transcript(dialogue)}` }];
 }
 
 async function replyOnce({ system, dialogue, maxTokens }) {
-  const messages = buildMessages({ system, dialogue });
+  const messages = buildMessages({ dialogue });
   let reply;
   try {
     reply = await chat({ model: MODELS.icarus, system, messages, maxTokens, temperature: 1 });
-  } catch (error) {
+  } catch {
     // бюджет сгорел в скрытых размышлениях — просим выдать только текст
     return chatFinal({ model: MODELS.icarus, system, messages, maxTokens: 260, temperature: 1 });
   }

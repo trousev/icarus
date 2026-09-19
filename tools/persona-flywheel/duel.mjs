@@ -1,7 +1,7 @@
 // Парное сравнение двух промптов на одних сценариях с двойным судейством
 // (позиции меняются местами, чтобы убрать bias на порядок).
 // node duel.mjs --a persona-vA.md --b persona-vB.md --label duel-vA-vB [--scenarios a,b] [--set core|probe]
-import { readFileSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ROOT, MODELS, loadScenarios, loadText, mapLimit, round2 } from "./lib/api.mjs";
 import { runScenario, transcript } from "./lib/dialogue.mjs";
