@@ -101,9 +101,24 @@ users:                          # люди: только id
 | `./script/test` | гоняет тесты (`node --test`) по всем `packages/**/*.test.ts` — обходом дерева, чтобы тест из нового каталога не выпал из прогона молча; докер и модель не нужны, `ICARUS_E2E=1` включает сценарные |
 | `./script/lint` | `tsc --noEmit` + `eslint` + `shellcheck` по `script/*` (можно по отдельности: `./script/lint tsc`, `./script/lint eslint`, `./script/lint shell`) |
 | `./script/server` | собирает `docker-compose.yml` из `config.yaml`, сначала пересобирает образы, потом поднимает стек через `docker compose up`; `-d` уводит в фон, `--with-librechat` добавляет стенд, `--build` собирает без кеша, `--down` гасит стек |
+| `./script/regenerate_user_passwords <пароль>` | сбрасывает пароли всех пользователей локального стенда LibreChat на заданный (в базе от них только bcrypt-хеши, восстановить забытый нельзя) |
 
 Те же команды доступны через pnpm: `pnpm test`, `pnpm lint`, `pnpm start`. Установка — только
 `./script/update`: у pnpm `pnpm update` означает другое (обновление версий зависимостей).
+
+## Стенд LibreChat
+
+`./script/server --with-librechat` поднимает рядом с icarus стенд LibreChat на `:3090`
+(контейнеры `icarus-librechat` и `icarus-librechat-mongo`, база — в томе `icarus_mongo-data`).
+Логинов в репозитории нет: пользователей заводят руками через UI, и в базе от них остаётся
+только bcrypt-хеш пароля, поэтому забытый не восстановить. Имя пользователя должно совпадать
+с id из `users` в `config.yaml` — оно приезжает в icarus заголовком `x-icarus-user-id`.
+Перезаписать пароли сразу всем пользователям стенда:
+
+```bash
+./script/regenerate_user_passwords 'новый-пароль'
+./script/regenerate_user_passwords - < пароль.txt   # пароль со stdin, чтобы не светить в истории
+```
 
 ## Проверки
 
@@ -140,7 +155,7 @@ reported».
 ## Устройство репозитория
 
 ```
-script/               команды разработчика: update, test, lint, server
+script/               команды разработчика: update, test, lint, server, regenerate_user_passwords
 packages/service/     сервис: HTTP, сессии pi, контейнеры, панель памяти
 packages/extensions/  расширения pi, которые живут в контейнере пользователя
 docker/user/          образ контейнера пользователя
