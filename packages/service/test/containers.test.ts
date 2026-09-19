@@ -25,6 +25,7 @@ const composeOptions = {
   dockerSocket: '/var/run/docker.sock',
   extraGroups: ['125'],
   panelSecret: PANEL_SECRET,
+  revision: 'rev-1',
 };
 
 function render(input: IcarusConfig = config, extra: Record<string, unknown> = {}): any {
@@ -102,9 +103,22 @@ test('стек: сервис, контейнер на человека и тёп
   assert.ok(compose.services.icarus.volumes.includes('/repo/config.yaml:/repo/config.yaml:ro'));
   assert.ok(compose.services.icarus.volumes.includes('/var/run/docker.sock:/var/run/docker.sock'));
   assert.equal(compose.services.icarus.environment.HOME, '/home/tester');
+  assert.equal(compose.services.icarus.environment.ICARUS_REVISION, 'rev-1');
   assert.equal(compose.services.icarus.user, '1000:1000');
   assert.deepEqual(compose.services.icarus.group_add, ['125']);
   assert.deepEqual(compose.services.icarus.depends_on, { 'icarus-user-probe': { condition: 'service_started' } });
+});
+
+test('стек: смена отпечатка кода пересоздаёт сервис, а не оставляет старый процесс', () => {
+  const before = render(config, { revision: 'rev-1' });
+  const after = render(config, { revision: 'rev-2' });
+
+  // Отпечаток лежит в окружении сервиса: изменился код — изменилось окружение,
+  // и `docker compose up` пересоздаёт контейнер вместо «Container icarus Running».
+  assert.notDeepEqual(after.services.icarus.environment, before.services.icarus.environment);
+  assert.equal(after.services.icarus.environment.ICARUS_REVISION, 'rev-2');
+  // У людей свой отпечаток (spec), от кода сервиса их контейнеры не зависят.
+  assert.deepEqual(after.services['icarus-user-probe'], before.services['icarus-user-probe']);
 });
 
 test('стек: контейнер человека — образ, маунты, окружение и метки владения', () => {
