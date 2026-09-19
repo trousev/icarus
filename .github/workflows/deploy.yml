@@ -37,8 +37,9 @@ jobs:
           host: ${{ secrets.DEPLOY_HOST }}
           username: trousev
           key: ${{ secrets.DEPLOY_SSH_SECRET }}
-          # Люди — из variables (список меняется без правки кода), ключи — из секретов.
-          envs: ICARUS_USERS,ICARUS_API_KEY,DEEPSEEK_API_KEY
+          # Люди — из variables (список меняется без правки кода), ключи — из секретов,
+          # DNS — из необязательной variables.ICARUS_DNS (пусто — значение из script/redeploy).
+          envs: ICARUS_USERS,ICARUS_API_KEY,DEEPSEEK_API_KEY,ICARUS_DNS
           # 30m вместо 10m по умолчанию: убитая на середине сессия оставляет стек
           # недособранным (у youtubarr так и случилось: контейнер в состоянии Created,
           # сервис лежит до ручного запуска).
@@ -59,3 +60,6 @@ jobs:
           ICARUS_USERS: ${{ vars.ICARUS_USERS }}
           ICARUS_API_KEY: ${{ secrets.ICARUS_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          # Не задана — script/redeploy возьмёт свой дефолт (сейчас 1.1.1.1 8.8.8.8).
+          # `none` в переменной убирает docker.dns из config.yaml.
+          ICARUS_DNS: ${{ vars.ICARUS_DNS }}

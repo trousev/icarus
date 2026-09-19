@@ -24,6 +24,7 @@
 #   DEEPSEEK_API_KEY  ключ провайдера из models
 #   ICARUS_PORT       порт сервиса (по умолчанию 8081: 8080 на хосте занят jitsi)
 #   ICARUS_DATA_DIR   каталог памяти (по умолчанию runtime/ внутри чекаута)
+#   ICARUS_DNS        DNS-серверы контейнеров (по умолчанию 1.1.1.1 8.8.8.8, см. ниже)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -31,6 +32,11 @@ cd "$ROOT"
 
 PORT="${ICARUS_PORT:-8081}"
 DATA_DIR="${ICARUS_DATA_DIR:-$ROOT/runtime}"
+# Резолвер хоста контейнерам не друг: unbound там пускает только 10.0.0.0/8, а Docker'овский
+# резолвер, получив от него молчание, ~4 секунды ждёт таймаут и только потом уходит на
+# следующий сервер — каждый запрос pi к модели становился на эти секунды длиннее, поэтому
+# контейнерам выдаём публичные серверы явно. Хост починят — ICARUS_DNS=none уберёт строку.
+DNS="${ICARUS_DNS:-1.1.1.1 8.8.8.8}"
 NODE_HOME="${ICARUS_NODE_HOME:-$HOME/.local/share/icarus/node}"
 NODE_URL_BASE="${ICARUS_NODE_URL:-https://nodejs.org/dist/latest-v24.x}"
 HEALTH_TIMEOUT=180
@@ -138,10 +144,11 @@ upsert_env DEEPSEEK_API_KEY "${DEEPSEEK_API_KEY:-}"
 [ -z "${DEEPSEEK_API_KEY:-}" ] || say 'DEEPSEEK_API_KEY обновлён в .env'
 
 # --- config.yaml ---------------------------------------------------------------
-# Люди — из variables, ключ API — из секрета; остальное в config.yaml не трогаем,
-# чтобы правки на хосте (модели, маунты, MCP) пережили деплой.
-say 'правлю config.yaml (люди, порт, dataDir, apiKey)'
-ICARUS_PORT="$PORT" ICARUS_DATA_DIR="$DATA_DIR" node packages/service/src/docker/render-config.ts
+# Люди — из variables, ключ API — из секрета, DNS — из кода (ICARUS_DNS); остальное
+# в config.yaml не трогаем, чтобы правки на хосте (модели, маунты, MCP) пережили деплой.
+say 'правлю config.yaml (люди, порт, dataDir, docker.dns, apiKey)'
+ICARUS_PORT="$PORT" ICARUS_DATA_DIR="$DATA_DIR" ICARUS_DNS="$DNS" \
+  node packages/service/src/docker/render-config.ts
 
 # --- запуск --------------------------------------------------------------------
 if [ "$NO_CACHE" = 1 ]; then

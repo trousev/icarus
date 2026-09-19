@@ -101,3 +101,19 @@ test('люди в файле заменяются, а не дописывают�
   assert.deepEqual(load(result.text).users.map((user) => user.id), ['vita']);
   assert.equal(/\n\s+- old\b/.test(result.text), false);
 });
+
+test('docker.dns приезжает из ICARUS_DNS, none убирает его, пусто — не трогает', () => {
+  const withDns = renderConfig(EXAMPLE, { users: 'probe', dns: '1.1.1.1, 8.8.8.8' });
+  assert.deepEqual(withDns.dns, ['1.1.1.1', '8.8.8.8']);
+  assert.deepEqual(load(withDns.text).docker.dns, ['1.1.1.1', '8.8.8.8']);
+
+  const kept = renderConfig(withDns.text, { users: 'probe' });
+  assert.equal(kept.dns, null, 'пустая переменная — прежнее значение остаётся');
+  assert.deepEqual(load(kept.text).docker.dns, ['1.1.1.1', '8.8.8.8']);
+
+  const removed = renderConfig(withDns.text, { users: 'probe', dns: 'none' });
+  assert.deepEqual(removed.dns, []);
+  assert.equal(load(removed.text).docker.dns, undefined, 'none убирает docker.dns');
+
+  assert.throws(() => renderConfig(EXAMPLE, { users: 'probe', dns: 'мой-резолвер' }), /ICARUS_DNS: «мой-резолвер»/);
+});

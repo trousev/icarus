@@ -193,6 +193,7 @@ GitHub по SSH заходит на `trousev.pro` под `trousev`, обновл
 | имя | где | что |
 | --- | --- | --- |
 | `ICARUS_USERS` | переменная environment `production` | люди через пробел или запятую — из неё собирается `users:` в `config.yaml` |
+| `ICARUS_DNS` | необязательная переменная environment `production` | DNS-серверы контейнеров (`docker.dns`); не задана — дефолт из `script/redeploy`, `none` — убрать |
 | `ICARUS_API_KEY` | секрет environment `production` | Bearer, под которым LibreChat ходит в icarus (`apiKey` в `config.yaml`) |
 | `DEEPSEEK_API_KEY` | секрет environment `production` | ключ провайдера — уезжает в `.env` |
 | `DEPLOY_HOST` | секрет environment `production` | `trousev.pro` |
@@ -220,12 +221,18 @@ LibreChat на проде — `http://host.docker.internal:8081/v1` с ключ�
 `10.0.0.0/8` отвечает контейнерам (они в `172.16.0.0/12`) `REFUSED`, Docker ждёт ~4 с и
 только потом уходит на следующий сервер — резолв `api.deepseek.com` из контейнера занимает
 **4 секунды вместо 0,02**, и это платит каждый вызов pi к модели (ходы 4,8 и 11,2 с против
-1,2 и 1,5 с локально). Лечится на хосте: `access-control: 172.16.0.0/12 allow` в unbound
-и `systemctl reload unbound` (заодно перестают тормозить все остальные контейнеры).
-Если хост трогать нельзя — `docker.dns` в `config.yaml` задаёт контейнерам свой список
-(`docker.dns: [1.1.1.1, 8.8.8.8]`); тогда имена других контейнеров внутри них не
-резолвятся, поэтому это запасной путь, а не основной. Проверка одной командой:
+1,2 и 1,5 с локально). Проверка одной командой:
 `docker exec icarus-user-<кто-то> getent ahostsv4 api.deepseek.com` — должно быть ~20 мс.
+
+Правильное лечение — на хосте (`access-control` на docker-подсеть в unbound + reload,
+тогда перестают тормозить и остальные контейнеры). Но `./script/redeploy` на всякий случай
+всегда прописывает контейнерам явный `docker.dns` — сейчас `1.1.1.1 8.8.8.8` (значение
+приезжает в `render-config.ts` переменной `ICARUS_DNS`, а не правится руками на хосте).
+Цена — имена других контейнеров и локальные зоны (`*.trousev.pro`) внутри контейнеров
+резолвятся публично; когда хост починят, `ICARUS_DNS=none` (в variables environment или
+в вызове скрипта) уберёт строку из `config.yaml`, и контейнеры вернутся на резолвер хоста.
+То же поле есть и в `config.yaml` (`docker.dns`, см. `config.example.yaml`) — им можно
+задаться и без деплоя.
 
 ## Устройство репозитория
 
