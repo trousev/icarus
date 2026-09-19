@@ -39,6 +39,7 @@ export type Overrides = {
   port?: string | undefined;
   dataDir?: string | undefined;
   apiKey?: string | undefined;
+  dns?: string | undefined;
 };
 
 export type RenderResult = {
@@ -46,6 +47,8 @@ export type RenderResult = {
   users: string[];
   port: number;
   dataDir: string;
+  /** Что стало с docker.dns: список, удалено или не трогали (null). */
+  dns: string[] | null;
   /** Откуда взялся ключ API: из секрета, из прежнего файла или сгенерирован заново. */
   apiKeySource: 'env' | 'config' | 'generated';
 };
@@ -93,6 +96,25 @@ function parsePort(value: string): number {
   return port;
 }
 
+/** Адрес DNS-сервера: тот же шаблон, что в config.ts (IPv4 или IPv6). */
+const DNS_ENTRY = /^[0-9a-fA-F:.]{3,45}$/;
+
+/**
+ * ICARUS_DNS: список адресов через пробел или запятую; `none` — убрать docker.dns;
+ * пусто — не трогать то, что уже лежит в конфиге.
+ */
+function parseDns(value: string | undefined): string[] | null {
+  const text = value?.trim() ?? '';
+  if (text === '') return null;
+  if (text === 'none' || text === 'off' || text === '-') return [];
+  return text.split(/[\s,]+/).map((entry) => {
+    if (!DNS_ENTRY.test(entry)) {
+      throw new Error(`ICARUS_DNS: «${entry}» — ожидался адрес DNS-сервера, например 1.1.1.1`);
+    }
+    return entry;
+  });
+}
+
 /**
  * Чистая правка конфига: на вход текст, на выход текст. Генератор ключа вынесен
  * параметром, чтобы тест не зависел от случайности.
@@ -116,13 +138,23 @@ export function renderConfig(
   if (overrides.dataDir?.trim()) doc.dataDir = overrides.dataDir.trim();
   const dataDir = String(doc.dataDir ?? '~/icarus-data');
 
+  // docker.dns — тоже настройка прода: значение приезжает из окружения, а не правится
+  // руками на хосте (см. ICARUS_DNS в script/redeploy). Пустое — прежнее не трогаем.
+  const dns = parseDns(overrides.dns);
+  if (dns !== null) {
+    const docker = asRecord(doc.docker ?? {}, 'docker');
+    if (dns.length > 0) docker.dns = dns;
+    else delete docker.dns;
+    doc.docker = docker;
+  }
+
   const fromEnv = overrides.apiKey?.trim() ?? '';
   const fromConfig = typeof doc.apiKey === 'string' ? doc.apiKey.trim() : '';
   const apiKeySource = fromEnv ? 'env' : fromConfig ? 'config' : 'generated';
   if (fromEnv) doc.apiKey = fromEnv;
   else if (!fromConfig) doc.apiKey = generate();
 
-  return { text: HEADER + stringifyYaml(doc, { lineWidth: 0 }), users, port, dataDir, apiKeySource };
+  return { text: HEADER + stringifyYaml(doc, { lineWidth: 0 }), users, port, dataDir, dns, apiKeySource };
 }
 
 function parseArgs(argv: string[]): { config: string } {
@@ -152,6 +184,7 @@ function main(): void {
     port: process.env.ICARUS_PORT,
     dataDir: process.env.ICARUS_DATA_DIR,
     apiKey: process.env.ICARUS_API_KEY,
+    dns: process.env.ICARUS_DNS,
   });
 
   // Ключ API лежит в этом файле, поэтому 600 — и на новый файл, и на старый:
@@ -160,9 +193,11 @@ function main(): void {
   fs.chmodSync(file, 0o600);
 
   const where = result.apiKeySource === 'env' ? 'из секрета' : result.apiKeySource === 'config' ? 'прежний' : 'сгенерирован';
+  const dns = result.dns === null ? 'не трогал' : result.dns.length > 0 ? result.dns.join(', ') : 'убран';
   process.stdout.write(
     `config.yaml (${source === EXAMPLE_CONFIG ? 'из примера' : 'прежний'}): ` +
-      `люди ${result.users.join(', ')}; порт ${result.port}; dataDir ${result.dataDir}; ключ API — ${where}\n`,
+      `люди ${result.users.join(', ')}; порт ${result.port}; dataDir ${result.dataDir}; ` +
+      `docker.dns ${dns}; ключ API — ${where}\n`,
   );
 }
 
