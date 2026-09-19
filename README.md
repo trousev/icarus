@@ -125,7 +125,8 @@ users:                          # люди: только id
 - прямой push запрещён, включая админский (`enforce_admins`) — только PR;
 - merge PR заблокирован, пока не позеленели все четыре проверки CI (job'ы `lint` и `test`
   на node 22 и 24);
-- ветку PR нужно держать на актуальном `main` (strict required status checks);
+- свежесть ветки PR относительно `main` не требуется: проверки гоняются на самом PR, а
+  догонять `main` — забота автора (`strict` в required status checks выключен осознанно);
 - force-push и удаление `main` запрещены.
 
 Имена job'ов и матрица — часть этой защиты. Меняешь `name` в `ci.yml` — обнови required status
