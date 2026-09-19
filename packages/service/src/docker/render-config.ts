@@ -40,7 +40,7 @@ export type Overrides = {
   dataDir?: string | undefined;
   apiKey?: string | undefined;
   dns?: string | undefined;
-  panelUrl?: string | undefined;
+  url?: string | undefined;
 };
 
 export type RenderResult = {
@@ -52,8 +52,8 @@ export type RenderResult = {
   dns: string[] | null;
   /** Откуда взялся ключ API: из секрета, из прежнего файла или сгенерирован заново. */
   apiKeySource: 'env' | 'config' | 'generated';
-  /** Внешний адрес панели (panelUrl) или null, если он не задан. */
-  panelUrl: string | null;
+  /** Внешний адрес панели (url) или null, если он не задан. */
+  url: string | null;
 };
 
 function asRecord(value: unknown, what: string): Record<string, unknown> {
@@ -157,13 +157,13 @@ export function renderConfig(
   if (fromEnv) doc.apiKey = fromEnv;
   else if (!fromConfig) doc.apiKey = generate();
 
-  // panelUrl — внешний адрес панели для личных ссылок. Из окружения правится тем же
+  // url — внешний адрес панели для личных ссылок. Из окружения правится тем же
   // путём, что порт и apiKey, но и заданный на хосте не теряется.
-  const panelUrlOverride = overrides.panelUrl?.trim() ?? '';
-  if (panelUrlOverride) doc.panelUrl = panelUrlOverride;
-  const panelUrl = typeof doc.panelUrl === 'string' && doc.panelUrl.trim() !== '' ? doc.panelUrl.trim() : null;
+  const urlOverride = overrides.url?.trim() ?? '';
+  if (urlOverride) doc.url = urlOverride;
+  const url = typeof doc.url === 'string' && doc.url.trim() !== '' ? doc.url.trim() : null;
 
-  return { text: HEADER + stringifyYaml(doc, { lineWidth: 0 }), users, port, dataDir, dns, apiKeySource, panelUrl };
+  return { text: HEADER + stringifyYaml(doc, { lineWidth: 0 }), users, port, dataDir, dns, apiKeySource, url };
 }
 
 function parseArgs(argv: string[]): { config: string } {
@@ -194,7 +194,7 @@ function main(): void {
     dataDir: process.env.ICARUS_DATA_DIR,
     apiKey: process.env.ICARUS_API_KEY,
     dns: process.env.ICARUS_DNS,
-    panelUrl: process.env.ICARUS_PANEL_URL,
+    url: process.env.ICARUS_URL,
   });
 
   // Ключ API лежит в этом файле, поэтому 600 — и на новый файл, и на старый:
@@ -204,11 +204,11 @@ function main(): void {
 
   const where = result.apiKeySource === 'env' ? 'из секрета' : result.apiKeySource === 'config' ? 'прежний' : 'сгенерирован';
   const dns = result.dns === null ? 'не трогал' : result.dns.length > 0 ? result.dns.join(', ') : 'убран';
-  const panel = result.panelUrl ?? 'не задан — ссылки поведут на localhost';
+  const panel = result.url ?? 'не задан — ссылки поведут на localhost';
   process.stdout.write(
     `config.yaml (${source === EXAMPLE_CONFIG ? 'из примера' : 'прежний'}): ` +
       `люди ${result.users.join(', ')}; порт ${result.port}; dataDir ${result.dataDir}; ` +
-      `docker.dns ${dns}; ключ API — ${where}; panelUrl ${panel}\n`,
+      `docker.dns ${dns}; ключ API — ${where}; url ${panel}\n`,
   );
 }
 

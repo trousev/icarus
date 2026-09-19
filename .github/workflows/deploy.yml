@@ -38,9 +38,9 @@ jobs:
           username: trousev
           key: ${{ secrets.DEPLOY_SSH_SECRET }}
           # Люди — из variables (список меняется без правки кода), ключи — из секретов,
-          # DNS и адрес панели — из необязательных variables.ICARUS_DNS / ICARUS_PANEL_URL
+          # DNS и адрес панели — из необязательных variables.ICARUS_DNS / ICARUS_URL
           # (пусто — значение из script/redeploy или из config.yaml на хосте).
-          envs: ICARUS_USERS,ICARUS_API_KEY,DEEPSEEK_API_KEY,ICARUS_DNS,ICARUS_PANEL_URL
+          envs: ICARUS_USERS,ICARUS_API_KEY,DEEPSEEK_API_KEY,ICARUS_DNS,ICARUS_URL
           # 30m вместо 10m по умолчанию: убитая на середине сессия оставляет стек
           # недособранным (у youtubarr так и случилось: контейнер в состоянии Created,
           # сервис лежит до ручного запуска).
@@ -66,4 +66,4 @@ jobs:
           ICARUS_DNS: ${{ vars.ICARUS_DNS }}
           # Внешний адрес панели для личных ссылок Икара. Не задана — прежнее значение
           # в config.yaml остаётся, а без него ссылки поведут на localhost.
-          ICARUS_PANEL_URL: ${{ vars.ICARUS_PANEL_URL }}
+          ICARUS_URL: ${{ vars.ICARUS_URL }}

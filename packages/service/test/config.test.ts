@@ -31,7 +31,7 @@ test('минимальный конфиг дочитывается умолча�
   const config = loadConfig(writeConfig(MINIMAL), {});
 
   assert.equal(config.apiKey, 'test-token');
-  assert.equal(config.panelUrl, 'http://localhost:8081', 'без panelUrl ссылка ведёт на localhost');
+  assert.equal(config.url, 'http://localhost:8081', 'без url ссылка ведёт на localhost');
   assert.equal(config.host, '0.0.0.0');
   assert.equal(config.port, 8081);
   assert.equal(config.sessionIdleMinutes, 30);
@@ -47,7 +47,7 @@ test('минимальный конфиг дочитывается умолча�
 
 test('общее для всех читается целиком: модели, ключи, маунты, MCP', () => {
   const file = writeConfig(`apiKey: token
-panelUrl: https://icarus.example:8443
+url: https://icarus.example:8443
 dataDir: /data
 sessionIdleMinutes: 5
 docker:
@@ -81,7 +81,7 @@ users:
 `);
   const config = loadConfig(file, { MY_KEY: 'secret' } as NodeJS.ProcessEnv);
 
-  assert.equal(config.panelUrl, 'https://icarus.example:8443', 'явный panelUrl не переписываем');
+  assert.equal(config.url, 'https://icarus.example:8443', 'явный url не переписываем');
   assert.equal(config.docker.image, 'icarus-user:v2');
   assert.equal(config.docker.network, 'icarus-net');
   assert.deepEqual(config.docker.dns, undefined, 'без docker.dns контейнеры берут резолвер хоста');

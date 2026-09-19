@@ -44,7 +44,7 @@ test('уровни моделей и личность уезжают в окру
   assert.equal(env.ICARUS_MODEL_FAST, 'deepseek/deepseek-v4-flash:off');
   assert.equal(env.ICARUS_MODEL_STRONG, 'deepseek/deepseek-v4-pro:medium');
   assert.equal(env.ICARUS_USER_ID, 'probe');
-  assert.equal(env.ICARUS_PANEL_URL, config.panelUrl);
+  assert.equal(env.ICARUS_URL, config.url);
   assert.match(env.ICARUS_PANEL_KEY, /^[0-9a-f]{64}$/, 'ключ ссылки — HMAC, а не открытый секрет');
 
   const own = makeConfig({ env: { ICARUS_MODEL_FAST: 'своё' } });

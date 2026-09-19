@@ -10,7 +10,7 @@ const NOW = Date.parse('2026-09-19T12:00:00Z');
 
 test('инструмент собирает ссылку на память текущего человека', () => {
   const result = memoryManagementLink(
-    { userId: 'probe', panelKey: KEY, panelUrl: 'http://icarus.example:8081/' },
+    { userId: 'probe', panelKey: KEY, url: 'http://icarus.example:8081/' },
     NOW,
   );
   if (!('url' in result)) throw new Error(result.error);
@@ -28,7 +28,7 @@ test('инструмент собирает ссылку на память те�
 
 test('срок годности берётся из окружения', () => {
   const result = memoryManagementLink(
-    { userId: 'probe', panelKey: KEY, panelUrl: 'http://icarus.example:8081', ttlMinutes: '60' },
+    { userId: 'probe', panelKey: KEY, url: 'http://icarus.example:8081', ttlMinutes: '60' },
     NOW,
   );
   if (!('url' in result)) throw new Error(result.error);
@@ -42,8 +42,8 @@ test('без личного ключа и адреса инструмент че
     {},
     { userId: 'probe' },
     { userId: 'probe', panelKey: KEY },
-    { panelKey: KEY, panelUrl: 'http://icarus.example:8081' },
-    { userId: '  ', panelKey: KEY, panelUrl: 'http://icarus.example:8081' },
+    { panelKey: KEY, url: 'http://icarus.example:8081' },
+    { userId: '  ', panelKey: KEY, url: 'http://icarus.example:8081' },
   ];
   for (const env of incomplete) {
     const result = memoryManagementLink(env, NOW);
@@ -59,11 +59,11 @@ test('расширение регистрирует инструмент и в �
   const saved = {
     id: process.env.ICARUS_USER_ID,
     key: process.env.ICARUS_PANEL_KEY,
-    url: process.env.ICARUS_PANEL_URL,
+    url: process.env.ICARUS_URL,
   };
   process.env.ICARUS_USER_ID = 'probe';
   process.env.ICARUS_PANEL_KEY = KEY;
-  process.env.ICARUS_PANEL_URL = 'http://icarus.example:8081';
+  process.env.ICARUS_URL = 'http://icarus.example:8081';
   try {
     const result = await tools[0].execute();
     assert.match(result.content[0].text, /твоей памятью/);
@@ -72,7 +72,7 @@ test('расширение регистрирует инструмент и в �
     for (const [name, value] of [
       ['ICARUS_USER_ID', saved.id],
       ['ICARUS_PANEL_KEY', saved.key],
-      ['ICARUS_PANEL_URL', saved.url],
+      ['ICARUS_URL', saved.url],
     ] as const) {
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;

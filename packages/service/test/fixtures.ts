@@ -15,7 +15,7 @@ export function makeConfig(overrides: Partial<IcarusConfig> = {}): IcarusConfig 
     host: '127.0.0.1',
     port: 0,
     apiKey: API_KEY,
-    panelUrl: 'http://localhost:8081',
+    url: 'http://localhost:8081',
     dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-test-')),
     sessionIdleMinutes: 30,
     docker: { image: 'icarus-user:dev', prefix: 'icarus-user', socket: null },

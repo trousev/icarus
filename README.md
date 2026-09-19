@@ -76,7 +76,8 @@ compose. `./script/server` один раз снесёт контейнеры б�
 
 ```yaml
 apiKey: icarus-local-token      # Bearer, под которым ходит LibreChat
-# panelUrl: http://trousev.pro:8081   # внешний адрес панели для личных ссылок Икара
+# url: https://memory.trousev.pro/   # внешний адрес панели для личных ссылок Икара
+                                    # (локально по умолчанию http://localhost:8081)
 dataDir: ~/icarus-data          # память, сессии и каталоги людей
 
 models:                         # общие модели: tier раздаёт эскалация
@@ -195,7 +196,7 @@ GitHub по SSH заходит на `trousev.pro` под `trousev`, обновл
 | --- | --- | --- |
 | `ICARUS_USERS` | переменная environment `production` | люди через пробел или запятую — из неё собирается `users:` в `config.yaml` |
 | `ICARUS_DNS` | необязательная переменная environment `production` | DNS-серверы контейнеров (`docker.dns`); не задана — дефолт из `script/redeploy`, `none` — убрать |
-| `ICARUS_PANEL_URL` | необязательная переменная environment `production` | внешний адрес панели памяти (`panelUrl`) для личных ссылок Икара; не задана — прежнее значение в `config.yaml`, а без него ссылки ведут на `localhost` |
+| `ICARUS_URL` | необязательная переменная environment `production` | внешний адрес панели памяти (`url`) для личных ссылок Икара; на проде `https://memory.trousev.pro/`, локально по умолчанию `http://localhost:8081`; пусто — прежнее значение из `config.yaml` |
 | `ICARUS_API_KEY` | секрет environment `production` | Bearer, под которым LibreChat ходит в icarus (`apiKey` в `config.yaml`) |
 | `DEEPSEEK_API_KEY` | секрет environment `production` | ключ провайдера — уезжает в `.env` |
 | `DEPLOY_HOST` | секрет environment `production` | `trousev.pro` |
