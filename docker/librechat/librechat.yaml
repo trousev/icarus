@@ -6,7 +6,7 @@ endpoints:
   custom:
     - name: 'Icarus'
       apiKey: 'icarus-local-token'
-      baseURL: 'http://host.docker.internal:8080/v1'
+      baseURL: 'http://host.docker.internal:8081/v1'
       models:
         default: ['icarus']
         fetch: false

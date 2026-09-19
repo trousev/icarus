@@ -81,7 +81,7 @@ cat <<'EOF'
 Готово. Дальше:
   ./script/lint            типы и линтер
   ./script/test            тесты (докер и модель не нужны)
-  ./script/server          собрать docker-compose.yml и поднять стек на :8080
+  ./script/server          собрать docker-compose.yml и поднять стек на :8081
                            (образ человека ./script/server соберёт сам)
   ./script/server -d       то же в фоне: переживёт терминал и перезагрузку
   ./script/server --with-librechat

@@ -389,7 +389,7 @@ export function loadConfig(file: string, env: NodeJS.ProcessEnv = process.env): 
 
   return {
     host: optionalString(raw.host, 'host') ?? '0.0.0.0',
-    port: numberOr(raw.port, 'port', 8080),
+    port: numberOr(raw.port, 'port', 8081),
     apiKey,
     panelKey: expandValue(optionalString(raw.panelKey, 'panelKey') ?? apiKey, env),
     dataDir: expandValue(optionalString(raw.dataDir, 'dataDir') ?? '~/icarus', env),

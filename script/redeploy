@@ -22,7 +22,8 @@
 #   ICARUS_USERS      люди через пробел или запятую (variables.ICARUS_USERS)
 #   ICARUS_API_KEY    ключ, под которым LibreChat ходит в icarus
 #   DEEPSEEK_API_KEY  ключ провайдера из models
-#   ICARUS_PORT       порт сервиса (по умолчанию 8081: 8080 на хосте занят jitsi)
+#   ICARUS_PORT       порт сервиса (по умолчанию 8081 — как и локально; на прод-хосте
+#                     8080 занят jitsi)
 #   ICARUS_DATA_DIR   каталог памяти (по умолчанию runtime/ внутри чекаута)
 #   ICARUS_DNS        DNS-серверы контейнеров (по умолчанию 1.1.1.1 8.8.8.8, см. ниже)
 set -euo pipefail
