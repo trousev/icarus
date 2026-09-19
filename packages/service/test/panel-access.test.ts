@@ -74,6 +74,24 @@ test('личная ссылка открывает страницу со сво�
   });
 });
 
+test('страница не зовёт нативные confirm и её скрипт компилируется', async () => {
+  await withServer(async (base) => {
+    const html = await (await fetch(`${base}/panel?t=${encodeURIComponent(tokenFor('probe'))}`)).text();
+
+    // Нативные модалки браузер глушит, если вкладка не активна, и confirm() молча
+    // возвращает false — кнопки «забыть»/«откатить» перестают работать. Свой диалог
+    // обязателен, а window.confirm в коде — регресс.
+    assert.doesNotMatch(html, /[^.\w]confirm\(/, 'нативный confirm вернулся');
+    assert.match(html, /askConfirm/, 'своего диалога подтверждения нет');
+
+    // Скрипт собирается из template literal с экранированием: опечатка в бэкслешах
+    // ломает всю страницу, а тесты её не видят. Компиляция ловит такое сразу.
+    const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+    assert.ok(script, 'в странице нет скрипта');
+    assert.doesNotThrow(() => new Function(script), 'скрипт панели не компилируется');
+  });
+});
+
 test('личная ссылка показывает только память своего человека', async () => {
   await withServer(async (base) => {
     const token = tokenFor('probe');

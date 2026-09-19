@@ -42,6 +42,10 @@ export function panelHtml(session: PanelSession): string {
   .row { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
   .muted { color:var(--dim); }
   .banner { padding:24px; max-width:560px; margin:60px auto; background:var(--panel); border:1px solid var(--line); border-radius:10px; }
+  .backdrop { position:fixed; inset:0; background:rgba(0,0,0,.55); display:flex; align-items:center; justify-content:center; z-index:50; }
+  .dialog { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px; width:min(520px, calc(100% - 32px)); box-shadow:0 12px 40px rgba(0,0,0,.5); }
+  .dialog p { margin:0 0 14px; white-space:pre-wrap; word-break:break-word; }
+  .dialog .row { justify-content:flex-end; margin:0; }
 </style>
 </head>
 <body>
@@ -77,8 +81,52 @@ const api = async (path, options = {}) => {
   return response.json();
 };
 const qs = (extra = {}) => new URLSearchParams({ scope: scope.value, ...extra }).toString();
-const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const status = (text) => { document.getElementById('status').textContent = text || ''; };
+
+// Свой диалог вместо window.confirm: браузер глушит нативные модалки, если
+// вкладка не активна, и нативный confirm молча возвращает false — кнопки «не работают».
+function askConfirm(message, confirmLabel = 'подтвердить') {
+  return new Promise((resolve) => {
+    const backdrop = document.createElement('div');
+    backdrop.className = 'backdrop';
+    const dialog = document.createElement('div');
+    dialog.className = 'dialog';
+    const text = document.createElement('p');
+    text.textContent = message;
+    const row = document.createElement('div');
+    row.className = 'row';
+    const cancel = document.createElement('button');
+    cancel.textContent = 'отмена';
+    const confirmButton = document.createElement('button');
+    confirmButton.className = 'danger';
+    confirmButton.textContent = confirmLabel;
+    row.append(cancel, confirmButton);
+    dialog.append(text, row);
+    backdrop.append(dialog);
+    document.body.append(backdrop);
+
+    const finish = (value) => {
+      document.removeEventListener('keydown', onKey, true);
+      backdrop.remove();
+      resolve(value);
+    };
+    const onKey = (event) => {
+      if (event.key === 'Escape') { event.preventDefault(); finish(false); }
+      if (event.key === 'Enter') { event.preventDefault(); finish(true); }
+    };
+    document.addEventListener('keydown', onKey, true);
+    cancel.onclick = () => finish(false);
+    confirmButton.onclick = () => finish(true);
+    backdrop.onclick = (event) => { if (event.target === backdrop) finish(false); };
+    confirmButton.focus();
+  });
+}
+
+// Общий обработчик кнопок: любая ошибка API должна быть видна, а не глохнуть.
+const guard = (action) => async () => {
+  try { await action(); } catch (error) { status('ошибка: ' + (error && error.message ? error.message : error)); }
+};
 
 async function loadFiles() {
   const data = await api('/panel/api/files?' + qs());
@@ -101,11 +149,11 @@ async function openFile(path) {
       (line.trim().startsWith('-') ? '</span><button class="forget danger" data-line="' + esc(line.trim()) + '">забыть</button>' : '</span>') +
       '</div>').join('') +
     '</pre>';
-  document.querySelectorAll('.forget').forEach((el) => el.onclick = () => forget(path, el.dataset.line));
+  document.querySelectorAll('.forget').forEach((el) => el.onclick = guard(() => forget(path, el.dataset.line)));
 }
 
 async function forget(path, line) {
-  if (!confirm('Убрать строку из памяти?\\n\\n' + line)) return;
+  if (!(await askConfirm('Убрать строку из памяти?\\n\\n' + line, 'забыть'))) return;
   const result = await api('/panel/api/forget', { method: 'POST', body: JSON.stringify({ scope: scope.value, path, line }) });
   status(result.message);
   await openFile(path);
@@ -132,7 +180,7 @@ async function loadHistory() {
         '<button data-show="' + c.hash + '">дифф</button><button class="danger" data-revert="' + c.hash + '">откатить</button></div></div>').join('')
     : '<p class="muted">Коммитов пока нет.</p>');
   box.querySelectorAll('[data-show]').forEach((el) => el.onclick = () => showCommit(el.dataset.show));
-  box.querySelectorAll('[data-revert]').forEach((el) => el.onclick = () => revertCommit(el.dataset.revert));
+  box.querySelectorAll('[data-revert]').forEach((el) => el.onclick = guard(() => revertCommit(el.dataset.revert)));
 }
 
 async function showCommit(hash) {
@@ -141,7 +189,7 @@ async function showCommit(hash) {
 }
 
 async function revertCommit(hash) {
-  if (!confirm('Откатить коммит ' + hash.slice(0, 8) + '? Изменения вернутся обратным коммитом.')) return;
+  if (!(await askConfirm('Откатить коммит ' + hash.slice(0, 8) + '? Изменения вернутся обратным коммитом.', 'откатить'))) return;
   const result = await api('/panel/api/revert', { method: 'POST', body: JSON.stringify({ scope: scope.value, commit: hash }) });
   status(result.message);
   await loadFiles();
@@ -155,8 +203,8 @@ const scope = document.getElementById('scope');
   document.title = 'Икар — память · ' + state.user;
   document.querySelector('.who').textContent = state.user;
   scope.onchange = loadFiles;
-  document.getElementById('search').onclick = doSearch;
-  document.getElementById('q').onkeydown = (e) => { if (e.key === 'Enter') doSearch(); };
+  document.getElementById('search').onclick = guard(doSearch);
+  document.getElementById('q').onkeydown = (e) => { if (e.key === 'Enter') guard(doSearch)(); };
   await loadFiles();
 })().catch((error) => { document.getElementById('files').innerHTML = '<p class="muted">' + esc(error.message) + '</p>'; });
 </script>`
