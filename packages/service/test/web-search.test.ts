@@ -1,13 +1,7 @@
-// Веб-поиск: разбор выдачи и превращение HTML в текст.
+// Веб-поиск: разбор выдачи, превращение HTML в текст и честные отказы провайдера.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  decodeDuckDuckGoUrl,
-  htmlToText,
-  parseBrave,
-  parseDuckDuckGo,
-  parseSearxng,
-} from '../../extensions/web-search.ts';
+import { htmlToText, parseBrave, parseDeepSeekSearch, parseSearxng } from '../../extensions/web-search.ts';
 
 test('скрипты и стили выкидываются, абзацы сохраняются', () => {
   const html = `<html><head><style>p{color:red}</style><script>alert(1)</script></head>
@@ -20,27 +14,74 @@ test('скрипты и стили выкидываются, абзацы сох
   assert.ok(text.split('\n').length >= 3, 'абзацы должны разъехаться по строкам');
 });
 
-test('ссылка-редирект DuckDuckGo разворачивается', () => {
-  assert.equal(
-    decodeDuckDuckGoUrl('//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fpage&rut=abc'),
-    'https://example.com/page',
-  );
-  assert.equal(decodeDuckDuckGoUrl('https://example.com/direct'), 'https://example.com/direct');
+test('выдача DeepSeek разбирается вместе с цитатами и без дублей', () => {
+  const payload = {
+    content: [
+      { type: 'thinking', thinking: 'ищу' },
+      {
+        type: 'web_search_tool_result',
+        content: [
+          { type: 'web_search_result', title: 'Лиссабон', url: 'https://lisbon.pt', page_age: '2026-09-01' },
+          { type: 'web_search_result', title: 'Дубль', url: 'https://lisbon.pt' },
+          { type: 'web_search_result', title: 'Второй результат', url: 'https://example.org/second' },
+        ],
+      },
+      {
+        type: 'text',
+        text: 'Ответ',
+        citations: [{ url: 'https://lisbon.pt', cited_text: 'Город на семи холмах' }],
+      },
+    ],
+  };
+
+  const outcome = parseDeepSeekSearch(payload);
+  assert.equal(outcome.error, undefined);
+  assert.deepEqual(outcome.results, [
+    { title: 'Лиссабон', url: 'https://lisbon.pt', snippet: 'Город на семи холмах' },
+    { title: 'Второй результат', url: 'https://example.org/second', snippet: undefined },
+  ]);
 });
 
-test('выдача DuckDuckGo разбирается вместе с выдержками', () => {
-  const html = `
-    <a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Flisbon.pt">Лиссабон</a>
-    <a class="result__snippet">Город на семи холмах</a>
-    <a class="result__a" href="https://example.org/second">Второй результат</a>
-    <a class="result__snippet">Короткое описание</a>
-  `;
-  const results = parseDuckDuckGo(html);
-  assert.equal(results.length, 2);
-  assert.equal(results[0].url, 'https://lisbon.pt');
-  assert.equal(results[0].title, 'Лиссабон');
-  assert.equal(results[0].snippet, 'Город на семи холмах');
-  assert.equal(results[1].url, 'https://example.org/second');
+test('выдача DeepSeek уважает limit', () => {
+  const payload = {
+    content: [
+      {
+        type: 'web_search_tool_result',
+        content: [
+          { type: 'web_search_result', title: 'A', url: 'https://a.dev' },
+          { type: 'web_search_result', title: 'B', url: 'https://b.dev' },
+        ],
+      },
+    ],
+  };
+
+  assert.deepEqual(parseDeepSeekSearch(payload, 1).results, [{ title: 'A', url: 'https://a.dev', snippet: undefined }]);
+});
+
+test('честный ноль результатов — это не ошибка', () => {
+  const outcome = parseDeepSeekSearch({ content: [{ type: 'web_search_tool_result', content: [] }] });
+  assert.deepEqual(outcome.results, []);
+  assert.equal(outcome.error, undefined, 'пустая выдача не должна выглядеть как отказ');
+});
+
+test('поиск без вызова web_search и ошибка серверного тула — это отказ, а не пустота', () => {
+  const skipped = parseDeepSeekSearch({ content: [{ type: 'text', text: 'не буду искать' }] });
+  assert.match(skipped.error ?? '', /web_search/);
+  assert.deepEqual(skipped.results, []);
+
+  const failed = parseDeepSeekSearch({
+    content: [
+      {
+        type: 'web_search_tool_result',
+        content: { type: 'web_search_tool_result_error', error_code: 'unavailable' },
+      },
+    ],
+  });
+  assert.match(failed.error ?? '', /unavailable/);
+  assert.deepEqual(failed.results, []);
+
+  const broken = parseDeepSeekSearch(null);
+  assert.match(broken.error ?? '', /web_search/);
 });
 
 test('выдача SearXNG и Brave разбирается в общий вид', () => {
@@ -52,7 +93,6 @@ test('выдача SearXNG и Brave разбирается в общий вид'
 });
 
 test('пустая и битая выдача не ломает разбор', () => {
-  assert.deepEqual(parseDuckDuckGo('<html></html>'), []);
   assert.deepEqual(parseSearxng(null), []);
   assert.deepEqual(parseSearxng({ results: 'нет' }), []);
   assert.deepEqual(parseBrave({}), []);
