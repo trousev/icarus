@@ -53,12 +53,52 @@ const HEAVY_PATTERNS = [
 
 export const LONG_PROMPT = 400;
 
-export function chooseTier(input: { hasImages: boolean; prompt: string; toolsUsed: boolean }): Tier {
+/**
+ * Инструменты-разведка: поиск и чтение. Сами по себе они не повод звать сильную
+ * модель — быстрая справится без размышлений, и человек не будет ждать. Всё
+ * остальное (bash, правки файлов, MCP, незнакомые тулы) — уже руки, там сильная.
+ */
+export const SEARCH_TOOLS = new Set(["web_search", "web_fetch", "read", "grep", "find", "ls"]);
+
+/** Сколько поисков подряд терпим на быстрой модели, прежде чем считать это работой. */
+export const SEARCH_BUDGET = 3;
+
+export function isSearchTool(name: string): boolean {
+  return SEARCH_TOOLS.has(name);
+}
+
+export type TierInput = {
+  hasImages: boolean;
+  prompt: string;
+  /** сколько инструментов-разведки уже отработало в этом ходу */
+  searches?: number;
+  /** попадался ли инструмент, который что-то меняет: bash, write, edit, MCP */
+  heavyTool?: boolean;
+};
+
+export function chooseTier(input: TierInput): Tier {
   if (input.hasImages) return "vision";
-  if (input.toolsUsed) return "strong";
+  if (input.heavyTool) return "strong";
+  if ((input.searches ?? 0) > SEARCH_BUDGET) return "strong";
   if (input.prompt.length > LONG_PROMPT) return "strong";
   if (HEAVY_PATTERNS.some((pattern) => pattern.test(input.prompt))) return "strong";
   return "fast";
+}
+
+/**
+ * Разрешает ровно тот уровень размышлений, который выбрал конфиг.
+ *
+ * pi поднимает неподдерживаемый уровень до ближайшего доступного: у deepseek-v4-pro
+ * в каталоге `medium` помечен null, поэтому `thinking: medium` из конфига молча
+ * превращался в `high`. DeepSeek принимает `reasoning_effort` как есть (хотя у себя
+ * сводит medium к high — см. их таблицу маппинга), так что отдаём модели ровно тот
+ * уровень, который выбрал человек, вместо того чтобы гадать по каталогу. `off` не
+ * трогаем: там pi выключает размышления отдельной веткой, и подменять его нечем.
+ */
+export function unblockThinking<T extends object>(model: T, level: string): T {
+  const map = (model as { thinkingLevelMap?: Record<string, string | null> }).thinkingLevelMap;
+  if (level === "off" || !map || map[level] !== null) return model;
+  return { ...model, thinkingLevelMap: { ...map, [level]: level } };
 }
 
 function log(message: string): void {
@@ -67,6 +107,9 @@ function log(message: string): void {
 
 export default function (pi: ExtensionAPI) {
   let current: Tier | null = null;
+  let turnTier: Tier = "fast";
+  let searches = 0;
+  let heavyTool = false;
 
   const apply = async (tier: Tier, ctx: ExtensionContext): Promise<void> => {
     if (current === tier) return;
@@ -76,20 +119,31 @@ export default function (pi: ExtensionAPI) {
       log(`модель ${spec.provider}/${spec.id} не найдена — остаюсь как есть`);
       return;
     }
-    await pi.setModel(model);
+    const patched = unblockThinking(model, spec.thinking);
+    if (patched !== model) {
+      log(`pi не пропускает thinking=${spec.thinking} для ${spec.provider}/${spec.id} — включаю принудительно`);
+    }
+    await pi.setModel(patched);
     pi.setThinkingLevel(spec.thinking as never);
     current = tier;
     log(`уровень ${tier}: ${spec.provider}/${spec.id}:${spec.thinking}`);
   };
 
   pi.on("before_agent_start", async (event, ctx) => {
+    searches = 0;
+    heavyTool = false;
     const hasImages = (event.images?.length ?? 0) > 0;
-    await apply(chooseTier({ hasImages, prompt: String(event.prompt ?? ""), toolsUsed: false }), ctx);
+    turnTier = chooseTier({ hasImages, prompt: String(event.prompt ?? "") });
+    await apply(turnTier, ctx);
   });
 
-  // Как только агенту понадобились руки — дальше ведём сильной моделью.
-  pi.on("tool_execution_start", async (_event, ctx) => {
-    if (current === "vision") return; // картинку уже отдали зрячей модели
-    await apply("strong", ctx);
+  // Как только агенту понадобились руки — дальше ведём сильной моделью. Но поиск
+  // и чтение руками не считаются: пока их немного, быстрая модель справляется сама.
+  pi.on("tool_execution_start", async (event, ctx) => {
+    if (turnTier === "vision") return; // картинку уже отдали зрячей модели
+    if (isSearchTool(event.toolName)) searches += 1;
+    else heavyTool = true;
+    const tier = chooseTier({ hasImages: false, prompt: "", searches, heavyTool });
+    await apply(tier === "strong" ? "strong" : turnTier, ctx);
   });
 }
