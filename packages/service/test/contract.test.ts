@@ -52,6 +52,27 @@ test('обычный ответ имеет форму chat.completion', () => {
   assert.equal(parsed.choices[0].finish_reason, 'stop');
 });
 
+test('обычный ответ несёт размышления отдельным полем и не подмешивает их в content', () => {
+  const parsed = completion(
+    'chatcmpl-1',
+    'icarus',
+    'ответ',
+    { prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 },
+    'читаю memory/identity.md\n',
+  ) as Record<string, any>;
+  assert.equal(parsed.choices[0].message.content, 'ответ');
+  assert.equal(parsed.choices[0].message.reasoning_content, 'читаю memory/identity.md\n');
+});
+
+test('без размышлений поля reasoning_content нет — старые клиенты не удивляются', () => {
+  const parsed = completion('chatcmpl-1', 'icarus', 'ответ', {
+    prompt_tokens: 1,
+    completion_tokens: 2,
+    total_tokens: 3,
+  }) as Record<string, any>;
+  assert.equal('reasoning_content' in parsed.choices[0].message, false);
+});
+
 test('ошибка отдаётся в форме OpenAI', () => {
   const parsed = errorBody('нет токена', 'authentication_error') as Record<string, any>;
   assert.equal(parsed.error.type, 'authentication_error');

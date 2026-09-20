@@ -35,18 +35,26 @@ export function usageChunk(id: string, model: string, usage: Usage): string {
 
 export const DONE = 'data: [DONE]\n\n';
 
+/**
+ * Ответ одним куском. `reasoning` (мысли модели и активность тулов) уходит
+ * отдельным полем `message.reasoning_content` и никогда не подмешивается в
+ * `content` — та же граница каналов, что и в стриме.
+ */
 export function completion(
   id: string,
   model: string,
   content: string,
   usage: Usage,
+  reasoning = '',
 ): Record<string, unknown> {
+  const message: Record<string, unknown> = { role: 'assistant', content };
+  if (reasoning) message.reasoning_content = reasoning;
   return {
     id,
     object: 'chat.completion',
     created: Math.floor(Date.now() / 1000),
     model,
-    choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
+    choices: [{ index: 0, message, finish_reason: 'stop' }],
     usage,
   };
 }

@@ -320,6 +320,11 @@ export async function handleChatCompletions(
   await runStreaming(req, res, session, id, model, prompt, streamOptions?.include_usage === true, images);
 }
 
+/**
+ * Ответ одним куском (`stream: false`). Размышления копим отдельно и отдаём в
+ * `message.reasoning_content` — тем же каналом, что и в стриме: в `content`
+ * должен лежать только видимый ответ.
+ */
 async function runBuffered(
   res: ServerResponse,
   session: PiSession,
@@ -349,13 +354,11 @@ async function runBuffered(
     await finished;
     const usage = usageFromStats(await session.getStats());
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify(completion(id, model, text, usage)));
+    res.end(JSON.stringify(completion(id, model, text, usage, reasoning)));
   } catch (error) {
     log.error('ход сорвался', { error: String(error) });
     if (!res.headersSent) res.writeHead(500, { 'content-type': 'application/json' });
     res.end(JSON.stringify(errorBody(`ход сорвался: ${String(error)}`, 'server_error')));
-  } finally {
-    void reasoning;
   }
 }
 
@@ -381,21 +384,19 @@ async function runStreaming(
   let wroteAnything = false;
 
   /**
-   * Какой канал сейчас открыт у клиента. Один чанк — ровно один канал: либо
-   * видимый текст, либо размышления. Смешивать их в одном `delta` нельзя —
-   * LangChain-обёртка LibreChat видит в таком чанке только `content` и уводит
-   * размышления в обычный текст ответа (проверено на живом стенде: пока стрим
-   * идёт, «мысли» видны как plain text, и только после `finish_reason` клиент
-   * задним числом переносит их в блок think).
+   * Один чанк — ровно один канал: либо размышления, либо видимый текст, и никогда
+   * оба поля сразу. Смешанный `delta` LangChain-обёртка LibreChat классифицирует
+   * как текст и уводит мысли в тело ответа.
    *
-   * Канал переключается только в одну сторону. Вернуться с текста на размышления
-   * нельзя: `reasoning_content` после текста клиент дописывает в текст ответа, а
-   * если отдать его отдельным шагом — роняет как несовпадение типа. Поэтому
-   * активность тулов после начала ответа едет в текст: лучше видимая строка, чем
-   * строка, которую клиент выбросит.
+   * Каналы при этом независимы и не «закрываются». `reasoning_content` остаётся
+   * размышлениям и фразам тулов в любой момент хода, `content` — только словам
+   * модели. LibreChat склеивает соседние дельты одного канала и сам упорядочивает
+   * блоки, поэтому «мысль после начала ответа» — это нормальный `think` вслед за
+   * `text`, а не повод дописать её в ответ. Обратный ход (после первого текста
+   * всё в `content`) — регресс: агент почти всегда говорит первую фразу до тулов,
+   * и тогда весь дальнейший монолог модели уезжает в видимый ответ.
    */
   type ReplyDelta = { content?: string; reasoning_content?: string };
-  let channel: 'text' | 'reasoning' = 'reasoning';
 
   const write = (payload: string) => {
     if (closed || res.writableEnded) return;
@@ -407,25 +408,15 @@ async function runStreaming(
     write(chunk(id, model, delta));
   };
 
-  /** Мысль модели: пока текста не было — в `reasoning_content`, после — уже некуда, кроме текста. */
-  const publishThinking = (text: string) => {
+  /** Мысль модели и активность тулов — один канал: свёрнутый блок «размышлений». */
+  const publishReasoning = (text: string) => {
     if (!text) return;
-    if (channel === 'reasoning') emit({ reasoning_content: text });
-    else emit({ content: text });
+    emit({ reasoning_content: text });
   };
 
-  /** Фраза про тул: тот же канал, что и мысли, но перед текстом её дополняем переводом строки. */
-  const publishActivity = (phrase: string) => {
-    if (channel === 'reasoning') {
-      emit({ reasoning_content: `${phrase}\n` });
-      return;
-    }
-    emit({ content: `${phrase}\n` });
-  };
-
+  /** Видимый текст ответа. */
   const publishText = (text: string) => {
     if (!text) return;
-    channel = 'text';
     emit({ content: text });
   };
 
@@ -441,17 +432,17 @@ async function runStreaming(
           publishText(delta.delta);
         }
         if (delta?.type === 'thinking_delta' && delta.delta) {
-          publishThinking(delta.delta);
+          publishReasoning(delta.delta);
         }
         break;
       }
       case 'tool_execution_start': {
         const phrase = phraseForToolStart(String(event.toolName), (event.args ?? {}) as Record<string, unknown>);
-        if (phrase) publishActivity(phrase);
+        if (phrase) publishReasoning(`${phrase}\n`);
         break;
       }
       case 'tool_execution_end': {
-        publishActivity(phraseForToolEnd(String(event.toolName), Boolean(event.isError)));
+        publishReasoning(`${phraseForToolEnd(String(event.toolName), Boolean(event.isError))}\n`);
         break;
       }
       case 'agent_settled': {
