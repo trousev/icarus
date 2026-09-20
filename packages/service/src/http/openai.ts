@@ -380,9 +380,53 @@ async function runStreaming(
   let finished = false;
   let wroteAnything = false;
 
+  /**
+   * Какой канал сейчас открыт у клиента. Один чанк — ровно один канал: либо
+   * видимый текст, либо размышления. Смешивать их в одном `delta` нельзя —
+   * LangChain-обёртка LibreChat видит в таком чанке только `content` и уводит
+   * размышления в обычный текст ответа (проверено на живом стенде: пока стрим
+   * идёт, «мысли» видны как plain text, и только после `finish_reason` клиент
+   * задним числом переносит их в блок think).
+   *
+   * Канал переключается только в одну сторону. Вернуться с текста на размышления
+   * нельзя: `reasoning_content` после текста клиент дописывает в текст ответа, а
+   * если отдать его отдельным шагом — роняет как несовпадение типа. Поэтому
+   * активность тулов после начала ответа едет в текст: лучше видимая строка, чем
+   * строка, которую клиент выбросит.
+   */
+  type ReplyDelta = { content?: string; reasoning_content?: string };
+  let channel: 'text' | 'reasoning' = 'reasoning';
+
   const write = (payload: string) => {
     if (closed || res.writableEnded) return;
     res.write(payload);
+  };
+
+  const emit = (delta: ReplyDelta) => {
+    if (delta.content) wroteAnything = true;
+    write(chunk(id, model, delta));
+  };
+
+  /** Мысль модели: пока текста не было — в `reasoning_content`, после — уже некуда, кроме текста. */
+  const publishThinking = (text: string) => {
+    if (!text) return;
+    if (channel === 'reasoning') emit({ reasoning_content: text });
+    else emit({ content: text });
+  };
+
+  /** Фраза про тул: тот же канал, что и мысли, но перед текстом её дополняем переводом строки. */
+  const publishActivity = (phrase: string) => {
+    if (channel === 'reasoning') {
+      emit({ reasoning_content: `${phrase}\n` });
+      return;
+    }
+    emit({ content: `${phrase}\n` });
+  };
+
+  const publishText = (text: string) => {
+    if (!text) return;
+    channel = 'text';
+    emit({ content: text });
   };
 
   // Первый чанк с ролью: некоторые клиенты (и парсеры вроде LangChain) без него
@@ -394,21 +438,20 @@ async function runStreaming(
       case 'message_update': {
         const delta = event.assistantMessageEvent as { type?: string; delta?: string } | undefined;
         if (delta?.type === 'text_delta' && delta.delta) {
-          wroteAnything = true;
-          write(chunk(id, model, { content: delta.delta }));
+          publishText(delta.delta);
         }
         if (delta?.type === 'thinking_delta' && delta.delta) {
-          write(chunk(id, model, { reasoning_content: delta.delta }));
+          publishThinking(delta.delta);
         }
         break;
       }
       case 'tool_execution_start': {
         const phrase = phraseForToolStart(String(event.toolName), (event.args ?? {}) as Record<string, unknown>);
-        if (phrase) write(chunk(id, model, { reasoning_content: `${phrase}\n` }));
+        if (phrase) publishActivity(phrase);
         break;
       }
       case 'tool_execution_end': {
-        write(chunk(id, model, { reasoning_content: `${phraseForToolEnd(String(event.toolName), Boolean(event.isError))}\n` }));
+        publishActivity(phraseForToolEnd(String(event.toolName), Boolean(event.isError)));
         break;
       }
       case 'agent_settled': {
