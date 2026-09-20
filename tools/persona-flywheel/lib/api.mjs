@@ -24,7 +24,7 @@ export function apiKey() {
   return cachedKey;
 }
 
-export async function chat({ model, system, messages, maxTokens = 500, temperature = 1, retries = 3, responseFormat }) {
+export async function chat({ model, system, messages, maxTokens = 500, temperature = 1, retries = 3, responseFormat, extra }) {
   let lastError;
   for (let attempt = 1; attempt <= retries; attempt++) {
     // на повторах даём модели больше места: пустой ответ обычно значит,
@@ -36,6 +36,7 @@ export async function chat({ model, system, messages, maxTokens = 500, temperatu
       max_tokens: budget,
       temperature,
       ...(responseFormat ? { response_format: responseFormat } : {}),
+      ...(extra ?? {}),
     };
     try {
       const response = await fetch(API_URL, {
