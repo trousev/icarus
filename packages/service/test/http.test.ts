@@ -149,21 +149,16 @@ test('размышления не смешиваются с ответом: од
       0,
       'чанк с reasoning_content и content сразу — LibreChat рисует такое как plain text, а не как «мысли»',
     );
-
-    // После первого текста канал закрыт: reasoning_content там клиент допишет в ответ.
-    const firstContent = deltas.findIndex((delta) => delta.content);
-    for (const delta of deltas.slice(firstContent)) {
-      assert.equal(delta.reasoning_content, undefined, 'размышление после текста утекло в ответ');
-    }
   });
 });
 
-test('активность тула после начала ответа не уходит в reasoning_content', async () => {
+test('мысль и активность тула после начала ответа остаются в reasoning_content, а не в тексте', async () => {
   const steps: Step[] = [
-    { type: 'message_update', assistantMessageEvent: { type: 'thinking_delta', delta: 'Сначала подумаю. ' } },
-    { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'Ответ' } },
+    { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'Сейчас посмотрю. ' } },
     { type: 'tool_execution_start', toolName: 'bash', args: { command: 'ls' } },
+    { type: 'message_update', assistantMessageEvent: { type: 'thinking_delta', delta: 'Надо проверить каталог.' } },
     { type: 'tool_execution_end', toolName: 'bash', isError: false },
+    { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'Готово.' } },
     { type: 'agent_settled' },
   ];
   await withServer(async (base) => {
@@ -172,18 +167,38 @@ test('активность тула после начала ответа не у
     assert.equal(
       deltas.filter((delta) => delta.reasoning_content && delta.content).length,
       0,
-      'фраза тула смешалась с текстом ответа',
+      'чанк с reasoning_content и content сразу — LibreChat рисует такое как plain text, а не как «мысли»',
     );
 
-    const afterText = deltas.slice(deltas.findIndex((delta) => delta.content));
+    // В видимом ответе — только слова модели. Канал размышлений не «закрывается»
+    // после первой фразы: агент почти всегда говорит её до тулов, и если закрыть,
+    // весь дальнейший монолог модели уезжает в текст (регресс из PR #45).
     assert.equal(
-      afterText.filter((delta) => delta.reasoning_content).length,
-      0,
-      'фраза тула ушла в reasoning_content после текста — клиент выбросит её как несовпадение типа',
+      deltas.map((delta) => delta.content ?? '').join(''),
+      'Сейчас посмотрю. Готово.',
+      'размышления или фразы тулов утекли в текст ответа',
     );
+    assert.equal(
+      deltas.map((delta) => delta.reasoning_content ?? '').join(''),
+      'выполняю: ls\nНадо проверить каталог.команда отработала\n',
+      'мысль или активность тула потерялись после начала ответа',
+    );
+  }, steps);
+});
 
-    // После текста канал один — текст, поэтому фразы тула едут туда же и не теряются.
-    assert.equal(deltas.map((delta) => delta.content ?? '').join(''), 'Ответвыполняю: ls\nкоманда отработала\n');
+test('без стрима размышления уезжают в message.reasoning_content, а не в текст', async () => {
+  const steps: Step[] = [
+    { type: 'message_update', assistantMessageEvent: { type: 'thinking_delta', delta: 'Сначала подумаю. ' } },
+    { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'Ответ' } },
+    { type: 'agent_settled' },
+  ];
+  await withServer(async (base) => {
+    const response = await sseRequest(base, { stream: false });
+    const payload = (await response.json()) as {
+      choices: Array<{ message: { content: string; reasoning_content?: string } }>;
+    };
+    assert.equal(payload.choices[0].message.content, 'Ответ', 'мысли утекли в текст ответа');
+    assert.equal(payload.choices[0].message.reasoning_content, 'Сначала подумаю. ');
   }, steps);
 });
 
