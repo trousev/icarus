@@ -18,18 +18,18 @@ export function parseTierSpec(value: string | undefined, fallback: TierSpec): Ti
 
 export const TIERS: Record<Tier, TierSpec> = {
   fast: parseTierSpec(process.env.ICARUS_MODEL_FAST, {
-    provider: "deepseek",
-    id: "deepseek-v4-flash",
+    provider: "deepinfra",
+    id: "deepseek-ai/DeepSeek-V4.1-Flash",
     thinking: "off",
   }),
   strong: parseTierSpec(process.env.ICARUS_MODEL_STRONG, {
-    provider: "deepseek",
-    id: "deepseek-v4-pro",
+    provider: "deepinfra",
+    id: "deepseek-ai/DeepSeek-V4.1-Flash",
     thinking: "medium",
   }),
   vision: parseTierSpec(process.env.ICARUS_MODEL_VISION, {
-    provider: "deepseek",
-    id: "deepseek-v4-flash-vision-exp",
+    provider: "deepinfra",
+    id: "deepseek-ai/DeepSeek-V4.1-Flash",
     thinking: "off",
   }),
 };
@@ -88,12 +88,11 @@ export function chooseTier(input: TierInput): Tier {
 /**
  * Разрешает ровно тот уровень размышлений, который выбрал конфиг.
  *
- * pi поднимает неподдерживаемый уровень до ближайшего доступного: у deepseek-v4-pro
- * в каталоге `medium` помечен null, поэтому `thinking: medium` из конфига молча
- * превращался в `high`. DeepSeek принимает `reasoning_effort` как есть (хотя у себя
- * сводит medium к high — см. их таблицу маппинга), так что отдаём модели ровно тот
- * уровень, который выбрал человек, вместо того чтобы гадать по каталогу. `off` не
- * трогаем: там pi выключает размышления отдельной веткой, и подменять его нечем.
+ * pi поднимает неподдерживаемый уровень до ближайшего доступного: если в каталоге
+ * модели у `medium` стоит null, `thinking: medium` из конфига молча превратился бы в
+ * `high`. Мы отдаём модели ровно тот уровень, который выбрал человек, вместо того
+ * чтобы гадать по каталогу. `off` не трогаем: там pi выключает размышления отдельной
+ * веткой, и подменять его нечем.
  */
 export function unblockThinking<T extends object>(model: T, level: string): T {
   const map = (model as { thinkingLevelMap?: Record<string, string | null> }).thinkingLevelMap;

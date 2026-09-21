@@ -3,23 +3,23 @@ import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
 export const ROOT = join(import.meta.dirname, "..");
-export const API_URL = "https://api.deepseek.com/chat/completions";
+export const API_URL = "https://api.deepinfra.com/v1/openai/chat/completions";
 
 export const MODELS = {
   // на ком гоняем реплики Икара
-  icarus: process.env.FW_MODEL ?? "deepseek-v4-flash",
-  user: "deepseek-v4-flash",
-  judge: "deepseek-v4-pro",
-  critic: "deepseek-v4-pro",
+  icarus: process.env.FW_MODEL ?? "deepseek-ai/DeepSeek-V4.1-Flash",
+  user: "deepseek-ai/DeepSeek-V4.1-Flash",
+  judge: "deepseek-ai/DeepSeek-V4-Pro-0813",
+  critic: "deepseek-ai/DeepSeek-V4-Pro-0813",
 };
 
-let cachedKey = process.env.DEEPSEEK_API_KEY ?? "";
+let cachedKey = process.env.DEEPINFRA_API_KEY ?? "";
 export function apiKey() {
   if (cachedKey) return cachedKey;
   const envFile = process.env.FW_ENV_FILE ?? "/home/trousev/src/icarus/.env";
   const text = readFileSync(envFile, "utf8");
-  const match = text.match(/^\s*DEEPSEEK_API_KEY\s*=\s*(\S+)\s*$/m);
-  if (!match) throw new Error("DEEPSEEK_API_KEY не найден");
+  const match = text.match(/^\s*DEEPINFRA_API_KEY\s*=\s*(\S+)\s*$/m);
+  if (!match) throw new Error("DEEPINFRA_API_KEY не найден");
   cachedKey = match[1];
   return cachedKey;
 }

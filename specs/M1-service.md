@@ -86,9 +86,9 @@ dataDir: ~/icarus-data
 docker: { image: icarus-user:dev, socket: unix:///var/run/docker.sock, network: icarus }
 
 models:
-  - { provider: deepseek, id: deepseek-v4-flash, thinking: off,    tier: fast }
-  - { provider: deepseek, id: deepseek-v4-pro,   thinking: medium, tier: strong }
-auth: { deepseek: env:DEEPSEEK_API_KEY }
+  - { provider: deepinfra, id: deepseek-ai/DeepSeek-V4.1-Flash, thinking: off,    tier: fast }
+  - { provider: deepinfra, id: deepseek-ai/DeepSeek-V4.1-Flash, thinking: medium, tier: strong }
+auth: { deepinfra: env:DEEPINFRA_API_KEY }
 mounts:
   - { host: ~/src/scratchpad, container: /workspace/scratchpad, mode: rw }
 
@@ -97,11 +97,13 @@ users:
   - second
 ```
 
-Из этого сервис генерирует `auth.json` и `settings.json` в примонтированный `~/.pi/agent` и `AGENTS.md`
-с картой окружения. Ключи в логи не попадают никогда. Уровни моделей уезжают в контейнер переменными
-`ICARUS_MODEL_FAST` / `…_STRONG` / `…_VISION` — их читает расширение эскалации. Уровень размышлений
-расширение отдаёт ровно тот, что записан в конфиге: pi поднял бы неподдерживаемый до ближайшего доступного
-(у `deepseek-v4-pro` `medium` в каталоге помечен отсутствующим), а расширение шлёт `reasoning_effort` как есть.
+Из этого сервис генерирует `auth.json`, `models.json` и `settings.json` в примонтированный `~/.pi/agent` и
+`AGENTS.md` с картой окружения. `models.json` нужен кастомным провайдерам вроде `deepinfra`: pi их сам не
+знает, и без файла модель из `models` в контейнере не найдётся. Ключи в логи не попадают никогда. Уровни
+моделей уезжают в контейнер переменными `ICARUS_MODEL_FAST` / `…_STRONG` / `…_VISION` — их читает расширение
+эскалации. Уровень размышлений расширение отдаёт ровно тот, что записан в конфиге: pi поднял бы
+неподдерживаемый до ближайшего доступного (`medium` у прежней модели в каталоге был помечен отсутствующим),
+а расширение шлёт `reasoning_effort` как есть.
 
 Изначально конфиг был JSON'ом и дублировал модели с ключами у каждого человека; формат упростили
 (см. историю коммитов), потому что настройки у людей незаметно разъезжались, а добавление человека

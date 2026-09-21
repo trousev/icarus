@@ -42,8 +42,8 @@ function spec(overrides: Partial<IcarusConfig> = {}, user = probe()): string {
 
 test('уровни моделей и личность уезжают в окружение', () => {
   const env = containerEnv(config, probe(), PANEL_SECRET);
-  assert.equal(env.ICARUS_MODEL_FAST, 'deepseek/deepseek-v4-flash:off');
-  assert.equal(env.ICARUS_MODEL_STRONG, 'deepseek/deepseek-v4-pro:medium');
+  assert.equal(env.ICARUS_MODEL_FAST, 'deepinfra/deepseek-ai/DeepSeek-V4.1-Flash:off');
+  assert.equal(env.ICARUS_MODEL_STRONG, 'deepinfra/deepseek-ai/DeepSeek-V4.1-Flash:medium');
   assert.equal(env.ICARUS_USER_ID, 'probe');
   assert.equal(env.ICARUS_URL, config.url);
   assert.match(env.ICARUS_PANEL_KEY, /^[0-9a-f]{64}$/, 'ключ ссылки — HMAC, а не открытый секрет');
@@ -74,7 +74,7 @@ test('отпечаток меняется от образа, dataDir, маунт
   assert.notEqual(spec({ mounts: [{ host: '/host/other', container: '/workspace/other' }] }), base, 'новый маунт');
   assert.notEqual(spec({ env: { ICARUS_EXTRACT_AFTER_MS: '1000' } }), base, 'новое окружение');
   assert.notEqual(
-    spec({ models: [{ provider: 'deepseek', id: 'deepseek-v4-pro', tier: 'fast' }] }),
+    spec({ models: [{ provider: 'deepinfra', id: 'deepseek-ai/DeepSeek-V4.1-Flash', tier: 'fast' }] }),
     base,
     'смена модели',
   );
@@ -134,7 +134,7 @@ test('стек: контейнер человека — образ, маунты
   assert.ok(service.volumes.includes('/data/users/probe/memory:/workspace/memory'));
   assert.ok(service.volumes.includes('/data/users/probe/sessions:/workspace/.sessions'));
   assert.ok(service.volumes.includes('/host/scratchpad:/workspace/scratchpad:ro'));
-  assert.equal(service.environment.ICARUS_MODEL_FAST, 'deepseek/deepseek-v4-flash:off');
+  assert.equal(service.environment.ICARUS_MODEL_FAST, 'deepinfra/deepseek-ai/DeepSeek-V4.1-Flash:off');
   assert.equal(service.environment.ICARUS_USER_ID, 'probe');
 });
 

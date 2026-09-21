@@ -40,19 +40,24 @@ docker:
 
 # Модели: tier раздаёт эскалация — fast для болтовни и поиска, strong для работы руками,
 # vision для картинок. thinking — уровень размышлений, он уезжает модели как есть
-# (эскалация не даёт pi поднять его до ближайшего доступного). У DeepSeek medium = high,
-# так что короче думает только low; off выключает размышления совсем.
+# (эскалация не даёт pi поднять его до ближайшего доступного). У DeepSeek-V4.1-Flash
+# размышления задаются уровнем reasoning_effort, off выключает их совсем.
+#
+# Провайдера deepinfra pi сам не знает: его описание (базовый адрес, протокол, ключ)
+# живёт в packages/service/src/providers.ts и уезжает в models.json контейнера. Здесь
+# важны только имя провайдера и id модели. V4.1-Flash мультимодальная, поэтому одна и
+# та же модель годится и для работы руками, и для картинок.
 models:
-  - provider: deepseek
-    id: deepseek-v4-flash
+  - provider: deepinfra
+    id: deepseek-ai/DeepSeek-V4.1-Flash
     thinking: off
     tier: fast
-  - provider: deepseek
-    id: deepseek-v4-pro
+  - provider: deepinfra
+    id: deepseek-ai/DeepSeek-V4.1-Flash
     thinking: medium
     tier: strong
-  - provider: deepseek
-    id: deepseek-v4-flash-vision-exp
+  - provider: deepinfra
+    id: deepseek-ai/DeepSeek-V4.1-Flash
     thinking: off
     tier: vision
 
@@ -61,12 +66,12 @@ models:
 # переопределение: свой ключ вместо .env или провайдер, которого нет в списке известных
 # (PROVIDER_ENV в packages/service/src/config.ts).
 # auth:
-#   deepseek: env:DEEPSEEK_API_KEY
+#   deepinfra: env:DEEPINFRA_API_KEY
 
 # Окружение контейнера — им настраиваются наши расширения
 env:
   ICARUS_EXTRACT_AFTER_MS: '20000'
-  ICARUS_EXTRACT_MODEL: deepseek/deepseek-v4-flash
+  ICARUS_EXTRACT_MODEL: deepinfra/deepseek-ai/DeepSeek-V4.1-Flash
 
 # Каталоги с хоста: пока общие для всех, у каждого человека те же (плюс его личные)
 mounts: []

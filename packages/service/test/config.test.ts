@@ -16,8 +16,8 @@ function writeConfig(text: string): string {
 
 const MINIMAL = `apiKey: test-token
 models:
-  - provider: deepseek
-    id: deepseek-v4-flash
+  - provider: deepinfra
+    id: deepseek-ai/DeepSeek-V4.1-Flash
     tier: fast
 users:
   - probe
@@ -55,15 +55,15 @@ docker:
   prefix: icarus
   network: icarus-net
 models:
-  - provider: deepseek
-    id: deepseek-v4-flash
+  - provider: deepinfra
+    id: deepseek-ai/DeepSeek-V4.1-Flash
     thinking: off
     tier: fast
-  - provider: deepseek
-    id: deepseek-v4-pro
+  - provider: deepinfra
+    id: deepseek-ai/DeepSeek-V4.1-Flash
     tier: strong
 auth:
-  deepseek: env:MY_KEY
+  deepinfra: env:MY_KEY
 env:
   ICARUS_EXTRACT_AFTER_MS: '1000'
 mounts:
@@ -90,7 +90,7 @@ users:
   assert.equal(config.models[0].tier, 'fast');
   assert.equal(config.models[0].thinking, 'off');
   assert.equal(config.models[1].thinking, undefined, 'thinking не выдумываем');
-  assert.deepEqual(config.auth, { deepseek: 'secret' });
+  assert.deepEqual(config.auth, { deepinfra: 'secret' });
   assert.equal(config.env.ICARUS_EXTRACT_AFTER_MS, '1000');
   assert.deepEqual(config.mounts, [{ host: '/host/repo', container: '/workspace/repo', mode: 'ro' }]);
   assert.equal(config.mcp.echo.command, 'node');
@@ -102,7 +102,7 @@ test('docker.dns: список адресов, опечатка — ошибка
   const withDns = writeConfig(`apiKey: token
 docker:
   dns: ['1.1.1.1', '2606:4700:4700::1111']
-models: [{ provider: deepseek, id: flash, tier: fast }]
+models: [{ provider: deepinfra, id: flash, tier: fast }]
 users: [probe]
 `);
   assert.deepEqual(loadConfig(withDns, {}).docker.dns, ['1.1.1.1', '2606:4700:4700::1111']);
@@ -110,7 +110,7 @@ users: [probe]
   const broken = writeConfig(`apiKey: token
 docker:
   dns: ['1.1.1.1 8.8.8.8']
-models: [{ provider: deepseek, id: flash, tier: fast }]
+models: [{ provider: deepinfra, id: flash, tier: fast }]
 users: [probe]
 `);
   assert.throws(() => loadConfig(broken, {}), /docker\.dns\[0\]: «1\.1\.1\.1 8\.8\.8\.8» — ожидался адрес DNS-сервера/);
@@ -119,9 +119,9 @@ users: [probe]
 test('~ и переменные окружения подставляются, где обещаны', () => {
   const file = writeConfig(`apiKey: env:MY_TOKEN
 dataDir: ~/icarus-test
-models: [{ provider: deepseek, id: flash, tier: fast }]
+models: [{ provider: deepinfra, id: flash, tier: fast }]
 auth:
-  deepseek: \${MY_KEY}
+  deepinfra: \${MY_KEY}
 mounts:
   - host: ~/src/repo
     container: /workspace/repo
@@ -138,24 +138,24 @@ users: [probe]
 
 test('пример конфига из репозитория разбирается', () => {
   const config = loadConfig(path.join(REPO_ROOT, 'config.example.yaml'), {
-    DEEPSEEK_API_KEY: 'sk-test',
+    DEEPINFRA_API_KEY: 'sk-test',
   } as NodeJS.ProcessEnv);
 
   assert.ok(config.users.length > 0, 'в примере должны быть люди');
   assert.ok(config.models.some((model) => model.tier === 'fast'), 'нужна быстрая модель');
-  assert.deepEqual(config.auth, { deepseek: 'sk-test' }, 'ключ из .env подхватывается без auth в конфиге');
+  assert.deepEqual(config.auth, { deepinfra: 'sk-test' }, 'ключ из .env подхватывается без auth в конфиге');
 });
 
 // --- ключи из .env ------------------------------------------------------------
 
 test('ключ провайдера из окружения сам уезжает в auth', () => {
-  const config = loadConfig(writeConfig(MINIMAL), { DEEPSEEK_API_KEY: 'sk-env' } as NodeJS.ProcessEnv);
-  assert.deepEqual(config.auth, { deepseek: 'sk-env' });
+  const config = loadConfig(writeConfig(MINIMAL), { DEEPINFRA_API_KEY: 'sk-env' } as NodeJS.ProcessEnv);
+  assert.deepEqual(config.auth, { deepinfra: 'sk-env' });
 });
 
 test('detectAuth знает имена переменных pi и чистит пробелы', () => {
-  const models = [{ provider: 'google', id: 'gemini-flash' }, { provider: 'deepseek', id: 'flash' }];
-  const auth = detectAuth(models, { GEMINI_API_KEY: ' g ', DEEPSEEK_API_KEY: '' } as NodeJS.ProcessEnv);
+  const models = [{ provider: 'google', id: 'gemini-flash' }, { provider: 'deepinfra', id: 'flash' }];
+  const auth = detectAuth(models, { GEMINI_API_KEY: ' g ', DEEPINFRA_API_KEY: '' } as NodeJS.ProcessEnv);
   assert.deepEqual(auth, { google: 'g' }, 'пустое значение — это отсутствие ключа');
 });
 
@@ -179,21 +179,21 @@ test('detectAuth знает и редких провайдеров pi, вклю�
 
 test('в auth попадают только провайдеры из models', () => {
   const config = loadConfig(writeConfig(MINIMAL), {
-    DEEPSEEK_API_KEY: 'sk-deepseek',
+    DEEPINFRA_API_KEY: 'sk-deepinfra',
     OPENAI_API_KEY: 'sk-openai',
   } as NodeJS.ProcessEnv);
-  assert.deepEqual(config.auth, { deepseek: 'sk-deepseek' });
+  assert.deepEqual(config.auth, { deepinfra: 'sk-deepinfra' });
 });
 
 test('пустой ключ в окружении — всё равно что нет', () => {
-  const config = loadConfig(writeConfig(MINIMAL), { DEEPSEEK_API_KEY: '  ' } as NodeJS.ProcessEnv);
+  const config = loadConfig(writeConfig(MINIMAL), { DEEPINFRA_API_KEY: '  ' } as NodeJS.ProcessEnv);
   assert.deepEqual(config.auth, {});
 });
 
 test('явный auth в config.yaml сильнее ключа из окружения', () => {
-  const file = writeConfig(`${MINIMAL}auth:\n  deepseek: env:MY_KEY\n`);
-  const config = loadConfig(file, { MY_KEY: 'явный', DEEPSEEK_API_KEY: 'из-окружения' } as NodeJS.ProcessEnv);
-  assert.deepEqual(config.auth, { deepseek: 'явный' });
+  const file = writeConfig(`${MINIMAL}auth:\n  deepinfra: env:MY_KEY\n`);
+  const config = loadConfig(file, { MY_KEY: 'явный', DEEPINFRA_API_KEY: 'из-окружения' } as NodeJS.ProcessEnv);
+  assert.deepEqual(config.auth, { deepinfra: 'явный' });
 });
 
 test('.env читается в окружение, но не перетирает уже заданное', () => {
@@ -219,7 +219,7 @@ test('нет .env — не ошибка: ключи могут прийти из
 // --- ошибки -------------------------------------------------------------------
 
 test('без apiKey не стартуем', () => {
-  const file = writeConfig('models: [{ provider: deepseek, id: flash }]\nusers: [probe]\n');
+  const file = writeConfig('models: [{ provider: deepinfra, id: flash }]\nusers: [probe]\n');
   assert.throws(() => loadConfig(file, {}), /apiKey/);
 });
 
@@ -229,8 +229,8 @@ test('неподставившаяся переменная в apiKey — это
 });
 
 test('пустой ключ провайдера ловим на старте, а не в контейнере', () => {
-  const file = writeConfig(`${MINIMAL}auth:\n  deepseek: env:NO_SUCH_KEY\n`);
-  assert.throws(() => loadConfig(file, {}), /auth\.deepseek: пусто/);
+  const file = writeConfig(`${MINIMAL}auth:\n  deepinfra: env:NO_SUCH_KEY\n`);
+  assert.throws(() => loadConfig(file, {}), /auth\.deepinfra: пусто/);
 });
 
 test('без моделей не стартуем', () => {
