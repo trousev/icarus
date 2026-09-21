@@ -678,13 +678,27 @@ a probe such as `interface(prettyprint=0): interface(ansi=false): print("OK");`.
 
 ## 3. Running only PART of a worksheet / a single execution group
 
-> *Section pending — being researched. This placeholder is replaced before delivery.*
+> **Moved.** This topic is covered in full in
+> [`07-single-group-and-persistent-process.md`](07-single-group-and-persistent-process.md) §3 and its §0.A.
+> Short version: no documented API runs one group of an unopened `.mw`; there is no CLI
+> option to select a group or label. `DocumentTools:-RunWorksheet` runs the *whole*
+> worksheet headless in a new engine (top-level `return` for early exit), and
+> `DocumentTools:-Retrieve(file, label)` only *retrieves* a labelled expression without
+> executing it. Practical route: extract `Group/Input/Text-field[style="Maple Input"]`
+> from the XML and feed a kernel, executing the prefix `1..k` for faithful semantics.
 
 ---
 
 ## 4. Persistent Maple process controlled from outside (request/response protocol)
 
-> *Section pending — being researched. This placeholder is replaced before delivery.*
+> **Moved.** This topic is covered in full in
+> [`07-single-group-and-persistent-process.md`](07-single-group-and-persistent-process.md) §4 and its §0.B.
+> Short version: the CLI *is* a REPL and stays alive while stdin is open; `-t` is the
+> machine mode (prompt `#-->`, prettyprint off); `-q` does not hide the prompt but
+> `interface(quiet=true)` does. There is no documented stdout-flush control, so real
+> wrappers use a pty (SageMath, Emacs) or an explicit `printf` sentinel (TeXmacs), with
+> `interface(errorbreak=0)`, `quit`/`done`/`stop` stripped, and SIGINT→SIGKILL sent to the
+> process group. OpenMaple or the Maple 2022+ Jupyter kernel avoid the framing problem.
 
 ---
 
