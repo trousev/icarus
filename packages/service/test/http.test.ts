@@ -102,7 +102,9 @@ test('поток содержит текст, активность тулов и
     assert.match(response.headers.get('content-type') ?? '', /text\/event-stream/);
 
     const text = await response.text();
-    assert.match(text, /"content":"Привет"/);
+    // Текст уходит законченными кусками: дельты одной фразы склеиваются в один чанк
+    // (см. AnswerBuffer — иначе переключение канала рвёт ответ посреди слова).
+    assert.match(text, /"content":"Привет, Саня"/);
     assert.match(text, /"reasoning_content":"читаю memory\/identity\.md\\n"/);
     assert.match(text, /"finish_reason":"stop"/);
     assert.match(text, /data: \[DONE\]/);
@@ -182,6 +184,87 @@ test('мысль и активность тула после начала отв
       deltas.map((delta) => delta.reasoning_content ?? '').join(''),
       'выполняю: ls\nНадо проверить каталог.команда отработала\n',
       'мысль или активность тула потерялись после начала ответа',
+    );
+  }, steps);
+});
+
+/** Порядок каналов в потоке: что клиент увидит раньше — мысль или текст. */
+function channelsOf(sse: string): string[] {
+  return deltasOf(sse)
+    .filter((delta) => delta.content || delta.reasoning_content)
+    .map((delta) => (delta.reasoning_content ? 'think' : 'text'));
+}
+
+test('переключение на активность тула не рвёт ответ посреди слова', async () => {
+  const steps: Step[] = [
+    { type: 'message_update', assistantMessageEvent: { type: 'text_start' } },
+    { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'Сайт рендерится д' } },
+    { type: 'tool_execution_start', toolName: 'bash', args: { command: 'curl -s site' } },
+    { type: 'tool_execution_end', toolName: 'bash', isError: false },
+    { type: 'message_update', assistantMessageEvent: { type: 'text_start' } },
+    {
+      type: 'message_update',
+      assistantMessageEvent: { type: 'text_delta', delta: 'жаваскриптом, текстом не отдаёт.\n\n' },
+    },
+    { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'Пробую их API.' } },
+    { type: 'agent_settled' },
+  ];
+  await withServer(async (base) => {
+    const sse = await (await sseRequest(base, {})).text();
+    const content = deltasOf(sse).map((delta) => delta.content ?? '').join('');
+
+    // LibreChat заводит новую часть на каждое переключение канала и рисует её
+    // отдельным блоком. Слово, оборванное на тул, должно уехать в одну часть с
+    // продолжением, иначе в чате появляется разрыв посреди слова.
+    assert.equal(
+      content,
+      'Сайт рендерится джаваскриптом, текстом не отдаёт.\n\nПробую их API.',
+      'оборванное слово разъехалось по разным частям ответа',
+    );
+    assert.deepEqual(
+      channelsOf(sse),
+      ['think', 'think', 'text', 'text'],
+      'хвост ответа должен уходить после активности тула, а не до неё',
+    );
+  }, steps);
+});
+
+test('поздний thinking_end не вставляет разрыв посреди фразы', async () => {
+  // pi присылает thinking_end уже после первых текстовых дельт того же блока —
+  // если считать его разрывом, посреди фразы появится пустая строка.
+  const steps: Step[] = [
+    { type: 'message_update', assistantMessageEvent: { type: 'text_start' } },
+    { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'Итого:' } },
+    { type: 'message_update', assistantMessageEvent: { type: 'thinking_end', content: 'подумал' } },
+    { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'всё хорошо' } },
+    { type: 'agent_settled' },
+  ];
+  await withServer(async (base) => {
+    const content = deltasOf(await (await sseRequest(base, {})).text())
+      .map((delta) => delta.content ?? '')
+      .join('');
+    assert.equal(content, 'Итого:всё хорошо', 'разрыв вставлен посреди блока текста');
+  }, steps);
+});
+
+test('новое сообщение модели начинается с пустой строки, а не приклеивается к хвосту', async () => {
+  const steps: Step[] = [
+    { type: 'message_update', assistantMessageEvent: { type: 'text_start' } },
+    { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'Теперь журнал.' } },
+    { type: 'tool_execution_start', toolName: 'read', args: { path: '/workspace/memory/journal/2026-09.md' } },
+    { type: 'tool_execution_end', toolName: 'read', isError: false },
+    { type: 'message_update', assistantMessageEvent: { type: 'text_start' } },
+    { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: '## Шаг 2\n\nПрочитал журнал.' } },
+    { type: 'agent_settled' },
+  ];
+  await withServer(async (base) => {
+    const content = deltasOf(await (await sseRequest(base, {})).text())
+      .map((delta) => delta.content ?? '')
+      .join('');
+    assert.equal(
+      content,
+      'Теперь журнал.\n\n## Шаг 2\n\nПрочитал журнал.',
+      'заголовок склеился с прошлой фразой — в чате он перестанет быть заголовком',
     );
   }, steps);
 });
