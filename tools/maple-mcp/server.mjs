@@ -82,6 +82,12 @@ const SESSION_DIR = (() => {
 })();
 
 const PLOT_DIR = process.env.MAPLE_PLOT_DIR ?? path.join(SESSION_DIR, 'plots');
+/**
+ * Базовый URL, по которому график видно из браузера (его отдаёт icarus:
+ * GET /maple/<файл>). Если задан, инструмент возвращает готовую markdown-строку,
+ * и картинка доезжает до чата, хотя сам мост pi изображения не пропускает.
+ */
+const PLOT_URL_BASE = (process.env.MAPLE_PLOT_URL_BASE ?? '').replace(/\/+$/, '');
 
 const safeName = (name) => String(name).replace(/[^\w.-]+/g, '_').slice(0, 64) || 'default';
 const journalPath = (name) => path.join(SESSION_DIR, `${safeName(name)}.jsonl`);
@@ -804,7 +810,9 @@ async function toolPlot({ expression, format = 'gif', session }) {
   const ext = PLOT_FORMATS[String(format).toLowerCase()];
   if (!ext) return fail(`формат «${format}» этот Maple не умеет. Доступно: gif, jpeg, bmp.`);
   mkdirSync(PLOT_DIR, { recursive: true });
-  const file = path.join(PLOT_DIR, `plot-${Date.now()}-${randomBytes(3).toString('hex')}.${ext}`);
+  // Имя случайное: icarus отдаёт графики без авторизации, угадать путь нельзя.
+  const name = `${randomBytes(8).toString('hex')}.${ext}`;
+  const file = path.join(PLOT_DIR, name);
   const code = [
     `__mcp_plot := ${expression}:`,
     `plottools:-exportplot("${file}", __mcp_plot):`,
@@ -828,12 +836,16 @@ async function toolPlot({ expression, format = 'gif', session }) {
   if (!existsSync(file)) return fail(`не удалось экспортировать график (формат ${ext}).\n${res.output}`);
   const data = await readFile(file);
   const mime = ext === 'jpg' ? 'jpeg' : ext;
+  const url = PLOT_URL_BASE ? `${PLOT_URL_BASE}/${name}` : null;
+  const hint = url
+    ? `график ${ext}, ${data.length} байт.\n` +
+      `Вставь следующую строку в ответ человеку ДОСЛОВНО — тогда картинка покажется в чате:\n` +
+      `![график](${url})`
+    : `график ${ext}, ${data.length} байт, файл: ${file}\n` +
+      `(этот мост изображения не пропускает — назови человеку путь к файлу)`;
   return {
     content: [
-      {
-        type: 'text',
-        text: `график ${ext}, ${data.length} байт, файл: ${file}\n(некоторые мосты, например pi-mcp-extension, не пропускают изображения — тогда скажи пользователю путь к файлу)`,
-      },
+      { type: 'text', text: hint },
       { type: 'image', data: data.toString('base64'), mimeType: `image/${mime}` },
     ],
     isError: false,
@@ -983,7 +995,9 @@ const TOOLS = [
   },
   {
     name: 'maple_plot',
-    description: 'Построить график и вернуть изображение. Форматы: gif (по умолчанию), jpeg, bmp (png этот Maple не умеет).',
+    description:
+      'Построить график (gif по умолчанию, ещё jpeg/bmp; png этот Maple не умеет). ' +
+      'В ответе приходит готовая markdown-строка с картинкой — вставь её в ответ человеку дословно, тогда график покажется в чате.',
     inputSchema: {
       type: 'object',
       properties: {

@@ -1,7 +1,9 @@
 // HTTP-сервер icarus: три маршрута и ничего лишнего.
 import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
 import { log, redact } from '../log.ts';
-import type { IcarusConfig } from '../config.ts';
+import { userPaths, type IcarusConfig } from '../config.ts';
 import type { SessionRegistry } from '../sessions/registry.ts';
 import { errorBody } from './sse.ts';
 import { handleChatCompletions, headerValue } from './openai.ts';
@@ -58,6 +60,31 @@ export function createServer(config: IcarusConfig, registry: SessionRegistry, pa
           containers,
         }),
       );
+      return;
+    }
+
+    // Графики Maple. Мост pi изображения не пропускает, поэтому MCP кладёт файл
+    // в каталог сессий человека и возвращает markdown-ссылку сюда: так картинка
+    // доезжает до чата. Имя файла — 16 случайных hex, угадать путь нельзя.
+    if (req.method === 'GET' && url.pathname.startsWith('/maple/')) {
+      const name = decodeURIComponent(url.pathname.slice('/maple/'.length));
+      if (!/^[a-f0-9]{16}\.(gif|jpe?g|bmp)$/i.test(name)) {
+        res.writeHead(404, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(errorBody('нет такого графика', 'not_found')));
+        return;
+      }
+      for (const user of config.users) {
+        const file = path.join(userPaths(config, user).piAgent, 'maple-mcp', 'plots', name);
+        if (!fs.existsSync(file)) continue;
+        const ext = path.extname(file).toLowerCase();
+        const type =
+          ext === '.gif' ? 'image/gif' : ext === '.bmp' ? 'image/bmp' : ext === '.png' ? 'image/png' : 'image/jpeg';
+        res.writeHead(200, { 'content-type': type, 'cache-control': 'private, max-age=3600' });
+        fs.createReadStream(file).pipe(res);
+        return;
+      }
+      res.writeHead(404, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(errorBody('график не найден', 'not_found')));
       return;
     }
 

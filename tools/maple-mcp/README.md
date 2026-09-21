@@ -150,10 +150,14 @@ docker exec -u node icarus-user-probe node /opt/icarus/tools/maple-mcp/test.mjs
   ```
 
   После этого работают `dsolve`, `pdsolve`, численные ОДУ. Откат — `--restore`.
-- **Картинки.** `maple_plot` возвращает и изображение, и путь к файлу. Но
-  `pi-mcp-extension` заменяет image-контент на текст `[Image: image/gif, base64
-  encoded]` — то есть до человека картинка через Икара не доедет. Поэтому в
-  ответе всегда есть путь к файлу в `MAPLE_PLOT_DIR`.
+- **Картинки.** `pi-mcp-extension` заменяет image-контент на текст
+  `[Image: image/gif, base64 encoded]`, поэтому сам image-блок до человека не
+  доходит. Решение: MCP кладёт график в `MAPLE_PLOT_DIR` и возвращает
+  markdown-ссылку `![график](http://localhost:8081/maple/<16hex>.gif)`, а icarus
+  отдаёт её маршрутом `GET /maple/<файл>` — ищет файл в каталогах людей, имя файла
+  это 16 случайных hex. База URL задаётся `MAPLE_PLOT_URL_BASE` (env сервера
+  `maple` в `config.yaml`). Агент обязан вставить эту строку в ответ дословно —
+  так написано в `MAPLE.md`.
 - **Графику** отдаём через `plottools:-exportplot`: `gif`, `jpeg`, `bmp`;
   **`png` и `tiff` Maple 18 не умеет**.
 - `DocumentTools:-ContentToString`, `Tabulate` и
