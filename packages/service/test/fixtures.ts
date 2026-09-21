@@ -8,6 +8,9 @@ import type { IcarusConfig, UserConfig } from '../src/config.ts';
 export const API_KEY = 'test-token';
 /** Секрет панели для тестов: из него выводятся личные ключи ссылок на память. */
 export const PANEL_SECRET = 'test-panel-secret';
+/** Провайдер и модель тестов: id содержит «/», как у любой модели DeepInfra. */
+export const PROVIDER = 'deepinfra';
+export const MODEL_ID = 'deepseek-ai/DeepSeek-V4.1-Flash';
 
 /** Свежий dataDir на каждый вызов: тесты пишут в память и incoming. */
 export function makeConfig(overrides: Partial<IcarusConfig> = {}): IcarusConfig {
@@ -20,8 +23,8 @@ export function makeConfig(overrides: Partial<IcarusConfig> = {}): IcarusConfig 
     sessionIdleMinutes: 30,
     docker: { image: 'icarus-user:dev', prefix: 'icarus-user', socket: null },
     models: [
-      { provider: 'deepseek', id: 'deepseek-v4-flash', thinking: 'off', tier: 'fast' },
-      { provider: 'deepseek', id: 'deepseek-v4-pro', thinking: 'medium', tier: 'strong' },
+      { provider: PROVIDER, id: MODEL_ID, thinking: 'off', tier: 'fast' },
+      { provider: PROVIDER, id: MODEL_ID, thinking: 'medium', tier: 'strong' },
     ],
     auth: {},
     env: {},
