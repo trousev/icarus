@@ -93,12 +93,21 @@ mcp:
 # Maple: считается локально, файлы сервера монтируются из репозитория.
 # MAPLE_DIR задаётся в .env; обе стороны маунта обязаны совпадать — launcher
 # Maple ищет свои библиотеки по тому же пути, что записан внутри него.
+#
+# Куда Maple пишет журналы сессий и графики, задаётся здесь и обязано указывать в
+# /workspace/maple: это персистентный маунт из dataDir, который сервис монтирует
+# сам (прописывать его в mounts не нужно). MCP-мост pi живёт только на время чата,
+# а контейнер человека пересоздаётся на каждом ./script/server — всё, что осталось
+# в других местах контейнера, расчёт не переживёт. Раздел «математика» в панели
+# памяти читает ровно этот каталог.
 #  maple:
 #    command: node
 #    args: ['/opt/icarus/tools/maple-mcp/server.mjs']
 #    env:
 #      MAPLE_BIN: ${MAPLE_DIR}/bin/maple
 #      MAPLE_TIMEOUT_SECONDS: "25"
+#      MAPLE_SESSION_DIR: /workspace/maple
+#      MAPLE_PLOT_DIR: /workspace/maple
 #      MAPLE_PLOT_URL_BASE: http://localhost:8081/maple
 #    lifecycle: eager
 # и в mounts выше:

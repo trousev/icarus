@@ -62,6 +62,7 @@ icarus (docker, Node/TS) — тонкий фасад, без знания о в�
 Контейнер пользователя (node + pi + git + ripgrep)
   /workspace/memory         ← bind: ~/icarus/<user>/memory   (git)
   /workspace/shared-memory  ← bind: ~/icarus/shared          (git)
+  /workspace/maple          ← bind: ~/icarus/<user>/maple    (журналы и графики Maple)
   /workspace/scratchpad     ← bind: ~/src/scratchpad         (позже, не в MVP)
   /workspace/AGENTS.md      ← генерирует сервис: раскладка и правила
   /workspace/icarus.md      ← системный промпт (руками)

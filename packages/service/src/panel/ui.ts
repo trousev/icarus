@@ -2,10 +2,26 @@
 //
 // Общего входа с ключом нет: страница открывается личной ссылкой от Икара, и пропуск
 // из неё же уходит в заголовке каждого запроса к API. Протухший или битый пропуск —
-// это не форма входа, а подсказка попросить у Икара свежую ссылку.
-export type PanelSession = { user: string } | null;
+// это не форма входа, а подсказка попросить у Икара свежую.
+//
+// Разделов три: личная память, семейная и математика. Математика приходит из сервиса
+// как read-only: у неё нет истории и кнопок правки, зато графики показываются
+// картинкой, а не строкой base64.
+export type PanelSession = { user: string; scopes: Record<string, 'memory' | 'maple'> } | null;
+
+const SCOPE_LABELS: Record<string, string> = {
+  personal: 'личная',
+  shared: 'семейная',
+  maple: 'математика',
+};
 
 export function panelHtml(session: PanelSession): string {
+  const scopeOptions = session
+    ? Object.keys(session.scopes)
+        .map((name) => `<option value="${name}">${SCOPE_LABELS[name] ?? escapeHtml(name)}</option>`)
+        .join('')
+    : '';
+  const modes = session ? JSON.stringify(session.scopes) : '{}';
   return `<!doctype html>
 <html lang="ru">
 <head>
@@ -24,6 +40,9 @@ export function panelHtml(session: PanelSession): string {
   button:hover { border-color:var(--accent); }
   button.danger:hover { border-color:var(--danger); color:var(--danger); }
   main { display:grid; grid-template-columns: 260px 1fr 320px; gap:0; height:calc(100vh - 57px); }
+  /* У математики нет истории: третья колонка ей не нужна, и место отдаём файлу. */
+  main.maple { grid-template-columns: 260px 1fr; }
+  main.maple #history { display:none; }
   .col { overflow:auto; padding:12px; border-right:1px solid var(--line); }
   .col:last-child { border-right:none; }
   .file { display:flex; justify-content:space-between; gap:8px; padding:6px 8px; border-radius:6px; cursor:pointer; color:var(--dim); }
@@ -31,6 +50,7 @@ export function panelHtml(session: PanelSession): string {
   .file.active { background:var(--panel); color:var(--accent); }
   .file small { color:var(--dim); }
   pre { margin:0; white-space:pre-wrap; word-break:break-word; font:13px/1.6 ui-monospace, monospace; }
+  img.plot { max-width:100%; background:#fff; border:1px solid var(--line); border-radius:8px; }
   .line { display:flex; gap:10px; align-items:flex-start; }
   /* Номер строки — только для глаза: в выделение и буфер обмена он не попадает
      (user-select:none), иначе скопированный текст приезжает с цифрами и отступом. */
@@ -57,11 +77,8 @@ ${
     ? `<header>
   <h1>Икар · память</h1>
   <span class="who">${escapeHtml(session.user)}</span>
-  <select id="scope">
-    <option value="personal">личная</option>
-    <option value="shared">семейная</option>
-  </select>
-  <input id="q" placeholder="поиск по памяти" size="28">
+  <select id="scope">${scopeOptions}</select>
+  <input id="q" placeholder="поиск по разделу" size="28">
   <button id="search">найти</button>
   <span id="status" class="muted"></span>
 </header>
@@ -73,6 +90,7 @@ ${
 <script>
 const params = new URLSearchParams(location.search);
 const token = params.get('t') || '';
+const modes = ${modes};
 let current = null;
 
 const api = async (path, options = {}) => {
@@ -86,6 +104,9 @@ const api = async (path, options = {}) => {
 const qs = (extra = {}) => new URLSearchParams({ scope: scope.value, ...extra }).toString();
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const status = (text) => { document.getElementById('status').textContent = text || ''; };
+const mode = () => modes[scope.value] || 'memory';
+const isImage = (path) => /\\.(gif|jpe?g|bmp)$/i.test(path);
+const humanSize = (bytes) => bytes < 1024 ? bytes + ' б' : (bytes / 1024).toFixed(1) + ' Кб';
 
 // Свой диалог вместо window.confirm: браузер глушит нативные модалки, если
 // вкладка не активна, и нативный confirm молча возвращает false — кнопки «не работают».
@@ -132,27 +153,50 @@ const guard = (action) => async () => {
 };
 
 async function loadFiles() {
+  const maple = mode() === 'maple';
+  document.querySelector('main').classList.toggle('maple', maple);
   const data = await api('/panel/api/files?' + qs());
   const box = document.getElementById('files');
   box.innerHTML = data.files.length
-    ? data.files.map((f) => '<div class="file" data-path="' + esc(f.path) + '"><span>' + esc(f.path) + '</span><small>' + f.size + 'б</small></div>').join('')
-    : '<p class="muted">Память пока пуста.</p>';
+    ? data.files.map((f) => '<div class="file" data-path="' + esc(f.path) + '"><span>' + esc(f.path) + '</span><small>' + humanSize(f.size) + '</small></div>').join('')
+    : '<p class="muted">' + (maple ? 'Расчётов пока нет.' : 'Память пока пуста.') + '</p>';
   box.querySelectorAll('.file').forEach((el) => el.onclick = () => openFile(el.dataset.path));
-  loadHistory();
+  document.getElementById('content').innerHTML = '<p class="muted">' + (maple
+    ? 'Это математика: журналы сессий Maple и графики. Файлы создаёт Maple, здесь они только смотрятся.'
+    : 'Выбери файл слева или найди что-нибудь поиском.') + '</p>';
+  if (maple) {
+    document.getElementById('history').innerHTML = '<p class="muted">Раздел только для чтения: журналы и графики создаёт Maple, правки и откаты — в личной памяти.</p>';
+  } else {
+    await loadHistory();
+  }
 }
 
 async function openFile(path) {
   current = path;
-  const data = await api('/panel/api/file?' + qs({ path }));
+  const base = '/panel/api/file?' + qs({ path });
   document.querySelectorAll('.file').forEach((el) => el.classList.toggle('active', el.dataset.path === path));
-  document.getElementById('content').innerHTML =
+  const box = document.getElementById('content');
+
+  // Картинку тянем байтами с пропуском в заголовке и показываем как <img>: base64
+  // в JSON раздул бы ответ втрое, а графики Maple — это gif на сотни килобайт.
+  if (isImage(path)) {
+    const response = await fetch(base + '&raw=1', { headers: { authorization: 'Bearer ' + token } });
+    if (!response.ok) { box.innerHTML = '<p class="muted">Картинка не открылась.</p>'; return; }
+    const url = URL.createObjectURL(await response.blob());
+    box.innerHTML = '<div class="row"><b>' + esc(path) + '</b></div><img class="plot" alt="' + esc(path) + '">';
+    box.querySelector('img').src = url;
+    return;
+  }
+
+  const data = await api(base);
+  box.innerHTML =
     '<div class="row"><b>' + esc(path) + '</b></div><pre>' +
     data.content.split('\\n').map((line, i) =>
       '<div class="line"><span class="ln">' + String(i + 1).padStart(3) + '</span><span style="flex:1">' + esc(line) +
-      (line.trim().startsWith('-') ? '</span><button class="forget danger" data-line="' + esc(line.trim()) + '">забыть</button>' : '</span>') +
+      (mode() === 'memory' && line.trim().startsWith('-') ? '</span><button class="forget danger" data-line="' + esc(line.trim()) + '">забыть</button>' : '</span>') +
       '</div>').join('') +
     '</pre>';
-  document.querySelectorAll('.forget').forEach((el) => el.onclick = guard(() => forget(path, el.dataset.line)));
+  if (mode() === 'memory') document.querySelectorAll('.forget').forEach((el) => el.onclick = guard(() => forget(path, el.dataset.line)));
 }
 
 async function forget(path, line) {

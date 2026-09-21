@@ -64,8 +64,10 @@ export function createServer(config: IcarusConfig, registry: SessionRegistry, pa
     }
 
     // Графики Maple. Мост pi изображения не пропускает, поэтому MCP кладёт файл
-    // в каталог сессий человека и возвращает markdown-ссылку сюда: так картинка
+    // в каталог математики человека и возвращает markdown-ссылку сюда: так картинка
     // доезжает до чата. Имя файла — 16 случайных hex, угадать путь нельзя.
+    // Старый каталог в pi-agent проверяем вторым: расчёты, не пережившие переезд,
+    // должны открываться, пока их не перенесли.
     if (req.method === 'GET' && url.pathname.startsWith('/maple/')) {
       const name = decodeURIComponent(url.pathname.slice('/maple/'.length));
       if (!/^[a-f0-9]{16}\.(gif|jpe?g|bmp)$/i.test(name)) {
@@ -74,8 +76,13 @@ export function createServer(config: IcarusConfig, registry: SessionRegistry, pa
         return;
       }
       for (const user of config.users) {
-        const file = path.join(userPaths(config, user).piAgent, 'maple-mcp', 'plots', name);
-        if (!fs.existsSync(file)) continue;
+        const paths = userPaths(config, user);
+        const candidates = [
+          path.join(paths.maple, name),
+          path.join(paths.piAgent, 'maple-mcp', 'plots', name),
+        ];
+        const file = candidates.find((candidate) => fs.existsSync(candidate));
+        if (!file) continue;
         const ext = path.extname(file).toLowerCase();
         const type =
           ext === '.gif' ? 'image/gif' : ext === '.bmp' ? 'image/bmp' : ext === '.png' ? 'image/png' : 'image/jpeg';
