@@ -1,0 +1,200 @@
+#!/usr/bin/env bash
+# Привязка Management API стенда LibreChat к пользователю.
+#
+# Зачем. Management API (единственный машинный способ прочитать скиллы) принимает
+# только OIDC-токены и только от клиента, привязанного к конкретному пользователю
+# LibreChat — то есть к его ObjectId из Mongo. ObjectId живёт в томе стенда, поэтому
+# в git его нет: docker/librechat/librechat.yaml остаётся шаблоном с заглушкой, а
+# рабочая копия (librechat.local.yaml, тоже не в git) собирается здесь.
+#
+# Обычно скрипт зовут не руками, а из ./script/server --with-librechat: стек
+# поднимается, после чего привязка подставляется сама. Руками он нужен в одном
+# случае: стенд уже поднят, а пользователя завели позже.
+#
+#   ./script/librechat-skills-bind                  # первый человек из config.yaml
+#   ./script/librechat-skills-bind probe2           # по username или e-mail
+#   ./script/librechat-skills-bind 507f1f77bcf86cd799439011
+#   ./script/librechat-skills-bind probe my-tenant  # явный тенант
+#
+# Флаги:
+#   --file <путь>   править этот файл (по умолчанию рабочая копия стенда)
+#   --ensure        создать рабочую копию из шаблона, если её нет
+#   --quiet         молчать, когда делать нечего (режим для ./script/server)
+#   --no-restart    не перезапускать LibreChat (когда стек и так поднимается)
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+CONFIG="${ICARUS_CONFIG:-$ROOT/config.yaml}"
+TEMPLATE="$ROOT/docker/librechat/librechat.yaml"
+LOCAL="$ROOT/docker/librechat/librechat.local.yaml"
+MONGO_URI='mongodb://127.0.0.1:27017/LibreChat'
+
+TARGET=''
+ENSURE=0
+QUIET=0
+RESTART=1
+POSITIONAL=()
+
+say() { printf '\033[1m==>\033[0m %s\n' "$*"; }
+note() { [ "$QUIET" = 1 ] || printf '\033[1m==>\033[0m %s\n' "$*"; }
+warn() { printf '\033[33m[!]\033[0m %s\n' "$*" >&2; }
+die() { printf '\033[31m[x]\033[0m %s\n' "$*" >&2; exit 1; }
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+  --file)
+    shift
+    [ $# -gt 0 ] || die 'для --file нужен путь'
+    TARGET="$1"
+    ;;
+  --ensure) ENSURE=1 ;;
+  --quiet | -q) QUIET=1 ;;
+  --no-restart) RESTART=0 ;;
+  -h | --help)
+    sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    exit 0
+    ;;
+  -*) die "неизвестный флаг: $1" ;;
+  *) POSITIONAL+=("$1") ;;
+  esac
+  shift
+done
+
+selector="${POSITIONAL[0]:-}"
+tenant_arg="${POSITIONAL[1]:-}"
+
+command -v docker >/dev/null 2>&1 || die 'не нашёл docker'
+docker info >/dev/null 2>&1 || die 'docker не отвечает'
+
+# По умолчанию правим рабочую копию: именно её монтирует стек. Нет копии, а её
+# просили завести (--ensure) — делаем из шаблона.
+[ -n "$TARGET" ] || TARGET="$LOCAL"
+if [ "$ENSURE" = 1 ] && [ ! -f "$TARGET" ]; then
+  [ -f "$TEMPLATE" ] || die "нет шаблона $TEMPLATE"
+  # docker на месте отсутствующего файла создаёт каталог — сносим, если так вышло.
+  [ ! -d "$TARGET" ] || rm -rf "$TARGET"
+  cp "$TEMPLATE" "$TARGET"
+  note "создал рабочую копию $TARGET из шаблона"
+fi
+[ -f "$TARGET" ] || die "нет файла $TARGET (создать из шаблона: --ensure)"
+[ ! -d "$TARGET" ] || die "$TARGET — каталог, а нужен файл (docker создал его вместо маунта?)"
+
+# --- контейнер Mongo -----------------------------------------------------------
+mongo="${LIBRECHAT_MONGO_CONTAINER:-}"
+if [ -z "$mongo" ]; then
+  for name in icarus-librechat-mongo librechat-probe-mongo; do
+    if docker ps --format '{{.Names}}' | grep -qx -- "$name"; then
+      mongo="$name"
+      break
+    fi
+  done
+fi
+if [ -z "$mongo" ]; then
+  mongo="$(docker ps --format '{{.Names}}\t{{.Image}}' | awk -F'\t' '$2 ~ /^mongo:/ { print $1; exit }')"
+fi
+# Стенд ещё не поднят — это не ошибка автоматического вызова: привяжем в следующий раз.
+if [ -z "$mongo" ]; then
+  [ "$QUIET" = 1 ] && exit 0
+  die 'не нашёл контейнер MongoDB стенда — подними стек: ./script/server --with-librechat'
+fi
+
+# --- селектор ------------------------------------------------------------------
+if [ -z "$selector" ]; then
+  selector="$(node -e "
+    const { parse } = require('yaml');
+    const fs = require('node:fs');
+    const config = parse(fs.readFileSync(process.argv[1], 'utf8'));
+    process.stdout.write(String(config?.users?.[0] ?? ''));
+  " "$CONFIG")"
+  if [ -z "$selector" ]; then
+    [ "$QUIET" = 1 ] && exit 0
+    die "в $CONFIG нет users — некого привязывать"
+  fi
+  note "пользователь не задан, беру первого из config.yaml: $selector"
+fi
+
+# --- ищем пользователя ---------------------------------------------------------
+# Селектор уходит переменной и сравнивается как строка: ни кавычек, ни спецсимволов
+# в запрос не попадает, поэтому mongosh не приходится экранировать.
+result="$(docker exec -i -e ICARUS_SELECTOR="$selector" "$mongo" mongosh --quiet "$MONGO_URI" --file /dev/stdin <<'EOF'
+const selector = process.env.ICARUS_SELECTOR;
+const isId = /^[a-f\d]{24}$/i.test(selector);
+const query = isId ? { _id: ObjectId(selector) } : { $or: [{ username: selector }, { email: selector }] };
+let user = db.users.findOne(query);
+if (!user) {
+  print('ICARUS_ERROR=not_found');
+} else {
+  if (!user.tenantId) {
+    db.users.updateOne({ _id: user._id }, { $set: { tenantId: 'default' } });
+    user = db.users.findOne({ _id: user._id });
+    print('ICARUS_TENANT_ADDED=default');
+  }
+  print('ICARUS_ID=' + user._id.toString());
+  print('ICARUS_NAME=' + (user.username || user.email || '?'));
+  print('ICARUS_TENANT=' + (user.tenantId || ''));
+}
+EOF
+)" || {
+  [ "$QUIET" = 1 ] && exit 0
+  die "mongosh не смог прочитать пользователей в $mongo"
+}
+
+case "$result" in
+*ICARUS_ERROR=not_found*)
+  if [ "$QUIET" = 1 ]; then
+    # Пользователя ещё нет: сказать об этом должен вызывающий, у него есть контекст.
+    printf '%s\n' 'NO_USER'
+    exit 0
+  fi
+  die "в стенде нет пользователя «$selector» (заведи его в UI на :3090 и запусти скрипт снова)"
+  ;;
+esac
+
+user_id="$(printf '%s\n' "$result" | sed -n 's/^ICARUS_ID=//p')"
+user_name="$(printf '%s\n' "$result" | sed -n 's/^ICARUS_NAME=//p')"
+tenant="$(printf '%s\n' "$result" | sed -n 's/^ICARUS_TENANT=//p')"
+[ -n "$tenant_arg" ] && tenant="$tenant_arg"
+[ -n "$user_id" ] || die "не удалось разобрать ответ Mongo: $result"
+[ -n "$tenant" ] || die 'у пользователя нет tenantId, а Management API системный тенант запрещает'
+
+printf '%s\n' "$result" | grep -q '^ICARUS_TENANT_ADDED=' &&
+  warn "у пользователя не было tenantId — проставил '$tenant' прямо в Mongo (Management API без него не работает)" || true
+
+# --- правим привязку -----------------------------------------------------------
+before="$(sha1sum "$TARGET" | cut -d' ' -f1)"
+node -e "
+  const fs = require('node:fs');
+  const [file, userId, tenantId] = process.argv.slice(1);
+  let text = fs.readFileSync(file, 'utf8');
+  const before = text;
+  if (!/^(\s*)userId: '[0-9a-f]{24}'\$/m.test(text)) {
+    console.error('в ' + file + ' нет строки userId у managementApi.clients');
+    process.exit(1);
+  }
+  text = text.replace(/^(\s*)userId: '[0-9a-f]{24}'\$/m, \`\$1userId: '\${userId}'\`);
+  text = text.replace(/^(\s*)tenantId: '[^']*'\$/m, \`\$1tenantId: '\${tenantId}'\`);
+  if (text !== before) fs.writeFileSync(file, text);
+" "$TARGET" "$user_id" "$tenant" || {
+  [ "$QUIET" = 1 ] && exit 0
+  die 'не удалось обновить привязку'
+}
+
+after="$(sha1sum "$TARGET" | cut -d' ' -f1)"
+if [ "$before" = "$after" ]; then
+  note "привязка уже стоит: $user_name ($user_id), тенант $tenant"
+  exit 0
+fi
+
+say "привязал клиента icarus-sync к $user_name ($user_id), тенант $tenant — обновил $TARGET"
+
+# LibreChat читает librechat.yaml один раз, на старте процесса: без перезапуска
+# привязка лежит в файле, а в памяти остаётся старая (Management API ответит 401).
+if [ "$RESTART" = 1 ]; then
+  librechat="${LIBRECHAT_CONTAINER:-icarus-librechat}"
+  if docker ps --format '{{.Names}}' | grep -qx -- "$librechat"; then
+    note "перезапускаю $librechat, чтобы он перечитал привязку"
+    docker restart "$librechat" >/dev/null
+  fi
+fi

@@ -11,6 +11,12 @@ export class SessionRegistry {
   private readyContainers = new Set<string>();
   /** Поднятие контейнера в полёте: два одновременных запроса не должны создавать его дважды. */
   private ensuring = new Map<string, Promise<string>>();
+  /**
+   * Поколение «медленных» ресурсов человека: скиллы, персону и расширения pi читает
+   * один раз при старте процесса. Синхронизация скиллов увеличивает поколение, и
+   * следующая сессия человека поднимается заново — с новым каталогом.
+   */
+  private generations = new Map<string, number>();
   private timer: NodeJS.Timeout | null = null;
   private config: IcarusConfig;
 
@@ -19,6 +25,22 @@ export class SessionRegistry {
     const intervalMs = Math.max(60_000, Math.round((config.sessionIdleMinutes * 60_000) / 4));
     this.timer = setInterval(() => void this.reapIdle(), intervalMs);
     this.timer.unref?.();
+  }
+
+  /** Текущее поколение ресурсов человека. */
+  generation(userId: string): number {
+    return this.generations.get(userId) ?? 0;
+  }
+
+  /**
+   * Отмечает, что ресурсы человека поменялись. Живые сессии не трогаем: идущий ход
+   * нужно доиграть, а следующая сессия этого разговора поднимется уже заново (см.
+   * acquire). История при этом не теряется — она лежит в /workspace/.sessions.
+   */
+  bumpResources(userId: string): number {
+    const next = this.generation(userId) + 1;
+    this.generations.set(userId, next);
+    return next;
   }
 
   private fastModel(): ModelConfig {
@@ -55,15 +77,28 @@ export class SessionRegistry {
   /** Находит или поднимает сессию разговора. */
   async acquire(user: UserConfig, conversationId: string): Promise<PiSession> {
     const key = `${user.id}:${conversationId}`;
+    const generation = this.generation(user.id);
     const existing = this.sessions.get(key);
     if (existing && existing.alive) {
-      existing.lastUsed = Date.now();
-      return existing;
+      // Ход идёт — не рвём его: пусть доиграет на старом каталоге, а перезапуск
+      // случится при следующем обращении к этому разговору.
+      if (existing.generation === generation || existing.busy) {
+        existing.lastUsed = Date.now();
+        return existing;
+      }
+      log.info('сессия перезапускается: ресурсы человека обновились', {
+        user: user.id,
+        conversation: conversationId.slice(0, 8),
+        from: existing.generation,
+        to: generation,
+      });
+      existing.dispose();
+      this.sessions.delete(key);
     }
     if (existing) this.sessions.delete(key);
 
     const container = await this.ensureUserContainer(user);
-    const session = new PiSession(this.config, user, conversationId, this.fastModel(), container);
+    const session = new PiSession(this.config, user, conversationId, this.fastModel(), container, generation);
     this.sessions.set(key, session);
     return session;
   }

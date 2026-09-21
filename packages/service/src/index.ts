@@ -4,6 +4,7 @@ import { log } from './log.ts';
 import { prepareUser } from './workspace.ts';
 import { reapStalePi, waitForContainers } from './docker/manager.ts';
 import { SessionRegistry } from './sessions/registry.ts';
+import { startSkillsSync } from './skills/service.ts';
 import { createServer } from './http/server.ts';
 
 const configPath = process.argv[2] ?? process.env.ICARUS_CONFIG ?? DEFAULT_CONFIG_PATH;
@@ -36,6 +37,9 @@ if (missing.length > 0) {
 }
 
 const registry = new SessionRegistry(config);
+// Скиллы, написанные в UI LibreChat, приезжают в каталог pi фоном: сервис не ждёт
+// синхронизации, а первый же удачный проход перезапустит сессии (см. skills/service.ts).
+const skillsSync = startSkillsSync(config, registry);
 // Панель памяти пускает только по личным ссылкам: проверять их подпись нечем без секрета.
 const server = createServer(config, registry, ensurePanelSecret(config.dataDir));
 
@@ -45,6 +49,7 @@ server.listen(config.port, config.host, () => {
 
 function shutdown(signal: string): void {
   log.info('останавливаюсь', { signal });
+  skillsSync?.stop();
   registry.dispose();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 3000);

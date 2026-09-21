@@ -27,6 +27,20 @@ export const DEFAULT_SERVICE_IMAGE = 'icarus-service:dev';
 export const LIBRECHAT_CONTAINER = 'icarus-librechat';
 export const LIBRECHAT_MONGO_CONTAINER = 'icarus-librechat-mongo';
 
+/**
+ * Стендовая OIDC-заглушка (docker/librechat/oidc-stub). Management API LibreChat
+ * принимает только OIDC machine-токены, а на стенде провайдера нет — его роль
+ * играет заглушка. Она поднимается дважды с одним ключом подписи: внутри контейнера
+ * LibreChat (тот видит её как http://localhost:9100 — по http LibreChat пускает
+ * только localhost) и обычным сервисом `oidc` в сети compose (у него icarus берёт
+ * токен). В бою здесь настоящий провайдер, а эти константы не используются.
+ */
+export const OIDC_STUB_PORT = 9100;
+export const OIDC_ISSUER = `http://localhost:${OIDC_STUB_PORT}`;
+export const OIDC_AUDIENCE = 'icarus-skills';
+export const OIDC_CLIENT_ID = 'icarus-sync';
+export const OIDC_CLIENT_SECRET = 'icarus-sync-dev-secret';
+
 export type LibrechatOptions = {
   /** Каталог docker/librechat: оттуда берутся .env, librechat.yaml и данные стенда. */
   dir: string;
@@ -128,6 +142,18 @@ function serviceEnvironment(config: IcarusConfig, options: ComposeOptions): Reco
     // Отпечаток кода: меняется код — меняется окружение — compose пересоздаёт сервис.
     ICARUS_REVISION: options.revision,
     ...(options.dockerHost ? { DOCKER_HOST: options.dockerHost } : {}),
+    // Синхронизация скиллов со стендом: адрес LibreChat и доступ к его OIDC-заглушке.
+    // Адреса стенда знает только compose — в config.yaml они приходят переменными.
+    ...(options.librechat
+      ? {
+          ICARUS_LIBRECHAT_URL: `http://${LIBRECHAT_CONTAINER}:${options.librechat.port}`,
+          // Токен берём у обычного сервиса `oidc` в сети compose: ограничение «http
+          // только к localhost» — это правило LibreChat, icarus им не связан.
+          ICARUS_SKILLS_TOKEN_URL: `http://oidc:${OIDC_STUB_PORT}/token`,
+          ICARUS_SKILLS_CLIENT_ID: OIDC_CLIENT_ID,
+          ICARUS_SKILLS_CLIENT_SECRET: OIDC_CLIENT_SECRET,
+        }
+      : {}),
   };
 }
 
@@ -150,9 +176,21 @@ function composeHeader(config: IcarusConfig, options: ComposeOptions): string {
 function librechatServices(
   options: LibrechatOptions,
   network: string | null,
+  runAs: string,
 ): { services: Record<string, ComposeService>; volumes: Record<string, unknown> } {
   const dir = options.dir;
   const attach = network ? { networks: [network] } : {};
+  const stubEnv = {
+    OIDC_ISSUER,
+    OIDC_AUDIENCE,
+    OIDC_CLIENT_ID,
+    OIDC_CLIENT_SECRET,
+    OIDC_PORT: String(OIDC_STUB_PORT),
+  };
+  const stubVolumes = [
+    bind(path.join(dir, 'oidc-stub'), '/opt/oidc-stub', 'ro'),
+    bind(path.join(dir, 'oidc-data'), '/data'),
+  ];
   return {
     services: {
       librechat: {
@@ -162,18 +200,28 @@ function librechatServices(
         depends_on: [LIBRECHAT_MONGO_CONTAINER],
         // icarus живёт в соседнем контейнере, а LibreChat ходит в него по host.docker.internal.
         extra_hosts: ['host.docker.internal:host-gateway'],
+        // Внутри своего же контейнера поднимаем OIDC-заглушку: Management API принимает
+        // только её токены, а по http обращаться разрешено лишь к localhost — значит,
+        // провайдер обязан жить в том же сетевом namespace, что LibreChat. Живёт он
+        // ровно столько же, сколько LibreChat, и не отваливается при его пересоздании.
+        // Штатная команда образа — npm run backend; entrypoint делает exec "$@".
+        command: ['sh', '-c', `node /opt/oidc-stub/server.mjs & exec npm run backend`],
         environment: {
           HOST: '0.0.0.0',
           MONGO_URI: `mongodb://${LIBRECHAT_MONGO_CONTAINER}:27017/LibreChat`,
+          ...stubEnv,
         },
         ports: [`${options.port}:${options.port}`],
         volumes: [
           bind(path.join(dir, '.env'), '/app/.env'),
-          bind(path.join(dir, 'librechat.yaml'), '/app/librechat.yaml'),
+          // Монтируем не шаблон, а рабочую копию: в неё ./script/server подставляет
+          // привязку Management API (ObjectId пользователя стенда), которой в git нет.
+          bind(path.join(dir, 'librechat.local.yaml'), '/app/librechat.yaml'),
           bind(path.join(dir, 'logs'), '/app/logs'),
           bind(path.join(dir, 'uploads'), '/app/uploads'),
           bind(path.join(dir, 'images'), '/app/client/public/images'),
           'librechat-data:/app/data',
+          ...stubVolumes,
         ],
         ...attach,
       },
@@ -183,6 +231,20 @@ function librechatServices(
         restart: 'unless-stopped',
         command: ['mongod', '--noauth'],
         volumes: ['mongo-data:/data/db'],
+        ...attach,
+      },
+      // Та же заглушка обычным сервисом в сети compose: icarus ходит сюда за токеном
+      // (ему адрес localhost не нужен — это ограничение только у LibreChat). Ключ
+      // подписи общий, каталог docker/librechat/oidc-data монтируется в оба места.
+      oidc: {
+        image: 'node:24-bookworm-slim',
+        container_name: 'icarus-oidc',
+        restart: 'unless-stopped',
+        // Ключ подписи пишется на хост: пусть он принадлежит человеку, а не root-у.
+        user: runAs,
+        command: ['node', '/opt/oidc-stub/server.mjs'],
+        environment: stubEnv,
+        volumes: stubVolumes,
         ...attach,
       },
     },
@@ -263,7 +325,9 @@ export function renderCompose(config: IcarusConfig, options: ComposeOptions): st
     ...attach,
   };
 
-  const librechat = options.librechat ? librechatServices(options.librechat, network) : { services: {}, volumes: {} };
+  const librechat = options.librechat
+    ? librechatServices(options.librechat, network, options.runAs)
+    : { services: {}, volumes: {} };
 
   const document = {
     name: COMPOSE_PROJECT,

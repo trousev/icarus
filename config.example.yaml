@@ -123,3 +123,44 @@ mcp:
 users:
   - probe
   - probe2
+
+# Скиллы: то, что человек пишет в UI LibreChat, приезжает в каталог pi
+# (~/.pi/agent/skills) и работает уже по правилам pi — модель видит имена и описания
+# в системном промпте и читает SKILL.md, когда задача совпала с описанием.
+#
+# Забираем скиллы через Management API LibreChat: GET /api/agents/v1/skills. Это
+# единственный машинный способ их прочитать, и он принимает только OIDC-токены,
+# настроенные в самом LibreChat:
+#
+#   endpoints:
+#     agents:
+#       managementApi:
+#         auth:
+#           oidc: { enabled: true, issuer: <ваш провайдер>, audience: icarus-skills }
+#           clients:
+#             - clientId: icarus-sync
+#               subject: icarus-sync
+#               userId: <ObjectId пользователя LibreChat>
+#               tenantId: <его тенант>
+#
+# Токен берётся либо статикой (token), либо по client_credentials. Проход идёт сразу
+# при старте сервиса и дальше раз в intervalSeconds (по умолчанию 300 — раз в пять
+# минут). Чаще незачем: каждый проход тянет список и тела всех скиллов, а новый скилл
+# всё равно подхватывается только на следующем ходу человека. Изменённый набор
+# перезапускает живые сессии pi (история при этом не теряется — она лежит в
+# /workspace/.sessions, и pi открывает её по --session-id).
+#
+# Без accounts набор скиллов у всех людей один и тот же — это удобно для семьи,
+# где скиллы общие. Свой набор на человека (у каждого свой пользователь LibreChat)
+# задаётся списком accounts с личными ключами или токеном.
+# Пустой url (например ${ICARUS_LIBRECHAT_URL} без переменной) — синхронизация
+# выключена, сервис работает как раньше.
+# skills:
+#   sync:
+#     url: https://librechat.example.com
+#     intervalSeconds: 300
+#     audience: icarus-skills
+#     tokenUrl: https://idp.example.com/token
+#     clientId: icarus-sync
+#     clientSecret: ${LIBRECHAT_SKILLS_CLIENT_SECRET}
+#     accounts: []

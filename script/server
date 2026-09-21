@@ -91,7 +91,15 @@ if [ "$WITH_LIBRECHAT" = 1 ]; then
     cp docker/librechat/.env.example docker/librechat/.env
     warn 'создал docker/librechat/.env из примера'
   fi
-  mkdir -p docker/librechat/logs docker/librechat/uploads docker/librechat/images
+  mkdir -p docker/librechat/logs docker/librechat/uploads docker/librechat/images docker/librechat/oidc-data
+  # Стек монтирует не шаблон, а его рабочую копию: в неё после подъёма подставляется
+  # привязка Management API (ObjectId пользователя стенда, в git ему делать нечего).
+  # Копию заводим здесь, до docker: на месте отсутствующего файла compose создал бы
+  # каталог, и LibreChat упал бы на разборе конфига.
+  if [ ! -f docker/librechat/librechat.local.yaml ]; then
+    cp docker/librechat/librechat.yaml docker/librechat/librechat.local.yaml
+    say 'создал docker/librechat/librechat.local.yaml из шаблона'
+  fi
 fi
 
 # --- сборка docker-compose.yml ------------------------------------------------
@@ -206,8 +214,24 @@ if [ -n "$LIBRECHAT_URL" ]; then
   echo "    LibreChat:     $LIBRECHAT_URL"
 fi
 
+if [ "$WITH_LIBRECHAT" = 1 ]; then
+  # Привязка Management API (нужна синхронизации скиллов) — это ObjectId пользователя
+  # стенда, он лежит в Mongo. Если стенд уже работал, Mongo жив и здесь всё решается
+  # до старта: LibreChat поднимется с готовой привязкой. На пустом томе пользователя
+  # ещё нет — тогда привяжем сразу после подъёма, а если и там некому, скажем об этом.
+  ./script/librechat-skills-bind --quiet --no-restart || true
+fi
+
 if [ "$DETACH" = 1 ]; then
   docker compose -f "$COMPOSE_FILE" up -d --remove-orphans
+  if [ "$WITH_LIBRECHAT" = 1 ]; then
+    # Mongo теперь точно поднят: добираем случай «том пустой» и «пользователя завели
+    # позже». Менялось ли что-то, скрипт знает сам и лишний раз никого не дёргает.
+    if [ "$(./script/librechat-skills-bind --quiet || true)" = 'NO_USER' ]; then
+      warn 'в стенде ещё нет пользователя LibreChat: заведи его на :3090 и запусти ./script/server снова —'
+      warn 'привязка Management API (для скиллов) ставится автоматически'
+    fi
+  fi
   echo '    логи:          docker compose -f docker-compose.yml logs -f'
   echo '    остановить:    ./script/server --down'
 else

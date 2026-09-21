@@ -87,6 +87,25 @@ function resolveDocker(config: ReturnType<typeof loadConfig>): {
   return { socketPath: null, dockerHost: socket };
 }
 
+/**
+ * Стек монтирует не шаблон конфига стенда, а его рабочую копию: в неё сервис
+ * подставляет привязку Management API (ObjectId пользователя LibreChat), которой
+ * в git делать нечего. Здесь только заводим копию из шаблона — саму привязку
+ * дописывает ./script/librechat-skills-bind, потому что ObjectId лежит в Mongo.
+ *
+ * Файл нужен до `docker compose up`: на месте отсутствующего маунта docker создал бы
+ * каталог, и LibreChat упал бы на разборе конфига.
+ */
+function ensureLibrechatConfig(dir: string): void {
+  const local = path.join(dir, 'librechat.local.yaml');
+  const template = path.join(dir, 'librechat.yaml');
+  if (fs.existsSync(local) && fs.statSync(local).isFile()) return;
+  if (!fs.existsSync(template)) throw new Error(`нет шаблона конфига стенда: ${template}`);
+  // docker мог уже создать на этом месте каталог — тогда сносим его.
+  fs.rmSync(local, { recursive: true, force: true });
+  fs.copyFileSync(template, local);
+}
+
 /** Порт стенда берём из его .env, чтобы он не разъезжался с librechat.yaml. */
 function librechatPort(dir: string): number {
   try {
@@ -122,6 +141,7 @@ function main(): void {
   }
 
   const librechatDir = path.join(REPO_ROOT, 'docker', 'librechat');
+  if (args.withLibrechat) ensureLibrechatConfig(librechatDir);
   const options: ComposeOptions = {
     repoRoot: REPO_ROOT,
     configPath: path.resolve(args.config),

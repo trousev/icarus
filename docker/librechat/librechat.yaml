@@ -3,6 +3,28 @@
 version: 1.3.13
 cache: true
 endpoints:
+  # Скиллы LibreChat — способность Agents. Стенду он нужен, чтобы скилл можно было
+  # написать в UI, а icarus — забрать его через Management API (см. skills.sync в
+  # config.yaml). Management API принимает только OIDC machine-токены; на стенде
+  # провайдера играет docker/librechat/oidc-stub, который compose поднимает в сети
+  # LibreChat по адресу http://localhost:9100.
+  #
+  # userId/tenantId — это ObjectId пользователя стенда LibreChat, чей набор скиллов
+  # синхронизируется. Их значения для локального стенда печатает
+  # `./script/librechat-skills-bind`; в бою здесь пользователь вашего LibreChat.
+  agents:
+    managementApi:
+      auth:
+        oidc:
+          enabled: true
+          issuer: 'http://localhost:9100'
+          audience: 'icarus-skills'
+        clients:
+          - clientId: 'icarus-sync'
+            subject: 'icarus-sync'
+            userId: '000000000000000000000000'
+            tenantId: 'default'
+
   custom:
     - name: 'Icarus'
       apiKey: 'icarus-local-token'
