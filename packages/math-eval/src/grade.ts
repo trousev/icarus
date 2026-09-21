@@ -196,7 +196,28 @@ function numericMatch(got: number, expected: number): boolean {
 // ---------------------------------------------------------------------------
 // Извлечение ответа
 
-const ANSWER_MARKER = /(?:^|\n)\s*(?:\*\*)?\s*(?:Ответ|Answer|Итог|Итого|Результат|Final answer)\s*(?:\*\*)?\s*[:：]\s*(.+)/gi;
+const ANSWER_MARKER = /(?:^|\n)\s*(?:\*\*)?\s*(?:Ответ|Answer|Итог|Итого|Результат|Final answer)\s*(?:\*\*)?\s*[:：]\s*([\s\S]+)/gi;
+
+/**
+ * Обрезать обёртку математического окружения: `\[ … \]`, `\( … \)`, `$$ … $$`.
+ * Хвост после окружения не трогаем: его отсекает тот, кто умеет разбирать
+ * формулы; здесь важно не потерять саму формулу.
+ */
+function stripMathWrapper(text: string): string {
+  let value = text.trim();
+  const pairs: Array<[string, string]> = [
+    ['\\[', '\\]'],
+    ['\\(', '\\)'],
+    ['$$', '$$'],
+    ['$', '$'],
+  ];
+  for (const [open, close] of pairs) {
+    if (value.startsWith(open) && value.endsWith(close) && value.length > open.length + close.length) {
+      value = value.slice(open.length, value.length - close.length).trim();
+    }
+  }
+  return value.replace(/^\\displaystyle\s*/, '').trim();
+}
 
 /** Финальный ответ из ответа агента: `\boxed{...}`, строка «Ответ: …» или короткий текст. */
 export function extractAnswer(text: string): string | null {
@@ -206,15 +227,17 @@ export function extractAnswer(text: string): string | null {
   let marked: string | null = null;
   for (const match of text.matchAll(ANSWER_MARKER)) marked = match[1];
   if (marked) {
-    const cleaned = marked
-      .replace(/\$([^$]*)\$/g, '$1')
-      .replace(/^\s*[`*_]+|[`*_]+\s*$/g, '')
-      .replace(/[.;,]\s*$/, '')
-      .trim();
-    if (cleaned.length > 0 && cleaned.length <= 200) return cleaned;
+    const cleaned = stripMathWrapper(
+      marked
+        .replace(/\$([^$]*)\$/g, '$1')
+        .replace(/^\s*[`*_]+|[`*_]+\s*$/g, '')
+        .replace(/[.;,]\s*$/, '')
+        .trim(),
+    );
+    if (cleaned.length > 0 && cleaned.length <= 2000) return cleaned;
   }
 
-  const flat = text.trim().replace(/^```[a-z]*\n?|```$/g, '').trim();
+  const flat = stripMathWrapper(text.trim().replace(/^```[a-z]*\n?|```$/g, '').trim());
   if (flat.length > 0 && flat.length <= 80 && !/\n/.test(flat)) {
     if (parseNumeric(flat) !== null) return flat;
   }

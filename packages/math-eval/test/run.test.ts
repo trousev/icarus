@@ -87,6 +87,7 @@ test('прогон против заглушки: свой разговор на
     const { outcomes, meta } = await runSuite({
       suite: suiteFile,
       problems,
+      target: 'icarus',
       baseUrl: `http://127.0.0.1:${port}`,
       apiKey: 'test-key',
       user: 'probe',
@@ -94,6 +95,7 @@ test('прогон против заглушки: свой разговор на
       arm: 'test-arm',
       repeat: 1,
       timeoutMs: 10_000,
+      concurrency: 1,
       outDir,
       mapleDir,
       grader: 'strict',
@@ -105,17 +107,24 @@ test('прогон против заглушки: свой разговор на
       [true, true, true],
       outcomes.map((outcome) => `${outcome.id}: ${outcome.reason}`).join('; '),
     );
-    assert.equal(outcomes[0].extracted, '400');
-    assert.equal(outcomes[0].usage?.total_tokens, 15);
+    // Отчёт сортируется по id, а не по порядку ответов: сверяемся по имени задачи.
+    const byId = new Map(outcomes.map((outcome) => [outcome.id, outcome]));
+    assert.equal(byId.get('num')?.extracted, '400');
+    assert.equal(byId.get('num')?.usage?.total_tokens, 15);
     assert.deepEqual(
-      outcomes.map((outcome) => outcome.mapleSteps),
-      [1, 0, 0],
+      outcomes.map((outcome) => [outcome.id, outcome.mapleSteps]),
+      [
+        ['honest', 0],
+        ['num', 1],
+        ['sym', 0],
+      ],
     );
 
     assert.equal(seen[0].authorization, 'Bearer test-key');
     assert.equal(seen[0].user, 'probe');
     assert.equal(new Set(seen.map((entry) => entry.conversation)).size, 3, 'на каждую задачу свой разговор');
     assert.equal(meta.arm, 'test-arm');
+    assert.equal(meta.target, 'icarus');
     assert.equal(meta.grader, 'strict');
 
     const summary = fs.readFileSync(path.join(outDir, 'summary.md'), 'utf8');

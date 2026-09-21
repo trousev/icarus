@@ -52,4 +52,7 @@ export type RunMeta = {
   grader: 'strict' | 'maple';
   repeat: number;
   problems: number;
+  /** icarus — агент как он есть; model — провайдер напрямую, без тулов. */
+  target: 'icarus' | 'model';
+  concurrency: number;
 };

@@ -96,6 +96,69 @@ Omni-MATH) берите `math-verify` — см. `research/08-ai-math-benchmarks.
 - `--timeout-ms`, `--skip-health`, `--require-all` (код возврата 1, если что-то не сошлось);
 - `--dry-run` — показать задачи, никого не спрашивая.
 
+## Контрольная рука: чистая модель без Икара
+
+Чтобы сверяться с опубликованными числами бенчмарков, нужна рука без агента:
+модель отвечает сама, без инструментов, памяти и персоны. Это `--target model` —
+прямой вызов провайдера.
+
+```bash
+export DEEPSEEK_API_KEY=...   # из .env
+
+node packages/math-eval/src/run.ts --target model \
+  --provider-url https://api.deepseek.com/v1 --provider-model deepseek-flash \
+  --suite runtime/math-eval/suites/asymob-40.jsonl --tier all \
+  --concurrency 6 --arm deepseek-flash --out runtime/math-eval/runs/smoke40
+```
+
+Прогон на 40 задачах ASyMOB и сравнение с публикацией — в
+`research/10-baseline-deepseek-flash.md`.
+
+## Сэмпл ASyMOB
+
+```bash
+curl -sL -o runtime/math-eval/datasets/Full_ASyMOB_Dataset.json \
+  "https://huggingface.co/datasets/Shalyt/ASyMOB-Algebraic_Symbolic_Mathematical_Operations_Benchmark/resolve/main/Full_ASyMOB_Dataset.json"
+
+node packages/math-eval/src/asymob.ts --total 400 --seed asymob-1 \
+  --out runtime/math-eval/suites/asymob-400.jsonl
+```
+
+Сэмплер берёт **только возмущённые семейства**: сид-набор (`Original`) топ-модели
+берут на ~97%, измерять там нечего. Внутри каждой группы доли тем сохраняются
+такими же, как в самой группе; выборка детерминирована зерном, поэтому набор
+воспроизводится, а в репозитории ему лежать не обязательно (данные ASyMOB —
+CC BY-SA 4.0, производная выборка осталась бы под той же лицензией).
+
+Эталоны вариантов лежат только в `Answer in Sympy`, и `e` там — **число
+Эйлера**, а не свободный символ: конвертер в `src/sympy-maple.ts` учитывает это
+(он нужен руке Икара, где сверяет Maple).
+
+## Грейдер ASyMOB (Python, SymPy)
+
+Ответы моделей на ASyMOB проверяются по методологии статьи — SymPy, а не Maple:
+Maple здесь инструмент агента, а не судья бенчмарка. Нужен `math-verify`:
+
+```bash
+python3 -m venv runtime/math-eval/venv
+runtime/math-eval/venv/bin/pip install math-verify
+
+runtime/math-eval/venv/bin/python packages/math-eval/grader/asymob_grade.py --jobs 6 \
+  --results runtime/math-eval/runs/smoke40/results.jsonl \
+  --suite runtime/math-eval/suites/asymob-40.jsonl \
+  --manifest runtime/math-eval/suites/asymob-40.manifest.json \
+  --out runtime/math-eval/runs/smoke40 --label "DeepSeek Flash, 40"
+
+runtime/math-eval/venv/bin/python packages/math-eval/grader/asymob_summary.py \
+  --graded runtime/math-eval/runs/smoke40/graded.jsonl --out runtime/math-eval/runs/smoke40
+```
+
+`asymob_grade.py` печатает две доли: **строгую** (только символьное тождество) и
+**зачтённую** (с документированными послаблениями — снятое `+C`, численная
+сверка, правило ASyMOB «лишние параметры = 1»; отключается `--no-anchor`).
+`asymob_summary.py` пересчитывает точность на доли полного набора ASyMOB — без
+этого сырые проценты сбалансированного сэмпла несравнимы со статьёй.
+
 ## Тесты
 
 ```bash

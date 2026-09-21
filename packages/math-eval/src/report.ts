@@ -45,9 +45,13 @@ export function renderReport(outcomes: Outcome[], meta: RunMeta): string {
   lines.push(`# math-eval: ${meta.arm}`);
   lines.push('');
   lines.push(`- набор: \`${meta.suite}\``);
-  lines.push(`- эндпоинт: ${meta.baseUrl} (модель \`${meta.model}\`, человек \`${meta.user}\`)`);
+  lines.push(
+    meta.target === 'icarus'
+      ? `- эндпоинт: ${meta.baseUrl} (агент Икар, модель \`${meta.model}\`, человек \`${meta.user}\`)`
+      : `- провайдер: ${meta.baseUrl} (модель \`${meta.model}\` напрямую, без агента и инструментов)`,
+  );
   lines.push(`- сверка ответов: ${meta.grader === 'maple' ? 'Maple (simplify(разность) = 0) + числа' : 'строки + числа'}`);
-  lines.push(`- задач: ${meta.problems}, попыток: ${total}, повторов: ${meta.repeat}`);
+  lines.push(`- задач: ${meta.problems}, попыток: ${total}, повторов: ${meta.repeat}, параллельно: ${meta.concurrency}`);
   lines.push(`- старт: ${meta.startedAt}, конец: ${meta.finishedAt}`);
   lines.push('');
   lines.push(`**Точность: ${solved}/${total} (${share(solved, total)})**`);
