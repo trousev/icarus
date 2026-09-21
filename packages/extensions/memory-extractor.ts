@@ -15,6 +15,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { localDate, localParts, resolveZone } from "./lib/time-core.ts";
 
 const MEMORY = process.env.ICARUS_MEMORY_DIR ?? "/workspace/memory";
 const WORKSPACE = process.env.ICARUS_WORKSPACE ?? "/workspace";
@@ -177,8 +178,11 @@ export function buildExtractionPrompt(
   transcript: string | TranscriptEntry[],
   today = new Date(),
   index = '',
+  // Дата — по поясу человека, а не по UTC: иначе вечерний разговор в Дублине
+  // уезжает во вчера, и «недавно» датируется не тем днём.
+  zone: string = resolveZone(),
 ): string {
-  const date = today.toISOString().slice(0, 10);
+  const date = localDate(today, zone);
   const entries: TranscriptEntry[] =
     typeof transcript === 'string' ? [{ role: 'user', text: transcript }] : transcript;
   const lines = formatTranscript(entries);
@@ -232,6 +236,7 @@ export function applyExtraction(
   extraction: Extraction,
   now = new Date(),
   userEntries: TranscriptEntry[] = [],
+  zone: string = resolveZone(),
 ): ApplyResult {
   const changed: string[] = [];
   const skipped: string[] = [];
@@ -276,14 +281,15 @@ export function applyExtraction(
   }
 
   if (extraction.journal) {
-    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    const { year, month: monthNumber, day: dayNumber } = localParts(now, zone);
+    const month = `${year}-${String(monthNumber).padStart(2, "0")}`;
     const dir = path.join(root, "journal");
     fs.mkdirSync(dir, { recursive: true });
     const target = path.join(dir, `${month}.md`);
     const existing = fs.existsSync(target) ? fs.readFileSync(target, "utf8") : `# ${month}\n`;
-    const day = String(now.getDate()).padStart(2, "0");
-    const monthNumber = String(now.getMonth() + 1).padStart(2, "0");
-    const entry = `- ${day}.${monthNumber} — ${extraction.journal.replace(/\s+/g, " ").trim()}`;
+    const day = String(dayNumber).padStart(2, "0");
+    const monthNumberText = String(monthNumber).padStart(2, "0");
+    const entry = `- ${day}.${monthNumberText} — ${extraction.journal.replace(/\s+/g, " ").trim()}`;
     const known = new Set(existing.split("\n").map(normalizeLine));
     if (!known.has(normalizeLine(entry))) {
       const separator = existing.endsWith("\n") ? "" : "\n";

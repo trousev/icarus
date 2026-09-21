@@ -60,6 +60,7 @@ test('люди, порт и ключ приезжают из окружения,
   assert.deepEqual(config.env, {
     ICARUS_EXTRACT_AFTER_MS: '20000',
     ICARUS_EXTRACT_MODEL: 'deepinfra/deepseek-ai/DeepSeek-V4.1-Flash',
+    TZ: 'Europe/Dublin',
   });
   assert.deepEqual(config.mcp.echo?.args, ['/opt/icarus/mcp/echo-server.mjs']);
 });
