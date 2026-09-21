@@ -398,8 +398,31 @@ class MapleSession {
       if (isRestart(code)) journalClear(this.id);
       journalAppend(this.id, code);
     }
-    return { ...res, output: `${prefix}${res.output}`.trim() };
+    return { ...res, output: `${prefix}${res.output}${unevaluatedHint(code, res)}`.trim() };
   }
+}
+
+/**
+ * Maple «отвечает», просто повторив ввод: `int(x^x, x)` возвращается как есть.
+ * Это «не нашёл», а не «доказано, что нет», — и модель любит достраивать второе.
+ * Подсказка приходит в самом результате инструмента, в момент, когда это важно.
+ */
+function unevaluatedHint(code, res) {
+  if (!res.ok) return '';
+  // Только «действующие» команды: Int/Sum/Product/Limit инертны по замыслу,
+  // их возврат как есть — нормальное поведение, а не «не нашёл».
+  const heads = /\b(int|sum|product|limit|dsolve|pdsolve|fsolve|solve)\s*\(/;
+  const norm = (s) => String(s).replace(/\s+/g, '').replace(/[;:]$/, '').replace(/`/g, '');
+  const src = norm(code);
+  if (!heads.test(src)) return '';
+  const lines = res.output.trim().split('\n').filter((l) => l.trim());
+  const last = norm(lines[lines.length - 1] ?? '');
+  if (!last || (last !== src && norm(res.output) !== src)) return '';
+  return (
+    '\n\n[Maple вернул выражение без изменений — это «не нашёл», а не «доказано, что нет». ' +
+    'Так и скажи человеку: «Maple не нашёл». Не добавляй «не существует», ' +
+    '«не выражается в элементарных», «известный факт», «по теореме».]'
+  );
 }
 
 const sessions = new Map();
