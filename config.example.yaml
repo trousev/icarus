@@ -90,6 +90,24 @@ mcp:
     command: node
     args: ['/opt/icarus/mcp/echo-server.mjs']
     lifecycle: eager
+# Maple: считается локально, файлы сервера монтируются из репозитория.
+# MAPLE_DIR задаётся в .env; обе стороны маунта обязаны совпадать — launcher
+# Maple ищет свои библиотеки по тому же пути, что записан внутри него.
+#  maple:
+#    command: node
+#    args: ['/opt/icarus/tools/maple-mcp/server.mjs']
+#    env:
+#      MAPLE_BIN: ${MAPLE_DIR}/bin/maple
+#      MAPLE_TIMEOUT_SECONDS: "25"
+#      MAPLE_PLOT_URL_BASE: http://localhost:8081/maple
+#    lifecycle: eager
+# и в mounts выше:
+#   - host: ${MAPLE_DIR}
+#     container: ${MAPLE_DIR}
+#     mode: ro
+#   - host: <путь к чекауту>/tools
+#     container: /opt/icarus/tools
+#     mode: ro
 
 # Люди: только id. Тот же id должен быть у человека в LibreChat — он приезжает
 # заголовком x-icarus-user-id (в стенде это {{LIBRECHAT_USER_USERNAME}}).

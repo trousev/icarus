@@ -103,8 +103,8 @@ stdio-MCP.
 
 ```yaml
 mounts:
-  - host: /opt/maple18                    # сам Maple
-    container: /opt/maple18
+  - host: ${MAPLE_DIR}                    # сам Maple; обе стороны — из .env
+    container: ${MAPLE_DIR}
     mode: ro
   - host: /home/trousev/src/icarus/tools  # каталог с сервером
     container: /opt/icarus/tools
@@ -116,10 +116,16 @@ mcp:
     args:
       - /opt/icarus/tools/maple-mcp/server.mjs
     env:
-      MAPLE_BIN: /opt/maple18/bin/maple
+      MAPLE_BIN: ${MAPLE_DIR}/bin/maple
       MAPLE_TIMEOUT_SECONDS: "25"
+      MAPLE_PLOT_URL_BASE: http://localhost:8081/maple
     lifecycle: eager
 ```
+
+`MAPLE_DIR=/opt/maple18` живёт в `.env` (см. `.env.example`); на проде то же
+значение приезжает из `vars.MAPLE_DIR` через `script/redeploy`. Обе стороны
+маунта обязаны совпадать: launcher Maple ищет библиотеки по тому пути, который
+записан внутри него самого.
 
 Дальше `./script/server -d`. Проверка в живом контейнере:
 
