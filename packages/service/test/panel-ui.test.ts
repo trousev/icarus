@@ -38,3 +38,13 @@ test('без Maple раздела математики в панели нет', 
   const html = panelHtml({ user: 'probe', scopes: { personal: 'memory', shared: 'memory' } });
   assert.doesNotMatch(html, /<option value="maple">/);
 });
+
+test('удаление файла целиком — только там, где память правится', () => {
+  const html = panelHtml({ user: 'probe', scopes: SCOPES });
+  // Кнопка живёт в шапке открытого файла и рисуется лишь в режиме памяти:
+  // у математики файлы создаёт Maple, и удалять их из панели нельзя.
+  assert.match(html, /mode\(\) === 'memory' \? '<button class="delete-file danger">удалить файл<\/button>'/);
+  assert.match(html, /api\('\/panel\/api\/delete'/, 'удаление уходит своим маршрутом');
+  // Удаление подтверждается и заранее говорит, что файл вернётся откатом.
+  assert.match(html, /askConfirm\('Удалить файл «' \+ path \+ '» целиком\?/);
+});

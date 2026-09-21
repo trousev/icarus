@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { listFiles, mapleExtensions, readImageFile, readMemoryFile, removeLine, resolveInside, searchMemory } from '../src/panel/memory.ts';
+import { listFiles, mapleExtensions, readImageFile, readMemoryFile, removeFile, removeLine, resolveInside, searchMemory } from '../src/panel/memory.ts';
 import { commitAll, ensureRepo, log, revert, show } from '../src/panel/git.ts';
 
 function tempRoot(): string {
@@ -57,6 +57,21 @@ test('забывание убирает ровно одну строку', () =>
 
   assert.equal(removeLine(root, 'preferences.md', '- Такой строки нет').ok, false);
   assert.equal(removeLine(root, '../../etc/passwd.md', 'что-нибудь').ok, false);
+});
+
+test('файл удаляется целиком, но не за пределами памяти и не каталог', () => {
+  const root = tempRoot();
+  // Каталог с «расширением» памяти всё равно не сносим: удаляем файл, а не полку.
+  fs.mkdirSync(path.join(root, 'archive.md'), { recursive: true });
+
+  assert.equal(removeFile(root, '../../etc/passwd.md').ok, false, 'за пределы памяти нельзя');
+  assert.equal(removeFile(root, 'notes.txt').ok, false, 'не markdown не трогаем');
+  assert.equal(removeFile(root, 'archive.md').ok, false, 'каталог целиком не удаляем');
+
+  assert.equal(removeFile(root, 'people/barsik.md').ok, true);
+  assert.equal(fs.existsSync(path.join(root, 'people/barsik.md')), false, 'файла больше нет');
+  assert.equal(removeFile(root, 'people/barsik.md').ok, false, 'дважды один файл не удалить');
+  assert.ok(fs.existsSync(path.join(root, 'preferences.md')), 'соседние файлы целы');
 });
 
 test('git: история, дифф и откат', async () => {

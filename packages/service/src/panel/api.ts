@@ -23,6 +23,7 @@ import {
   memoryExtensions,
   readImageFile,
   readMemoryFile,
+  removeFile,
   removeLine,
   searchMemory,
 } from './memory.ts';
@@ -209,7 +210,20 @@ export async function handlePanel(
     return true;
   }
 
-  if (mode === 'maple' && req.method === 'POST' && (route === 'revert' || route === 'forget')) {
+  // Удаление файла целиком — тоже коммит: пропажу видно в истории, и её можно
+  // вернуть обратным коммитом, как и любую другую правку памяти.
+  if (mode === 'memory' && req.method === 'POST' && route === 'delete') {
+    const relative = String(body.path ?? '');
+    const result = removeFile(root, relative, allowed);
+    if (result.ok) {
+      await commitAll(root, `memory: удалить файл «${relative.slice(0, 80)}»`);
+    }
+    logger.info('панель: удаление файла', { user: userId, scope, ok: result.ok });
+    json(res, result.ok ? 200 : 400, result);
+    return true;
+  }
+
+  if (mode === 'maple' && req.method === 'POST' && (route === 'revert' || route === 'forget' || route === 'delete')) {
     json(res, 400, errorBody('математика только для чтения: журналы и графики создаёт Maple', 'invalid_request_error'));
     return true;
   }

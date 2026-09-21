@@ -57,6 +57,8 @@ export function panelHtml(session: PanelSession): string {
   .ln { color:var(--dim); flex:0 0 auto; white-space:pre; user-select:none; -webkit-user-select:none; }
   .line:hover .forget { opacity:1; }
   .forget { opacity:0; font-size:11px; padding:0 6px; border-color:transparent; color:var(--dim); user-select:none; -webkit-user-select:none; }
+  /* Удаление файла: кнопка всегда на виду, но прижата к правому краю строки. */
+  .delete-file { margin-left:auto; font-size:12px; padding:3px 10px; }
   .hit { padding:6px 8px; border-radius:6px; cursor:pointer; }
   .hit:hover { background:var(--panel); }
   .hit b { color:var(--accent); font-weight:500; }
@@ -190,13 +192,16 @@ async function openFile(path) {
 
   const data = await api(base);
   box.innerHTML =
-    '<div class="row"><b>' + esc(path) + '</b></div><pre>' +
+    '<div class="row"><b>' + esc(path) + '</b>' +
+    (mode() === 'memory' ? '<button class="delete-file danger">удалить файл</button>' : '') +
+    '</div><pre>' +
     data.content.split('\\n').map((line, i) =>
       '<div class="line"><span class="ln">' + String(i + 1).padStart(3) + '</span><span style="flex:1">' + esc(line) +
       (mode() === 'memory' && line.trim().startsWith('-') ? '</span><button class="forget danger" data-line="' + esc(line.trim()) + '">забыть</button>' : '</span>') +
       '</div>').join('') +
     '</pre>';
   if (mode() === 'memory') document.querySelectorAll('.forget').forEach((el) => el.onclick = guard(() => forget(path, el.dataset.line)));
+  if (mode() === 'memory') document.querySelectorAll('.delete-file').forEach((el) => el.onclick = guard(() => deleteFile(path)));
 }
 
 async function forget(path, line) {
@@ -204,6 +209,15 @@ async function forget(path, line) {
   const result = await api('/panel/api/forget', { method: 'POST', body: JSON.stringify({ scope: scope.value, path, line }) });
   status(result.message);
   await openFile(path);
+  await loadFiles();
+}
+
+// Файл удаляем целиком, но коммитом: промах видно в истории и он откатывается.
+async function deleteFile(path) {
+  if (!(await askConfirm('Удалить файл «' + path + '» целиком?\\n\\nВернуть его можно откатом коммита в истории.', 'удалить'))) return;
+  const result = await api('/panel/api/delete', { method: 'POST', body: JSON.stringify({ scope: scope.value, path }) });
+  status(result.message);
+  current = null;
   await loadFiles();
 }
 
