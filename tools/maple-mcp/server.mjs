@@ -100,7 +100,9 @@ function journalRead(name) {
     if (!line.trim()) continue;
     try {
       out.push(JSON.parse(line));
-    } catch {}
+    } catch {
+      // битая строка журнала (обрыв записи) — пропускаем, остальное важнее
+    }
   }
   return out;
 }
@@ -124,7 +126,9 @@ function journalClear(name) {
   try {
     const f = journalPath(name);
     if (existsSync(f)) unlinkSync(f);
-  } catch {}
+  } catch {
+    // журнала нет или он уже удалён — стирать нечего
+  }
 }
 
 function journalInfo(name) {
@@ -258,12 +262,16 @@ class MapleSession {
       this.proc = null;
       try {
         p.stdin.end();
-      } catch {}
+      } catch {
+        // процесс мог умереть раньше нас — закрывать нечего
+      }
       p.kill('SIGTERM');
       setTimeout(() => {
         try {
           p.kill('SIGKILL');
-        } catch {}
+        } catch {
+          // уже мёртв — SIGKILL не нужен
+        }
       }, 1500).unref?.();
     }
     this.dead = true;
