@@ -15,10 +15,11 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { localDate, localParts, resolveZone } from "./lib/time-core.ts";
 
 const MEMORY = process.env.ICARUS_MEMORY_DIR ?? "/workspace/memory";
 const WORKSPACE = process.env.ICARUS_WORKSPACE ?? "/workspace";
-const MODEL = process.env.ICARUS_EXTRACT_MODEL ?? "deepseek/deepseek-v4-flash";
+const MODEL = process.env.ICARUS_EXTRACT_MODEL ?? "deepinfra/deepseek-ai/DeepSeek-V4.1-Flash";
 const QUIET_MS = Number(process.env.ICARUS_EXTRACT_AFTER_MS ?? 90_000);
 const MAX_TRANSCRIPT = 6000;
 
@@ -219,8 +220,11 @@ export function buildExtractionPrompt(
   transcript: string | TranscriptEntry[],
   today = new Date(),
   index = '',
+  // Дата — по поясу человека, а не по UTC: иначе вечерний разговор в Дублине
+  // уезжает во вчера, и «недавно» датируется не тем днём.
+  zone: string = resolveZone(),
 ): string {
-  const date = today.toISOString().slice(0, 10);
+  const date = localDate(today, zone);
   const entries: TranscriptEntry[] =
     typeof transcript === 'string' ? [{ role: 'user', text: transcript }] : transcript;
   const lines = formatTranscript(entries);
@@ -249,20 +253,31 @@ export function buildExtractionPrompt(
 - Не повторяй то, что уже записано, и не заводи второй файл про то же самое.
 - Разовая просьба («найди», «переведи») — это не факт о человеке. Но если он сам назвал
   признак, привычку, вкус или постоянное дело — это факт.
+- Устойчивое и временное — по разным полкам. Устойчивое (кто человек, где живёт, характер,
+  вкусы, привычки, люди вокруг) идёт в identity.md, preferences.md, people/. Временное и
+  длящееся (здоровье и восстановление, бумаги и заявки, поиск работы, переезд, ремонт, сроки)
+  идёт в projects/<тема>.md датированными строками состояния, а не в identity.md: «недавно
+  была операция на глазу» — это не черта характера.
+- Относительное время из слов человека («недавно», «на прошлой неделе», «полгода назад»,
+  «только что») переводи в абсолютную дату от сегодняшнего числа. Снимок состояния начинается
+  со слов «по состоянию на 21.09.2026 — …», начавшееся — с «с 21.09.2026 …». Без даты запись
+  через полгода читается как сегодняшняя.
 - Если помнить нечего — верни пустые notes и journal.
 ${indexBlock}
 Куда писать (поле file):
-- identity.md — кто человек, где живёт, чем занимается
+- identity.md — кто человек, где живёт, чем занимается; только устойчивое
 - preferences.md — вкусы, привычки, как с ним разговаривать
 - people/<имя>.md — конкретный человек
-- projects/<тема>.md — долгая тема или дело
+- projects/<тема>.md — длящееся дело или временное состояние: здоровье, бумаги и заявки,
+  работа, переезд, ремонт, сроки. Строкой с датой: «- По состоянию на 21.09.2026 — подал на
+  гражданство, идёт рассмотрение»
 
 Ответ строго одним JSON без пояснений:
-{"journal": "одна строка о том, что было в разговоре", "notes": [{"file": "preferences.md", "append": "- Кофе пьёт без сахара", "evidence": "я без сахара пью"}]}
+{"journal": "одна строка о том, что было в разговоре", "notes": [{"file": "preferences.md", "append": "- Кофе пьёт без сахара", "evidence": "я без сахара пью"}, {"file": "projects/здоровье.md", "append": "- По состоянию на 21.09.2026 — была операция на глазу", "evidence": "недавно была операция на глазу"}]}
 
 Если человек в этом куске разговора ничего не сказал сам${hasUserWords ? '' : ' (а здесь его слов нет)'} — notes и journal пустые.
 
-Сегодня ${date}.
+Сегодня ${date} — от этого дня и считай относительное время.
 
 Разговор:
 ${lines}`;
@@ -274,6 +289,7 @@ export function applyExtraction(
   extraction: Extraction,
   now = new Date(),
   userEntries: TranscriptEntry[] = [],
+  zone: string = resolveZone(),
 ): ApplyResult {
   const changed: string[] = [];
   const skipped: string[] = [];
@@ -318,14 +334,15 @@ export function applyExtraction(
   }
 
   if (extraction.journal) {
-    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    const { year, month: monthNumber, day: dayNumber } = localParts(now, zone);
+    const month = `${year}-${String(monthNumber).padStart(2, "0")}`;
     const dir = path.join(root, "journal");
     fs.mkdirSync(dir, { recursive: true });
     const target = path.join(dir, `${month}.md`);
     const existing = fs.existsSync(target) ? fs.readFileSync(target, "utf8") : `# ${month}\n`;
-    const day = String(now.getDate()).padStart(2, "0");
-    const monthNumber = String(now.getMonth() + 1).padStart(2, "0");
-    const entry = `- ${day}.${monthNumber} — ${extraction.journal.replace(/\s+/g, " ").trim()}`;
+    const day = String(dayNumber).padStart(2, "0");
+    const monthNumberText = String(monthNumber).padStart(2, "0");
+    const entry = `- ${day}.${monthNumberText} — ${extraction.journal.replace(/\s+/g, " ").trim()}`;
     const known = new Set(existing.split("\n").map(normalizeLine));
     if (!known.has(normalizeLine(entry))) {
       const separator = existing.endsWith("\n") ? "" : "\n";

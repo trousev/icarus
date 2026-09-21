@@ -170,6 +170,10 @@ function stringMap(value: unknown, what: string, env: NodeJS.ProcessEnv): Record
  * в списке нет — ключ задаётся явно через auth. Один ключ на нескольких
  * провайдеров — норма: у moonshotai и moonshotai-cn он общий.
  *
+ * deepinfra в каталоге pi нет — это наш кастомный провайдер, его описание живёт в
+ * providers.ts и уезжает в models.json. В auth.json ключ всё равно попадает: там он
+ * лежит по имени провайдера, и лишним не бывает.
+ *
  * Особые случаи pi сюда не помещаются, для них остаётся auth: — anthropic
  * принимает ещё ANTHROPIC_AUTH_TOKEN и ANTHROPIC_OAUTH_TOKEN, amazon-bedrock
  * обходится AWS-кредами, google-vertex — Application Default Credentials.
@@ -177,7 +181,7 @@ function stringMap(value: unknown, what: string, env: NodeJS.ProcessEnv): Record
 const PROVIDER_ENV: Record<string, string> = {
   anthropic: 'ANTHROPIC_API_KEY',
   openai: 'OPENAI_API_KEY',
-  deepseek: 'DEEPSEEK_API_KEY',
+  deepinfra: 'DEEPINFRA_API_KEY',
   google: 'GEMINI_API_KEY',
   'google-vertex': 'GOOGLE_CLOUD_API_KEY',
   'azure-openai-responses': 'AZURE_OPENAI_API_KEY',

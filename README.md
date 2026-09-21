@@ -81,8 +81,9 @@ apiKey: icarus-local-token      # Bearer, под которым ходит Libre
 dataDir: ~/icarus-data          # память, сессии и каталоги людей
 
 models:                         # общие модели: tier раздаёт эскалация
-  - { provider: deepseek, id: deepseek-v4-flash, thinking: off, tier: fast }
-# auth: { deepseek: env:DEEPSEEK_API_KEY }   # обычно не нужно: ключ подхватится из .env
+  - { provider: deepinfra, id: deepseek-ai/DeepSeek-V4.1-Flash, thinking: off, tier: fast }
+# auth: { deepinfra: env:DEEPINFRA_API_KEY }   # обычно не нужно: ключ подхватится из .env
+env: { TZ: Europe/Dublin }      # часовой пояс человека: по нему Икар считает дату и датирует память
 mounts: []                      # каталоги с хоста — пока общие для всех
 mcp: {}                         # MCP-серверы
 
@@ -91,19 +92,24 @@ users:                          # люди: только id
   - probe2
 ```
 
+Провайдер `deepinfra` — не встроенный в pi, поэтому его описание (базовый адрес, протокол,
+ключ, метаданные моделей) живёт в `packages/service/src/providers.ts` и уезжает в
+`models.json` контейнера. В `config.yaml` остаётся только выбор: провайдер, id модели,
+уровень размышлений и tier.
+
 Ключи живут в `.env` в корне (образец — `.env.example`, рабочий файл в git не попадает и
 создаётся `./script/update`):
 
 ```bash
-DEEPSEEK_API_KEY=sk-...   # ключ провайдера из models: кроме окружения, попадает в auth.json
-                          # и в web_search — тот ходит родным поиском DeepSeek тем же ключом
+DEEPINFRA_API_KEY=...     # ключ провайдера из models: кроме окружения, попадает в auth.json
+TAVILY_API_KEY=...        # ключ веб-поиска: серверного поиска у DeepInfra нет
 BRAVE_API_KEY=...         # необязательная альтернатива: ICARUS_SEARCH_PROVIDER=brave
 ```
 
 Ключ провайдера из `models`, для которого в `.env` нашлось значение, подставляется сам:
 дублировать его в `config.yaml` не нужно. Блоки `auth:` и `env:` остаются для переопределения
 и для провайдеров, которых нет в списке известных (`PROVIDER_ENV` в
-`packages/service/src/config.ts`). Окружение сильнее файла: `export DEEPSEEK_API_KEY=…`
+`packages/service/src/config.ts`). Окружение сильнее файла: `export DEEPINFRA_API_KEY=…`
 перебьёт строку в `.env`. После правки `.env` хватит `./script/server` — compose пересоздаст
 контейнеры; сами значения в `docker-compose.yml` не пишутся, туда едет только путь к файлу.
 
@@ -202,7 +208,8 @@ GitHub по SSH заходит на `trousev.pro` под `trousev`, обновл
 | `ICARUS_DNS` | необязательная переменная environment `production` | DNS-серверы контейнеров (`docker.dns`); не задана — дефолт из `script/redeploy`, `none` — убрать |
 | `ICARUS_URL` | необязательная переменная environment `production` | внешний адрес панели памяти (`url`) для личных ссылок Икара; на проде `https://memory.trousev.pro/`, локально по умолчанию `http://localhost:8081`; пусто — прежнее значение из `config.yaml` |
 | `ICARUS_API_KEY` | секрет environment `production` | Bearer, под которым LibreChat ходит в icarus (`apiKey` в `config.yaml`) |
-| `DEEPSEEK_API_KEY` | секрет environment `production` | ключ провайдера — уезжает в `.env` |
+| `DEEPINFRA_API_KEY` | секрет environment `production` | ключ провайдера — уезжает в `.env` |
+| `TAVILY_API_KEY` | секрет environment `production` | ключ веб-поиска — тоже уезжает в `.env` |
 | `DEPLOY_HOST` | секрет environment `production` | `trousev.pro` |
 | `DEPLOY_SSH_SECRET` | секрет environment `production` | приватный ключ `github-actions-deploy@icarus`; его публичная часть — в `~/.ssh/authorized_keys` на хосте |
 
@@ -227,10 +234,10 @@ GitHub по SSH заходит на `trousev.pro` под `trousev`, обновл
 хозяина, и если локальный резолвер не пускает docker-подсети, каждый внешний запрос
 сначала ждёт таймаут. Так, `unbound` с `access-control` только на `127.0.0.0/8` и
 `10.0.0.0/8` отвечает контейнерам (они в `172.16.0.0/12`) `REFUSED`, Docker ждёт ~4 с и
-только потом уходит на следующий сервер — резолв `api.deepseek.com` из контейнера занимает
+только потом уходит на следующий сервер — резолв `api.deepinfra.com` из контейнера занимает
 **4 секунды вместо 0,02**, и это платит каждый вызов pi к модели (ходы 4,8 и 11,2 с против
 1,2 и 1,5 с локально). Проверка одной командой:
-`docker exec icarus-user-<кто-то> getent ahostsv4 api.deepseek.com` — должно быть ~20 мс.
+`docker exec icarus-user-<кто-то> getent ahostsv4 api.deepinfra.com` — должно быть ~20 мс.
 
 Правильное лечение — на хосте (`access-control` на docker-подсеть в unbound + reload,
 тогда перестают тормозить и остальные контейнеры). Но `./script/redeploy` на всякий случай

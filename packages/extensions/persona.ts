@@ -7,6 +7,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import fs from "node:fs";
 import { buildMemoryCore } from "./lib/memory-core.ts";
+import { TIME_INSTRUCTION } from "./lib/time-core.ts";
 
 const PERSONA = "/workspace/icarus.md";
 const DUMP = "/workspace/.prompt-dump.txt";
@@ -51,7 +52,11 @@ export default function (pi: ExtensionAPI) {
         ].join('\n')
       : '';
 
-    const systemPrompt = [persona, contextFiles, memoryBlock].filter(Boolean).join("\n\n---\n\n");
+    // TIME_INSTRUCTION — текст постоянный: сама дата в промпт не едет, иначе он менялся
+    // бы от смены даты и рвал кэш. Свежее время приезжает меткой к реплике (см. clock.ts).
+    const systemPrompt = [persona, contextFiles, memoryBlock, TIME_INSTRUCTION]
+      .filter(Boolean)
+      .join("\n\n---\n\n");
 
     return { systemPrompt };
   });

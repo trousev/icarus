@@ -21,7 +21,8 @@
 # Переменные окружения приходят из workflow (секреты — из environment production):
 #   ICARUS_USERS      люди через пробел или запятую (variables.ICARUS_USERS)
 #   ICARUS_API_KEY    ключ, под которым LibreChat ходит в icarus
-#   DEEPSEEK_API_KEY  ключ провайдера из models
+#   DEEPINFRA_API_KEY ключ провайдера из models (DeepInfra)
+#   TAVILY_API_KEY    ключ веб-поиска (Tavily): у DeepInfra серверного поиска нет
 #   ICARUS_PORT       порт сервиса (по умолчанию 8081 — как и локально; на прод-хосте
 #                     8080 занят jitsi)
 #   ICARUS_DATA_DIR   каталог памяти (по умолчанию runtime/ внутри чекаута)
@@ -143,8 +144,10 @@ upsert_env() {
   mv "$tmp" "$file"
 }
 
-upsert_env DEEPSEEK_API_KEY "${DEEPSEEK_API_KEY:-}"
-[ -z "${DEEPSEEK_API_KEY:-}" ] || say 'DEEPSEEK_API_KEY обновлён в .env'
+upsert_env DEEPINFRA_API_KEY "${DEEPINFRA_API_KEY:-}"
+[ -z "${DEEPINFRA_API_KEY:-}" ] || say 'DEEPINFRA_API_KEY обновлён в .env'
+upsert_env TAVILY_API_KEY "${TAVILY_API_KEY:-}"
+[ -z "${TAVILY_API_KEY:-}" ] || say 'TAVILY_API_KEY обновлён в .env'
 
 # --- config.yaml ---------------------------------------------------------------
 # Люди — из variables, ключ API — из секрета, DNS — из кода (ICARUS_DNS); остальное
