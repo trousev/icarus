@@ -40,7 +40,7 @@ jobs:
           # Люди — из variables (список меняется без правки кода), ключи — из секретов,
           # DNS и адрес панели — из необязательных variables.ICARUS_DNS / ICARUS_URL
           # (пусто — значение из script/redeploy или из config.yaml на хосте).
-          envs: ICARUS_USERS,ICARUS_API_KEY,DEEPINFRA_API_KEY,TAVILY_API_KEY,ICARUS_DNS,ICARUS_URL
+          envs: ICARUS_USERS,ICARUS_API_KEY,DEEPINFRA_API_KEY,TAVILY_API_KEY,ICARUS_DNS,ICARUS_URL,MAPLE_DIR
           # 30m вместо 10m по умолчанию: убитая на середине сессия оставляет стек
           # недособранным (у youtubarr так и случилось: контейнер в состоянии Created,
           # сервис лежит до ручного запуска).
@@ -69,3 +69,6 @@ jobs:
           # Внешний адрес панели для личных ссылок Икара. Не задана — прежнее значение
           # в config.yaml остаётся, а без него ссылки поведут на localhost.
           ICARUS_URL: ${{ vars.ICARUS_URL }}
+          # Где на хосте стоит Maple. Не задана — script/redeploy подставит /opt/maple18.
+          # Значение уезжает в .env, откуда его читают маунт и MAPLE_BIN в config.yaml.
+          MAPLE_DIR: ${{ vars.MAPLE_DIR }}

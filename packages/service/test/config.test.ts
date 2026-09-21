@@ -136,6 +136,23 @@ users: [probe]
   ]);
 });
 
+test('одна переменная задаёт обе стороны маунта (путь установки вроде MAPLE_DIR)', () => {
+  const file = writeConfig(`apiKey: k
+dataDir: ~/icarus-test
+models: [{ provider: deepinfra, id: flash, tier: fast }]
+mounts:
+  - host: \${MAPLE_DIR}
+    container: \${MAPLE_DIR}
+    mode: ro
+users: [probe]
+`);
+  const config = loadConfig(file, { MAPLE_DIR: '/opt/maple18' } as NodeJS.ProcessEnv);
+
+  assert.deepEqual(config.mounts, [
+    { host: '/opt/maple18', container: '/opt/maple18', mode: 'ro' },
+  ]);
+});
+
 test('пример конфига из репозитория разбирается', () => {
   const config = loadConfig(path.join(REPO_ROOT, 'config.example.yaml'), {
     DEEPINFRA_API_KEY: 'sk-test',

@@ -44,6 +44,18 @@ export function renderAgentsMd(config: IcarusConfig): string {
     ),
   ];
 
+  // Детали про Maple живут в отдельном MAPLE.md и читаются по требованию.
+  // В основную память кладём только указатель: иначе инструкция про символьный
+  // счёт висит в каждом разговоре, включая те, где математики нет вовсе.
+  const maple = config.mcp?.maple
+    ? `
+## Если нужна математика
+
+Математика, аналитика, Maple — читай \`MAPLE.md\`: там что умеет, как вести
+расчёты в сессиях и что говорить человеку.
+`
+    : '';
+
   return `# Где ты находишься
 
 Ты работаешь в контейнере. Всё, что тебе нужно, лежит в \`/workspace\`:
@@ -69,7 +81,7 @@ ${rows.join('\n')}
 
 - \`shared-memory/\` — только по явной просьбе. Сомневаешься — пиши в личное.
 - Не удаляй чужие файлы и не трогай ничего за пределами \`/workspace\`.
-`;
+${maple}`;
 }
 
 /** Ключи провайдеров в формате pi: ~/.pi/agent/auth.json. */
@@ -168,6 +180,19 @@ export function prepareUser(config: IcarusConfig, user: UserConfig) {
     writeFileSafe(paths.icarusMd, fs.readFileSync(personaSource, 'utf8'));
   } else {
     log.warn('icarus.md не найден — агент останется на дефолтном промпте', { source: personaSource });
+  }
+
+  // Инструкция по Maple — отдельным файлом, читается по требованию. Нет сервера —
+  // файла быть не должно: иначе агент обещает то, чего у него нет.
+  if (config.mcp?.maple) {
+    const mapleSource = path.join(REPO_ROOT, 'MAPLE.md');
+    if (fs.existsSync(mapleSource)) {
+      writeFileSafe(paths.mapleMd, fs.readFileSync(mapleSource, 'utf8'));
+    } else {
+      log.warn('MAPLE.md не найден — агент не узнает, как работать с Maple', { source: mapleSource });
+    }
+  } else if (fs.existsSync(paths.mapleMd)) {
+    fs.rmSync(paths.mapleMd, { force: true });
   }
 
   // Каталог расширений — управляемый: чистим его, иначе после переименований там

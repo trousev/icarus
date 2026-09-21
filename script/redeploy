@@ -29,6 +29,9 @@
 #   ICARUS_DNS        DNS-серверы контейнеров (по умолчанию 1.1.1.1 8.8.8.8, см. ниже)
 #   ICARUS_URL        внешний адрес панели для личных ссылок Икара (на проде
 #                     https://memory.trousev.pro/); пусто — прежнее из config.yaml
+#   MAPLE_DIR         каталог установки Maple на хосте (по умолчанию /opt/maple18).
+#                     Оттуда же берётся путь CLI внутри контейнеров людей:
+#                     config.yaml подставляет ${MAPLE_DIR} в маунт и в MAPLE_BIN.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -148,6 +151,12 @@ upsert_env DEEPINFRA_API_KEY "${DEEPINFRA_API_KEY:-}"
 [ -z "${DEEPINFRA_API_KEY:-}" ] || say 'DEEPINFRA_API_KEY обновлён в .env'
 upsert_env TAVILY_API_KEY "${TAVILY_API_KEY:-}"
 [ -z "${TAVILY_API_KEY:-}" ] || say 'TAVILY_API_KEY обновлён в .env'
+
+# Путь к Maple: не секрет, но тоже задаётся снаружи (variables.MAPLE_DIR), чтобы
+# локаль и прод настраивались одинаково. Не задан — берём дефолт: без него
+# ${MAPLE_DIR} в config.yaml раскрылся бы в пустую строку и маунт сломался бы.
+upsert_env MAPLE_DIR "${MAPLE_DIR:-/opt/maple18}"
+say "MAPLE_DIR=${MAPLE_DIR:-/opt/maple18} записан в .env"
 
 # --- config.yaml ---------------------------------------------------------------
 # Люди — из variables, ключ API — из секрета, DNS — из кода (ICARUS_DNS); остальное

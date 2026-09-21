@@ -278,8 +278,10 @@ function parseMounts(value: unknown, env: NodeJS.ProcessEnv): MountConfig[] {
       throw new Error(`${where}.mode: «${mode}» — ожидалось ro или rw`);
     }
     return {
+      // Обе стороны маунта раскрываются одинаково: путь установки (например MAPLE_DIR)
+      // задаётся одной переменной в .env, и хост с контейнером не разъезжаются.
       host: expandValue(requiredString(mount.host, `${where}.host`), env),
-      container: requiredString(mount.container, `${where}.container`),
+      container: expandValue(requiredString(mount.container, `${where}.container`), env),
       mode: (mode ?? 'rw') as MountConfig['mode'],
     };
   });
@@ -436,6 +438,8 @@ export function userPaths(config: IcarusConfig, user: UserConfig) {
     piAgent: path.join(root, 'pi-agent'),
     agentsMd: path.join(root, 'AGENTS.md'),
     icarusMd: path.join(root, 'icarus.md'),
+    /** Инструкция по Maple: читается агентом по требованию, не висит в промпте. */
+    mapleMd: path.join(root, 'MAPLE.md'),
     sharedMemory: path.join(config.dataDir, 'shared'),
   };
 }

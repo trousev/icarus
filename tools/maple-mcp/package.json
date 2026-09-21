@@ -1,0 +1,17 @@
+{
+  "name": "maple-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP-сервер для локально установленного Maple (проверено на Maple 18)",
+  "bin": {
+    "maple-mcp": "./server.mjs"
+  },
+  "scripts": {
+    "test": "node test.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}
