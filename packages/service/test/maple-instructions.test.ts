@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { migrateLegacyMaple, renderAgentsMd } from '../src/workspace.ts';
 import { userVolumes } from '../src/docker/compose.ts';
-import { userPaths } from '../src/config.ts';
+import { REPO_ROOT, userPaths } from '../src/config.ts';
 import { makeConfig, probe } from './fixtures.ts';
 
 test('без настроенного Maple в AGENTS.md нет ни слова про него', () => {
@@ -27,6 +27,20 @@ test('с Maple в AGENTS.md только указатель, а не вся ин
   assert.doesNotMatch(md, /dsolve/);
   assert.doesNotMatch(md, /25 секунд/);
   assert.doesNotMatch(md, /воркшит/i);
+  // Про LaTeX — тоже деталь: человек прочитает её только вместе с MAPLE.md.
+  assert.doesNotMatch(md, /latex/i);
+});
+
+// Формулы человеку — всегда в LaTeX, и в инструкции должно быть видно и само
+// правило, и чем его исполнять: `latex()` в Maple и `maple_to_latex` в MCP.
+test('MAPLE.md требует всегда писать формулы в LaTeX', () => {
+  const md = fs.readFileSync(path.join(REPO_ROOT, 'MAPLE.md'), 'utf8');
+  assert.match(md, /#+\s*⛔?\s*Формулы[^\n]*LaTeX/, 'нужен отдельный раздел про формулы');
+  assert.match(md, /ВСЕГДА/, 'правило должно звучать безоговорочно');
+  assert.match(md, /\$x\^2\$/, 'нужен пример формулы в строке');
+  assert.match(md, /\$\$\.\.\.\$\$/, 'нужен пример выносной формулы');
+  assert.match(md, /latex\(expr, output=string\)/, 'нужна команда Maple latex(...)');
+  assert.match(md, /mcp_maple_to_latex/, 'нужен инструмент для перевода в LaTeX');
 });
 
 test('MAPLE.md монтируется в контейнер только при настроенном сервере', () => {
