@@ -32,8 +32,11 @@ export function panelHtml(session: PanelSession): string {
   .file small { color:var(--dim); }
   pre { margin:0; white-space:pre-wrap; word-break:break-word; font:13px/1.6 ui-monospace, monospace; }
   .line { display:flex; gap:10px; align-items:flex-start; }
+  /* Номер строки — только для глаза: в выделение и буфер обмена он не попадает
+     (user-select:none), иначе скопированный текст приезжает с цифрами и отступом. */
+  .ln { color:var(--dim); flex:0 0 auto; white-space:pre; user-select:none; -webkit-user-select:none; }
   .line:hover .forget { opacity:1; }
-  .forget { opacity:0; font-size:11px; padding:0 6px; border-color:transparent; color:var(--dim); }
+  .forget { opacity:0; font-size:11px; padding:0 6px; border-color:transparent; color:var(--dim); user-select:none; -webkit-user-select:none; }
   .hit { padding:6px 8px; border-radius:6px; cursor:pointer; }
   .hit:hover { background:var(--panel); }
   .hit b { color:var(--accent); font-weight:500; }
@@ -145,7 +148,7 @@ async function openFile(path) {
   document.getElementById('content').innerHTML =
     '<div class="row"><b>' + esc(path) + '</b></div><pre>' +
     data.content.split('\\n').map((line, i) =>
-      '<div class="line"><span class="muted">' + String(i + 1).padStart(3) + '</span><span style="flex:1">' + esc(line) +
+      '<div class="line"><span class="ln">' + String(i + 1).padStart(3) + '</span><span style="flex:1">' + esc(line) +
       (line.trim().startsWith('-') ? '</span><button class="forget danger" data-line="' + esc(line.trim()) + '">забыть</button>' : '</span>') +
       '</div>').join('') +
     '</pre>';
