@@ -742,7 +742,42 @@ community-аналога (`maxima-mcp`) — 133 операции, и там эм
 
 ---
 
-## 10. Источники
+## 10. Что подтвердилось на живой установке (Maple 18.00)
+
+На машине оказался **Maple 18.00** (`X86 64 LINUX, Feb 10 2014, Build ID
+922027`, `/opt/maple18`), а не «Maple 2018». Это важно: часть API, которую мы
+считали доступной «в 2018», в 18.0 отсутствует.
+
+Проверено вживую:
+
+- `Worksheet:-ReadFile/WriteFile/FromString/ToString/Convert` — есть и
+  **работают headless**; `Worksheet:-WorksheetToMapleText` — **нет** (2017+).
+- `DocumentTools:-InsertContent/GetProperty/SetProperty/Do/Retrieve/RunWorksheet/GetDocumentProperty`
+  — есть; **`Tabulate` и `ContentToString` — нет**.
+- `Worksheet:-Display` — только GUI (как и писала справка).
+- `latex(expr, output=string)`, `MathML:-ExportContent` работают; графику
+  отдаёт `plottools:-exportplot` в **gif/jpeg/bmp**, а `png`/`tiff` — **нет**.
+  `Export(..., format="PNG")` в 18.0 просто возвращает невычисленный вызов.
+- **`maple -c` использовать нельзя**: launcher `maple` — shell-скрипт, который
+  делает `eval` аргументов, поэтому код и пути с кавычками и слэшами ломаются.
+  Надёжно — через stdin или файл-скрипт.
+- **Синтаксическая ошибка в живом REPL вешает поток**: следующие операторы не
+  выполняются. Runtime-ошибки безопасны. Спасает предварительная проверка
+  синтаксиса отдельным процессом (`maple -P`) — тогда сессия не портится.
+- `maple -q -s -t` даёт чистый вывод без prompt'а и без «bytes used»; вывод
+  флэшится сразу; старт ~50 мс; RSS ядра ~5 МБ.
+- `.mw` в Maple 18 — тот же plain-text XML; в примерах встречается
+  `<Version major="11" …>` (файл, не пересохранённый ещё с Maple 11), то есть
+  `major` — версия формата, а не год релиза.
+- 2-D ввод удаётся читать по атрибуту `input-equation` (линейная форма Maple),
+  а не только как «непрозрачный base64».
+
+Реализация по итогам: **`tools/maple-mcp/`** — сервер (stdio + Streamable HTTP)
+и самотесты (27 проверок, все зелёные).
+
+---
+
+## 11. Источники
 
 Официальное (Maplesoft):
 
