@@ -72,8 +72,8 @@ node tools/maple-mcp/test-sessions.mjs       # 20 проверок журнал�
 | `MAPLE_TIMEOUT_SECONDS` | `60` | таймаут одного вычисления, сек |
 | `MAPLE_IDLE_SECONDS` | `300` | простой, после которого ядро гасится |
 | `MAPLE_MAX_SESSIONS` | `4` | максимум одновременных ядер |
-| `MAPLE_SESSION_DIR` | `~/.pi/agent/maple-mcp` (в контейнере Икара — персистентный маунт) | журналы сессий |
-| `MAPLE_PLOT_DIR` | `<SESSION_DIR>/plots` | куда складывать графики |
+| `MAPLE_SESSION_DIR` | `~/.pi/agent/maple-mcp`; в Икаре задан явно — `/workspace/maple` | журналы сессий |
+| `MAPLE_PLOT_DIR` | `<SESSION_DIR>/plots`; в Икаре задан явно — `/workspace/maple` | куда складывать графики |
 | `MAPLE_JOURNAL_MAX_BYTES` | `524288` | предел журнала (дальше старые записи отбрасываются) |
 | `MAPLE_WORKSPACE_ROOT` | текущий каталог | база для относительных путей `.mw` |
 | `MAPLE_HTTP_PORT` / `MAPLE_HTTP_HOST` | `8770` / `0.0.0.0` | адрес HTTP-режима |
@@ -118,6 +118,10 @@ mcp:
     env:
       MAPLE_BIN: ${MAPLE_DIR}/bin/maple
       MAPLE_TIMEOUT_SECONDS: "25"
+      # Журналы и графики — в постоянный каталог человека: /workspace/maple
+      # сервис монтирует из dataDir сам, из config.yaml его прописывать не надо.
+      MAPLE_SESSION_DIR: /workspace/maple
+      MAPLE_PLOT_DIR: /workspace/maple
       MAPLE_PLOT_URL_BASE: http://localhost:8081/maple
     lifecycle: eager
 ```
@@ -126,6 +130,11 @@ mcp:
 значение приезжает из `vars.MAPLE_DIR` через `script/redeploy`. Обе стороны
 маунта обязаны совпадать: launcher Maple ищет библиотеки по тому пути, который
 записан внутри него самого.
+
+Без `MAPLE_SESSION_DIR`/`MAPLE_PLOT_DIR` сервер пишет в `~/.pi/agent/maple-mcp`
+(а если такого каталога нет — в `<текущий каталог>/.maple-mcp`). Для Икара так
+делать не стоит: мост pi живёт только на время чата, и расчёт переживёт разговор
+лишь потому, что журнал лежит на хосте.
 
 Дальше `./script/server -d`. Проверка в живом контейнере:
 

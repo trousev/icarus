@@ -24,6 +24,9 @@ export function ensureDirs(config: IcarusConfig, user: UserConfig): void {
   for (const dir of [paths.memory, paths.incoming, paths.sessions, paths.piAgent, paths.sharedMemory]) {
     fs.mkdirSync(dir, { recursive: true });
   }
+  // Каталог математики заводим только при настроенном Maple: пустая папка в
+  // /workspace без сервера только сбивала бы агента с толку.
+  if (config.mcp?.maple) fs.mkdirSync(paths.maple, { recursive: true });
   for (const sub of ['people', 'projects', 'journal']) {
     fs.mkdirSync(path.join(paths.memory, sub), { recursive: true });
   }
@@ -36,6 +39,11 @@ export function renderAgentsMd(config: IcarusConfig): string {
     '| `/workspace/shared-memory/` | **семейная память**, общая для всех | писать **только по явной просьбе** |',
     '| `/workspace/incoming/` | вложения из чата | разбирай сам: прочитай, посмотри, разложи |',
     '| `/workspace/icarus.md` | твой системный промпт | не редактируй |',
+    ...(config.mcp?.maple
+      ? [
+          '| `/workspace/maple/` | **математика**: журналы и файлы расчётов Maple | читай и считай через Maple, руками файлы не правь |',
+        ]
+      : []),
     ...config.mounts.map(
       (mount) =>
         `| \`${mount.container}\` | репозиторий или каталог с кодом | ${
@@ -155,9 +163,54 @@ function copyDirFiles(from: string, to: string, depth = 0): string[] {
   return copied;
 }
 
+/**
+ * Переносит старые расчёты Maple из pi-agent в постоянный каталог математики.
+ *
+ * До появления `/workspace/maple` сервер по умолчанию писал журналы в
+ * `<pi-agent>/maple-mcp`, а каталог pi-agent при пересборке окружения не чистится —
+ * то есть чужого там не бывает, и перенести его безопасно. Копируем, а не
+ * перемещаем: если в постоянном каталоге уже есть свежая версия файла, побеждает
+ * она, а старый остаётся на месте — терять чужие расчёты из-за уборки нельзя.
+ * Функция идемпотентна: после первого переноса копировать уже нечего.
+ */
+export function migrateLegacyMaple(legacy: string, maple: string): number {
+  let entries: fs.Dirent[];
+  try {
+    if (!fs.existsSync(legacy)) return 0;
+    entries = fs.readdirSync(legacy, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+
+  fs.mkdirSync(maple, { recursive: true });
+  let copied = 0;
+  for (const entry of entries) {
+    if (entry.name.startsWith('.')) continue;
+    const source = path.join(legacy, entry.name);
+    const target = path.join(maple, entry.name);
+    if (entry.isDirectory()) {
+      copied += migrateLegacyMaple(source, target);
+      continue;
+    }
+    if (!entry.isFile() || fs.existsSync(target)) continue;
+    try {
+      fs.copyFileSync(source, target);
+      copied += 1;
+    } catch {
+      // отдельный файл не скопировался — переживём, остальные важнее
+    }
+  }
+  return copied;
+}
+
 export function prepareUser(config: IcarusConfig, user: UserConfig) {
   ensureDirs(config, user);
   const paths = userPaths(config, user);
+
+  if (config.mcp?.maple) {
+    const moved = migrateLegacyMaple(path.join(paths.piAgent, 'maple-mcp'), paths.maple);
+    if (moved > 0) log.info('расчёты Maple перенесены в постоянный каталог', { user: user.id, files: moved });
+  }
 
   writeFileSafe(paths.agentsMd, renderAgentsMd(config));
 

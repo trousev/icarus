@@ -433,6 +433,13 @@ export function userPaths(config: IcarusConfig, user: UserConfig) {
   return {
     root,
     memory: path.join(root, 'memory'),
+    /**
+     * Математика: журналы сессий Maple, графики и воркшиты. Лежит рядом с памятью
+     * и переживает и перезапуск сервиса, и пересоздание контейнера: MCP-мост pi
+     * поднимается на время чата, поэтому всё, что должно остаться, обязано лежать
+     * на хосте, а не во временном каталоге внутри контейнера.
+     */
+    maple: path.join(root, 'maple'),
     incoming: path.join(root, 'incoming'),
     sessions: path.join(root, 'sessions'),
     piAgent: path.join(root, 'pi-agent'),

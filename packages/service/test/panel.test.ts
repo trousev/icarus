@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { listFiles, readMemoryFile, removeLine, resolveInside, searchMemory } from '../src/panel/memory.ts';
+import { listFiles, mapleExtensions, readImageFile, readMemoryFile, removeLine, resolveInside, searchMemory } from '../src/panel/memory.ts';
 import { commitAll, ensureRepo, log, revert, show } from '../src/panel/git.ts';
 
 function tempRoot(): string {
@@ -86,4 +86,32 @@ test('откат по мусорному хешу не делается', async 
   const root = tempRoot();
   await ensureRepo(root);
   assert.equal((await revert(root, 'не-хеш')).ok, false);
+});
+
+test('математика: журналы и графики читаются своим набором расширений', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-maple-'));
+  fs.writeFileSync(path.join(root, 'osc.jsonl'), '{"code":"dsolve(...):"}\n');
+  fs.writeFileSync(path.join(root, '0123456789abcdef.gif'), 'GIF89a');
+  fs.writeFileSync(path.join(root, 'worksheet.mw'), '<worksheet/>');
+  // Память в каталог математики не подмешивается: разделы не пересекаются.
+  fs.writeFileSync(path.join(root, 'identity.md'), '- Кто-то\n');
+
+  assert.deepEqual(
+    listFiles(root, '', mapleExtensions).map((file) => file.path).sort(),
+    ['0123456789abcdef.gif', 'osc.jsonl', 'worksheet.mw'],
+  );
+  assert.match(String(readMemoryFile(root, 'osc.jsonl', mapleExtensions)), /dsolve/);
+
+  const image = readImageFile(root, '0123456789abcdef.gif', mapleExtensions);
+  assert.ok(image);
+  assert.equal(image.type, 'image/gif');
+  // Не картинка и не разрешённое расширение — не отдаём.
+  assert.equal(readImageFile(root, 'osc.jsonl', mapleExtensions), null);
+  assert.equal(readImageFile(root, '../../etc/passwd.gif', mapleExtensions), null);
+  assert.equal(readMemoryFile(root, 'identity.md', mapleExtensions), null);
+
+  // «Забыть строку» в журнале Maple — нельзя: файл не проходит по расширениям.
+  assert.equal(removeLine(root, 'osc.jsonl', '- Любая строка').ok, false);
+  // А обычной памяти это по-прежнему можно.
+  assert.equal(removeLine(root, 'identity.md', '- Кто-то').ok, true);
 });

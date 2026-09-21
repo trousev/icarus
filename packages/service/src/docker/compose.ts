@@ -75,6 +75,9 @@ export function userVolumes(config: IcarusConfig, user: UserConfig): string[] {
   const paths = userPaths(config, user);
   return [
     bind(paths.memory, '/workspace/memory'),
+    // Математика — персистентно и рядом с памятью: журналы сессий Maple и графики
+    // не должны умирать вместе с MCP-мостом pi или пересозданием контейнера.
+    ...(config.mcp?.maple ? [bind(paths.maple, '/workspace/maple')] : []),
     bind(paths.incoming, '/workspace/incoming'),
     bind(paths.sessions, '/workspace/.sessions'),
     bind(paths.sharedMemory, '/workspace/shared-memory'),
