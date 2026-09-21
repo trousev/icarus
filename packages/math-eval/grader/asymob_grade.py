@@ -186,6 +186,7 @@ def symbolic_equal(left, right) -> bool:
 
 def fold_case(expr):
     """`A` и `a` после разбора LaTeX расходятся регистром — сравниваем без него."""
+    expr = sympify(expr)  # xreplace умеет вернуть питоновский int — это ломает сравнение
     return expr.xreplace({s: Symbol(str(s).lower()) for s in expr.free_symbols})
 
 
@@ -277,7 +278,7 @@ def grade_within(gold, candidates: list, anchor: bool) -> tuple[bool, bool, str]
         gold_names = {str(s) for s in gold_folded.free_symbols}
         folded = fold_case(item)
         constants = {s for s in folded.free_symbols if str(s) == "c" and "c" not in gold_names}
-        clean = folded.xreplace({s: 0 for s in constants}) if constants else folded
+        clean = sympify(folded.xreplace({s: 0 for s in constants})) if constants else folded
         if constants:
             verdict = symbolic_equal(gold_folded, clean)
             if verdict is True:
