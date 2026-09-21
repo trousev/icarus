@@ -11,18 +11,17 @@ import {
 } from '../../extensions/escalation.ts';
 
 test('спецификация уровня разбирается из строки окружения', () => {
-  assert.deepEqual(parseTierSpec('deepseek/deepseek-v4-pro:medium', { provider: 'x', id: 'y', thinking: 'off' }), {
-    provider: 'deepseek',
-    id: 'deepseek-v4-pro',
-    thinking: 'medium',
-  });
-  assert.deepEqual(parseTierSpec('deepseek/deepseek-v4-flash', { provider: 'x', id: 'y', thinking: 'off' }), {
-    provider: 'deepseek',
-    id: 'deepseek-v4-flash',
-    thinking: 'off',
-  });
-  assert.deepEqual(parseTierSpec('мусор', { provider: 'deepseek', id: 'fallback', thinking: 'off' }), {
-    provider: 'deepseek',
+  // id модели DeepInfra сам содержит «/», поэтому провайдер отделяется только по первому.
+  assert.deepEqual(
+    parseTierSpec('deepinfra/deepseek-ai/DeepSeek-V4.1-Flash:medium', { provider: 'x', id: 'y', thinking: 'off' }),
+    { provider: 'deepinfra', id: 'deepseek-ai/DeepSeek-V4.1-Flash', thinking: 'medium' },
+  );
+  assert.deepEqual(
+    parseTierSpec('deepinfra/deepseek-ai/DeepSeek-V4.1-Flash', { provider: 'x', id: 'y', thinking: 'off' }),
+    { provider: 'deepinfra', id: 'deepseek-ai/DeepSeek-V4.1-Flash', thinking: 'off' },
+  );
+  assert.deepEqual(parseTierSpec('мусор', { provider: 'deepinfra', id: 'fallback', thinking: 'off' }), {
+    provider: 'deepinfra',
     id: 'fallback',
     thinking: 'off',
   });
@@ -83,17 +82,17 @@ test('длинная реплика считается сложной', () => {
 });
 
 test('уровень из конфига не подменяется каталогом pi', () => {
-  const pro = { id: 'deepseek-v4-pro', thinkingLevelMap: { minimal: null, low: null, medium: null, high: 'high' } };
-  const unblocked = unblockThinking(pro, 'medium');
+  const strong = { id: 'сильная', thinkingLevelMap: { minimal: null, low: null, medium: null, high: 'high' } };
+  const unblocked = unblockThinking(strong, 'medium');
   assert.equal(unblocked.thinkingLevelMap?.medium, 'medium', 'medium уезжает провайдеру как есть');
   assert.equal(unblocked.thinkingLevelMap?.high, 'high', 'остальные уровни не трогаем');
-  assert.equal(pro.thinkingLevelMap.medium, null, 'исходная модель не мутирует');
+  assert.equal(strong.thinkingLevelMap.medium, null, 'исходная модель не мутирует');
 });
 
 test('поддерживаемые уровни и выключенные размышления не трогаем', () => {
-  const flash = { id: 'deepseek-v4-flash', thinkingLevelMap: { low: 'low', high: 'high' } };
-  assert.equal(unblockThinking(flash, 'low'), flash, 'уровень и так поддержан');
-  assert.equal(unblockThinking(flash, 'off'), flash, 'off выключается отдельной веткой pi');
+  const fast = { id: 'быстрая', thinkingLevelMap: { low: 'low', high: 'high' } };
+  assert.equal(unblockThinking(fast, 'low'), fast, 'уровень и так поддержан');
+  assert.equal(unblockThinking(fast, 'off'), fast, 'off выключается отдельной веткой pi');
   const noMap = { id: 'custom' };
   assert.equal(unblockThinking(noMap, 'medium'), noMap, 'без каталога не гадаем');
 });

@@ -26,16 +26,18 @@ const QUESTION = `Слушай, иду в консульство голосов�
 показать телефон, пролистать телегу? Как себя вести?`;
 
 const VARIANTS = [
-  // боевой режим: fast-тир Икара — flash с выключенным мышлением
-  { id: "flash-off-base", model: "deepseek-v4-flash", temperature: 1, thinking: "disabled", persona: PERSONA },
-  { id: "flash-off-t13", model: "deepseek-v4-flash", temperature: 1.3, thinking: "disabled", persona: PERSONA },
-  { id: "flash-off-ru", model: "deepseek-v4-flash", temperature: 1, thinking: "disabled", persona: PERSONA + RU_CLAUSE },
-  { id: "pro-off-base", model: "deepseek-v4-pro", temperature: 1, thinking: "disabled", persona: PERSONA },
-  { id: "pro-off-ru", model: "deepseek-v4-pro", temperature: 1, thinking: "disabled", persona: PERSONA + RU_CLAUSE },
+  // боевой режим: fast-тир Икара — V4.1-Flash с выключенным мышлением
+  { id: "flash-off-base", model: "deepseek-ai/DeepSeek-V4.1-Flash", temperature: 1, thinking: "disabled", persona: PERSONA },
+  { id: "flash-off-t13", model: "deepseek-ai/DeepSeek-V4.1-Flash", temperature: 1.3, thinking: "disabled", persona: PERSONA },
+  { id: "flash-off-ru", model: "deepseek-ai/DeepSeek-V4.1-Flash", temperature: 1, thinking: "disabled", persona: PERSONA + RU_CLAUSE },
+  { id: "pro-off-base", model: "deepseek-ai/DeepSeek-V4-Pro-0813", temperature: 1, thinking: "disabled", persona: PERSONA },
+  { id: "pro-off-ru", model: "deepseek-ai/DeepSeek-V4-Pro-0813", temperature: 1, thinking: "disabled", persona: PERSONA + RU_CLAUSE },
 ];
 
 const only = process.argv[2];
-const chosen = only ? VARIANTS.filter((v) => v.model.includes(only) || v.id.includes(only)) : VARIANTS;
+const chosen = only
+  ? VARIANTS.filter((v) => v.model.toLowerCase().includes(only.toLowerCase()) || v.id.includes(only))
+  : VARIANTS;
 
 const label = `ru-probe-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, "")}`;
 const dir = join(ROOT, "logs", label);

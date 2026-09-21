@@ -40,7 +40,7 @@ jobs:
           # Люди — из variables (список меняется без правки кода), ключи — из секретов,
           # DNS и адрес панели — из необязательных variables.ICARUS_DNS / ICARUS_URL
           # (пусто — значение из script/redeploy или из config.yaml на хосте).
-          envs: ICARUS_USERS,ICARUS_API_KEY,DEEPSEEK_API_KEY,ICARUS_DNS,ICARUS_URL
+          envs: ICARUS_USERS,ICARUS_API_KEY,DEEPINFRA_API_KEY,TAVILY_API_KEY,ICARUS_DNS,ICARUS_URL
           # 30m вместо 10m по умолчанию: убитая на середине сессия оставляет стек
           # недособранным (у youtubarr так и случилось: контейнер в состоянии Created,
           # сервис лежит до ручного запуска).
@@ -60,7 +60,9 @@ jobs:
         env:
           ICARUS_USERS: ${{ vars.ICARUS_USERS }}
           ICARUS_API_KEY: ${{ secrets.ICARUS_API_KEY }}
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DEEPINFRA_API_KEY: ${{ secrets.DEEPINFRA_API_KEY }}
+          # Ключ веб-поиска: серверного поиска у DeepInfra нет, ищем через Tavily.
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
           # Не задана — script/redeploy возьмёт свой дефолт (сейчас 1.1.1.1 8.8.8.8).
           # `none` в переменной убирает docker.dns из config.yaml.
           ICARUS_DNS: ${{ vars.ICARUS_DNS }}
