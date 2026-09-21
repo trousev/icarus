@@ -10,6 +10,7 @@ import { compareHistory, normalizeContent, type IncomingMessage as ChatMessage }
 import { phraseForToolEnd, phraseForToolStart } from '../reasoning.ts';
 import type { SessionRegistry } from '../sessions/registry.ts';
 import type { PiSession } from '../sessions/pi-session.ts';
+import { AnswerBuffer } from './answer.ts';
 import { chunk, completion, completionId, DONE, errorBody, usageChunk, type Usage } from './sse.ts';
 import {
   buildTitlePrompt,
@@ -395,6 +396,12 @@ async function runStreaming(
    * `text`, а не повод дописать её в ответ. Обратный ход (после первого текста
    * всё в `content`) — регресс: агент почти всегда говорит первую фразу до тулов,
    * и тогда весь дальнейший монолог модели уезжает в видимый ответ.
+   *
+   * Цена переключения — разрыв ответа в том месте, где модель оборвалась на тул:
+   * LibreChat заводит на каждое переключение новую часть и рисует её отдельным
+   * блоком. Поэтому видимый текст едет через `AnswerBuffer`: незаконченный хвост
+   * придерживается и склеивается с продолжением, а переключение попадает на
+   * границу строки или предложения.
    */
   type ReplyDelta = { content?: string; reasoning_content?: string };
 
@@ -414,11 +421,12 @@ async function runStreaming(
     emit({ reasoning_content: text });
   };
 
-  /** Видимый текст ответа. */
-  const publishText = (text: string) => {
-    if (!text) return;
-    emit({ content: text });
-  };
+  /**
+   * Видимый текст ответа. Уходит не сразу, а законченными кусками: см.
+   * `AnswerBuffer` — иначе переключение на мысль или фразу тула разрежет ответ
+   * там, где модель оборвала его на тул.
+   */
+  const answer = new AnswerBuffer((text) => emit({ content: text }));
 
   // Первый чанк с ролью: некоторые клиенты (и парсеры вроде LangChain) без него
   // не собирают сообщение.
@@ -428,21 +436,42 @@ async function runStreaming(
     switch (event.type) {
       case 'message_update': {
         const delta = event.assistantMessageEvent as { type?: string; delta?: string } | undefined;
-        if (delta?.type === 'text_delta' && delta.delta) {
-          publishText(delta.delta);
+        if (!delta?.type) break;
+        if (delta.type === 'text_start') {
+          answer.startBlock();
+          break;
         }
-        if (delta?.type === 'thinking_delta' && delta.delta) {
+        if (delta.type === 'text_delta' && delta.delta) {
+          answer.push(delta.delta);
+          break;
+        }
+        // `thinking_end` намеренно не считаем разрывом: pi шлёт его уже после
+        // первого текста того же блока (проверено на живом потоке), и разрыв
+        // по нему вставил бы разделитель посреди фразы.
+        if (delta.type === 'thinking_start') {
+          answer.breakText();
+          break;
+        }
+        if (delta.type === 'thinking_delta' && delta.delta) {
+          answer.breakText();
           publishReasoning(delta.delta);
+          break;
         }
         break;
       }
       case 'tool_execution_start': {
+        answer.breakText();
         const phrase = phraseForToolStart(String(event.toolName), (event.args ?? {}) as Record<string, unknown>);
         if (phrase) publishReasoning(`${phrase}\n`);
         break;
       }
       case 'tool_execution_end': {
+        answer.breakText();
         publishReasoning(`${phraseForToolEnd(String(event.toolName), Boolean(event.isError))}\n`);
+        break;
+      }
+      case 'message_start': {
+        answer.breakText();
         break;
       }
       case 'agent_settled': {
@@ -482,6 +511,7 @@ async function runStreaming(
     await settle;
     if (closed) return;
 
+    answer.flush();
     const usage = usageFromStats(await session.getStats());
     write(chunk(id, model, {}, 'stop'));
     if (includeUsage) write(usageChunk(id, model, usage));
@@ -491,6 +521,7 @@ async function runStreaming(
   } catch (error) {
     log.error('стрим сорвался', { error: String(error) });
     if (!closed && !res.writableEnded) {
+      answer.flush();
       write(chunk(id, model, { content: `\n[ошибка: ${String(error)}]` }, 'stop'));
       write(DONE);
       res.end();
