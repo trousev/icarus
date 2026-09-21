@@ -93,12 +93,12 @@ test('ответ модели чистится до заголовка', () => {
 
 test('разовый вопрос к модели идёт без тулов, сессии и контекста', () => {
   const args = oneShotArgs(
-    { provider: 'deepseek', id: 'deepseek-v4-flash', thinking: 'off' },
+    { provider: 'deepinfra', id: 'deepseek-ai/DeepSeek-V4.1-Flash', thinking: 'off' },
     'вопрос',
     'системная подсказка',
   );
   assert.deepEqual(args.slice(0, 2), ['-p', 'вопрос']);
-  assert.ok(args.includes('deepseek/deepseek-v4-flash'));
+  assert.ok(args.includes('deepinfra/deepseek-ai/DeepSeek-V4.1-Flash'));
   for (const flag of ['--no-tools', '--no-session', '--no-context-files', '--no-extensions', '--no-skills', '--no-prompt-templates']) {
     assert.ok(args.includes(flag), `нет флага ${flag}`);
   }

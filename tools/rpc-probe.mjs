@@ -4,11 +4,11 @@
 //
 //   node tools/rpc-probe.mjs "Привет! Ты помнишь, кто я?" "Запомни: люблю кофе без сахара"
 //
-// Переменные: CONTAINER (по умолчанию icarus-test), MODEL (по умолчанию deepseek/deepseek-v4-flash:off)
+// Переменные: CONTAINER (по умолчанию icarus-test), MODEL (по умолчанию deepinfra/deepseek-ai/DeepSeek-V4.1-Flash:off)
 import { spawn } from 'node:child_process';
 
 const container = process.env.CONTAINER || 'icarus-test';
-const model = process.env.MODEL || 'deepseek/deepseek-v4-flash:off';
+const model = process.env.MODEL || 'deepinfra/deepseek-ai/DeepSeek-V4.1-Flash:off';
 const prompts = process.argv.slice(2);
 
 if (prompts.length === 0) {

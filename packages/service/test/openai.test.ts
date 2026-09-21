@@ -65,7 +65,7 @@ test('контейнер монтирует память, сессии и реп
   const config = {
     dataDir: '/data',
     docker: { image: 'icarus-user:dev', prefix: 'icarus-user', socket: null },
-    models: [{ provider: 'deepseek', id: 'deepseek-v4-flash', tier: 'fast' as const }],
+    models: [{ provider: 'deepinfra', id: 'deepseek-ai/DeepSeek-V4.1-Flash', tier: 'fast' as const }],
     mounts: [{ host: '/host/scratchpad', container: '/workspace/scratchpad', mode: 'ro' as const }],
   } as unknown as IcarusConfig;
   const joined = userVolumes(config, { id: 'probe' }).join(' ');
@@ -84,6 +84,6 @@ test('пути пользователя выводятся из dataDir', () => 
 test('конфиг без apiKey не принимается', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-cfg-'));
   const file = path.join(dir, 'config.yaml');
-  fs.writeFileSync(file, 'dataDir: /tmp\nmodels:\n  - provider: deepseek\n    id: flash\nusers:\n  - a\n');
+  fs.writeFileSync(file, 'dataDir: /tmp\nmodels:\n  - provider: deepinfra\n    id: deepseek-ai/DeepSeek-V4.1-Flash\nusers:\n  - a\n');
   assert.throws(() => loadConfig(file, {} as any), /apiKey/);
 });

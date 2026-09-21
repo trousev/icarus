@@ -1,11 +1,12 @@
 // Подготовка рабочего окружения пользователя на хосте: каталоги, AGENTS.md,
-// auth.json для pi и наши расширения.
+// конфиги pi (auth.json, models.json, settings.json, mcp.json) и наши расширения.
 //
 // Всё содержимое — общее (модели, ключи, MCP, маунты из config.yaml); от человека
 // зависит только то, куда это кладётся: каталог в dataDir и имя контейнера.
 import fs from 'node:fs';
 import path from 'node:path';
 import { log } from './log.ts';
+import { renderModelsJson } from './providers.ts';
 import {
   REPO_ROOT,
   userPaths,
@@ -154,6 +155,11 @@ export function prepareUser(config: IcarusConfig, user: UserConfig) {
 
   writeFileSafe(path.join(paths.piAgent, 'settings.json'), renderSettingsJson(config));
   writeFileSafe(path.join(paths.piAgent, 'mcp.json'), renderMcpJson(config));
+
+  // models.json — описание кастомных провайдеров (DeepInfra): без него pi не найдёт
+  // ни самой модели, ни её адреса. Пишем всегда, даже пустым: файл управляемый, и
+  // оставшийся от прежней конфигурации провайдер не должен пережить свой config.yaml.
+  writeFileSafe(path.join(paths.piAgent, 'models.json'), renderModelsJson(config.models));
 
   // Персона одна на всех, источник истины — репозиторий: при старте перезаписываем копию
   // в каталоге пользователя, иначе правки в icarus.md не доедут до существующих людей.
