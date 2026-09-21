@@ -1,4 +1,4 @@
-// Панель памяти: чтение файлов, поиск, точечное забывание.
+// Панель памяти: чтение файлов, поиск, точечное забывание и удаление файла целиком.
 // Всё, что приходит из браузера, проверяется на выход за пределы каталога памяти.
 //
 // Каталогов два, и они разной природы. Память — markdown, который агент правит
@@ -133,6 +133,31 @@ export function searchMemory(
 
 function normalize(text: string): string {
   return text.replace(/^\s*[-*]\s*/, '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+/**
+ * Удаляет файл целиком — когда чистить построчно нечего или файл больше не нужен.
+ * Каталог не сносим: панель удаляет файл, а не полку памяти, иначе одним промахом
+ * уехали бы все записи разом.
+ */
+export function removeFile(
+  root: string,
+  relative: string,
+  allowed: ReadonlySet<string> = MEMORY_EXTENSIONS,
+): { ok: boolean; message: string } {
+  const full = resolveInside(root, relative, allowed);
+  if (!full) return { ok: false, message: 'такой файл трогать нельзя' };
+
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(full);
+  } catch {
+    return { ok: false, message: 'файла нет' };
+  }
+  if (!stat.isFile()) return { ok: false, message: 'это не файл, а каталог' };
+
+  fs.rmSync(full);
+  return { ok: true, message: `удалил файл ${relative}` };
 }
 
 /** Убирает строку из файла — то самое «забудь это». */

@@ -7,6 +7,7 @@ import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { createServer } from '../src/http/server.ts';
 import { userPaths, type IcarusConfig } from '../src/config.ts';
+import { commitAll } from '../src/panel/git.ts';
 import { containerEnv } from '../src/docker/spec.ts';
 import { derivePanelKey, signPanelCredential } from '../../extensions/lib/panel-link.ts';
 import { makeConfig, PANEL_SECRET, probe } from './fixtures.ts';
@@ -152,6 +153,51 @@ test('семейная память доступна по личной ссыл�
   });
 });
 
+test('файл памяти удаляется целиком коммитом и возвращается откатом', async () => {
+  await withServer(async (base, config) => {
+    const token = tokenFor('probe');
+    const memory = userPaths(config, probe('probe')).memory;
+    const barsik = path.join(memory, 'people/barsik.md');
+    // Память живёт в git: к моменту удаления файл уже в истории разбора — иначе
+    // возвращать откатом было бы нечего, и удаление оказалось бы необратимым.
+    assert.equal(await commitAll(memory, 'memory: разбор разговора'), true);
+
+    const deletion = await api(base, token, 'delete', {
+      method: 'POST',
+      body: JSON.stringify({ scope: 'personal', path: 'people/barsik.md' }),
+    });
+    assert.equal(deletion.status, 200);
+    const body = (await deletion.json()) as { ok: boolean; message: string };
+    assert.equal(body.ok, true);
+    assert.equal(fs.existsSync(barsik), false, 'файл удалён с диска');
+
+    // Удаление — обычная правка памяти: коммит видно в истории, и он откатывается.
+    const commits = (await (await api(base, token, 'history?scope=personal')).json()) as {
+      commits: Array<{ hash: string; subject: string }>;
+    };
+    assert.match(commits.commits[0].subject, /удалить файл/);
+    const revert = await api(base, token, 'revert', {
+      method: 'POST',
+      body: JSON.stringify({ scope: 'personal', commit: commits.commits[0].hash }),
+    });
+    assert.equal(revert.status, 200);
+    assert.equal(fs.existsSync(barsik), true, 'откат вернул файл');
+  });
+});
+
+test('удаление файла: чужое, не-markdown и выход из каталога не проходят', async () => {
+  await withServer(async (base) => {
+    const token = tokenFor('probe');
+    const attempt = (body: Record<string, unknown>) =>
+      api(base, token, 'delete', { method: 'POST', body: JSON.stringify(body) });
+
+    assert.equal((await attempt({ scope: 'personal', path: '../../etc/passwd.md' })).status, 400);
+    assert.equal((await attempt({ scope: 'personal', path: 'osc.jsonl' })).status, 400, 'чужой формат не трогаем');
+    assert.equal((await attempt({ scope: 'personal', path: 'secret.md' })).status, 400, 'чужого файла не видно');
+    assert.equal((await attempt({ scope: 'personal', path: '' })).status, 400);
+  });
+});
+
 test('раздел математики показывает расчёты Maple, но не даёт их править', async () => {
   await withServer(async (base) => {
     const token = tokenFor('probe');
@@ -185,6 +231,12 @@ test('раздел математики показывает расчёты Mapl
       body: JSON.stringify({ scope: 'maple', commit: 'deadbee' }),
     });
     assert.equal(revert.status, 400);
+    // Удалить журнал целиком — тоже правка, и в математике её быть не должно.
+    const remove = await api(base, token, 'delete', {
+      method: 'POST',
+      body: JSON.stringify({ scope: 'maple', path: 'osc.jsonl' }),
+    });
+    assert.equal(remove.status, 400);
 
     // И чужого человека в математике тоже не видно.
     assert.equal((await api(base, token, 'file?scope=maple&path=чужой.jsonl')).status, 404);
