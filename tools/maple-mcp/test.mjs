@@ -10,9 +10,16 @@ import { tmpdir } from 'node:os';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const server = path.join(here, 'server.mjs');
 
+// Свои каталоги, чтобы не мусорить в боевых журналах и не зависеть от них.
+const scratch = await mkdtemp(path.join(tmpdir(), 'maple-mcp-test-'));
 const child = spawn(process.execPath, [server], {
   stdio: ['pipe', 'pipe', 'pipe'],
-  env: { ...process.env, MAPLE_MCP_DEBUG: process.env.MAPLE_MCP_DEBUG ?? '0' },
+  env: {
+    ...process.env,
+    MAPLE_MCP_DEBUG: process.env.MAPLE_MCP_DEBUG ?? '0',
+    MAPLE_SESSION_DIR: path.join(scratch, 'sessions'),
+    MAPLE_PLOT_DIR: path.join(scratch, 'plots'),
+  },
 });
 child.stderr.on('data', (d) => process.stderr.write(`[server] ${d}`));
 
@@ -184,5 +191,6 @@ console.log('\n7) сессии');
 
 console.log(`\nи т о г о: ${pass} ok, ${failCount} fail`);
 await rm(work, { recursive: true, force: true }).catch(() => {});
+await rm(scratch, { recursive: true, force: true }).catch(() => {});
 child.kill('SIGTERM');
 setTimeout(() => process.exit(failCount ? 1 : 0), 500);

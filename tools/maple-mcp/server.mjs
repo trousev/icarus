@@ -16,9 +16,9 @@ import { spawn } from 'node:child_process';
 import http from 'node:http';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { StringDecoder } from 'node:string_decoder';
-import { mkdtemp, writeFile, readFile, rm, stat } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 
 // ─────────────────────────── конфигурация ───────────────────────────
@@ -28,10 +28,12 @@ const MAPLE_EXTRA_ARGS = (process.env.MAPLE_ARGS ?? '').split(/\s+/).filter(Bool
 /** -q тихо, -s без init-файлов, -t тестовый режим (без prompt и «bytes used»). */
 const MAPLE_ARGS = ['-q', '-s', '-t', ...MAPLE_EXTRA_ARGS];
 const MAPLE_TIMEOUT_SECONDS = Number(process.env.MAPLE_TIMEOUT_SECONDS ?? 60);
-const MAPLE_IDLE_SECONDS = Number(process.env.MAPLE_IDLE_SECONDS ?? 900);
+/** Простой сессии (сек), после которого ядро прибивается. Состояние — в журнале. */
+const MAPLE_IDLE_SECONDS = Number(process.env.MAPLE_IDLE_SECONDS ?? 300);
 const MAPLE_MAX_SESSIONS = Number(process.env.MAPLE_MAX_SESSIONS ?? 4);
 const MAPLE_ROOT = process.env.MAPLE_WORKSPACE_ROOT ?? process.cwd();
-const MAPLE_MEMORY_KB = process.env.MAPLE_MEMORY_KB ?? '';
+const JOURNAL_MAX_BYTES = Number(process.env.MAPLE_JOURNAL_MAX_BYTES ?? 512 * 1024);
+const JOURNAL_KEEP_ENTRIES = Number(process.env.MAPLE_JOURNAL_KEEP ?? 400);
 const DEBUG = process.env.MAPLE_MCP_DEBUG === '1';
 
 const PROTOCOL_VERSION = '2024-11-05';
@@ -62,6 +64,76 @@ function resolveUserPath(p) {
   if (path.isAbsolute(p)) return p;
   return path.resolve(MAPLE_ROOT, p);
 }
+
+// ─────────────────────────── журнал сессий ───────────────────────────
+//
+// Мост pi → MCP поднимает наш процесс на время чата и убивает в конце
+// (`session_shutdown` → `shutdownAll`). Плюс мы сами гасим ядро после
+// MAPLE_IDLE_SECONDS простоя. Чтобы «продолжить в другом чате», мы пишем
+// журнал выполненного кода и при первом обращении к сессии проигрываем его
+// в свежее ядро — состояние (переменные, функции, assume) возвращается.
+
+const SESSION_DIR = (() => {
+  if (process.env.MAPLE_SESSION_DIR) return process.env.MAPLE_SESSION_DIR;
+  const home = process.env.HOME || homedir();
+  const piAgent = path.join(home, '.pi', 'agent'); // в контейнере Икара это персистентный маунт
+  if (existsSync(piAgent)) return path.join(piAgent, 'maple-mcp');
+  return path.join(MAPLE_ROOT, '.maple-mcp');
+})();
+
+const PLOT_DIR = process.env.MAPLE_PLOT_DIR ?? path.join(SESSION_DIR, 'plots');
+
+const safeName = (name) => String(name).replace(/[^\w.-]+/g, '_').slice(0, 64) || 'default';
+const journalPath = (name) => path.join(SESSION_DIR, `${safeName(name)}.jsonl`);
+
+function journalRead(name) {
+  const file = journalPath(name);
+  if (!existsSync(file)) return [];
+  const out = [];
+  for (const line of readFileSync(file, 'utf8').split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      out.push(JSON.parse(line));
+    } catch {}
+  }
+  return out;
+}
+
+function journalAppend(name, code, extra = {}) {
+  const file = journalPath(name);
+  try {
+    mkdirSync(SESSION_DIR, { recursive: true });
+    appendFileSync(file, JSON.stringify({ t: new Date().toISOString(), code, ...extra }) + '\n');
+    if (statSync(file).size > JOURNAL_MAX_BYTES) {
+      const kept = journalRead(name).slice(-JOURNAL_KEEP_ENTRIES);
+      writeFileSync(file, kept.map((e) => JSON.stringify(e)).join('\n') + '\n');
+      log('журнал обрезан', name, kept.length);
+    }
+  } catch (e) {
+    log('не удалось записать журнал', e?.message ?? e);
+  }
+}
+
+function journalClear(name) {
+  try {
+    const f = journalPath(name);
+    if (existsSync(f)) unlinkSync(f);
+  } catch {}
+}
+
+function journalInfo(name) {
+  const file = journalPath(name);
+  if (!existsSync(file)) return null;
+  const entries = journalRead(name);
+  return {
+    file,
+    entries: entries.length,
+    lastUsed: entries.length ? entries[entries.length - 1].t : null,
+    bytes: statSync(file).size,
+  };
+}
+
+const isRestart = (code) => /(^|\n)[ \t]*restart[ \t]*[:;]?[ \t]*(\n|$)/.test(code);
 
 // ─────────────────────────── запуск Maple ───────────────────────────
 
@@ -139,6 +211,8 @@ class MapleSession {
     this.lastUsed = Date.now();
     this.everStarted = false;
     this.dead = true;
+    /** false → при следующем вызове состояние надо проиграть из журнала. */
+    this.restored = false;
   }
 
   async start() {
@@ -168,6 +242,7 @@ class MapleSession {
     });
     this.dead = false;
     this.everStarted = true;
+    this.restored = false; // новое ядро — состояние пустое, журнал проиграем при вызове
     this.lastUsed = Date.now();
   }
 
@@ -186,6 +261,7 @@ class MapleSession {
       }, 1500).unref?.();
     }
     this.dead = true;
+    this.restored = false;
   }
 
   /** Ждём появления маркера в буфере либо таймаута. */
@@ -211,16 +287,75 @@ class MapleSession {
     });
   }
 
-  /** Выполнить код в живой сессии. */
-  async evaluate(code, { timeoutMs } = {}) {
+  /** Выполнить код в живой сессии (с авто-восстановлением состояния из журнала). */
+  async evaluate(code, opts = {}) {
     this.queue = this.queue.then(
-      () => this.#evaluate(code, timeoutMs),
-      () => this.#evaluate(code, timeoutMs),
+      () => this.#evaluate(code, opts),
+      () => this.#evaluate(code, opts),
     );
     return this.queue;
   }
 
-  async #evaluate(code, timeoutMs = MAPLE_TIMEOUT_SECONDS * 1000) {
+  /** Явно поднять ядро и проиграть журнал (инструмент maple_session_resume). */
+  async restore(timeoutMs = MAPLE_TIMEOUT_SECONDS * 1000) {
+    await this.start();
+    if (this.dead || !this.proc) return { ok: false, output: 'не удалось запустить процесс Maple' };
+    const entries = journalRead(this.id).length;
+    if (this.restored) return { ok: true, output: `сессия «${this.id}» уже содержит состояние`, entries };
+    const note = await this.#restoreState(timeoutMs);
+    return { ok: this.restored, output: note ?? `у сессии «${this.id}» пустой журнал`, entries };
+  }
+
+  /** Проиграть журнал в свежее ядро. Возвращает заметку или null. */
+  async #restoreState(timeoutMs) {
+    const entries = journalRead(this.id);
+    this.restored = true;
+    if (entries.length === 0) return null;
+    const res = await this.#run(entries.map((e) => e.code).join('\n'), timeoutMs);
+    this.restored = res.ok;
+    return res.ok
+      ? `[сессия «${this.id}» восстановлена из журнала: ${entries.length} шагов]`
+      : `[не удалось восстановить сессию «${this.id}»: ${res.output.slice(0, 300)}]`;
+  }
+
+  /** Отправить код в ядро и дождаться маркера. */
+  async #run(code, timeoutMs) {
+    const token = `__MAPLE_MCP_${randomBytes(8).toString('hex')}__`;
+    this.buf = '';
+    const payload = `${code.endsWith('\n') ? code : code + '\n'}printf("${token}\\n"):\n`;
+    try {
+      this.proc.stdin.write(payload);
+    } catch (e) {
+      return { ok: false, phase: 'write', output: `не удалось записать в Maple: ${e?.message ?? e}`, session: this.id };
+    }
+
+    const res = await this.waitFor(token, timeoutMs);
+    this.lastUsed = Date.now();
+
+    if (res.timeout) {
+      await this.stop();
+      return {
+        ok: false,
+        phase: 'timeout',
+        output: `превышен таймаут ${Math.round(timeoutMs / 1000)} с; сессия «${this.id}» перезапущена (журнал сохранён)`,
+        session: this.id,
+      };
+    }
+    if (res.dead) {
+      return {
+        ok: false,
+        phase: 'exit',
+        output: `процесс Maple завершился (код ${this.exit?.code ?? '?'}). Возможно, код содержал quit/stop/done или упал.\n${res.text}`.trim(),
+        session: this.id,
+      };
+    }
+
+    const output = res.text;
+    const failed = /(^|\n)\s*(Error,|.*\bsyntax error\b)/i.test(output);
+    return { ok: !failed, phase: failed ? 'maple' : 'done', output: output.trim(), session: this.id };
+  }
+
+  async #evaluate(code, { timeoutMs = MAPLE_TIMEOUT_SECONDS * 1000, resume = true } = {}) {
     if (killsSession(code)) {
       return {
         ok: false,
@@ -245,39 +380,19 @@ class MapleSession {
       }
     }
 
-    const token = `__MAPLE_MCP_${randomBytes(8).toString('hex')}__`;
-    this.buf = '';
-    const payload = `${code.endsWith('\n') ? code : code + '\n'}printf("${token}\\n"):\n`;
-    try {
-      this.proc.stdin.write(payload);
-    } catch (e) {
-      return { ok: false, phase: 'write', output: `не удалось записать в Maple: ${e?.message ?? e}`, session: this.id };
+    let prefix = '';
+    if (!this.restored && resume) {
+      const note = await this.#restoreState(timeoutMs);
+      if (note) prefix = note + '\n';
     }
 
-    const res = await this.waitFor(token, timeoutMs);
-    this.lastUsed = Date.now();
+    const res = await this.#run(code, timeoutMs);
 
-    if (res.timeout) {
-      await this.stop();
-      return {
-        ok: false,
-        phase: 'timeout',
-        output: `превышен таймаут ${Math.round(timeoutMs / 1000)} с; сессия «${this.id}» перезапущена`,
-        session: this.id,
-      };
+    if (res.ok) {
+      if (isRestart(code)) journalClear(this.id);
+      journalAppend(this.id, code);
     }
-    if (res.dead) {
-      return {
-        ok: false,
-        phase: 'exit',
-        output: `процесс Maple завершился (код ${this.exit?.code ?? '?'}). Возможно, код содержал quit/stop/done или упал.\n${res.text}`.trim(),
-        session: this.id,
-      };
-    }
-
-    const output = res.text;
-    const failed = /(^|\n)\s*(Error,|.*\bsyntax error\b)/i.test(output);
-    return { ok: !failed, phase: failed ? 'maple' : 'done', output: output.trim(), session: this.id };
+    return { ...res, output: `${prefix}${res.output}`.trim() };
   }
 }
 
@@ -316,11 +431,23 @@ setInterval(() => {
   const limit = Date.now() - MAPLE_IDLE_SECONDS * 1000;
   for (const s of [...sessions.values()]) {
     if (s.lastUsed < limit) {
-      log('idle stop', s.id);
+      log('простой, гасим', s.id, `${MAPLE_IDLE_SECONDS} с`);
       s.stop().then(() => sessions.delete(s.id));
     }
   }
-}, 60_000).unref();
+  // интервал подстраиваем под таймаут: при 300 с хватает 30 с, в тестах — чаще
+}, Math.max(1000, Math.min(30_000, (MAPLE_IDLE_SECONDS * 1000) / 4))).unref();
+
+function journalNames() {
+  try {
+    if (!existsSync(SESSION_DIR)) return [];
+    return readdirSync(SESSION_DIR)
+      .filter((f) => f.endsWith('.jsonl'))
+      .map((f) => f.slice(0, -'.jsonl'.length));
+  } catch {
+    return [];
+  }
+}
 
 // ─────────────────────────── разбор .mw (XML) ───────────────────────────
 
@@ -562,11 +689,11 @@ function renderEval(res) {
   return `${head}\n${body}`;
 }
 
-async function toolEval({ code, session, timeout_seconds }) {
+async function toolEval({ code, session, timeout_seconds, resume = true }) {
   if (typeof code !== 'string' || !code.trim()) return fail('параметр code обязателен');
   const s = await getSession(session || 'default');
   const timeoutMs = timeout_seconds ? Number(timeout_seconds) * 1000 : MAPLE_TIMEOUT_SECONDS * 1000;
-  const res = await s.evaluate(code, { timeoutMs });
+  const res = await s.evaluate(code, { timeoutMs, resume: resume !== false });
   return res.ok ? ok(renderEval(res)) : fail(renderEval(res));
 }
 
@@ -593,22 +720,72 @@ async function toolHealth() {
       `проба: ${line}`,
       `задержка: ${ms} мс`,
       `сессии: ${[...sessions.keys()].join(', ') || '(нет)'}`,
+      `журналы сессий: ${SESSION_DIR}`,
+      `остановка по простою: ${MAPLE_IDLE_SECONDS} с`,
+      `каталог графиков: ${PLOT_DIR}`,
     ].join('\n'),
   );
 }
 
 async function toolListSessions() {
-  if (sessions.size === 0) return ok('живых сессий нет');
-  const rows = [...sessions.values()].map(
-    (s) => `${s.id}\t${s.dead ? 'мертва' : 'жива'}\tпростой ${Math.round((Date.now() - s.lastUsed) / 1000)} с`,
+  const names = new Set([...sessions.keys(), ...journalNames()]);
+  if (names.size === 0) return ok('сессий нет');
+  const rows = [...names].sort().map((n) => {
+    const live = sessions.get(n);
+    const info = journalInfo(n);
+    const state = live && !live.dead ? `жива (простой ${Math.round((Date.now() - live.lastUsed) / 1000)} с)` : 'остановлена';
+    const journal = info ? `журнал: ${info.entries} шагов, последняя запись ${info.lastUsed}` : 'журнала нет';
+    return `${n}\t${state}\t${journal}`;
+  });
+  return ok(
+    `ядро гасится после ${MAPLE_IDLE_SECONDS} с простоя; журналы — в ${SESSION_DIR}\n` + rows.join('\n'),
   );
-  return ok(rows.join('\n'));
 }
 
-async function toolResetSession({ session }) {
+async function toolSessionResume({ session, timeout_seconds }) {
+  const id = session || 'default';
+  const live = sessions.get(id);
+  if (live && !live.dead && live.restored) return ok(`сессия «${id}» уже жива вместе с состоянием`);
+  const info = journalInfo(id);
+  if (!info || info.entries === 0) return ok(`у сессии «${id}» нет журнала — восстанавливать нечего`);
+  await resetSession(id);
+  const s = await getSession(id);
+  const r = await s.restore(timeout_seconds ? Number(timeout_seconds) * 1000 : undefined);
+  return r.ok ? ok(`${r.output}\nшагов в журнале: ${r.entries}`) : fail(r.output);
+}
+
+async function toolSessionHistory({ session, limit = 40 }) {
+  const id = session || 'default';
+  const entries = journalRead(id);
+  if (entries.length === 0) return ok(`журнал сессии «${id}» пуст`);
+  const shown = entries.slice(-Math.max(1, Number(limit)));
+  const from = entries.length - shown.length + 1;
+  const body = shown
+    .map((e, i) => `#${from + i}  ${e.t}\n${String(e.code).split('\n').map((l) => `    ${l}`).join('\n')}`)
+    .join('\n');
+  return ok(`сессия «${id}»: ${entries.length} записей в ${journalPath(id)}\n${body}`);
+}
+
+/** Перезапуск ядра с сохранением журнала: состояние вернётся при следующем вызове. */
+async function toolSessionReset({ session }) {
   const id = session || 'default';
   const existed = await resetSession(id);
-  return ok(existed ? `сессия «${id}» сброшена` : `сессии «${id}» не было`);
+  const info = journalInfo(id);
+  if (!existed && !info) return ok(`сессии «${id}» не было`);
+  return ok(
+    `сессия «${id}» перезапущена: ядро остановлено, журнал сохранён (${info?.entries ?? 0} шагов) — ` +
+      `при следующем вызове состояние вернётся. Стереть совсем — maple_session_forget.`,
+  );
+}
+
+async function toolSessionForget({ session }) {
+  const id = session || 'default';
+  const info = journalInfo(id);
+  await resetSession(id);
+  journalClear(id);
+  return ok(
+    info ? `сессия «${id}» забыта: ядро остановлено, журнал (${info.entries} шагов) удалён` : `сессии «${id}» и так не было`,
+  );
 }
 
 async function toolLatex({ expression, session }) {
@@ -626,7 +803,8 @@ async function toolPlot({ expression, format = 'gif', session }) {
   if (!expression) return fail('параметр expression обязателен');
   const ext = PLOT_FORMATS[String(format).toLowerCase()];
   if (!ext) return fail(`формат «${format}» этот Maple не умеет. Доступно: gif, jpeg, bmp.`);
-  const file = await tmpFile(`.${ext}`);
+  mkdirSync(PLOT_DIR, { recursive: true });
+  const file = path.join(PLOT_DIR, `plot-${Date.now()}-${randomBytes(3).toString('hex')}.${ext}`);
   const code = [
     `__mcp_plot := ${expression}:`,
     `plottools:-exportplot("${file}", __mcp_plot):`,
@@ -652,7 +830,10 @@ async function toolPlot({ expression, format = 'gif', session }) {
   const mime = ext === 'jpg' ? 'jpeg' : ext;
   return {
     content: [
-      { type: 'text', text: `график ${ext}, ${data.length} байт` },
+      {
+        type: 'text',
+        text: `график ${ext}, ${data.length} байт, файл: ${file}\n(некоторые мосты, например pi-mcp-extension, не пропускают изображения — тогда скажи пользователю путь к файлу)`,
+      },
       { type: 'image', data: data.toString('base64'), mimeType: `image/${mime}` },
     ],
     isError: false,
@@ -763,14 +944,15 @@ const TOOLS = [
     name: 'maple_evaluate_code',
     description:
       'Выполнить код на языке Maple в долгоживущей сессии и вернуть текстовый вывод. ' +
-      'Состояние (переменные, функции, assume) сохраняется между вызовами в рамках одной session. ' +
-      'Синтаксис проверяется заранее; ошибки возвращаются как isError.',
+      'Состояние (переменные, функции, assume) сохраняется между вызовами, а после простоя или нового чата ' +
+      'автоматически восстанавливается из журнала сессии. Синтаксис проверяется заранее; ошибки возвращаются как isError.',
     inputSchema: {
       type: 'object',
       properties: {
         code: { type: 'string', description: 'Код Maple. Оператор с «;» печатает результат, с «:» — нет.' },
-        session: { type: 'string', description: 'Имя сессии (по умолчанию default).' },
+        session: { type: 'string', description: 'Имя сессии (по умолчанию default). Давай осмысленные имена разным расчётам.' },
         timeout_seconds: { type: 'number', description: 'Таймаут, сек (по умолчанию из MAPLE_TIMEOUT_SECONDS).' },
+        resume: { type: 'boolean', description: 'Восстанавливать состояние из журнала (по умолчанию да). false — начать с чистого ядра.' },
       },
       required: ['code'],
       additionalProperties: false,
@@ -814,8 +996,43 @@ const TOOLS = [
     },
   },
   {
+    name: 'maple_session_list',
+    description:
+      'Список сессий: живые ядра и сохранённые журналы (в т.ч. из прошлых чатов). Видно, сколько шагов в журнале и когда он обновлялся.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'maple_session_resume',
+    description:
+      'Поднять сессию из журнала: запустить свежее ядро и проиграть весь ранее выполненный код, ' +
+      'чтобы вернуть переменные и функции. Нужно, чтобы продолжить работу в новом чате. ' +
+      'Обычно вызывать не обязательно: maple_evaluate_code восстанавливает сессию сам.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        session: { type: 'string', description: 'Имя сессии (по умолчанию default).' },
+        timeout_seconds: { type: 'number', description: 'Таймаут на восстановление, сек.' },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'maple_session_history',
+    description: 'Показать журнал сессии: какой код выполнялся (по шагам, с датами). Полезно, чтобы вспомнить контекст расчёта.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        session: { type: 'string', description: 'Имя сессии (по умолчанию default).' },
+        limit: { type: 'number', description: 'Сколько последних записей показать (по умолчанию 40).' },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'maple_session_reset',
-    description: 'Сбросить сессию: убить процесс и забыть состояние.',
+    description:
+      'Перезапустить ядро сессии, сохранив журнал: состояние вернётся при следующем вызове. ' +
+      'Помогает, если ядро зависло или нужно освободить память.',
     inputSchema: {
       type: 'object',
       properties: { session: { type: 'string', description: 'Имя сессии (по умолчанию default).' } },
@@ -823,9 +1040,13 @@ const TOOLS = [
     },
   },
   {
-    name: 'maple_session_list',
-    description: 'Список живых сессий Maple.',
-    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    name: 'maple_session_forget',
+    description: 'Забыть сессию совсем: остановить ядро и стереть журнал. Действие необратимо.',
+    inputSchema: {
+      type: 'object',
+      properties: { session: { type: 'string', description: 'Имя сессии (по умолчанию default).' } },
+      additionalProperties: false,
+    },
   },
   {
     name: 'maple_worksheet_read',
@@ -898,8 +1119,11 @@ const HANDLERS = {
   maple_check_code: toolCheck,
   maple_to_latex: toolLatex,
   maple_plot: toolPlot,
-  maple_session_reset: toolResetSession,
   maple_session_list: toolListSessions,
+  maple_session_resume: toolSessionResume,
+  maple_session_history: toolSessionHistory,
+  maple_session_reset: toolSessionReset,
+  maple_session_forget: toolSessionForget,
   maple_worksheet_read: toolWorksheetRead,
   maple_worksheet_create: toolWorksheetCreate,
   maple_worksheet_edit_cell: toolWorksheetEditCell,
@@ -962,6 +1186,15 @@ async function dispatch(msg) {
 
 function serveStdio() {
   let stdinBuf = '';
+  let inflight = 0;
+  /** Ждём, пока доиграют начатые запросы: иначе на закрытии stdin теряем ответы. */
+  const idle = (maxMs = 60_000) =>
+    new Promise((resolve) => {
+      const deadline = Date.now() + maxMs;
+      const tick = () => (inflight === 0 || Date.now() > deadline ? resolve() : setTimeout(tick, 50));
+      tick();
+    });
+
   process.stdin.setEncoding('utf8');
   process.stdin.on('data', (chunk) => {
     stdinBuf += chunk;
@@ -976,14 +1209,21 @@ function serveStdio() {
       } catch {
         continue;
       }
+      inflight++;
       dispatch(msg)
         .then((r) => {
           if (r) send(r);
         })
-        .catch((e) => log('handler crash', e?.stack ?? e));
+        .catch((e) => log('handler crash', e?.stack ?? e))
+        .finally(() => {
+          inflight--;
+        });
     }
   });
-  process.stdin.on('end', bye);
+  process.stdin.on('end', async () => {
+    await idle();
+    await bye();
+  });
 }
 
 /**
