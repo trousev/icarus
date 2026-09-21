@@ -30,6 +30,8 @@ export function makeConfig(overrides: Partial<IcarusConfig> = {}): IcarusConfig 
     env: {},
     mounts: [],
     mcp: {},
+    // Синхронизация скиллов в тестах выключена: сеть и LibreChat тут ни к чему.
+    skills: { sync: null },
     users: [{ id: 'probe' }],
     ...overrides,
   };

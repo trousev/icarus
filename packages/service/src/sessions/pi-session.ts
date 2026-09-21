@@ -31,6 +31,12 @@ export class PiSession {
   readonly key: string;
   readonly sessionId: string;
   readonly container: string;
+  /**
+   * Поколение ресурсов человека на момент запуска процесса (скиллы и всё остальное,
+   * что pi читает один раз при старте). Реестр сверяет его со свежим: не совпало —
+   * сессия пересоздаётся, иначе старый процесс о новом скилле просто не знает.
+   */
+  readonly generation: number;
   busy = false;
   lastUsed = Date.now();
   turns = 0;
@@ -47,11 +53,13 @@ export class PiSession {
     conversationId: string,
     model: ModelConfig,
     container: string,
+    generation = 0,
   ) {
     this.user = user;
     this.conversationId = conversationId;
     this.key = `${user.id}:${conversationId}`;
     this.container = container;
+    this.generation = generation;
     this.sessionId = sessionIdFor(user.id, conversationId);
 
     this.client = new RpcClient(config, container, piArgsFor(model, this.sessionId));

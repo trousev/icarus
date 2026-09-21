@@ -1,5 +1,18 @@
 # Стенд M0: LibreChat (api + mongo) для снятия живого запроса к кастомному эндпоинту.
 # RAG/Meilisearch/pgvector намеренно выкинуты — для проверки стыка они не нужны.
+#
+# Здесь же живёт OIDC-заглушка (см. research/08-librechat-skills.md): Management API
+# LibreChat, через который icarus забирает скиллы, принимает только её токены. Один
+# экземпляр крутится внутри api — LibreChat пускает http только к localhost; второй
+# (сервис oidc, порт 9100 на хосте) выдаёт токены тому, кто запускает icarus на хосте.
+# Ключ подписи у них общий, в ./oidc-data.
+x-oidc-env: &oidc-env
+  OIDC_ISSUER: 'http://localhost:9100'
+  OIDC_AUDIENCE: 'icarus-skills'
+  OIDC_CLIENT_ID: 'icarus-sync'
+  OIDC_CLIENT_SECRET: 'icarus-sync-dev-secret'
+  OIDC_PORT: '9100'
+
 services:
   api:
     container_name: librechat-probe
@@ -11,15 +24,21 @@ services:
       - mongodb
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # Штатная команда образа — npm run backend; entrypoint делает exec "$@", поэтому
+    # заглушку поднимаем в фоне перед ней.
+    command: sh -c "node /opt/oidc-stub/server.mjs & exec npm run backend"
     environment:
-      - HOST=0.0.0.0
-      - MONGO_URI=mongodb://mongodb:27017/LibreChat
+      HOST: 0.0.0.0
+      MONGO_URI: mongodb://mongodb:27017/LibreChat
+      <<: *oidc-env
     volumes:
       - ./.env:/app/.env
       - ./librechat.yaml:/app/librechat.yaml
       - ./logs:/app/logs
       - ./uploads:/app/uploads
       - ./images:/app/client/public/images
+      - ./oidc-stub:/opt/oidc-stub:ro
+      - ./oidc-data:/data
       - librechat-data:/app/data
 
   mongodb:
@@ -29,6 +48,19 @@ services:
     volumes:
       - mongo-data:/data/db
     command: mongod --noauth
+
+  # Токены для того, кто ходит в Management API с хоста (icarus запущен не в compose).
+  oidc:
+    container_name: librechat-probe-oidc
+    image: node:24-bookworm-slim
+    restart: unless-stopped
+    command: ['node', '/opt/oidc-stub/server.mjs']
+    ports:
+      - '127.0.0.1:9100:9100'
+    environment: *oidc-env
+    volumes:
+      - ./oidc-stub:/opt/oidc-stub:ro
+      - ./oidc-data:/data
 
 volumes:
   mongo-data:

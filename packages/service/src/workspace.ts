@@ -21,7 +21,17 @@ export type PreparedUser = ReturnType<typeof prepareUser>;
 
 export function ensureDirs(config: IcarusConfig, user: UserConfig): void {
   const paths = userPaths(config, user);
-  for (const dir of [paths.memory, paths.incoming, paths.sessions, paths.piAgent, paths.sharedMemory]) {
+  for (const dir of [
+    paths.memory,
+    paths.incoming,
+    paths.sessions,
+    paths.piAgent,
+    // Каталог скиллов заводим заранее и пустым: так его видит pi, и так же в него
+    // пишет синхронизация. prepareUser его не чистит — это не управляемый каталог
+    // расширений, а место, куда скиллы приезжают из LibreChat (см. skills/sync.ts).
+    paths.skills,
+    paths.sharedMemory,
+  ]) {
     fs.mkdirSync(dir, { recursive: true });
   }
   // Каталог математики заводим только при настроенном Maple: пустая папка в

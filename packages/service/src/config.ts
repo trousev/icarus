@@ -11,6 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseEnv } from 'node:util';
 import { parse as parseYaml } from 'yaml';
+import { log } from './log.ts';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 /** Корень репозитория: в нём лежат config.yaml, .env, icarus.md и расширения. */
@@ -40,6 +41,46 @@ export type McpServerConfig = {
 
 /** Человек: пока только id, всё остальное — общее (см. IcarusConfig). */
 export type UserConfig = { id: string };
+
+/**
+ * Учётные данные для Management API LibreChat. Токен либо задан статикой (`token`),
+ * либо берётся по client_credentials (`tokenUrl` + `clientId` + `clientSecret`).
+ * Секреты берутся из .env: `clientSecret: ${LIBRECHAT_SKILLS_CLIENT_SECRET}`.
+ */
+export type SkillsAuthConfig = {
+  token?: string;
+  tokenUrl?: string;
+  clientId?: string;
+  clientSecret?: string;
+};
+
+/** Привязка человека icarus к пользователю LibreChat, чьи скиллы он получает. */
+export type SkillsAccountConfig = SkillsAuthConfig & { user: string };
+
+/**
+ * Синхронизация скиллов, написанных в UI LibreChat, в каталог pi.
+ *
+ * Скиллы забираются через Management API LibreChat (`/api/agents/v1/skills`) — это
+ * единственный машинный способ их прочитать. Забранное раскладывается в
+ * `~/.pi/agent/skills` у человека, откуда pi берёт их сам: имена и описания попадают
+ * в системный промпт, тело читается по требованию обычным read.
+ */
+export type SkillsSyncConfig = {
+  /** Адрес LibreChat, доступный сервису (в стеке — http://icarus-librechat:3090). */
+  url: string;
+  /** Период опроса, секунды. Скилл доезжает до pi со следующего хода. */
+  intervalSeconds: number;
+  /** audience для client_credentials, если провайдер его требует. */
+  audience?: string;
+  token?: string;
+  tokenUrl?: string;
+  clientId?: string;
+  clientSecret?: string;
+  /** Личные привязки: у каждого человека — свой набор скиллов в LibreChat. */
+  accounts: SkillsAccountConfig[];
+};
+
+export type SkillsConfig = { sync: SkillsSyncConfig | null };
 
 export type DockerConfig = {
   image: string;
@@ -72,6 +113,8 @@ export type IcarusConfig = {
   mounts: MountConfig[];
   /** MCP-серверы: то, чем Икар обрастает без правки кода. */
   mcp: Record<string, McpServerConfig>;
+  /** Скиллы: пока только синхронизация с LibreChat. */
+  skills: SkillsConfig;
   users: UserConfig[];
 };
 
@@ -363,9 +406,7 @@ function parseMcp(value: unknown, env: NodeJS.ProcessEnv): Record<string, McpSer
 }
 
 /** id идёт в имя контейнера и в путь на диске — держим его предсказуемым. */
-const USER_ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
-
-function parseUsers(value: unknown): UserConfig[] {
+const USER_ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;function parseUsers(value: unknown): UserConfig[] {
   const users = asArray(value, 'users').map((item, index) => {
     if (typeof item !== 'string') {
       throw new Error(`users[${index}]: человек — это просто его id строкой, например "- probe"`);
@@ -383,6 +424,72 @@ function parseUsers(value: unknown): UserConfig[] {
     seen.add(user.id);
   }
   return users;
+}
+
+/** Поля авторизации в Management API: раскрываем переменные и проверяем полноту. */
+function parseSkillsAuth(value: unknown, where: string, env: NodeJS.ProcessEnv): SkillsAuthConfig {
+  const raw = value === undefined || value === null ? {} : asRecord(value, where);
+  const auth: SkillsAuthConfig = {};
+  for (const key of ['token', 'tokenUrl', 'clientId', 'clientSecret'] as const) {
+    const text = optionalString(raw[key], `${where}.${key}`);
+    if (text === undefined) continue;
+    const expanded = expandValue(text, env).trim();
+    if (expanded !== '') auth[key] = expanded;
+  }
+  const hasStatic = auth.token !== undefined;
+  const hasClient = auth.tokenUrl !== undefined && auth.clientId !== undefined && auth.clientSecret !== undefined;
+  if (!hasStatic && !hasClient) {
+    throw new Error(
+      `${where}: нужен либо token, либо все три — tokenUrl, clientId и clientSecret (проверь переменные в .env)`,
+    );
+  }
+  return auth;
+}
+
+/**
+ * Скиллы: сейчас это только синхронизация с LibreChat.
+ *
+ * Пустой адрес (`url: ${ICARUS_LIBRECHAT_URL}`, когда переменной нет) — это «стенд не
+ * подключён»: синхронизация молча выключена, сервис работает как раньше. Так один и
+ * тот же config.yaml годится и для стека со стендом, и без него.
+ */
+function parseSkills(value: unknown, env: NodeJS.ProcessEnv, users: UserConfig[]): SkillsConfig {
+  if (value === undefined || value === null) return { sync: null };
+  const skills = asRecord(value, 'skills');
+  if (skills.sync === undefined || skills.sync === null) return { sync: null };
+
+  const where = 'skills.sync';
+  const raw = asRecord(skills.sync, where);
+  const url = expandValue(optionalString(raw.url, `${where}.url`) ?? '', env).trim();
+  if (url === '') {
+    log.info('синхронизация скиллов выключена: skills.sync.url пуст');
+    return { sync: null };
+  }
+  if (!/^https?:\/\//.test(url)) {
+    throw new Error(`${where}.url: «${url}» — ожидался http(s)-адрес LibreChat`);
+  }
+
+  const sync: SkillsSyncConfig = {
+    url: url.replace(/\/+$/, ''),
+    intervalSeconds: Math.max(2, numberOr(raw.intervalSeconds, `${where}.intervalSeconds`, 300)),
+    accounts: [],
+    ...parseSkillsAuth(raw, where, env),
+  };
+
+  const audience = expandValue(optionalString(raw.audience, `${where}.audience`) ?? '', env).trim();
+  if (audience !== '') sync.audience = audience;
+
+  sync.accounts = asArray(raw.accounts, `${where}.accounts`).map((item, index) => {
+    const accountWhere = `${where}.accounts[${index}]`;
+    const account = asRecord(item, accountWhere);
+    const user = requiredString(account.user, `${accountWhere}.user`).trim();
+    if (!users.some((known) => known.id === user)) {
+      throw new Error(`${accountWhere}.user: «${user}» нет в users — привязка к чужому человеку ничего не даст`);
+    }
+    return { user, ...parseSkillsAuth(account, accountWhere, env) };
+  });
+
+  return { sync };
 }
 
 export function loadConfig(file: string, env: NodeJS.ProcessEnv = process.env): IcarusConfig {
@@ -419,6 +526,7 @@ export function loadConfig(file: string, env: NodeJS.ProcessEnv = process.env): 
   const models = parseModels(raw.models);
   const host = optionalString(raw.host, 'host') ?? '0.0.0.0';
   const port = numberOr(raw.port, 'port', 8081);
+  const users = parseUsers(raw.users);
 
   return {
     host,
@@ -440,7 +548,8 @@ export function loadConfig(file: string, env: NodeJS.ProcessEnv = process.env): 
     env: stringMap(raw.env, 'env', env),
     mounts: parseMounts(raw.mounts, env),
     mcp: parseMcp(raw.mcp, env),
-    users: parseUsers(raw.users),
+    skills: parseSkills(raw.skills, env, users),
+    users,
   };
 }
 
@@ -464,6 +573,14 @@ export function userPaths(config: IcarusConfig, user: UserConfig) {
     incoming: path.join(root, 'incoming'),
     sessions: path.join(root, 'sessions'),
     piAgent: path.join(root, 'pi-agent'),
+    /**
+     * Скиллы: `~/.pi/agent/skills` внутри контейнера. Каталог агентский (не проектный),
+     * поэтому pi берёт его без всякого доверия к проекту. Сюда пишет синхронизация
+     * (см. skills/sync.ts); руками в него лучше не лезть — управляемые скиллы
+     * отмечаются манифестом `.icarus-skills.json`, и всё, чего в манифесте нет,
+     * синхронизация не трогает.
+     */
+    skills: path.join(root, 'pi-agent', 'skills'),
     agentsMd: path.join(root, 'AGENTS.md'),
     icarusMd: path.join(root, 'icarus.md'),
     /** Инструкция по Maple: читается агентом по требованию, не висит в промпте. */

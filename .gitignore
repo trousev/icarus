@@ -21,6 +21,8 @@ data/
 
 # стенд LibreChat (M0)
 docker/librechat/.env
+docker/librechat/librechat.local.yaml
+docker/librechat/oidc-data/
 docker/librechat/probe-log.jsonl
 docker/librechat/logs/
 docker/librechat/uploads/

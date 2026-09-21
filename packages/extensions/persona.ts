@@ -7,6 +7,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import fs from "node:fs";
 import { buildMemoryCore } from "./lib/memory-core.ts";
+import { formatSkillsBlock, type SkillEntry } from "./lib/skills-core.ts";
 import { TIME_INSTRUCTION } from "./lib/time-core.ts";
 
 const PERSONA = "/workspace/icarus.md";
@@ -52,9 +53,18 @@ export default function (pi: ExtensionAPI) {
         ].join('\n')
       : '';
 
+    // Скиллы pi добавляет в свой сборщик промпта, а мы промпт заменяем целиком — значит,
+    // каталог собираем сами, иначе модель о скиллах просто не узнает. В каталоге только
+    // имя, описание и путь; тело скилла читается через read по совпадению с описанием.
+    const options = (event.systemPromptOptions ?? {}) as {
+      skills?: SkillEntry[];
+      selectedTools?: string[];
+    };
+    const skillsBlock = formatSkillsBlock(options.skills ?? [], options.selectedTools ?? []);
+
     // TIME_INSTRUCTION — текст постоянный: сама дата в промпт не едет, иначе он менялся
     // бы от смены даты и рвал кэш. Свежее время приезжает меткой к реплике (см. clock.ts).
-    const systemPrompt = [persona, contextFiles, memoryBlock, TIME_INSTRUCTION]
+    const systemPrompt = [persona, contextFiles, memoryBlock, skillsBlock, TIME_INSTRUCTION]
       .filter(Boolean)
       .join("\n\n---\n\n");
 
