@@ -57,7 +57,11 @@ test('люди, порт и ключ приезжают из окружения,
     ['trousev', 'vita', 'julia'],
   );
   assert.equal(config.models.length, 3, 'модели из примера не потерялись');
-  assert.deepEqual(config.env, { ICARUS_EXTRACT_AFTER_MS: '20000', ICARUS_EXTRACT_MODEL: 'deepseek/deepseek-v4-flash' });
+  assert.deepEqual(config.env, {
+    ICARUS_EXTRACT_AFTER_MS: '20000',
+    ICARUS_EXTRACT_MODEL: 'deepseek/deepseek-v4-flash',
+    TZ: 'Europe/Dublin',
+  });
   assert.deepEqual(config.mcp.echo?.args, ['/opt/icarus/mcp/echo-server.mjs']);
 });
 

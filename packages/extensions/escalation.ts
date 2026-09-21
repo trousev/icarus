@@ -58,7 +58,16 @@ export const LONG_PROMPT = 400;
  * модель — быстрая справится без размышлений, и человек не будет ждать. Всё
  * остальное (bash, правки файлов, MCP, незнакомые тулы) — уже руки, там сильная.
  */
-export const SEARCH_TOOLS = new Set(["web_search", "web_fetch", "read", "grep", "find", "ls"]);
+export const SEARCH_TOOLS = new Set([
+  "web_search",
+  "web_fetch",
+  "read",
+  "grep",
+  "find",
+  "ls",
+  // «который час» — взгляд, а не работа: гонять на нём сильную модель незачем
+  "now",
+]);
 
 /** Сколько поисков подряд терпим на быстрой модели, прежде чем считать это работой. */
 export const SEARCH_BUDGET = 3;

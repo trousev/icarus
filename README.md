@@ -83,6 +83,7 @@ dataDir: ~/icarus-data          # память, сессии и каталоги
 models:                         # общие модели: tier раздаёт эскалация
   - { provider: deepseek, id: deepseek-v4-flash, thinking: off, tier: fast }
 # auth: { deepseek: env:DEEPSEEK_API_KEY }   # обычно не нужно: ключ подхватится из .env
+env: { TZ: Europe/Dublin }      # часовой пояс человека: по нему Икар считает дату и датирует память
 mounts: []                      # каталоги с хоста — пока общие для всех
 mcp: {}                         # MCP-серверы
 
