@@ -771,6 +771,15 @@ community-аналога (`maxima-mcp`) — 133 операции, и там эм
   `major` — версия формата, а не год релиза.
 - 2-D ввод удаётся читать по атрибуту `input-equation` (линейная форма Maple),
   а не только как «непрозрачный base64».
+- **Внешние библиотеки Maple 18 не грузятся на современной glibc:**
+  `libatlas.so` и `libmsp.so` (2014 год) требуют исполняемого стека, а `dlopen`
+  в glibc 2.41+ (Ubuntu 26.04) такие объекты отвергает. Симптом —
+  `Error, (in dsolve) external library libmodLA.so could not be found/used`,
+  то есть молча ломаются `dsolve`, `pdsolve`, численные ОДУ и всё, что тянет
+  ATLAS. Лечится снятием флага `PT_GNU_STACK RWE`:
+  `tools/maple-mcp/fix-execstack.py` (с бэкапами `*.bak-execstack`, есть
+  `--restore`). После фикса `dsolve` даёт `y(x) = 1/k*sin(k*x)`,
+  `pdsolve` решает уравнение теплопроводности.
 
 Реализация по итогам: **`tools/maple-mcp/`** — сервер (stdio + Streamable HTTP)
 и самотесты (27 проверок, все зелёные).

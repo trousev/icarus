@@ -125,6 +125,18 @@ HTTP-режим (`server.mjs --http 8770`) остаётся для клиент�
 
 ## Ограничения и грабли (проверено на Maple 18)
 
+- **Если `dsolve`/`pdsolve` падают с `external library libmodLA.so could not be
+  found/used`** — это не сервер, а старые библиотеки Maple: `libatlas.so` и
+  `libmsp.so` из 2014 года требуют исполняемого стека, а glibc 2.41+ (Ubuntu
+  26.04) такие `dlopen` отвергает. Лечится снятием флага:
+
+  ```bash
+  python3 tools/maple-mcp/fix-execstack.py            # предпросмотр
+  sudo python3 tools/maple-mcp/fix-execstack.py --apply   # с бэкапами *.bak-execstack
+  ```
+
+  После этого работают `dsolve`, `pdsolve`, численные ОДУ и прочее, что тянет
+  ATLAS. Откат — `--restore`.
 - **Графику** отдаём через `plottools:-exportplot`: работают `gif`, `jpeg`,
   `bmp`; **`png` и `tiff` Maple 18 не умеет**. По умолчанию — `gif`
   (MCP-клиенты его понимают).
