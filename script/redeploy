@@ -153,10 +153,16 @@ upsert_env TAVILY_API_KEY "${TAVILY_API_KEY:-}"
 [ -z "${TAVILY_API_KEY:-}" ] || say 'TAVILY_API_KEY обновлён в .env'
 
 # Путь к Maple: не секрет, но тоже задаётся снаружи (variables.MAPLE_DIR), чтобы
-# локаль и прод настраивались одинаково. Не задан — берём дефолт: без него
-# ${MAPLE_DIR} в config.yaml раскрылся бы в пустую строку и маунт сломался бы.
-upsert_env MAPLE_DIR "${MAPLE_DIR:-/opt/maple18}"
-say "MAPLE_DIR=${MAPLE_DIR:-/opt/maple18} записан в .env"
+# локаль и прод настраивались одинаково. Незаданная repo-переменная приезжает из
+# workflow не пустотой, а пустой строкой (envs SSH-экшена), а пустое окружение
+# сильнее .env — ${MAPLE_DIR} в config.yaml раскрылся бы в '', и маунт превратился
+# бы в ::ro (docker: invalid spec). Поэтому пустое значение считаем «не задано»,
+# подставляем дефолт и экспортируем его: и render-config, и compose-write, и
+# docker compose обязаны видеть один и тот же путь.
+MAPLE_DIR="${MAPLE_DIR:-/opt/maple18}"
+export MAPLE_DIR
+upsert_env MAPLE_DIR "$MAPLE_DIR"
+say "MAPLE_DIR=$MAPLE_DIR записан в .env"
 
 # --- config.yaml ---------------------------------------------------------------
 # Люди — из variables, ключ API — из секрета, DNS — из кода (ICARUS_DNS); остальное

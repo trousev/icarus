@@ -67,6 +67,12 @@ export type ComposeOptions = {
 type ComposeService = Record<string, unknown>;
 
 function bind(source: string, target: string, mode?: 'ro'): string {
+  // Путь не подставился — docker разберёт «::ro» и упадёт «invalid spec» уже посреди
+  // сборки. Падаем раньше и внятнее: конфиг с пустым маунтом до docker не доезжает
+  // (см. parseMounts в config.ts — там эта же проверка ловит неподставившуюся ${VAR}).
+  if (source === '' || target === '') {
+    throw new Error(`маунт с пустым путём: «${source}:${target}» — проверь переменные окружения в config.yaml`);
+  }
   return `${source}:${target}${mode === 'ro' ? ':ro' : ''}`;
 }
 

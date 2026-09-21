@@ -69,6 +69,8 @@ jobs:
           # Внешний адрес панели для личных ссылок Икара. Не задана — прежнее значение
           # в config.yaml остаётся, а без него ссылки поведут на localhost.
           ICARUS_URL: ${{ vars.ICARUS_URL }}
-          # Где на хосте стоит Maple. Не задана — script/redeploy подставит /opt/maple18.
+          # Где на хосте стоит Maple. Не задана — script/redeploy подставит /opt/maple18:
+          # незаданная repo-переменная приезжает сюда пустой строкой, и пустое
+          # окружение сильнее .env, поэтому script/redeploy считает '' за «не задано».
           # Значение уезжает в .env, откуда его читают маунт и MAPLE_BIN в config.yaml.
           MAPLE_DIR: ${{ vars.MAPLE_DIR }}

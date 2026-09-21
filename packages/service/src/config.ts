@@ -85,11 +85,17 @@ export function expandValue(value: string, env: NodeJS.ProcessEnv = process.env)
 }
 
 /**
- * Читает .env в process.env, не перетирая уже заданное: окружение сильнее файла —
- * ровно как ведёт себя docker compose с env_file, так что порядок не зависит от того,
- * запущен сервис в контейнере или прямо на хосте. Файла нет — это норма: ключи могут
- * прийти из окружения. Сами значения нужны только здесь (auth); в контейнеры людей
- * compose отдаёт файл целиком, поэтому секреты не попадают в docker-compose.yml.
+ * Читает .env в process.env, не перетирая уже заданное непустым: окружение сильнее
+ * файла — ровно как ведёт себя docker compose с env_file, так что порядок не зависит
+ * от того, запущен сервис в контейнере или прямо на хосте. Файла нет — это норма:
+ * ключи могут прийти из окружения. Сами значения нужны только здесь (auth); в
+ * контейнеры людей compose отдаёт файл целиком, поэтому секреты не попадают в
+ * docker-compose.yml.
+ *
+ * Пустая строка в окружении — это «не задано», а не «пусто»: незаданная переменная
+ * в CI (например vars.MAPLE_DIR в deploy.yml) приезжает именно так. Считать её
+ * заданной нельзя — она перебивает рабочее значение из .env, и ${MAPLE_DIR} в
+ * config.yaml раскрывается в '', а маунт — в ::ro (docker: invalid spec).
  */
 export function loadEnvFile(file: string = ENV_FILE): void {
   if (!fs.existsSync(file)) return;
@@ -114,7 +120,9 @@ export function loadEnvFile(file: string = ENV_FILE): void {
 
   for (const [name, value] of Object.entries(parsed)) {
     if (typeof value !== 'string') continue;
-    if (process.env[name] === undefined) process.env[name] = value;
+    // Пустое окружение — то же самое, что отсутствующее: иначе незаданная
+    // переменная из CI затирает .env (см. комментарий к loadEnvFile).
+    if (!process.env[name]) process.env[name] = value;
   }
 }
 
@@ -277,13 +285,26 @@ function parseMounts(value: unknown, env: NodeJS.ProcessEnv): MountConfig[] {
     if (mode !== undefined && mode !== 'ro' && mode !== 'rw') {
       throw new Error(`${where}.mode: «${mode}» — ожидалось ro или rw`);
     }
-    return {
-      // Обе стороны маунта раскрываются одинаково: путь установки (например MAPLE_DIR)
-      // задаётся одной переменной в .env, и хост с контейнером не разъезжаются.
-      host: expandValue(requiredString(mount.host, `${where}.host`), env),
-      container: expandValue(requiredString(mount.container, `${where}.container`), env),
-      mode: (mode ?? 'rw') as MountConfig['mode'],
-    };
+    // Обе стороны маунта раскрываются одинаково: путь установки (например MAPLE_DIR)
+    // задаётся одной переменной в .env, и хост с контейнером не разъезжаются.
+    const host = expandValue(requiredString(mount.host, `${where}.host`), env).trim();
+    const container = expandValue(requiredString(mount.container, `${where}.container`), env).trim();
+    // Пустая сторона маунта — это почти всегда неподставившаяся переменная
+    // (${MAPLE_DIR} без MAPLE_DIR, например пустая vars.MAPLE_DIR из CI). Docker
+    // ругается на такое «invalid spec: ::ro» уже посреди сборки, поэтому ловим
+    // здесь и объясняем, чего не хватает.
+    const sides: Array<[string, string]> = [
+      ['host', host],
+      ['container', container],
+    ];
+    for (const [side, text] of sides) {
+      if (text === '') {
+        throw new Error(
+          `${where}.${side}: пусто — проверь, что переменная задана в .env или в окружении (например MAPLE_DIR)`,
+        );
+      }
+    }
+    return { host, container, mode: (mode ?? 'rw') as MountConfig['mode'] };
   });
 }
 

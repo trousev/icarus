@@ -109,6 +109,13 @@ test('стек: сервис, контейнер на человека и тёп
   assert.deepEqual(compose.services.icarus.depends_on, { 'icarus-user-probe': { condition: 'service_started' } });
 });
 
+test('пустой путь маунта до docker не доезжает', () => {
+  // Прод-сбой #57: неподставившаяся ${MAPLE_DIR} давала «::ro», и падал уже
+  // `docker compose build` — с «invalid spec: ::ro: empty section between colons».
+  const broken = makeConfig({ dataDir: config.dataDir, mounts: [{ host: '', container: '', mode: 'ro' }] });
+  assert.throws(() => renderCompose(broken, composeOptions), /пустым путём/);
+});
+
 test('стек: смена отпечатка кода пересоздаёт сервис, а не оставляет старый процесс', () => {
   const before = render(config, { revision: 'rev-1' });
   const after = render(config, { revision: 'rev-2' });

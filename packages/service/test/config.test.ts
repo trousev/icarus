@@ -233,6 +233,46 @@ test('нет .env — не ошибка: ключи могут прийти из
   assert.doesNotThrow(() => loadEnvFile('/nope/.env'));
 });
 
+test('пустая переменная окружения не перебивает .env', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-env-'));
+  const file = path.join(dir, '.env');
+  fs.writeFileSync(file, 'ICARUS_TEST_EMPTY=из файла\n');
+
+  // Незаданная repo-переменная в deploy.yml приезжает на прод именно так — пустой
+  // строкой в окружении (envs SSH-экшена). Заданной её считать нельзя: она затрёт
+  // рабочее значение из .env, и ${MAPLE_DIR} в config.yaml раскроется в ''.
+  process.env.ICARUS_TEST_EMPTY = '';
+  try {
+    loadEnvFile(file);
+    assert.equal(process.env.ICARUS_TEST_EMPTY, 'из файла', 'пустое окружение — то же, что отсутствующее');
+  } finally {
+    delete process.env.ICARUS_TEST_EMPTY;
+  }
+});
+
+test('прод-сценарий деплоя #57: пустой MAPLE_DIR из CI не ломает маунт', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-deploy-'));
+  const env = path.join(dir, '.env');
+  const config = path.join(dir, 'config.yaml');
+  fs.writeFileSync(env, 'MAPLE_DIR=/opt/maple18\n');
+  fs.writeFileSync(
+    config,
+    `${MINIMAL}mounts:\n  - host: \${MAPLE_DIR}\n    container: \${MAPLE_DIR}\n    mode: ro\n`,
+  );
+
+  // Как на проде: vars.MAPLE_DIR не задана — workflow прокинул пустую строку,
+  // script/redeploy положил дефолт в .env, а окружение так и осталось пустым.
+  process.env.MAPLE_DIR = '';
+  try {
+    loadEnvFile(env);
+    assert.deepEqual(loadConfig(config).mounts, [
+      { host: '/opt/maple18', container: '/opt/maple18', mode: 'ro' },
+    ]);
+  } finally {
+    delete process.env.MAPLE_DIR;
+  }
+});
+
 // --- ошибки -------------------------------------------------------------------
 
 test('без apiKey не стартуем', () => {
@@ -286,6 +326,15 @@ test('неизвестный tier у модели — ошибка', () => {
 test('режим маунта только ro или rw', () => {
   const file = writeConfig(`${MINIMAL}mounts:\n  - host: /h\n    container: /c\n    mode: rwx\n`);
   assert.throws(() => loadConfig(file, {}), /mode/);
+});
+
+test('неподставившаяся переменная в маунте — понятная ошибка, а не ::ro', () => {
+  const file = writeConfig(`${MINIMAL}mounts:\n  - host: \${NO_SUCH_DIR}\n    container: \${NO_SUCH_DIR}\n    mode: ro\n`);
+  // Ни отсутствующая переменная, ни пустая, ни пробельная маунта не задают.
+  for (const value of [undefined, '', '   ']) {
+    const env = value === undefined ? {} : { NO_SUCH_DIR: value };
+    assert.throws(() => loadConfig(file, env as NodeJS.ProcessEnv), /mounts\[0\]\.host: пусто/);
+  }
 });
 
 test('битый YAML объясняет, что файл не разобрать', () => {
