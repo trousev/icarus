@@ -106,9 +106,24 @@ export function parseExtraction(raw: string): Extraction | null {
   return { notes, journal: journal || undefined };
 }
 
-/** Индекс уже записанного: без него разбор плодит дубликаты и файлы-близнецы. */
-export function memoryIndex(root: string, maxFiles = 25, maxLines = 8): string {
-  const lines: string[] = [];
+/**
+ * Бюджет индекса в символах. Индекс — обзор памяти для разбора, а не её второй
+ * экземпляр: файлы показываем целиком, пока влезают, и хвост бюджета не раздуваем.
+ */
+export const INDEX_BUDGET = 4000;
+
+/**
+ * Индекс уже записанного: без него разбор плодит дубликаты и файлы-близнецы.
+ *
+ * Потолок строк на файл по умолчанию снят: раньше восьми строк хватало, чтобы на
+ * identity.md в 20+ фактов разбор не видел поздние и заводил дубли. Теперь файл
+ * показывается целиком, пока влезает в бюджет, — а бюджет и есть ограничитель.
+ * Явный maxLines остаётся для вызывающих, которым нужен свой потолок.
+ */
+export function memoryIndex(root: string, maxFiles = 25, maxLines = Infinity): string {
+  const blocks: string[] = [];
+  let used = 0;
+
   const walk = (dir: string, prefix = ''): void => {
     let entries: fs.Dirent[];
     try {
@@ -124,19 +139,46 @@ export function memoryIndex(root: string, maxFiles = 25, maxLines = 8): string {
         continue;
       }
       if (!entry.name.endsWith('.md') || entry.name === 'journal' || prefix === 'journal/') continue;
-      if (lines.length >= maxFiles) return;
-      const bulletLines = fs
+      if (blocks.length >= maxFiles) return;
+      const bullets = fs
         .readFileSync(full, 'utf8')
         .split('\n')
         .map((line) => line.trim())
         .filter((line) => /^[-*]\s+/.test(line))
         .slice(0, maxLines);
-      if (bulletLines.length === 0) continue;
-      lines.push(`${prefix}${entry.name}:\n${bulletLines.map((line) => `    ${line}`).join('\n')}`);
+      if (bullets.length === 0) continue;
+
+      const header = `${prefix}${entry.name}:`;
+      const rendered = bullets.map((line) => `    ${line}`);
+      const separator = blocks.length === 0 ? 0 : 1;
+      const whole = separator + header.length + 1 + rendered.join('\n').length;
+      if (used + whole <= INDEX_BUDGET) {
+        blocks.push(`${header}\n${rendered.join('\n')}`);
+        used += whole;
+        continue;
+      }
+
+      // Файл целиком уже не влезает: добираем столько строк, сколько осталось, и прямо
+      // помечаем хвост. Молчаливая обрезка — ровно то, из-за чего разбор не видел
+      // поздние факты и заводил дубли.
+      const fits: string[] = [];
+      for (const line of rendered) {
+        const hidden = bullets.length - fits.length - 1;
+        const marker = hidden > 0 ? `\n    … ещё ${hidden} пункт(ов): файл целиком по пути` : '';
+        const candidate = `${header}\n${[...fits, line].join('\n')}${marker}`;
+        if (used + separator + candidate.length > INDEX_BUDGET) break;
+        fits.push(line);
+      }
+      if (fits.length === 0) return;
+      const hidden = bullets.length - fits.length;
+      const marker = hidden > 0 ? `\n    … ещё ${hidden} пункт(ов): файл целиком по пути` : '';
+      blocks.push(`${header}\n${fits.join('\n')}${marker}`);
+      return; // бюджет исчерпан — остальные файлы в него уже не влезут
     }
   };
+
   walk(root);
-  return lines.join('\n');
+  return blocks.join('\n');
 }
 
 function tokens(text: string): Set<string> {
