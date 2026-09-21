@@ -74,52 +74,54 @@ node tools/maple-mcp/test.mjs
   официальным `@modelcontextprotocol/sdk` (`StreamableHTTPClientTransport`) —
   тем же, что использует `pi-mcp-extension`.
 
-## Подключение к Икару
+## Подключение к Икару (через docker compose)
 
-Икар запускает MCP-серверы **внутри контейнера** агента, а Maple стоит на
-хосте, поэтому нужен HTTP-режим (в контейнерах Икара уже есть
-`extra_hosts: host.docker.internal:host-gateway`, см. `compose.ts`).
+Отдельный compose-сервис и systemd не нужны: **Maple 18 работает прямо внутри
+контейнера агента** — проверено, лицензия не привязана к железу
+(`HOSTID=INTERNET=*.*.*.*`), а glibc из `node:24-bookworm-slim` подходит.
+Поэтому всё делается штатными средствами Икара: `mounts:` + stdio-MCP.
 
-1. На хосте поднять сервер (лучше через systemd, см. ниже):
-
-```bash
-MAPLE_TIMEOUT_SECONDS=25 node /home/trousev/src/icarus/tools/maple-mcp/server.mjs --http 8770
-```
-
-2. В `config.yaml`:
+В `config.yaml`:
 
 ```yaml
+mounts:
+  - host: ~/src/scratchpad
+    container: /workspace/scratchpad
+    mode: ro
+  - host: /opt/maple18                    # сам Maple
+    container: /opt/maple18
+    mode: ro
+  - host: /home/trousev/src/icarus/tools  # каталог с сервером
+    container: /opt/icarus/tools
+    mode: ro
+
 mcp:
+  echo: {}                                # как было
   maple:
-    transport: streamable-http
-    url: http://host.docker.internal:8770/mcp
+    command: node
+    args:
+      - /opt/icarus/tools/maple-mcp/server.mjs
+    env:
+      MAPLE_BIN: /opt/maple18/bin/maple
+      MAPLE_TIMEOUT_SECONDS: "25"
     lifecycle: eager
 ```
 
-3. `./script/update && ./script/server` (сервис перегенерирует
-   `~/.pi/agent/mcp.json`); проверить можно вопросом «посчитай в Maple …».
+Дальше `./script/server -d`: `docker-compose.yml` пересобирается из
+`config.yaml`, контейнеры пересоздаются с новыми маунтами, сервис генерирует
+`~/.pi/agent/mcp.json`. Проверка прямо в живом контейнере:
 
-Почему не stdio в контейнере: Maple пришлось бы монтировать внутрь образа
-(гигабайты и системные библиотеки), а `license.dat` обычно привязан к
-оборудованию хоста и в контейнере с другим MAC не пройдёт.
-
-### systemd (пример)
-
-```ini
-# ~/.config/systemd/user/maple-mcp.service
-[Unit]
-Description=Maple MCP server
-After=network.target
-
-[Service]
-Environment=MAPLE_BIN=/opt/maple18/bin/maple
-Environment=MAPLE_TIMEOUT_SECONDS=25
-ExecStart=/usr/bin/node /home/trousev/src/icarus/tools/maple-mcp/server.mjs --http 8770
-Restart=on-failure
-
-[Install]
-WantedBy=default.target
+```bash
+docker exec -u node icarus-user-probe node /opt/icarus/tools/maple-mcp/test.mjs
 ```
+
+Почему не отдельным сервисом: `docker-compose.yml` — **генерируемый артефакт**
+(он в `.gitignore`, его собирает `script/server` из `config.yaml`), так что
+дописывать в него сервис руками бессмысленно. А `mounts` + `mcp` уже есть в
+схеме и полностью покрывают задачу.
+
+HTTP-режим (`server.mjs --http 8770`) остаётся для клиента вне контейнеров
+Икара — например, для отладки с хоста.
 
 ## Ограничения и грабли (проверено на Maple 18)
 

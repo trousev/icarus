@@ -627,13 +627,25 @@ async function toolPlot({ expression, format = 'gif', session }) {
   const ext = PLOT_FORMATS[String(format).toLowerCase()];
   if (!ext) return fail(`формат «${format}» этот Maple не умеет. Доступно: gif, jpeg, bmp.`);
   const file = await tmpFile(`.${ext}`);
-  const s = await getSession(session || 'default');
   const code = [
     `__mcp_plot := ${expression}:`,
     `plottools:-exportplot("${file}", __mcp_plot):`,
     `printf("PLOT_DONE\\n"):`,
   ].join('\n');
-  const res = await s.evaluate(code);
+
+  // Экспорт графика изредка роняет ядро (в контейнере видели код 79) — один ретрай
+  // на свежей сессии; операция идемпотентная, так что повтор безопасен.
+  let res;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const s = await getSession(session || 'default');
+    res = await s.evaluate(code);
+    if (res.ok && existsSync(file)) break;
+    if (attempt === 1 && (res.phase === 'exit' || res.phase === 'timeout')) {
+      await resetSession(s.id);
+      continue;
+    }
+    break;
+  }
   if (!res.ok) return fail(renderEval(res));
   if (!existsSync(file)) return fail(`не удалось экспортировать график (формат ${ext}).\n${res.output}`);
   const data = await readFile(file);
