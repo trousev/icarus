@@ -436,6 +436,8 @@ export function userPaths(config: IcarusConfig, user: UserConfig) {
     piAgent: path.join(root, 'pi-agent'),
     agentsMd: path.join(root, 'AGENTS.md'),
     icarusMd: path.join(root, 'icarus.md'),
+    /** Инструкция по Maple: читается агентом по требованию, не висит в промпте. */
+    mapleMd: path.join(root, 'MAPLE.md'),
     sharedMemory: path.join(config.dataDir, 'shared'),
   };
 }

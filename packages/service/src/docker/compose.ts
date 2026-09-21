@@ -81,6 +81,9 @@ export function userVolumes(config: IcarusConfig, user: UserConfig): string[] {
     bind(paths.piAgent, '/home/node/.pi/agent'),
     bind(paths.agentsMd, '/workspace/AGENTS.md', 'ro'),
     bind(paths.icarusMd, '/workspace/icarus.md', 'ro'),
+    // Инструкция по Maple монтируется только когда сервер настроен: пустой файл
+    // или каталог на его месте только путали бы агента.
+    ...(config.mcp?.maple ? [bind(paths.mapleMd, '/workspace/MAPLE.md', 'ro')] : []),
     ...config.mounts.map((mount) => bind(mount.host, mount.container, mount.mode === 'ro' ? 'ro' : undefined)),
   ];
 }
