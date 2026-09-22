@@ -115,8 +115,18 @@ export async function runSuite(options: RunOptions): Promise<{ outcomes: Outcome
   } else {
     fs.writeFileSync(resultsFile, '');
   }
-  const answered = new Set(previous.map((outcome) => `${outcome.id}#${outcome.repeat}`));
-  const outcomes: Outcome[] = [...previous];
+  // Задачи, упавшие по инфраструктуре (таймаут, 5xx), при продолжении
+  // переспрашиваются: их «ответ» ничего не говорит о модели. Готовые ответы
+  // остаются, а файл перезаписывается без старых ошибок, чтобы в нём не было
+  // двух строк на одну задачу.
+  const kept = previous.filter((outcome) => outcome.error === null);
+  const retried = previous.length - kept.length;
+  if (retried > 0) {
+    fs.writeFileSync(resultsFile, kept.map((outcome) => JSON.stringify(outcome)).join('\n') + (kept.length ? '\n' : ''));
+    log(`повторяю упавшие по инфраструктуре: ${retried}`);
+  }
+  const answered = new Set(kept.map((outcome) => `${outcome.id}#${outcome.repeat}`));
+  const outcomes: Outcome[] = [...kept];
 
   const allTasks: Array<{ problem: Problem; repeat: number }> = [];
   for (const problem of options.problems) {

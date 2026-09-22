@@ -50,6 +50,13 @@ SYMPY_REF = re.compile(r"ASyMOB SymPy: (.*)$", re.S)
 # `y(x)=…`, `f(x)=…`, `y=…` — обёртка вокруг ответа, а не часть ответа.
 RELATION = re.compile(r"^\s*([A-Za-z]\w*)\s*(?:\([^()]{0,20}\))?\s*=\s*(?=\S)(.+)$", re.S)
 
+# Метка финального ответа. Агент пишет прозу до неё («радиус сходимости равен …»),
+# и без отсечения математика извлекается из середины фразы.
+ANSWER_MARK = re.compile(r"(?:Ответ|Answer|Итог|Итого|Результат|Final answer)\s*[:：]", re.I)
+
+# Одиночный знак равенства: `<=`, `>=`, `!=`, `==`, `:=`, `\le`, `\ge` — не он.
+RHS_SPLIT = re.compile(r"(?<![<>=!:\\])=(?!=)")
+
 SPECIAL = ("E", "pi", "I", "oo")
 
 # Сколько секунд даём SymPy на одно сравнение. Ответы бывают в сотни килобайт
@@ -103,8 +110,19 @@ def gold_expression(reference: str):
 
 
 def prepared(text: str) -> str:
-    match = RELATION.match(text.strip())
-    return match.group(2).strip() if match else text.strip()
+    r"""Хвост после последней метки ответа, без обёртки `y(x)=` и `\operatorname`."""
+    marks = list(ANSWER_MARK.finditer(text))
+    tail = text[marks[-1].end():] if marks else text
+    # `\operatorname{artanh}` SymPy не знает — снимаем обёртку.
+    tail = re.sub(r"\\operatorname\{([A-Za-z]+)\}", r"\1", tail)
+    match = RELATION.match(tail.strip())
+    return match.group(2).strip() if match else tail.strip()
+
+
+def textual_rhs(text: str) -> str | None:
+    """Правая часть уравнения — откат для случаев, которые не разбираются."""
+    parts = [part for part in RHS_SPLIT.split(text) if part.strip()]
+    return parts[-1].strip() if len(parts) > 1 else None
 
 
 def as_expr(candidate):
@@ -232,16 +250,34 @@ def candidates_from(text: str) -> list:
     (в нём уже есть `\\[…\\]`).
     """
     plain = prepared(text)
-    for variant in (f"${plain}$", text):
-        if not variant.strip():
+    # Если ответ записан уравнением, годится и целое уравнение, и его стороны:
+    # `\int f dx = F + C` и `R = e^2/4` — это ответы, а не условия.
+    # Цепочка равенств — это тоже ответ, но её части могут быть разными: берём
+    # все части по верхнеуровневым `=`, а не только последнюю (агент иногда
+    # последним шагом сам себе противоречит, а верная форма стоит раньше).
+    attempts = [plain]
+    parts = [part.strip() for part in RHS_SPLIT.split(plain) if part.strip()]
+    if len(parts) > 1:
+        attempts.extend(reversed(parts))
+    rhs = textual_rhs(plain)
+    if rhs and rhs not in attempts:
+        attempts.append(rhs)
+    for attempt in attempts:
+        if not attempt.strip():
             continue
-        try:
-            parsed = parse(variant, extraction_config=PARSE_CONFIG)
-        except Exception:  # noqa: BLE001 — битый LaTeX это не падение грейдера
-            parsed = []
-        found = [item for item in (as_expr(candidate) for candidate in parsed) if item is not None]
-        if found:
-            return found
+        for variant in (f"${attempt}$", attempt):
+            try:
+                parsed = parse(variant, extraction_config=PARSE_CONFIG)
+            except Exception:  # noqa: BLE001 — битый LaTeX это не падение грейдера
+                parsed = []
+            found = [item for item in (as_expr(candidate) for candidate in parsed) if item is not None]
+            if found:
+                sides = []
+                for item in found:
+                    for side in (getattr(item, "rhs", None), getattr(item, "lhs", None)):
+                        if side is not None:
+                            sides.append(side)
+                return found + sides
     return []
 
 
