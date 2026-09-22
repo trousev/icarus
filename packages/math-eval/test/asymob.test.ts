@@ -105,6 +105,17 @@ test('промпт повторяет запрет на код из ASyMOB и п
   assert.match(prompt, /prefixed by "Answer:"/);
 });
 
+test('режим tools не запрещает вычисления, но строку Answer оставляет', () => {
+  const prompt = buildPrompt('Compute the integral $\\int x^2 e^x dx$', 'tools');
+  assert.match(prompt, /may use any available tools/);
+  assert.ok(!prompt.includes('do not use code'), 'в режиме tools запрета быть не должно');
+  assert.match(prompt, /prefixed by "Answer:"/);
+  // задача в обоих режимах одна и та же — меняется только разрешение на инструменты
+  const nocode = buildPrompt('Compute the integral', 'nocode');
+  assert.match(nocode, /Compute the integral/);
+  assert.match(prompt, /Compute the integral/);
+});
+
 test('задача получает id с темой и семейством и эталон в LaTeX', () => {
   const problem = toProblem(row('numeric-random', 'Differential Equations'));
   assert.match(problem.id, /^asymob-differential-equations-numeric-all-2-s-\d+$/);

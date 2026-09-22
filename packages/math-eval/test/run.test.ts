@@ -136,3 +136,80 @@ test('прогон против заглушки: свой разговор на
     server.close();
   }
 });
+
+test('прерванный прогон продолжается с места обрыва', async () => {
+  const dir = tmp('math-eval-resume-');
+  const suiteFile = path.join(dir, 'suite.jsonl');
+  fs.writeFileSync(
+    suiteFile,
+    [
+      JSON.stringify({ id: 'a', category: 'test', tier: 'full', kind: 'answer', question: 'сколько 1+1?', answers: ['2'] }),
+      JSON.stringify({ id: 'b', category: 'test', tier: 'full', kind: 'answer', question: 'сколько 2+2?', answers: ['4'] }),
+    ].join('\n') + '\n',
+  );
+
+  const outDir = path.join(dir, 'out');
+  fs.mkdirSync(outDir, { recursive: true });
+  // Первая задача «уже отвечена» прошлым прогоном — её не должно быть в запросах.
+  fs.writeFileSync(
+    path.join(outDir, 'results.jsonl'),
+    `${JSON.stringify({
+      id: 'a',
+      category: 'test',
+      arm: 'test-arm',
+      repeat: 1,
+      ok: true,
+      reason: 'сошлось',
+      extracted: '2',
+      expected: ['2'],
+      content: 'Ответ: 2',
+      reasoning: '',
+      ms: 1,
+      mapleSteps: 0,
+      usage: null,
+      error: null,
+    })}\n`,
+  );
+
+  let calls = 0;
+  const server = http.createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on('data', (part: Buffer) => chunks.push(part));
+    request.on('end', () => {
+      calls += 1;
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'Ответ: 4' } }] }));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = (server.address() as AddressInfo).port;
+
+  try {
+    const { outcomes } = await runSuite({
+      suite: suiteFile,
+      problems: selectProblems(loadSuite(suiteFile), { tier: 'all' }),
+      target: 'icarus',
+      baseUrl: `http://127.0.0.1:${port}`,
+      apiKey: 'k',
+      user: 'probe',
+      model: 'icarus',
+      arm: 'test-arm',
+      repeat: 1,
+      timeoutMs: 10_000,
+      concurrency: 1,
+      outDir,
+      mapleDir: null,
+      grader: 'strict',
+      resume: true,
+    });
+    assert.equal(calls, 1, 'уже отвеченную задачу переспрашивать нельзя');
+    assert.deepEqual(
+      outcomes.map((outcome) => outcome.id),
+      ['a', 'b'],
+      'в отчёт должны попасть и прежние, и новые задачи',
+    );
+    assert.ok(outcomes.every((outcome) => outcome.ok));
+  } finally {
+    server.close();
+  }
+});

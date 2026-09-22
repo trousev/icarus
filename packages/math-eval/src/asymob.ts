@@ -159,19 +159,33 @@ export function sampleAsymob(rows: AsymobRow[], options: SampleOptions): AsymobR
 // Промпт и задача
 
 /**
- * Формулировка как в ASyMOB: сама задача плюс их же запрет на код. Своя строка
- * только одна — просьба закончить ответ строкой `Answer:`, иначе ответ нечем
- * извлекать; на математику она не влияет.
+ * Формулировка задачи. Два режима, и путать их нельзя:
+ *
+ * - `nocode` — как в ASyMOB: их же запрет на код. Это единственный режим, в
+ *   котором рука «чистая модель» сравнима с публикацией.
+ * - `tools` — без запрета: для агента, у которого Maple и есть инструмент.
+ *   В режиме `nocode` агент честно подчиняется человеку и не зовёт Maple вообще,
+ *   так что измерить вклад движка на нём невозможно.
+ *
+ * Своя строка в обоих режимах ровно одна — просьба закончить ответ строкой
+ * `Answer:`; иначе ответ нечем извлекать, на математику она не влияет.
  */
-export function buildPrompt(challenge: string): string {
-  return [
-    'Solve the following problem.',
-    '',
-    challenge.trim(),
-    '',
-    "Assume you don't have access to a computer, and do not use code to solve the question.",
-    'End your response with the final answer in LaTeX on a separate line, prefixed by "Answer:".',
-  ].join('\n');
+export function buildPrompt(challenge: string, mode: PromptMode = 'nocode'): string {
+  const lines = ['Solve the following problem.', '', challenge.trim(), ''];
+  if (mode === 'maple') {
+    lines.push(
+      'Solve it with the Maple tools (mcp_maple_*) — compute and verify with Maple, do not calculate in your head —',
+      'and report what Maple returned. If Maple did not compute it, say so instead of inventing an answer.',
+    );
+  } else {
+    lines.push(
+      mode === 'tools'
+        ? 'You may use any available tools — including a computer algebra system — to compute or check the answer.'
+        : "Assume you don't have access to a computer, and do not use code to solve the question.",
+    );
+  }
+  lines.push('End your response with the final answer in LaTeX on a separate line, prefixed by "Answer:".');
+  return lines.join('\n');
 }
 
 function slug(value: string): string {
@@ -181,9 +195,11 @@ function slug(value: string): string {
     .replace(/^-|-$/g, '');
 }
 
+export type PromptMode = 'nocode' | 'tools' | 'maple';
+
 export type AsymobManifestEntry = { id: string; group: Group; variation: string; topic: string; index: string };
 
-export function toProblem(row: AsymobRow): Problem {
+export function toProblem(row: AsymobRow, mode: PromptMode = 'nocode'): Problem {
   const group = groupOf(row.Variation);
   if (!group) throw new Error(`строка ${row.Index}: семейство «${row.Variation}» не поддержано`);
   // У возмущённых семейств LaTeX-эталон пустой: он есть только в синтаксисе SymPy.
@@ -196,7 +212,7 @@ export function toProblem(row: AsymobRow): Problem {
     category: row.Category,
     tier: 'full',
     kind: 'answer',
-    question: buildPrompt(row.Challenge),
+    question: buildPrompt(row.Challenge, mode),
     answers: [reference],
     verify: sympy ? `ASyMOB SymPy: ${sympy}` : `ASyMOB: ${row.Source.split('\n')[0]}`,
     notes: `${group} / ${row.Variation}`,
@@ -220,11 +236,13 @@ const USAGE = `sample-asymob — стратифицированный сэмпл
   --out <файл>     куда писать JSONL (по умолчанию runtime/math-eval/suites/asymob-400.jsonl)
   --manifest <файл>  карта id → семейство/тема (по умолчанию рядом с --out, .manifest.json)
   --seed <строка>  зерно выборки (по умолчанию asymob-1); тем же зерном — тот же набор
+  --prompt <nocode|tools|maple>  запрет на код как в ASyMOB, разрешение инструментов
+                   или явная инструкция считать через Maple (по умолчанию nocode)
   --total <n>      сколько задач (по умолчанию 400; доли групп сохраняются)
   --help           эта справка
 `;
 
-type Cli = { input: string; out: string; manifest: string; seed: string; total: number };
+type Cli = { input: string; out: string; manifest: string; seed: string; total: number; prompt: PromptMode };
 
 function parseArgv(argv: string[]): Cli | 'help' {
   const flags = new Map<string, string>();
@@ -245,6 +263,7 @@ function parseArgv(argv: string[]): Cli | 'help' {
     manifest: flags.get('manifest') ?? out.replace(/\.jsonl$/, '') + '.manifest.json',
     seed: flags.get('seed') ?? 'asymob-1',
     total: Number(flags.get('total') ?? 400),
+    prompt: (flags.get('prompt') ?? 'nocode') as PromptMode,
   };
 }
 
@@ -265,17 +284,20 @@ function main(argv: string[]): number {
     return 0;
   }
   if (!Number.isInteger(parsed.total) || parsed.total <= 0) throw new Error('--total: ожидаю целое больше нуля');
+  if (parsed.prompt !== 'nocode' && parsed.prompt !== 'tools' && parsed.prompt !== 'maple') {
+    throw new Error(`--prompt: ожидаю nocode, tools или maple, а не «${parsed.prompt}»`);
+  }
 
   const weights = scaleWeights(parsed.total);
   const rows = loadAsymob(parsed.input);
   const sample = sampleAsymob(rows, { seed: parsed.seed, weights });
-  const problems = sample.map(toProblem);
+  const problems = sample.map((row) => toProblem(row, parsed.prompt));
   const manifest = sample.map(manifestEntry);
 
   fs.mkdirSync(path.dirname(parsed.out), { recursive: true });
   const header = [
     '# Сэмпл ASyMOB (CC BY-SA 4.0, https://huggingface.co/datasets/Shalyt/ASyMOB-Algebraic_Symbolic_Mathematical_Operations_Benchmark).',
-    `# зерно выборки: ${parsed.seed}; задач: ${problems.length}; сиды (Original) исключены.`,
+    `# зерно выборки: ${parsed.seed}; задач: ${problems.length}; сиды (Original) исключены; промпт: ${parsed.prompt}.`,
     '# Группы: ' + Object.entries(weights).map(([group, count]) => `${group}=${count}`).join(', '),
   ];
   fs.writeFileSync(parsed.out, `${header.join('\n')}\n${problems.map((problem) => JSON.stringify(problem)).join('\n')}\n`);

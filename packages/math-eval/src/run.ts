@@ -45,6 +45,8 @@ export type RunOptions = {
   outDir: string;
   mapleDir: string | null;
   grader: 'strict' | 'maple';
+  /** Продолжить прерванный прогон: готовые задачи не переспрашиваются. */
+  resume?: boolean;
   oracle?: AnswerOracle;
   log?: (line: string) => void;
 };
@@ -94,17 +96,38 @@ export async function runSuite(options: RunOptions): Promise<{ outcomes: Outcome
   const startedAt = new Date().toISOString();
   fs.mkdirSync(options.outDir, { recursive: true });
   const resultsFile = path.join(options.outDir, 'results.jsonl');
-  fs.writeFileSync(resultsFile, '');
 
   const log = options.log ?? (() => {});
   const stamp = Date.now().toString(36);
-  const outcomes: Outcome[] = [];
-  const tasks: Array<{ problem: Problem; repeat: number }> = [];
-  for (const problem of options.problems) {
-    for (let repeat = 1; repeat <= options.repeat; repeat += 1) tasks.push({ problem, repeat });
+
+  // Продолжение прерванного прогона: длинные замеры рвутся (сессия, сеть), а
+  // каждая задача стоит денег — поэтому готовое перечитываем, а не выбрасываем.
+  const previous: Outcome[] = [];
+  if (options.resume && fs.existsSync(resultsFile)) {
+    for (const line of fs.readFileSync(resultsFile, 'utf8').split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        previous.push(JSON.parse(line) as Outcome);
+      } catch {
+        // Битая строка — как будто задачи и не было: она будет спрошена заново.
+      }
+    }
+  } else {
+    fs.writeFileSync(resultsFile, '');
   }
-  const total = tasks.length;
-  let done = 0;
+  const answered = new Set(previous.map((outcome) => `${outcome.id}#${outcome.repeat}`));
+  const outcomes: Outcome[] = [...previous];
+
+  const allTasks: Array<{ problem: Problem; repeat: number }> = [];
+  for (const problem of options.problems) {
+    for (let repeat = 1; repeat <= options.repeat; repeat += 1) allTasks.push({ problem, repeat });
+  }
+  const tasks = allTasks.filter(({ problem, repeat }) => !answered.has(`${problem.id}#${repeat}`));
+  const skipped = allTasks.length - tasks.length;
+  if (skipped > 0) log(`продолжаю прогон: ${skipped} задач уже отвечено, осталось ${tasks.length}`);
+
+  const total = allTasks.length;
+  let done = skipped;
 
   await mapWithConcurrency(tasks, options.concurrency, async ({ problem, repeat }) => {
     const conversationId = `${options.arm}-${problem.id}-${stamp}-r${repeat}`;
@@ -201,6 +224,7 @@ type CliOptions = {
   dryRun: boolean;
   skipHealth: boolean;
   requireAll: boolean;
+  resume: boolean;
 };
 
 const USAGE = `math-eval — прогон набора математических задач против Икара или провайдера.
@@ -234,6 +258,7 @@ const USAGE = `math-eval — прогон набора математическ�
   --maple-dir <путь>   каталог журналов Maple человека (для подсчёта шагов; только рука icarus)
   --maple-bin <путь>   бинарь Maple для сверки ответов (включает --grader maple)
   --grader <strict|maple>  strict — строки и числа, maple — simplify(разность)=0
+  --resume             продолжить прерванный прогон: готовые задачи не переспрашивать
   --dry-run            показать задачи и выйти, ничего не спрашивая
   --skip-health        не проверять, жив ли эндпоинт
   --require-all        выйти с кодом 1, если хоть одна задача не сошлась
@@ -242,7 +267,7 @@ const USAGE = `math-eval — прогон набора математическ�
 
 function parseArgv(argv: string[]): CliOptions | 'help' {
   const flags = new Map<string, string>();
-  const booleans = new Set(['dry-run', 'skip-health', 'require-all', 'help']);
+  const booleans = new Set(['dry-run', 'skip-health', 'require-all', 'resume', 'help']);
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (!arg.startsWith('--')) throw new Error(`не понимаю аргумент «${arg}»`);
@@ -314,6 +339,7 @@ function parseArgv(argv: string[]): CliOptions | 'help' {
     dryRun: flags.has('dry-run'),
     skipHealth: flags.has('skip-health'),
     requireAll: flags.has('require-all'),
+    resume: flags.has('resume'),
   };
 }
 
@@ -402,6 +428,7 @@ async function main(): Promise<number> {
     outDir: parsed.outDir,
     mapleDir: parsed.mapleDir,
     grader,
+    resume: parsed.resume,
     ...(oracle ? { oracle } : {}),
     log: (line) => process.stdout.write(`${line}\n`),
   });
