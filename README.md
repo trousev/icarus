@@ -193,6 +193,10 @@ BRAVE_API_KEY=...         # необязательная альтернатив�
 ./script/lint && ./script/test
 ```
 
+Замеры на бенчмарках в CI не гоняются: они ходят в платные API, требуют
+`math-verify` и (для руки Икара) Maple. Стенд — `packages/math-eval`, инструкция с
+командами и правилами сверки — [`BENCHMARKS.md`](BENCHMARKS.md).
+
 `eslint` идёт с базовым набором правил самого ESLint (`js.configs.recommended`) и с node-глобалями
 для `.js`/`.mjs` — иначе правила typescript-eslint не ловят ни `no-duplicate-case`, ни
 `no-fallthrough`, ни `no-useless-assignment`. `shellcheck` нужен только шагу `shell`: машина без
@@ -290,6 +294,7 @@ GitHub по SSH заходит на `trousev.pro` под `trousev`, обновл
 script/               команды разработчика: update, test, lint, server, redeploy, regenerate_user_passwords
 packages/service/     сервис: HTTP, сессии pi, контейнеры, панель памяти
 packages/extensions/  расширения pi, которые живут в контейнере пользователя
+packages/math-eval/   стенд для замеров на ASyMOB: сэмплер, прогон, грейдер (см. BENCHMARKS.md)
 docker/user/          образ контейнера пользователя
 docker/service/       образ самого icarus: node, git и клиент docker
 docker/librechat/     стенд для проверки стыка с LibreChat
@@ -303,6 +308,7 @@ tools/rpc-probe.mjs   отладочный клиент к pi по RPC
 - [`PLAN.md`](PLAN.md) — план, решения интервью, итоги этапов M0–M3 и найденные грабли.
 - [`specs/M1-service.md`](specs/M1-service.md) — границы и критерии готовности сервиса.
 - [`icarus.md`](icarus.md) — характер Икара, он же системный промпт.
+- [`BENCHMARKS.md`](BENCHMARKS.md) — как гонять замеры на ASyMOB: команды, правила сверки, baseline.
 
 ## Лицензия
 
