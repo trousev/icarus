@@ -136,6 +136,9 @@ test('стек: контейнер человека — образ, маунты
   assert.equal(service.build, undefined, 'образ у людей общий — его собирает script/server, а не каждый сервис');
   assert.equal(service.container_name, 'icarus-user-probe');
   assert.equal(service.restart, 'unless-stopped');
+  // init обязателен: PID 1 у человека — `sleep infinity`, он не подбирает сирот, и
+  // брошенные ядра Maple (`mserver`) оставались зомби навсегда. tini их подчищает.
+  assert.equal(service.init, true, 'без init сироты (ядра Maple) копятся зомби');
   assert.deepEqual(service.labels, userLabels(config, probe(), PANEL_SECRET));
   assert.equal(service.labels['icarus.spec'], specFor(config, probe(), PANEL_SECRET));
   assert.ok(service.volumes.includes('/data/users/probe/memory:/workspace/memory'));

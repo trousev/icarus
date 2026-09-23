@@ -60,7 +60,7 @@ CLI `/opt/maple18/bin/maple`.
 node tools/maple-mcp/server.mjs              # stdio
 node tools/maple-mcp/server.mjs --http 8770  # Streamable HTTP на /mcp
 node tools/maple-mcp/test.mjs                # 27 проверок базовых возможностей
-node tools/maple-mcp/test-sessions.mjs       # 20 проверок журнала и простоев
+node tools/maple-mcp/test-sessions.mjs       # 25 проверок журнала, простоев и утечки процессов
 ```
 
 ## Настройки (переменные окружения)
@@ -90,6 +90,13 @@ node tools/maple-mcp/test-sessions.mjs       # 20 проверок журнал�
 - Runtime-ошибки видны по `Error,` и возвращаются как `isError`.
 - `quit`/`done`/`stop` на верхнем уровне блокируются — иначе сессия умрёт.
 - Таймаут убивает ядро; журнал остаётся, состояние вернётся.
+- **Maple — это два процесса**: обёртка `cmaple` (её pid возвращает `spawn`) и ядро
+  `mserver`, которое обёртка порождает сама. Гасим поэтому не процесс, а **группу
+  процессов**: Maple стартует с `detached: true` (это `setsid`), а остановка шлёт
+  сигнал всей группе. Иначе ядро переживает обёртку, осиротеет, а в контейнере
+  человека (PID 1 — `sleep infinity`, сирот он не подбирает) навсегда останется
+  зомби `[mserver] <defunct>` — таких за разговор копились сотни. На выходе сервер
+  добивает остатки групп, а контейнерам людей дополнительно включён `init: true`.
 - HTTP-транспорт — стандартный MCP Streamable HTTP (POST `/mcp`, ответ JSON или
   SSE по `Accept`, заголовок `Mcp-Session-Id`). Проверен официальным
   `@modelcontextprotocol/sdk` — тем же, что использует `pi-mcp-extension`.

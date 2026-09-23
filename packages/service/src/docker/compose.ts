@@ -276,6 +276,12 @@ export function renderCompose(config: IcarusConfig, options: ComposeOptions): st
       image: config.docker.image,
       container_name: name,
       restart: 'unless-stopped',
+      // У человека PID 1 — `sleep infinity` из образа, а он сирот не подбирает: любой
+      // процесс, переживший своего родителя, после смерти остаётся зомби навсегда.
+      // Так и копились `[mserver] <defunct>`: у Maple убили обёртку cmaple, ядро
+      // осиротело и, завершившись, висело зомби. init (tini) в роли PID 1 подчищает
+      // такие сироты — ровно как в контейнере сервиса ниже.
+      init: true,
       labels: userLabels(config, user, options.panelSecret),
       environment: containerEnv(config, user, options.panelSecret),
       volumes: userVolumes(config, user),
