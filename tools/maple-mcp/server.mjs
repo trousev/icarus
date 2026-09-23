@@ -149,13 +149,80 @@ function journalInfo(name) {
 const isRestart = (code) => /(^|\n)[ \t]*restart[ \t]*[:;]?[ \t]*(\n|$)/.test(code);
 
 // ─────────────────────────── запуск Maple ───────────────────────────
+//
+// Maple — это всегда ДВА процесса: обёртка `cmaple` (её pid возвращает spawn) и ядро
+// `mserver`, которое обёртка порождает сама. Убить одну обёртку мало: ядро остаётся
+// сиротой (проверено — после SIGTERM обёртке `mserver` живёт ещё секунды и падает по
+// SIGSEGV). В контейнере человека PID 1 — это `sleep infinity`, сирот он не подбирает,
+// поэтому каждый брошенный `mserver`, завершившись, навсегда остаётся зомби
+// (`[mserver] <defunct>`) — за разговор таких набирались сотни.
+//
+// Лечим у источника: каждое ядро запускаем в своей группе процессов (`detached: true`
+// — это setsid, лидер группы совпадает с pid обёртки, ядро наследует группу), а гасим
+// не процесс, а группу целиком. Тогда ядро умирает вместе с обёрткой и сирот не бывает.
 
 class MapleError extends Error {}
+
+/** Живые группы процессов Maple (pgid): нужны, чтобы подмести их на выходе. */
+const mapleGroups = new Set();
+
+/**
+ * Запуск Maple в отдельной группе процессов: `pid` ребёнка = pgid группы,
+ * в которой живут и обёртка `cmaple`, и ядро `mserver`.
+ */
+function spawnMaple(args, options = {}) {
+  const child = spawn(MAPLE_BIN, args, {
+    cwd: MAPLE_ROOT,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    detached: true,
+    ...options,
+  });
+  if (!child.pid) return child;
+  const pgid = child.pid;
+  mapleGroups.add(pgid);
+  child.once('close', () => {
+    // Обёртка вышла. Если в группе кто-то остался (ядро), добиваем: иначе он осиротеет,
+    // а в контейнере без reaper'а навсегда останется зомби. Живого ядра после выхода
+    // обёртки быть не должно — состояние сессии и так лежит в журнале.
+    if (mapleGroupAlive(pgid)) killMapleGroup(pgid, 'SIGKILL');
+    mapleGroups.delete(pgid);
+  });
+  return child;
+}
+
+/** Сигнал всей группе Maple — и обёртке, и ядру. `pgid` — это pid обёртки. */
+function killMapleGroup(pgid, signal) {
+  if (!pgid) return;
+  try {
+    process.kill(-pgid, signal);
+  } catch (e) {
+    // ESRCH — группа уже пуста, это нормальный конец. Остальное — повод для отладки.
+    if (e?.code !== 'ESRCH') log('не удалось послать', signal, 'группе', pgid, e?.message ?? e);
+  }
+}
+
+/** Жива ли ещё группа (сигнал 0 ничего не убивает, только проверяет). */
+function mapleGroupAlive(pgid) {
+  if (!pgid) return false;
+  try {
+    process.kill(-pgid, 0);
+    return true;
+  } catch (e) {
+    // EPERM — группа есть, но сигнал нам не разрешён: считаем живой.
+    return e?.code === 'EPERM';
+  }
+}
+
+// Аварийный выход (в том числе `process.exit` в bye): добиваем всё, что успели поднять.
+// Обработчик 'exit' обязан быть синхронным — process.kill как раз синхронный.
+process.on('exit', () => {
+  for (const pgid of mapleGroups) killMapleGroup(pgid, 'SIGKILL');
+});
 
 /** Одноразовый запуск Maple: файл со скриптом → stdout/stderr/код выхода. */
 function runMapleOnce(args, { timeoutMs = 30_000, input = null } = {}) {
   return new Promise((resolve) => {
-    const child = spawn(MAPLE_BIN, args, { cwd: MAPLE_ROOT, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawnMaple(args);
     const dec = new StringDecoder('utf8');
     let out = '';
     let err = '';
@@ -167,7 +234,8 @@ function runMapleOnce(args, { timeoutMs = 30_000, input = null } = {}) {
       resolve({ stdout: out, stderr: err, ...extra });
     };
     const timer = setTimeout(() => {
-      child.kill('SIGKILL');
+      // Группу, а не только обёртку: иначе ядро останется сиротой (см. spawnMaple).
+      killMapleGroup(child.pid, 'SIGKILL');
       finish({ timedOut: true, code: null, signal: 'SIGKILL' });
     }, timeoutMs);
     child.stdout.on('data', (d) => (out += dec.write(d)));
@@ -232,11 +300,7 @@ class MapleSession {
     if (!this.dead && this.proc) return;
     if (!existsSync(MAPLE_BIN)) throw new MapleError(`Maple не найден: ${MAPLE_BIN} (задайте MAPLE_BIN)`);
     log('start session', this.id);
-    const child = spawn(MAPLE_BIN, MAPLE_ARGS, {
-      cwd: MAPLE_ROOT,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: process.env,
-    });
+    const child = spawnMaple(MAPLE_ARGS, { env: process.env });
     this.proc = child;
     this.buf = '';
     this.decoder = new StringDecoder('utf8');
@@ -260,25 +324,23 @@ class MapleSession {
   }
 
   async stop() {
-    if (this.proc) {
-      const p = this.proc;
-      this.proc = null;
-      try {
-        p.stdin.end();
-      } catch {
-        // процесс мог умереть раньше нас — закрывать нечего
-      }
-      p.kill('SIGTERM');
-      setTimeout(() => {
-        try {
-          p.kill('SIGKILL');
-        } catch {
-          // уже мёртв — SIGKILL не нужен
-        }
-      }, 1500).unref?.();
-    }
     this.dead = true;
     this.restored = false;
+    if (!this.proc) return;
+    const p = this.proc;
+    this.proc = null;
+    try {
+      p.stdin.end();
+    } catch {
+      // процесс мог умереть раньше нас — закрывать нечего
+    }
+    // SIGTERM всей группе: ядро `mserver` — такой же её член, как обёртка `cmaple`.
+    killMapleGroup(p.pid, 'SIGTERM');
+    // Ядро в тяжёлом счёте SIGTERM может и не заметить: тогда добиваем группу.
+    // Проверяем именно группу — лидер к этому моменту уже мог выйти, а ядро нет.
+    setTimeout(() => {
+      if (mapleGroupAlive(p.pid)) killMapleGroup(p.pid, 'SIGKILL');
+    }, 1500).unref?.();
   }
 
   /** Ждём появления маркера в буфере либо таймаута. */

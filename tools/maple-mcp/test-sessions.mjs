@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // Тест «длинных» сессий Maple: состояние живёт в журнале и переживает
 // конец чата (перезапуск MCP-процесса) и принудительную остановку по простою.
+// Плюс проверка утечки процессов: ядро Maple не остаётся сиротой после остановки.
 //
 // Запуск: node tools/maple-mcp/test-sessions.mjs
-import { spawn } from 'node:child_process';
+import { spawn, execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { mkdtemp, rm, readFile } from 'node:fs/promises';
@@ -22,6 +23,47 @@ function check(name, cond, detail = '') {
   } else {
     failCount++;
     console.log(`  ❌ ${name}${detail ? `\n     ${detail.replace(/\n/g, '\n     ')}` : ''}`);
+  }
+}
+
+// ─── процессы Maple: следим за утечкой ──────────────────────────────────
+//
+// Maple — это всегда два процесса: обёртка `cmaple` (её pid возвращает spawn) и ядро
+// `mserver`, которое обёртка порождает сама. Если погасить только обёртку, ядро
+// осиротеет, а в контейнере человека PID 1 — `sleep infinity`, который сирот не
+// подбирает: каждый брошенный `mserver` остаётся зомби (`[mserver] <defunct>`) навсегда.
+// Поэтому сервер запускает Maple в отдельной группе процессов и гасит группу целиком.
+
+/** Живые процессы Maple: pid → { ppid, pgid, sid, comm }. */
+function mapleProcs() {
+  const out = execSync('ps -eo pid=,ppid=,pgid=,sid=,comm=', { encoding: 'utf8' });
+  const map = new Map();
+  for (const line of out.trim().split('\n')) {
+    const [pid, ppid, pgid, sid, comm] = line.trim().split(/\s+/);
+    if (comm === 'cmaple' || comm === 'mserver') map.set(pid, { ppid, pgid, sid, comm });
+  }
+  return map;
+}
+
+/** Кто ещё жив в группе процессов `pgid`. */
+function procsInGroup(pgid) {
+  const out = execSync('ps -eo pid=,pgid=', { encoding: 'utf8' });
+  return out
+    .trim()
+    .split('\n')
+    .map((l) => l.trim().split(/\s+/))
+    .filter(([, g]) => g === String(pgid))
+    .map(([p]) => p);
+}
+
+/** Ждём, пока группа опустеет: возвращаем тех, кто остался (пусто — хорошо). */
+async function waitGroupGone(pgid, ms) {
+  const deadline = Date.now() + ms;
+  for (;;) {
+    const left = pgid ? procsInGroup(pgid) : [];
+    if (left.length === 0) return [];
+    if (Date.now() > deadline) return left;
+    await new Promise((r) => setTimeout(r, 100));
   }
 }
 
@@ -183,6 +225,37 @@ console.log('\n5) Файлы журналов');
   check('журнал osc удалён после forget', !exists, f);
   const idle = await readFile(path.join(sessionDir, 'idle.jsonl'), 'utf8').then((t) => t.trim().split('\n').length).catch(() => 0);
   check('журнал idle на диске', idle >= 1, `${idle} записей`);
+}
+
+// ─── Утечка процессов: ядро Maple не остаётся сиротой ─────────────────────
+console.log('\n6) Утечка процессов: ядро не осиротеет после остановки');
+const baseline = new Set(mapleProcs().keys()); // чужой Maple на машине не наш
+const chat5 = makeClient({ MAPLE_TIMEOUT_SECONDS: '3' });
+await init(chat5);
+{
+  await chat5.tool('maple_evaluate_code', { code: 'leak := 1:', session: 'leak' });
+  const mine = [...mapleProcs()].filter(([pid]) => !baseline.has(pid));
+  const wrapper = mine.find(([, p]) => p.comm === 'cmaple');
+  check(
+    'ядро Maple работает в отдельной группе процессов',
+    Boolean(wrapper) && wrapper[1].pgid === wrapper[0] && wrapper[1].sid === wrapper[0],
+    `процессы: ${JSON.stringify(mine)}`,
+  );
+  const pgid = wrapper?.[1].pgid;
+
+  const timedOut = await chat5.tool('maple_evaluate_code', { code: 'while true do end do:', session: 'leak' });
+  check('зависший счёт убит по таймауту', timedOut.err && /timeout/.test(timedOut.text), timedOut.text);
+  const afterTimeout = await waitGroupGone(pgid, 6000);
+  check('после таймаута в группе не осталось ядра', afterTimeout.length === 0, `живы pid: ${afterTimeout.join(', ')}`);
+
+  // Новое ядро — и штатное завершение MCP (SIGTERM: так мост гасит процесс в конце чата).
+  const again = await chat5.tool('maple_evaluate_code', { code: 'leak2 := 2:', session: 'leak' });
+  check('сессия поднялась заново', !again.err, again.text);
+  const next = [...mapleProcs()].filter(([pid]) => !baseline.has(pid));
+  const pgid2 = next.find(([, p]) => p.comm === 'cmaple')?.[1].pgid;
+  chat5.child.kill('SIGTERM');
+  const afterBye = await waitGroupGone(pgid2, 6000);
+  check('штатное завершение MCP не оставляет живых ядер', afterBye.length === 0, `живы pid: ${afterBye.join(', ')}`);
 }
 
 console.log(`\nи т о г о: ${pass} ok, ${failCount} fail`);
