@@ -46,6 +46,19 @@ test('обычные разделы инструкции не задеты', () 
   assert.match(md, /Границы/);
 });
 
+// Исключение из правила «в AGENTS.md только указатель»: бюджет попыток. Замер на
+// 400 задачах ASyMOB показал, что MAPLE.md агент почти не читает (10 сессий из
+// 453), а зацикливается на невычислимом Maple всё равно — до 33 вызовов и обрывы
+// по таймауту. Останавливать цикл должно то, что всегда в системном промпте.
+test('бюджет попыток живёт в AGENTS.md, а не только в MAPLE.md', () => {
+  const md = renderAgentsMd(makeConfig({ mcp: { maple: { command: 'node' } } }));
+  assert.match(md, /Не зацикливайся/);
+  assert.match(md, /6 вызовов Maple/);
+
+  const maplemd = fs.readFileSync(path.join(import.meta.dirname, '..', '..', '..', 'MAPLE.md'), 'utf8');
+  assert.match(maplemd, /Бюджет попыток/, 'в MAPLE.md правило тоже должно быть — там оно подробное');
+});
+
 test('каталог математики монтируется постоянно и виден в раскладке', () => {
   const nobody = renderAgentsMd(makeConfig());
   assert.doesNotMatch(nobody, /workspace\/maple/, 'без Maple каталога математики нет');
