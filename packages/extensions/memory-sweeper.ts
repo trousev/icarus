@@ -29,7 +29,10 @@ const STATE = sweepStatePath(WORKSPACE);
 // Уборка идёт следом за разбором разговора: пусть сначала договорит экстрактор, иначе
 // два `git commit` в одной памяти столкнутся за index.lock.
 const QUIET_MS = Number(process.env.ICARUS_EXTRACT_AFTER_MS ?? 90_000) + 30_000;
-const TIMEOUT_MS = 120_000;
+// Уборка — один вызов модели со всей памятью сразу. Запрос дешёвый (~8,4k входных и
+// ~1,5k выходных токенов), но у DeepInfra огромный разброс: один и тот же вызов на
+// проде отвечал и 16 с, и 234 с. 120 с рубили медленный хвост, поэтому таймаут щедрый.
+const TIMEOUT_MS = 600_000;
 
 function log(message: string): void {
   process.stderr.write(`[memory-sweeper] ${message}\n`);
