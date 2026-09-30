@@ -5,15 +5,19 @@
 // собрано всё остальное — сбор файлов, промпт, разбор плана и его применение.
 //
 // Главный принцип: уборка НЕ удаляет информацию. Строку можно перенести на другую
-// полку или переформулировать/датировать, но не выбросить. Любая непонятная ситуация
-// (неизвестный файл, строка не найдена, мусорный JSON) оставляет память нетронутой.
+// полку или переформулировать/датировать, но не выбросить. Поэтому строку адресуют не
+// текстом, а парой «номер строки + дословная цитата»: номер — основной ключ, цитата —
+// проверка, что он не уехал. Не сошлось — пункт пропускается, а не правит соседнюю
+// строку; остальной план при этом применяется, а не отменяется целиком.
 import fs from 'node:fs';
 import path from 'node:path';
 import { isAllowedTarget, isDuplicate, squash } from '../memory-extractor.ts';
 
 export type SweepFile = { path: string; content: string };
-export type SweepMove = { from: string; line: string; to: string; append?: string };
-export type SweepRewrite = { file: string; from: string; to: string };
+/** Адрес строки: номер из промпта (с 1) и её дословный текст. */
+export type SweepAnchor = { index?: number; quote: string };
+export type SweepMove = { from: string; to: string; append?: string } & SweepAnchor;
+export type SweepRewrite = { file: string; to: string } & SweepAnchor;
 export type SweepPlan = { moves: SweepMove[]; rewrites: SweepRewrite[]; journal?: string };
 export type SweepResult = { changed: string[]; skipped: string[] };
 export type SweepState = { lastRunAt?: string };
@@ -27,6 +31,14 @@ export const DEFAULT_SWEEP_AFTER_HOURS = 24;
 /** Сравнение строк как в экстракторе: маркер списка и вёрстка не в счёт. */
 export function normalizeLine(line: string): string {
   return line.replace(/^\s*[-*]\s*/, '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+/**
+ * Модель иногда копирует строку вместе с номером из промпта («L12: - …») — номер
+ * частью текста не является, иначе якорь не сойдётся с файлом.
+ */
+export function withoutLineNumber(text: string): string {
+  return text.replace(/^\s*L\d+:\s?/i, '');
 }
 
 /** Строка-пункт: переносим и переписываем только пункты списка. */
@@ -87,7 +99,8 @@ export function collectMemoryFiles(root: string, now = new Date()): SweepFile[] 
 
 /**
  * Промпт уборки. Правила жёсткие намеренно: модель склонна «наводить порядок»
- * удалением, а нам нужен только перенос и переформулировка.
+ * удалением, а нам нужен только перенос и переформулировка. Строки пронумерованы:
+ * по номеру строка находится точно, а цитата нужна, чтобы поймать уехавший номер.
  */
 export function buildSweepPrompt(files: SweepFile[], today = new Date()): string {
   const date = `${String(today.getDate()).padStart(2, '0')}.${String(today.getMonth() + 1).padStart(2, '0')}.${today.getFullYear()}`;
@@ -97,15 +110,23 @@ export function buildSweepPrompt(files: SweepFile[], today = new Date()): string
         file.content.length > SWEEP_FILE_LIMIT
           ? `${file.content.slice(0, SWEEP_FILE_LIMIT).trimEnd()}\n… (файл длиннее, показано начало)`
           : file.content;
-      return `### ${file.path}\n${content}`;
+      const numbered = content
+        .split('\n')
+        .map((line, index) => `L${index + 1}: ${line}`)
+        .join('\n');
+      return `### ${file.path}\n${numbered}`;
     })
     .join('\n\n');
 
-  return `Ты — уборщик долговременной памяти. Ниже файлы памяти. Приведи их в порядок: уведи закрытое и длящееся из identity.md в проектные файлы, датируй изменчивое, сократи формулировки. Но не потеряй ни одного факта.
+  return `Ты — уборщик долговременной памяти. Ниже файлы памяти, строки пронумерованы. Приведи их в порядок: уведи закрытое и длящееся из identity.md в проектные файлы, датируй изменчивое, сократи формулировки. Но не потеряй ни одного факта.
+
+Как адресовать строку:
+- line — её номер из списка (например 12), quote — сама строка дословно, целиком, ровно как в файле.
+- Пункт применяется, только если quote совпадает со строкой под этим номером; если не совпало, пункт пропускается, а остальной план применяется. Поэтому копируй quote буквально, не пересказывай и не выдумывай номера.
 
 Что можно:
-- moves — перенести строку в другой файл. Поле line обязано дословно совпадать с существующей строкой, поле from — её файл. Поле append — новая формулировка строки в целевом файле; если текст менять не нужно, не указывай его.
-- rewrites — переписать строку на месте. Поле from обязано дословно совпадать с существующей строкой.
+- moves — перенести строку в другой файл. Поля: from — файл-источник, line и quote — адрес строки, to — целевой файл, append — новая формулировка строки в целевом файле; если текст менять не нужно, не указывай его.
+- rewrites — переписать строку на месте. Поля: file, line и quote — адрес строки, to — новая формулировка.
 - journal — одна строка о том, что убрано и перенесено.
 
 Чего нельзя:
@@ -120,7 +141,7 @@ export function buildSweepPrompt(files: SweepFile[], today = new Date()): string
 - Не дублируй: если в целевом файле уже есть та же мысль, не переноси её.
 
 Ответ строго одним JSON без пояснений:
-{"moves":[{"from":"identity.md","line":"- …","to":"projects/zdorovie.md","append":"- По состоянию на ${date}: …"}],"rewrites":[{"file":"identity.md","from":"- …","to":"- …"}],"journal":"что убрано"}
+{"moves":[{"from":"identity.md","line":12,"quote":"- …","to":"projects/zdorovie.md","append":"- По состоянию на ${date}: …"}],"rewrites":[{"file":"identity.md","line":7,"quote":"- …","to":"- …"}],"journal":"что убрано"}
 
 Сегодня ${date}.
 
@@ -128,10 +149,32 @@ export function buildSweepPrompt(files: SweepFile[], today = new Date()): string
 ${body}`;
 }
 
+/** Номер строки из плана: 12, "12" или "L12". Всё остальное — это цитата старого формата. */
+export function lineNumberOf(value: unknown): number | undefined {
+  if (typeof value === 'number') {
+    return Number.isInteger(value) && value >= 1 ? value : undefined;
+  }
+  if (typeof value !== 'string') return undefined;
+  const match = /^\s*L?(\d+)\s*$/i.exec(value);
+  if (!match) return undefined;
+  const number = Number(match[1]);
+  return number >= 1 ? number : undefined;
+}
+
 /**
- * Разбор плана уборки. Неизвестные полки и попытки удаления отбрасываются молча:
- * лучше сделать меньше, чем тронуть память непонятно как. Удаление — это перенос
- * без цели или переформулировка в пустую строку.
+ * Цитата-якорь. В новом формате это quote, в старом — сам line (у moves) или from
+ * (у rewrites). Без цитаты пункт бесполезен: вслепую по одному номеру память не правим.
+ */
+function anchorText(quote: unknown, legacy: unknown): string {
+  if (typeof quote === 'string' && quote.trim()) return squash(quote);
+  if (typeof legacy === 'string' && legacy.trim()) return squash(legacy);
+  return '';
+}
+
+/**
+ * Разбор плана уборки. Неизвестные полки, попытки удаления и пункты без якоря
+ * отбрасываются молча: лучше сделать меньше, чем тронуть память непонятно как.
+ * Удаление — это перенос без цели или переформулировка в пустую строку.
  */
 export function parseSweepPlan(raw: string): SweepPlan | null {
   const match = /\{[\s\S]*\}/.exec(raw);
@@ -150,13 +193,14 @@ export function parseSweepPlan(raw: string): SweepPlan | null {
     for (const item of source.moves) {
       if (!item || typeof item !== 'object') continue;
       const record = item as Record<string, unknown>;
-      const { from, line, to, append } = record;
-      if (typeof from !== 'string' || typeof line !== 'string' || typeof to !== 'string') continue;
+      const { from, to, append } = record;
+      if (typeof from !== 'string' || typeof to !== 'string') continue;
       if (!isAllowedTarget(from) || !isAllowedTarget(to)) continue;
-      const text = squash(line);
-      if (!text) continue;
+      const index = lineNumberOf(record.line);
+      const quote = anchorText(record.quote, index === undefined ? record.line : undefined);
+      if (!quote) continue;
       const next = typeof append === 'string' ? squash(append) : '';
-      moves.push({ from: from.trim(), line: text, to: to.trim(), append: next || undefined });
+      moves.push({ from: from.trim(), index, quote, to: to.trim(), append: next || undefined });
     }
   }
 
@@ -164,13 +208,15 @@ export function parseSweepPlan(raw: string): SweepPlan | null {
   if (Array.isArray(source.rewrites)) {
     for (const item of source.rewrites) {
       if (!item || typeof item !== 'object') continue;
-      const { file, from, to } = item as Record<string, unknown>;
-      if (typeof file !== 'string' || typeof from !== 'string' || typeof to !== 'string') continue;
+      const record = item as Record<string, unknown>;
+      const { file, from, to } = record;
+      if (typeof file !== 'string' || typeof to !== 'string') continue;
       if (!isAllowedTarget(file)) continue;
-      const before = squash(from);
+      const index = lineNumberOf(record.line);
+      const quote = anchorText(record.quote, typeof from === 'string' ? from : record.line);
       const after = squash(to);
-      if (!before || !after) continue;
-      rewrites.push({ file: file.trim(), from: before, to: after });
+      if (!quote || !after) continue;
+      rewrites.push({ file: file.trim(), index, quote, to: after });
     }
   }
 
@@ -187,9 +233,10 @@ function appendBullet(lines: string[], line: string): void {
 }
 
 /**
- * Применяет план. Сначала все проверки и правки в памяти, запись на диск — в самом
- * конце: ошибка на любом шаге означает, что не изменён ни один файл. Ровно поэтому
- * функция бросает исключение, а не возвращает половину применённого плана.
+ * Применяет план. Строку ищет по номеру из промпта и сверяет с цитатой: не сошлось —
+ * пункт пропускается, остальные применяются (факт остаётся на месте, терять нечего).
+ * Правки идут в памяти, запись на диск — в самом конце, чтобы сбой записи не оставил
+ * половину уборки.
  */
 export function applySweepPlan(root: string, plan: SweepPlan, now = new Date()): SweepResult {
   const changed: string[] = [];
@@ -217,15 +264,42 @@ export function applySweepPlan(root: string, plan: SweepPlan, now = new Date()):
     }
   };
 
-  const findLine = (lines: string[], needle: string): number => {
-    const target = normalizeLine(needle);
-    return lines.findIndex((line) => normalizeLine(line) === target);
+  /** Файл может быть неизвестен или не читаться — это повод пропустить пункт, не план. */
+  const tryLines = (rel: string, create = false): string[] | null => {
+    try {
+      return linesOf(rel, create);
+    } catch {
+      return null;
+    }
+  };
+
+  /**
+   * Номер строки под якорь. Номер из промпта — основной ключ, но применяем его, только
+   * если цитата совпала: иначе номер мог уехать (файл дописали) и правка попадёт не туда.
+   * Запасной путь — поиск по цитате, и только если такая строка в файле ровно одна:
+   * при дублях непонятно, какую править, а угадывать в памяти нельзя.
+   */
+  const resolveLine = (lines: string[], anchor: SweepAnchor): number => {
+    const needle = normalizeLine(withoutLineNumber(anchor.quote));
+    if (!needle) return -1;
+    if (anchor.index !== undefined) {
+      const at = anchor.index - 1;
+      if (at >= 0 && at < lines.length && normalizeLine(lines[at]) === needle) return at;
+    }
+    const found: number[] = [];
+    for (let index = 0; index < lines.length; index += 1) {
+      if (normalizeLine(lines[index]) === needle) found.push(index);
+    }
+    return found.length === 1 ? found[0] : -1;
   };
 
   for (const move of plan.moves) {
-    const fromLines = linesOf(move.from);
-    const index = findLine(fromLines, move.line);
-    if (index < 0) throw new Error(`строка не найдена в ${move.from}: ${move.line}`);
+    const fromLines = tryLines(move.from);
+    const index = fromLines ? resolveLine(fromLines, move) : -1;
+    if (!fromLines || index < 0) {
+      skipped.push(move.from);
+      continue;
+    }
     // Без append переносим строку дословно — вместе с цитатой человека, если она есть.
     const movedLine = fromLines[index];
     const targetLine = move.append ? ensureBullet(move.append) : movedLine;
@@ -243,7 +317,11 @@ export function applySweepPlan(root: string, plan: SweepPlan, now = new Date()):
     // Цель проверяем ДО правки источника: похожая строка в цели — это повод пропустить
     // перенос, а не потерять факт. Сначала splice, потом проверка — и исходная строка
     // исчезла бы из источника, не появившись в цели.
-    const toLines = linesOf(move.to, true);
+    const toLines = tryLines(move.to, true);
+    if (!toLines) {
+      skipped.push(move.to);
+      continue;
+    }
     if (toLines.some((line) => normalizeLine(line) === normalizeLine(targetLine)) || isDuplicate(toLines, targetLine)) {
       skipped.push(move.to);
       continue;
@@ -253,9 +331,12 @@ export function applySweepPlan(root: string, plan: SweepPlan, now = new Date()):
   }
 
   for (const rewrite of plan.rewrites) {
-    const lines = linesOf(rewrite.file);
-    const index = findLine(lines, rewrite.from);
-    if (index < 0) throw new Error(`строка не найдена в ${rewrite.file}: ${rewrite.from}`);
+    const lines = tryLines(rewrite.file);
+    const index = lines ? resolveLine(lines, rewrite) : -1;
+    if (!lines || index < 0) {
+      skipped.push(rewrite.file);
+      continue;
+    }
     const next = ensureBullet(rewrite.to);
     if (normalizeLine(lines[index]) === normalizeLine(next)) {
       skipped.push(rewrite.file);
