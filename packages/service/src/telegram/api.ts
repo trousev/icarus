@@ -8,19 +8,50 @@ import { redact } from '../log.ts';
 export type TelegramUser = { id: number; username?: string; first_name?: string };
 export type TelegramChat = { id: number; type: string };
 
-/** Сообщение: текст и то, чем его заменяют (фото, голосовое, документ). */
+/** Фото: один и тот же кадр лестницей размеров, до последнего — сжатый JPEG. */
+export type TelegramPhotoSize = {
+  file_id: string;
+  width?: number;
+  height?: number;
+  file_size?: number;
+};
+
+export type TelegramDocument = {
+  file_id: string;
+  file_name?: string;
+  mime_type?: string;
+  file_size?: number;
+};
+
+/** Голосовое: у Telegram это всегда OGG/Opus, поэтому mime можно и не спрашивать. */
+export type TelegramVoice = {
+  file_id: string;
+  duration?: number;
+  mime_type?: string;
+  file_size?: number;
+};
+
+/**
+ * Сообщение: текст и то, чем его заменяют (фото, голосовое, документ). У вложения
+ * текст лежит не в `text`, а в подписи — `caption`.
+ */
 export type TelegramMessage = {
   message_id: number;
   chat: TelegramChat;
   from?: TelegramUser;
   text?: string;
-  photo?: unknown;
-  document?: unknown;
-  voice?: unknown;
+  caption?: string;
+  photo?: TelegramPhotoSize[];
+  document?: TelegramDocument;
+  voice?: TelegramVoice;
   video?: unknown;
+  video_note?: unknown;
   audio?: unknown;
   sticker?: unknown;
 };
+
+/** Файл в хранилище Telegram: качать его — отдельным запросом по `file_path`. */
+export type TelegramFile = { file_id: string; file_path?: string; file_size?: number };
 
 export type TelegramUpdate = { update_id: number; message?: TelegramMessage };
 export type SentMessage = { message_id: number };
@@ -28,6 +59,8 @@ export type SentMessage = { message_id: number };
 export const TELEGRAM_API_BASE = 'https://api.telegram.org';
 /** Сколько ждём ответ Bot API, если вызов не сказал иного. */
 export const TELEGRAM_TIMEOUT_MS = 30_000;
+/** Предел Bot API на скачивание: файл больше 20 МБ он не отдаёт вовсе. */
+export const TELEGRAM_FILE_LIMIT = 20 * 1024 * 1024;
 
 /** Ошибка Bot API: `{ok: false, error_code, description}`. */
 export class TelegramError extends Error {
@@ -132,6 +165,29 @@ export class TelegramApi {
         timeoutMs: (timeoutSeconds + 15) * 1000,
       },
     );
+  }
+
+  /**
+   * Путь к вложению в хранилище Telegram. Ссылка на файл живёт час, поэтому
+   * качаем сразу, а не откладываем.
+   */
+  getFile(fileId: string): Promise<TelegramFile> {
+    return this.call<TelegramFile>('getFile', { file_id: fileId });
+  }
+
+  /**
+   * Сам файл. Адрес другой, чем у методов Bot API (`/file/bot<токен>/<путь>`),
+   * и в ответе байты, а не JSON, поэтому мимо `call`. Токен в пути — секрет:
+   * в лог он не попадает (см. redact), а ошибки описываем без адреса.
+   */
+  async downloadFile(filePath: string): Promise<Buffer> {
+    const response = await this.request(`${this.baseUrl}/file/bot${this.token}/${filePath}`, {
+      signal: AbortSignal.timeout(this.timeoutMs),
+    });
+    if (!response.ok) {
+      throw new TelegramError('файл не скачался', response.status);
+    }
+    return Buffer.from(await response.arrayBuffer());
   }
 
   sendMessage(chatId: number, text: string): Promise<SentMessage> {

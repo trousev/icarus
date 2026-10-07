@@ -14,7 +14,7 @@
 // можно проверять тестами, а решения о запуске остаются в script/server.
 import path from 'node:path';
 import { stringify as stringifyYaml } from 'yaml';
-import { userContainer, userPaths, type IcarusConfig, type UserConfig } from '../config.ts';
+import { CONTAINER_INCOMING, userContainer, userPaths, type IcarusConfig, type UserConfig } from '../config.ts';
 import { containerEnv, LABEL_MANAGED, LABEL_SPEC, LABEL_USER, specFor } from './spec.ts';
 
 /** Имя compose-проекта: по этой метке compose отличает свои контейнеры от чужих. */
@@ -82,7 +82,7 @@ export function userVolumes(config: IcarusConfig, user: UserConfig): string[] {
     // Математика — персистентно и рядом с памятью: журналы сессий Maple и графики
     // не должны умирать вместе с MCP-мостом pi или пересозданием контейнера.
     ...(config.mcp?.maple ? [bind(paths.maple, '/workspace/maple')] : []),
-    bind(paths.incoming, '/workspace/incoming'),
+    bind(paths.incoming, CONTAINER_INCOMING),
     bind(paths.sessions, '/workspace/.sessions'),
     bind(paths.sharedMemory, '/workspace/shared-memory'),
     bind(paths.piAgent, '/home/node/.pi/agent'),

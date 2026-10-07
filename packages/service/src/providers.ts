@@ -9,7 +9,7 @@
 // Базовый адрес, протокол, способ подписи и метаданные модели — свойство провайдера,
 // а не выбора, и его место рядом с остальными знаниями о провайдерах (PROVIDER_ENV
 // в config.ts). Иначе каждый человек в своей копии конфига держал бы ещё и адрес API.
-import type { ModelConfig } from './config.ts';
+import { DEEPINFRA_BASE_URL, type ModelConfig } from './config.ts';
 
 /** Что pi должен знать о модели, чего нет в config.yaml. */
 type ModelMeta = {
@@ -98,7 +98,7 @@ function deepInfraModel(id: string): Record<string, unknown> {
 const CUSTOM_PROVIDERS: Record<string, (models: ModelConfig[]) => Record<string, unknown>> = {
   deepinfra: (models) => ({
     name: 'DeepInfra',
-    baseUrl: 'https://api.deepinfra.com/v1/openai',
+    baseUrl: DEEPINFRA_BASE_URL,
     api: 'openai-completions',
     // Ключ подставляется из окружения контейнера: .env уезжает туда целиком (env_file).
     apiKey: '$DEEPINFRA_API_KEY',

@@ -33,6 +33,8 @@ export function makeConfig(overrides: Partial<IcarusConfig> = {}): IcarusConfig 
     mcp: {},
     // Telegram-бот в тестах выключен: сеть и Bot API тут ни к чему.
     telegram: null,
+    // Распознавание голосовых тоже: тесты, которым оно нужно, задают его сами.
+    speech: null,
     users: [{ id: 'probe' }],
     ...overrides,
   };

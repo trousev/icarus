@@ -71,6 +71,22 @@ export type PanelConfig = {
   devUser?: string;
 };
 
+/**
+ * Распознавание речи: голосовые из Telegram модель не слышит, поэтому их сначала
+ * перекладывают в текст отдельной моделью провайдера (Whisper у DeepInfra). Ключ
+ * берётся из auth — тот же, что уехал в контейнер, так что новых секретов не нужно.
+ */
+export type SpeechConfig = {
+  provider: string;
+  /** id модели распознавания. */
+  model: string;
+  /** Язык диктовки — подсказка распознавателю; не задан, так определит сам. */
+  language?: string;
+  /** Базовый адрес OpenAI-совместимого API провайдера (метод /audio/transcriptions). */
+  baseUrl: string;
+  apiKey: string;
+};
+
 export type DockerConfig = {
   image: string;
   network?: string;
@@ -106,6 +122,8 @@ export type IcarusConfig = {
   mcp: Record<string, McpServerConfig>;
   /** Telegram-бот: null — выключен (нет токена или некому отвечать). */
   telegram: TelegramConfig | null;
+  /** Распознавание голосовых: null — выключено (нет ключа провайдера или отключено в конфиге). */
+  speech: SpeechConfig | null;
   users: UserConfig[];
 };
 
@@ -262,14 +280,43 @@ const PROVIDER_ENV: Record<string, string> = {
 };
 
 /**
+ * DeepInfra — единственный провайдер, описание которого нам приходится держать
+ * самим (см. providers.ts). Адрес один и на чат, и на распознавание речи: методы
+ * у OpenAI-совместимого API те же, отличается только путь.
+ */
+export const DEEPINFRA_BASE_URL = 'https://api.deepinfra.com/v1/openai';
+
+/**
+ * Где и чем расшифровывать голосовые — по имени провайдера из `speech`. Ключ берём
+ * из auth (или из окружения — тем же именем, что у моделей), отдельного секрета не
+ * заводим. У незнакомого провайдера ни адреса, ни модели не угадать: и то и другое
+ * задаётся в конфиге.
+ */
+export const SPEECH_PROVIDERS: Record<string, { baseUrl: string; model: string }> = {
+  deepinfra: { baseUrl: DEEPINFRA_BASE_URL, model: 'openai/whisper-large-v3' },
+  openai: { baseUrl: 'https://api.openai.com/v1', model: 'whisper-1' },
+  groq: { baseUrl: 'https://api.groq.com/openai/v1', model: 'whisper-large-v3' },
+};
+
+/** По умолчанию голосовые расшифровывает Whisper у DeepInfra: ключ уже есть в .env. */
+export const DEFAULT_SPEECH_PROVIDER = 'deepinfra';
+
+/**
+ * Ключ провайдера из окружения — одним списком имён на всех (PROVIDER_ENV).
+ */
+function keyFromEnv(provider: string, env: NodeJS.ProcessEnv): string {
+  const name = PROVIDER_ENV[provider];
+  return (name === undefined ? undefined : env[name])?.trim() ?? '';
+}
+
+/**
  * Ключи, которые уже лежат в окружении. Берём только провайдеров из models:
  * ключ от провайдера, которого в конфиге нет, в auth.json не нужен.
  */
 export function detectAuth(models: ModelConfig[], env: NodeJS.ProcessEnv = process.env): Record<string, string> {
   const auth: Record<string, string> = {};
   for (const provider of new Set(models.map((model) => model.provider))) {
-    const name = PROVIDER_ENV[provider];
-    const key = (name === undefined ? undefined : env[name])?.trim();
+    const key = keyFromEnv(provider, env);
     if (key) auth[provider] = key;
   }
   return auth;
@@ -506,6 +553,49 @@ function parsePanel(value: unknown, users: UserConfig[]): PanelConfig {
   };
 }
 
+/**
+ * Голосовые: чем расшифровывать. Блока в конфиге нет — берём Whisper у DeepInfra,
+ * чей ключ уже лежит в .env: голосовые должны работать без правки конфига, как и
+ * остальные модели. Отключить совсем — `speech: none` (или `false`).
+ *
+ * Ключа провайдера нет — распознавание выключается с записью в лог: сервис работает
+ * как раньше, а бот на голосовое отвечает, что не умеет, вместо тишины.
+ */
+function parseSpeech(value: unknown, env: NodeJS.ProcessEnv, auth: Record<string, string>): SpeechConfig | null {
+  const off = value === false || (typeof value === 'string' && value.trim().toLowerCase() === 'none');
+  if (off) {
+    log.info('распознавание голосовых выключено в конфиге (speech)');
+    return null;
+  }
+
+  const raw = value === undefined || value === null ? {} : asRecord(value, 'speech');
+  const provider = optionalString(raw.provider, 'speech.provider') ?? DEFAULT_SPEECH_PROVIDER;
+  const known = SPEECH_PROVIDERS[provider];
+  const language = optionalString(raw.language, 'speech.language');
+  const baseUrl = (optionalString(raw.baseUrl, 'speech.baseUrl') ?? known?.baseUrl ?? '').replace(/\/+$/, '');
+  const model = optionalString(raw.model, 'speech.model') ?? known?.model ?? '';
+  const hints = `известные провайдеры: ${Object.keys(SPEECH_PROVIDERS).join(', ')}`;
+
+  if (baseUrl === '') {
+    throw new Error(`speech.provider: «${provider}» — не знаю адреса распознавания, задай speech.baseUrl (${hints})`);
+  }
+  if (model === '') {
+    throw new Error(`speech.provider: «${provider}» — не знаю модели распознавания, задай speech.model (${hints})`);
+  }
+
+  // Ключ ищем и в auth, и прямо в окружении: распознавание — не модель, и его
+  // провайдера в `models` может не быть (перешли на другую модель для чата —
+  // голосовые от этого работать не перестают).
+  const apiKey = auth[provider] ?? keyFromEnv(provider, env);
+  if (apiKey === '') {
+    const where = PROVIDER_ENV[provider] ?? `auth.${provider}`;
+    log.info(`голосовые не расшифровываются: нет ключа ${provider} (положи ${where} в .env)`);
+    return null;
+  }
+
+  return { provider, model, baseUrl, apiKey, ...(language === undefined ? {} : { language }) };
+}
+
 export function loadConfig(file: string, env: NodeJS.ProcessEnv = process.env): IcarusConfig {
   const resolved = expandValue(file, env);
 
@@ -541,6 +631,7 @@ export function loadConfig(file: string, env: NodeJS.ProcessEnv = process.env): 
   const host = optionalString(raw.host, 'host') ?? '0.0.0.0';
   const port = numberOr(raw.port, 'port', 8081);
   const users = parseUsers(raw.users);
+  const auth = parseAuth(raw.auth, env, models);
 
   return {
     host,
@@ -559,11 +650,12 @@ export function loadConfig(file: string, env: NodeJS.ProcessEnv = process.env): 
       socket: socket ?? null,
     },
     models,
-    auth: parseAuth(raw.auth, env, models),
+    auth,
     env: stringMap(raw.env, 'env', env),
     mounts: parseMounts(raw.mounts, env),
     mcp: parseMcp(raw.mcp, env),
     telegram: parseTelegram(raw.telegram, raw.telegram_mapping, env, users),
+    speech: parseSpeech(raw.speech, env, auth),
     users,
   };
 }
@@ -578,6 +670,13 @@ export function findTelegramUser(config: IcarusConfig, username: string | undefi
   const id = config.telegram?.mapping[normalizeTelegramUsername(username)];
   return id === undefined ? undefined : findUser(config, id);
 }
+
+/**
+ * Куда контейнер человека видит каталог вложений (см. userVolumes в compose.ts).
+ * Путь нужен и сервису: вложение он кладёт на хост, а в реплику отдаёт уже этот
+ * адрес — иначе pi искал бы файл мимо.
+ */
+export const CONTAINER_INCOMING = '/workspace/incoming';
 
 /** Пути на хосте, которые сервис готовит и монтирует пользователю. */
 export function userPaths(config: IcarusConfig, user: UserConfig) {

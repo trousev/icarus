@@ -2,20 +2,36 @@
 // до чата. Сети и докера тут нет: Bot API, реестр сессий и сессия pi — заглушки.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import {
   KeyedQueue,
   TelegramBot,
+  NOTHING_TO_READ,
+  VOICE_EMPTY,
+  VOICE_NO_SPEECH,
+  attachmentFailed,
   compactText,
   conversationIdFor,
   isCommand,
+  unsupportedText,
+  voicePrompt,
   GREETING,
   NO_USERNAME,
-  TEXT_ONLY,
   UNKNOWN_COMMAND,
 } from '../src/telegram/bot.ts';
-import { TelegramApi, TelegramError, type TelegramUpdate } from '../src/telegram/api.ts';
+import {
+  TelegramApi,
+  TelegramError,
+  type TelegramPhotoSize,
+  type TelegramUpdate,
+} from '../src/telegram/api.ts';
 import { MESSAGE_LIMIT, PLACEHOLDER, splitPoint } from '../src/telegram/reply.ts';
-import { makeConfig } from './fixtures.ts';
+import { userPaths } from '../src/config.ts';
+import { makeConfig, probe } from './fixtures.ts';
+
+/** Байты, которые «скачались» из Telegram: содержимое в тестах не важно. */
+const JPEG = Buffer.from('не-совсем-jpeg');
 
 // --- Bot API ----------------------------------------------------------------
 
@@ -97,8 +113,11 @@ function fakeSession(steps: Step[] = ANSWER_STEPS) {
   return {
     busy: false,
     prompts: [] as string[],
-    async prompt(text: string) {
+    /** Что уехало модели картинками: base64 и mime, ровно как ждёт pi. */
+    images: [] as Array<Array<{ data: string; mimeType: string }>>,
+    async prompt(text: string, images: Array<{ data: string; mimeType: string }> = []) {
       this.prompts.push(text);
+      this.images.push(images);
       for (const step of steps) for (const listener of listeners) listener(step);
     },
     onEvent(listener: (event: Record<string, unknown>) => void) {
@@ -109,8 +128,14 @@ function fakeSession(steps: Step[] = ANSWER_STEPS) {
 }
 
 /** Чат глазами Telegram: сообщения заводятся отправкой и меняются правками. */
-function fakeApi() {
-  const state = { messages: [] as Array<{ chatId: number; id: number; text: string }>, nextId: 1, typing: 0 };
+function fakeApi(files: Record<string, Buffer> = {}) {
+  const state = {
+    messages: [] as Array<{ chatId: number; id: number; text: string }>,
+    nextId: 1,
+    typing: 0,
+    files: new Map(Object.entries(files)),
+    downloaded: [] as string[],
+  };
   const api = {
     async sendMessage(chatId: number, text: string) {
       const message = { chatId, id: state.nextId, text };
@@ -130,6 +155,16 @@ function fakeApi() {
     async getMe() {
       return { id: 1, username: 'the_icarus_bot' };
     },
+    async getFile(fileId: string) {
+      if (!state.files.has(fileId)) throw new TelegramError('file not found', 400);
+      return { file_id: fileId, file_path: `files/${fileId}`, file_size: state.files.get(fileId)?.length ?? 0 };
+    },
+    async downloadFile(filePath: string) {
+      state.downloaded.push(filePath);
+      const file = state.files.get(filePath.replace(/^files\//, ''));
+      if (!file) throw new TelegramError('файл не скачался', 404);
+      return file;
+    },
   } as unknown as TelegramApi;
   return { api, state };
 }
@@ -141,7 +176,17 @@ function chatText(state: ReturnType<typeof fakeApi>['state'], chatId: number): s
     .join('\n');
 }
 
-function makeBot(options: { steps?: Step[]; config?: ReturnType<typeof makeConfig>; compact?: unknown } = {}) {
+function makeBot(
+  options: {
+    steps?: Step[];
+    config?: ReturnType<typeof makeConfig>;
+    compact?: unknown;
+    /** Чем расшифровывать голосовые: как в бою, но без сети; null — нечем. */
+    transcribe?: ((audio: Uint8Array, mimeType: string) => Promise<string>) | null;
+    /** Файлы, которые «лежат» в Telegram: id → байты. */
+    files?: Record<string, Buffer>;
+  } = {},
+) {
   const config =
     options.config ??
     makeConfig({ telegram: { token: 'bot-token', mapping: { trousev: 'probe' } } });
@@ -154,9 +199,12 @@ function makeBot(options: { steps?: Step[]; config?: ReturnType<typeof makeConfi
       return options.compact ?? { status: 'compacted', tokensBefore: 1200, tokensAfter: 300 };
     },
   };
-  const { api, state } = fakeApi();
-  const bot = new TelegramBot(config, registry as never, { api, editIntervalMs: 0 });
-  return { bot, session, state, compactCalls };
+  const { api, state } = fakeApi(options.files ?? { IMAGE: JPEG, VOICE: JPEG });
+  // Расшифровка по умолчанию рабочая: тест про «распознавания нет» задаёт null явно.
+  const transcribe =
+    'transcribe' in options ? options.transcribe : async () => 'привет из голосового';
+  const bot = new TelegramBot(config, registry as never, { api, editIntervalMs: 0, transcribe });
+  return { bot, session, state, compactCalls, config };
 }
 
 function messageUpdate(text: string, options: { username?: string; chatId?: number; type?: string } = {}): TelegramUpdate {
@@ -167,7 +215,55 @@ function messageUpdate(text: string, options: { username?: string; chatId?: numb
       message_id: 10,
       chat: { id: chatId, type },
       from: username === '' ? { id: 7 } : { id: 7, username },
-      ...(text === '' ? { photo: [{}] } : { text }),
+      text,
+    },
+  };
+}
+
+/** Фото: Telegram шлёт один кадр лестницей размеров, от мелкого к крупному. */
+function photoUpdate(
+  options: { caption?: string; sizes?: TelegramPhotoSize[]; fileId?: string; messageId?: number } = {},
+): TelegramUpdate {
+  const { caption, fileId = 'IMAGE', messageId = 10 } = options;
+  return {
+    update_id: 1,
+    message: {
+      message_id: messageId,
+      chat: { id: 42, type: 'private' },
+      from: { id: 7, username: 'trousev' },
+      ...(caption === undefined ? {} : { caption }),
+      photo:
+        options.sizes ??
+        ([
+          { file_id: 'small', width: 90, height: 60, file_size: 900 },
+          { file_id: fileId, width: 1280, height: 960, file_size: JPEG.length },
+        ] as TelegramPhotoSize[]),
+    },
+  };
+}
+
+function voiceUpdate(options: { duration?: number; fileId?: string } = {}): TelegramUpdate {
+  const { duration = 7, fileId = 'VOICE' } = options;
+  return {
+    update_id: 1,
+    message: {
+      message_id: 11,
+      chat: { id: 42, type: 'private' },
+      from: { id: 7, username: 'trousev' },
+      voice: { file_id: fileId, duration, mime_type: 'audio/ogg', file_size: JPEG.length },
+    },
+  };
+}
+
+/** Вложение, которое бот не разбирает: видео, стикер, документ не-картинка. */
+function otherUpdate(kind: 'video' | 'sticker' | 'audio' | 'document' | 'video_note'): TelegramUpdate {
+  return {
+    update_id: 1,
+    message: {
+      message_id: 12,
+      chat: { id: 42, type: 'private' },
+      from: { id: 7, username: 'trousev' },
+      [kind]: kind === 'document' ? { file_id: 'DOC', file_name: 'смета.pdf', mime_type: 'application/pdf' } : {},
     },
   };
 }
@@ -201,13 +297,176 @@ test('без username в телеграме человека не узнать �
   assert.equal(chatText(state, 42), NO_USERNAME);
 });
 
-test('фото и голосовые бот пока не разбирает — просит словами', async () => {
-  const { bot, session, state } = makeBot();
+test('фото уезжает в pi нативно, а сам файл ложится в incoming', async () => {
+  const { bot, session, config } = makeBot();
 
-  await bot.handleUpdate(messageUpdate(''));
+  await bot.handleUpdate(photoUpdate({ caption: 'что на фото?' }));
+
+  assert.equal(session.images.length, 1, 'картинка ушла одним вложением');
+  assert.deepEqual(session.images[0]?.map((image) => image.mimeType), ['image/jpeg']);
+  assert.equal(session.images[0]?.[0]?.data, JPEG.toString('base64'), 'модель видит сами байты, а не путь');
+  assert.match(session.prompts[0] ?? '', /что на фото\?/);
+  assert.match(session.prompts[0] ?? '', /\/workspace\/incoming\/telegram-42-10\.jpg/);
+
+  const saved = fs.readdirSync(userPaths(config, probe()).incoming);
+  assert.deepEqual(saved, ['telegram-42-10.jpg']);
+  assert.deepEqual(fs.readFileSync(path.join(userPaths(config, probe()).incoming, saved[0] ?? '')), JPEG);
+});
+
+test('из лестницы размеров берём самый крупный кадр', async () => {
+  const { bot, session, state } = makeBot({ files: { small: JPEG, big: JPEG } });
+
+  await bot.handleUpdate(
+    photoUpdate({
+      fileId: 'big',
+      sizes: [
+        { file_id: 'small', width: 90, height: 60 },
+        { file_id: 'big', width: 1280, height: 960 },
+      ],
+    }),
+  );
+
+  assert.deepEqual(state.downloaded, ['files/big']);
+  assert.equal(session.images[0]?.length, 1);
+});
+
+test('фото без подписи всё равно доезжает — с одним лишь путём', async () => {
+  const { bot, session } = makeBot();
+
+  await bot.handleUpdate(photoUpdate());
+
+  assert.equal(session.prompts.length, 1);
+  assert.doesNotMatch(session.prompts[0] ?? '', /^\s*$/, 'реплика не пустая: в ней есть путь к файлу');
+  assert.match(session.prompts[0] ?? '', /\/workspace\/incoming\/telegram-42-10\.jpg/);
+  assert.equal(session.images[0]?.length, 1, 'картинка при этом уехала');
+});
+
+test('картинка документом — тоже картинка, с человеческим именем файла', async () => {
+  const { bot, session, config } = makeBot({
+    files: { SHOT: JPEG },
+    steps: ANSWER_STEPS,
+  });
+
+  await bot.handleUpdate({
+    update_id: 1,
+    message: {
+      message_id: 21,
+      chat: { id: 42, type: 'private' },
+      from: { id: 7, username: 'trousev' },
+      document: { file_id: 'SHOT', file_name: 'скриншот.png', mime_type: 'image/png' },
+    },
+  });
+
+  assert.deepEqual(session.images[0]?.map((image) => image.mimeType), ['image/png']);
+  assert.deepEqual(fs.readdirSync(userPaths(config, probe()).incoming), ['telegram-42-21-скриншот.png']);
+});
+
+test('голосовое расшифровывается и уезжает репликой с пометкой', async () => {
+  const heard: Array<{ bytes: number; mime: string }> = [];
+  const { bot, session, state } = makeBot({
+    transcribe: async (audio, mimeType) => {
+      heard.push({ bytes: audio.length, mime: mimeType });
+      return 'напомни купить молоко';
+    },
+  });
+
+  await bot.handleUpdate(voiceUpdate({ duration: 7 }));
+
+  assert.deepEqual(heard, [{ bytes: JPEG.length, mime: 'audio/ogg' }]);
+  assert.deepEqual(state.downloaded, ['files/VOICE']);
+  assert.deepEqual(session.prompts, ['[голосовое, 7 с] напомни купить молоко']);
+  assert.deepEqual(session.images, [[]], 'голосовое картинкой не считается');
+  assert.equal(chatText(state, 42), 'Привет, Саня');
+});
+
+test('распознавания нет — говорим об этом, а не молчим', async () => {
+  const { bot, session, state } = makeBot({ transcribe: null });
+
+  await bot.handleUpdate(voiceUpdate());
 
   assert.deepEqual(session.prompts, []);
-  assert.equal(chatText(state, 42), TEXT_ONLY);
+  assert.equal(chatText(state, 42), VOICE_NO_SPEECH);
+});
+
+test('пустая расшифровка не превращается в ход', async () => {
+  const { bot, session, state } = makeBot({ transcribe: async () => '   ' });
+
+  await bot.handleUpdate(voiceUpdate());
+
+  assert.deepEqual(session.prompts, []);
+  assert.equal(chatText(state, 42), VOICE_EMPTY);
+});
+
+test('сбой распознавания человек видит ответом', async () => {
+  const { bot, session, state } = makeBot({
+    transcribe: async () => {
+      throw new Error('распознавание не удалось (код 401)');
+    },
+  });
+
+  await bot.handleUpdate(voiceUpdate());
+
+  assert.deepEqual(session.prompts, []);
+  assert.match(chatText(state, 42), /Не разобрал голосовое: распознавание не удалось \(код 401\)/);
+});
+
+test('пометка о голосовом: с длительностью и без', () => {
+  assert.equal(voicePrompt('привет', 12), '[голосовое, 12 с] привет');
+  assert.equal(voicePrompt('привет', null), '[голосовое] привет');
+});
+
+test('видео, стикер и документ бот честно не разбирает', async () => {
+  for (const [kind, name] of [
+    ['video', 'видео'],
+    ['video_note', 'видеосообщение'],
+    ['sticker', 'стикер'],
+    ['audio', 'аудиофайл'],
+    ['document', 'документ'],
+  ] as const) {
+    const { bot, session, state } = makeBot();
+    await bot.handleUpdate(otherUpdate(kind));
+
+    assert.deepEqual(session.prompts, [], `${kind} в разговор не уезжает`);
+    assert.equal(chatText(state, 42), unsupportedText(name));
+  }
+});
+
+test('вложение не скачалось — человек видит причину, а не тишину', async () => {
+  const { bot, session, state } = makeBot({ files: {} });
+
+  await bot.handleUpdate(photoUpdate());
+
+  assert.deepEqual(session.prompts, []);
+  assert.equal(chatText(state, 42), attachmentFailed('telegram: file not found (код 400)'));
+});
+
+test('слишком большой файл не качаем вовсе', async () => {
+  const { bot, state } = makeBot({ files: { IMAGE: JPEG } });
+
+  await bot.handleUpdate(
+    photoUpdate({ sizes: [{ file_id: 'IMAGE', width: 9999, height: 9999, file_size: 30 * 1024 * 1024 }] }),
+  );
+
+  assert.deepEqual(state.downloaded, [], 'и не пытались');
+  assert.match(chatText(state, 42), /не больше 20 МБ/);
+});
+
+test('пустое сообщение разбирать нечего — так и говорим', async () => {
+  const { bot, session, state } = makeBot();
+
+  await bot.handleUpdate({ update_id: 1, message: { message_id: 30, chat: { id: 42, type: 'private' }, from: { id: 7, username: 'trousev' } } });
+
+  assert.deepEqual(session.prompts, []);
+  assert.equal(chatText(state, 42), NOTHING_TO_READ);
+});
+
+test('подпись к фото может быть командой', async () => {
+  const { bot, state, compactCalls } = makeBot();
+
+  await bot.handleUpdate(photoUpdate({ caption: '/compact' }));
+
+  assert.deepEqual(compactCalls, [{ user: 'probe', conversationId: 'telegram-42' }]);
+  assert.match(chatText(state, 42), /Подвёл итог/);
 });
 
 test('/start здоровается, незнакомая команда — подсказка', async () => {

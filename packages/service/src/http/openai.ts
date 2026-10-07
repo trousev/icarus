@@ -5,7 +5,8 @@ import path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createHash } from 'node:crypto';
 import { log, redact } from '../log.ts';
-import { findUser, userPaths, type IcarusConfig, type UserConfig } from '../config.ts';
+import { CONTAINER_INCOMING, findUser, userPaths, type IcarusConfig, type UserConfig } from '../config.ts';
+import { buildPrompt } from '../prompt.ts';
 import { compareHistory, normalizeContent, type IncomingMessage as ChatMessage } from '../sessions/divergence.ts';
 import { phraseForToolEnd, phraseForToolStart } from '../reasoning.ts';
 import type { SessionRegistry } from '../sessions/registry.ts';
@@ -184,7 +185,7 @@ export function extractLatestUserMessage(
       try {
         fs.mkdirSync(incomingDir, { recursive: true });
         fs.writeFileSync(path.join(incomingDir, name), Buffer.from(base64, 'base64'));
-        files.push(`/workspace/incoming/${name}`);
+        files.push(`${CONTAINER_INCOMING}/${name}`);
       } catch (error) {
         log.warn('вложение не сохранилось', { error: String(error) });
       }
@@ -194,11 +195,8 @@ export function extractLatestUserMessage(
   return { text: texts.join('\n').trim(), files, images };
 }
 
-export function buildPrompt(text: string, files: string[]): string {
-  if (files.length === 0) return text;
-  const list = files.map((file) => `- ${file}`).join('\n');
-  return `${text}\n\n[Пользователь приложил файлы, они уже лежат на диске:\n${list}]`;
-}
+// Реплика собирается общим образом — им же пользуется Telegram (см. prompt.ts).
+export { buildPrompt };
 
 function appendDivergence(config: IcarusConfig, userId: string, conversationId: string, body: string): void {
   const dir = path.join(config.dataDir, 'logs', 'divergence');
