@@ -251,13 +251,25 @@ GitHub по SSH заходит на `trousev.pro` под `trousev`, обновл
 Секреты лежат именно в environment `production`, а у него правило «разрешена только
 ветка `main`»: репозиторий публичный, и секреты уровня репозитория читала бы любая ветка.
 
-`ICARUS_USERS` — это **username из LibreChat**, а не имя человека: заголовок
-`x-icarus-user-id`, которым LibreChat зовёт icarus, собирается из него
-(`{{LIBRECHAT_USER_USERNAME}}` в `librechat.yaml`). Поэтому на проде там
-`alexander vitaliia julia`, а не короткие `trousev vita julia` — с чужим id icarus
-отвечает 403 «пользователь … не заведён в конфиге», и человек не может поговорить.
-Проверить, кого видит icarus, можно по `/healthz`: он отдаёт `users` и состояние
-контейнеров (`missing` должен быть 0).
+`ICARUS_USERS` — это **id человека, который LibreChat кладёт в `x-icarus-user-id`**, а не
+имя и не username. На проде заголовок собирается из LDAP-атрибута `uid`
+(`x-icarus-user-id: '{{LIBRECHAT_USER_LDAPID}}'` в `librechat.yaml`), поэтому там
+`trousev vita julia` — ровно те логины, под которыми люди входят в форму.
+
+Так было не сразу: раньше в заголовок ехал `{{LIBRECHAT_USER_USERNAME}}`, а username
+LibreChat собирает не из `uid`, а из `givenName` ([`ldapStrategy.js`](https://github.com/danny-avila/LibreChat)
+берёт `LDAP_USERNAME || givenName || mail`), то есть из имени в каталоге — выходили
+`alexander vitaliia julia`, и `ICARUS_USERS` приходилось держать в этом же виде.
+Путаница стоила дорого: логин `trousev` и id `alexander` — разные строки, и человека,
+которого завели в LDAP, но не в этой переменной, icarus встречает 403 «пользователь …
+не заведён в конфиге». Проверить, кого видит icarus, можно по `/healthz`: он отдаёт
+`users` и состояние контейнеров (`missing` должен быть 0).
+
+`librechat.yaml` лежит вне этого репозитория (в `~/prog/LibreChat` на прод-хосте) и
+правится вместе с деплоем LibreChat. Перезапуск — `docker compose restart api`, пересборка
+не нужна: файл смонтирован в контейнер. Каталоги памяти в `runtime/users/<id>` тоже
+названы по id, поэтому смена id — это ещё и перенос каталога (созданный заново контейнер
+человека останется ни с чем, если каталог не переименовать).
 
 Прод-специфику деплой подставляет сам: `dataDir` внутри чекаута (`runtime/`, в git не попадает).
 Порт `8081` — общий дефолт (`config.example.yaml` локально и `script/redeploy` на проде): он выбран

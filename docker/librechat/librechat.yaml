@@ -46,6 +46,8 @@ endpoints:
         {convo}
       modelDisplayLabel: 'Икар'
       headers:
+        # Стенд на паролях: ldapId тут ни у кого не заполнен, поэтому id — username.
+        # На проде наоборот: '{{LIBRECHAT_USER_LDAPID}}' (uid из LDAP), см. README.
         x-icarus-user-id: '{{LIBRECHAT_USER_USERNAME}}'
         x-icarus-user-email: '{{LIBRECHAT_USER_EMAIL}}'
         x-icarus-conversation-id: '{{LIBRECHAT_BODY_CONVERSATIONID}}'
