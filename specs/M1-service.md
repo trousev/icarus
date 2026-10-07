@@ -47,7 +47,10 @@ tools/rpc-probe.mjs            # отладочный клиент (уже ес�
 | `GET` | `/v1/models` | одна модель, id `icarus` |
 | `POST` | `/v1/chat/completions` | основной маршрут, `stream` поддержан |
 
-**Идентичность.** Заголовки от LibreChat: `x-icarus-user-id` ← `{{LIBRECHAT_USER_ID}}`,
+**Идентичность.** Заголовки от LibreChat: `x-icarus-user-id` ← плейсхолдер `{{LIBRECHAT_USER_*}}`
+(сам заголовок настраивается, поэтому источник зависит от того, как заведены люди: прод —
+`{{LIBRECHAT_USER_LDAPID}}`, uid из LDAP; стенд на паролях — `{{LIBRECHAT_USER_USERNAME}}`; в наброске
+спеки стоял `{{LIBRECHAT_USER_ID}}`, но id — это ObjectId MongoDB, людям он ничего не говорит),
 `x-icarus-conversation-id` ← `{{LIBRECHAT_BODY_CONVERSATIONID}}`. Фолбэки: `body.user`, иначе
 `sha1(первое сообщение)`. Неизвестный пользователь → `403` и запись в лог.
 
