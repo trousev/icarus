@@ -30,6 +30,8 @@ export function makeConfig(overrides: Partial<IcarusConfig> = {}): IcarusConfig 
     env: {},
     mounts: [],
     mcp: {},
+    // Telegram-бот в тестах выключен: сеть и Bot API тут ни к чему.
+    telegram: null,
     users: [{ id: 'probe' }],
     ...overrides,
   };

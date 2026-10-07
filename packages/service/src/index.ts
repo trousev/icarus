@@ -4,6 +4,7 @@ import { log } from './log.ts';
 import { prepareUser } from './workspace.ts';
 import { reapStalePi, waitForContainers } from './docker/manager.ts';
 import { SessionRegistry } from './sessions/registry.ts';
+import { startTelegramBot } from './telegram/bot.ts';
 import { createServer } from './http/server.ts';
 
 const configPath = process.argv[2] ?? process.env.ICARUS_CONFIG ?? DEFAULT_CONFIG_PATH;
@@ -36,6 +37,9 @@ if (missing.length > 0) {
 }
 
 const registry = new SessionRegistry(config);
+// Telegram — второй вход к тому же Икару: тот же реестр сессий, та же память.
+// Не настроен (нет токена или маппинга) — бот просто не поднимается.
+const telegram = startTelegramBot(config, registry);
 // Панель памяти пускает только по личным ссылкам: проверять их подпись нечем без секрета.
 const server = createServer(config, registry, ensurePanelSecret(config.dataDir));
 
@@ -45,6 +49,7 @@ server.listen(config.port, config.host, () => {
 
 function shutdown(signal: string): void {
   log.info('останавливаюсь', { signal });
+  telegram?.stop();
   registry.dispose();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 3000);

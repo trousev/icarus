@@ -134,3 +134,47 @@ test('url приезжает из ICARUS_URL и переживает депло�
   assert.equal(absent.url, null, 'без url адрес считается незаданным');
   assert.equal(load(absent.text).url, 'http://localhost:9000', 'конфиг подставит localhost по порту');
 });
+
+/** Тот же разбор, но с токеном бота в окружении: без него блок telegram не поднимается. */
+function loadWithBot(text: string) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-render-tg-'));
+  const file = path.join(dir, 'config.yaml');
+  fs.writeFileSync(file, text);
+  return loadConfig(file, { TELEGRAM_BOT_TOKEN: 'bot-token' });
+}
+
+test('маппинг telegram приезжает из ICARUS_TELEGRAM_MAPPING и переживает деплой', () => {
+  const set = renderConfig(EXAMPLE, { users: 'trousev, vita', telegramMapping: '@trousev:trousev, @vita:vita' });
+  assert.deepEqual(set.telegram, { trousev: 'trousev', vita: 'vita' });
+  assert.deepEqual(loadWithBot(set.text).telegram, {
+    token: 'bot-token',
+    mapping: { trousev: 'trousev', vita: 'vita' },
+  });
+
+  const kept = renderConfig(set.text, { users: 'trousev, vita' });
+  assert.equal(kept.telegram, null, 'пустая переменная прежний маппинг не трогает');
+  assert.deepEqual(loadWithBot(kept.text).telegram?.mapping, { trousev: 'trousev', vita: 'vita' });
+
+  const removed = renderConfig(set.text, { users: 'trousev, vita', telegramMapping: 'none' });
+  assert.deepEqual(removed.telegram, {});
+  assert.equal(loadWithBot(removed.text).telegram, null, 'none убирает маппинг, а с ним и блок');
+
+  assert.throws(() => renderConfig(EXAMPLE, { users: 'probe', telegramMapping: '@trousev' }), /@username:человек/);
+  assert.throws(() => renderConfig(EXAMPLE, { users: 'trousev', telegramMapping: '@vita:julia' }), /нет среди людей/);
+  assert.throws(() => renderConfig(EXAMPLE, { users: 'probe', telegramMapping: 'трусев:probe' }), /не похоже/);
+});
+
+test('час тишины приезжает из ICARUS_SESSION_IDLE_MINUTES и переживает деплой', () => {
+  const set = renderConfig(CUSTOM, { users: 'probe', sessionIdleMinutes: '60' });
+  assert.equal(set.sessionIdleMinutes, 60);
+  assert.equal(load(set.text).sessionIdleMinutes, 60);
+
+  const kept = renderConfig(set.text, { users: 'probe' });
+  assert.equal(kept.sessionIdleMinutes, 60, 'пустая переменная прежнее значение не трогает');
+
+  const off = renderConfig(set.text, { users: 'probe', sessionIdleMinutes: '0' });
+  assert.equal(off.sessionIdleMinutes, 0, 'ноль — «сжимать сразу», это тоже осознанный выбор');
+
+  assert.throws(() => renderConfig(EXAMPLE, { users: 'probe', sessionIdleMinutes: 'час' }), /ICARUS_SESSION_IDLE_MINUTES/);
+  assert.throws(() => renderConfig(EXAMPLE, { users: 'probe', sessionIdleMinutes: '-5' }), /ICARUS_SESSION_IDLE_MINUTES/);
+});

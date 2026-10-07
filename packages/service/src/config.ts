@@ -11,6 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseEnv } from 'node:util';
 import { parse as parseYaml } from 'yaml';
+import { log } from './log.ts';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 /** Корень репозитория: в нём лежат config.yaml, .env, icarus.md и расширения. */
@@ -40,6 +41,19 @@ export type McpServerConfig = {
 
 /** Человек: пока только id, всё остальное — общее (см. IcarusConfig). */
 export type UserConfig = { id: string };
+
+/**
+ * Telegram-бот: второй вход к тому же Икару. Человека узнаём по username в
+ * Telegram — он приезжает в каждом сообщении, — и по карте переводим в id
+ * человека icarus: на проде это uid из LDAP, на стенде — username, ровно то, что
+ * приезжает заголовком x-icarus-user-id. Так у бота нет своей
+ * таблицы людей: заведён в `users` — значит, можешь и в Telegram.
+ */
+export type TelegramConfig = {
+  token: string;
+  /** Ключи — telegram username без «@» и в нижнем регистре, значения — id из users. */
+  mapping: Record<string, string>;
+};
 
 export type DockerConfig = {
   image: string;
@@ -72,6 +86,8 @@ export type IcarusConfig = {
   mounts: MountConfig[];
   /** MCP-серверы: то, чем Икар обрастает без правки кода. */
   mcp: Record<string, McpServerConfig>;
+  /** Telegram-бот: null — выключен (нет токена или некому отвечать). */
+  telegram: TelegramConfig | null;
   users: UserConfig[];
 };
 
@@ -383,6 +399,76 @@ const USER_ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;function parseUsers(value: unknow
   return users;
 }
 
+/**
+ * Telegram username: в конфиге и в апдейтах он в одном виде — без «@», нижним
+ * регистром. В yaml имя с «@» придётся взять в кавычки: с @ начинаются
+ * зарезервированные конструкции, и `@trousev: trousev` не разберётся.
+ */
+const TELEGRAM_USERNAME = /^[a-zA-Z0-9_]{3,32}$/;
+
+export function normalizeTelegramUsername(value: string): string {
+  return value.trim().replace(/^@/, '').toLowerCase();
+}
+
+/**
+ * Telegram: токен бота и карта «кто есть кто».
+ *
+ * Карту принимаем в двух написаниях: `telegram.mapping` и отдельным ключом
+ * `telegram_mapping` — второе читается ровно как в жизни:
+ *
+ *   telegram_mapping:
+ *     '@trousev': trousev
+ *
+ * Заданы оба — побеждает `telegram.mapping`.
+ *
+ * Без токена или с пустой картой бот просто не поднимается: сервис работает как
+ * раньше, а в логе видно, чего не хватает.
+ */
+function parseTelegram(
+  value: unknown,
+  alias: unknown,
+  env: NodeJS.ProcessEnv,
+  users: UserConfig[],
+): TelegramConfig | null {
+  const raw = value === undefined || value === null ? {} : asRecord(value, 'telegram');
+  // Токен можно и не писать: он подхватывается из .env, как ключи провайдеров.
+  const token = expandValue(optionalString(raw.token, 'telegram.token') ?? '${TELEGRAM_BOT_TOKEN}', env).trim();
+
+  const nested = raw.mapping;
+  const mappingRaw = nested ?? alias;
+  const where = nested === undefined ? 'telegram_mapping' : 'telegram.mapping';
+  const mapping: Record<string, string> = {};
+
+  if (mappingRaw !== undefined && mappingRaw !== null) {
+    for (const [username, item] of Object.entries(asRecord(mappingRaw, where))) {
+      const id = requiredString(item, `${where}.${username}`);
+      if (!users.some((user) => user.id === id)) {
+        throw new Error(`${where}.${username}: «${id}» нет в users — telegram-имя ведёт к человеку, которого нет`);
+      }
+      const key = normalizeTelegramUsername(username);
+      if (!TELEGRAM_USERNAME.test(key)) {
+        throw new Error(
+          `${where}.${username}: «${username}» не похоже на telegram username — буквы, цифры и «_», без «@» ` +
+            '(в yaml имя с @ берётся в кавычки)',
+        );
+      }
+      mapping[key] = id;
+    }
+  }
+
+  if (token === '') {
+    if (Object.keys(mapping).length > 0) {
+      log.info('telegram-бот не поднят: нет токена (положи TELEGRAM_BOT_TOKEN в .env)');
+    }
+    return null;
+  }
+  if (Object.keys(mapping).length === 0) {
+    log.warn('telegram-бот не поднят: пусто в telegram.mapping — некому отвечать');
+    return null;
+  }
+  return { token, mapping };
+}
+
 export function loadConfig(file: string, env: NodeJS.ProcessEnv = process.env): IcarusConfig {
   const resolved = expandValue(file, env);
 
@@ -426,7 +512,7 @@ export function loadConfig(file: string, env: NodeJS.ProcessEnv = process.env): 
     // В ссылке не покажешь «слушать везде»: без явного url человек получит localhost.
     url: expandValue(optionalString(raw.url, 'url') ?? `http://${publicHost(host)}:${port}`, env),
     dataDir: expandValue(optionalString(raw.dataDir, 'dataDir') ?? '~/icarus', env),
-    sessionIdleMinutes: numberOr(raw.sessionIdleMinutes, 'sessionIdleMinutes', 30),
+    sessionIdleMinutes: numberOr(raw.sessionIdleMinutes, 'sessionIdleMinutes', 60),
     docker: {
       image: optionalString(dockerRaw.image, 'docker.image') ?? 'icarus-user:dev',
       ...(network === undefined ? {} : { network }),
@@ -439,12 +525,20 @@ export function loadConfig(file: string, env: NodeJS.ProcessEnv = process.env): 
     env: stringMap(raw.env, 'env', env),
     mounts: parseMounts(raw.mounts, env),
     mcp: parseMcp(raw.mcp, env),
+    telegram: parseTelegram(raw.telegram, raw.telegram_mapping, env, users),
     users,
   };
 }
 
 export function findUser(config: IcarusConfig, userId: string | undefined): UserConfig | undefined {
   return config.users.find((user) => user.id === userId);
+}
+
+/** Человек по telegram username: имена сравниваем без «@» и без регистра. */
+export function findTelegramUser(config: IcarusConfig, username: string | undefined): UserConfig | undefined {
+  if (!username) return undefined;
+  const id = config.telegram?.mapping[normalizeTelegramUsername(username)];
+  return id === undefined ? undefined : findUser(config, id);
 }
 
 /** Пути на хосте, которые сервис готовит и монтирует пользователю. */

@@ -41,6 +41,8 @@ export type Overrides = {
   apiKey?: string | undefined;
   dns?: string | undefined;
   url?: string | undefined;
+  telegramMapping?: string | undefined;
+  sessionIdleMinutes?: string | undefined;
 };
 
 export type RenderResult = {
@@ -54,6 +56,10 @@ export type RenderResult = {
   apiKeySource: 'env' | 'config' | 'generated';
   /** Внешний адрес панели (url) или null, если он не задан. */
   url: string | null;
+  /** Маппинг telegram-бота: карта, пустая карта (убран) или null (не трогали). */
+  telegram: Record<string, string> | null;
+  /** Час тишины после правки: через него разговор считается законченным. */
+  sessionIdleMinutes: number;
 };
 
 function asRecord(value: unknown, what: string): Record<string, unknown> {
@@ -118,6 +124,62 @@ function parseDns(value: string | undefined): string[] | null {
   });
 }
 
+/** Telegram username: тот же вид, что и в config.ts — без «@», нижним регистром. */
+const TELEGRAM_USERNAME = /^[a-zA-Z0-9_]{3,32}$/;
+
+/**
+ * ICARUS_TELEGRAM_MAPPING: «кто есть кто» для telegram-бота — пары
+ * `@username:человек` через запятую или пробел (человек — id из `ICARUS_USERS`,
+ * то есть uid из LDAP на проде):
+ *
+ *   ICARUS_TELEGRAM_MAPPING='@trousev:trousev,@vita:vita'
+ *
+ * `none` — убрать маппинг (бот замолчит), пусто — не трогать то, что лежит в конфиге.
+ * Человек обязан быть в users: telegram-имя, ведущее в никуда, — это отказ в ответе
+ * среди ночи, а не настройка.
+ */
+export function parseTelegramMapping(value: string | undefined, users: string[]): Record<string, string> | null {
+  const text = value?.trim() ?? '';
+  if (text === '') return null;
+  if (text === 'none' || text === 'off' || text === '-') return {};
+
+  const mapping: Record<string, string> = {};
+  for (const pair of text.split(/[,\s]+/)) {
+    if (pair === '') continue;
+    const at = pair.indexOf(':');
+    if (at <= 0 || at === pair.length - 1) {
+      throw new Error(`ICARUS_TELEGRAM_MAPPING: «${pair}» — ожидал пару «@username:человек»`);
+    }
+    const username = pair.slice(0, at).replace(/^@/, '').toLowerCase();
+    const user = pair.slice(at + 1);
+    if (!TELEGRAM_USERNAME.test(username)) {
+      throw new Error(`ICARUS_TELEGRAM_MAPPING: «${username}» не похоже на telegram username`);
+    }
+    if (!users.includes(user)) {
+      throw new Error(
+        `ICARUS_TELEGRAM_MAPPING: «${user}» нет среди людей (${users.join(', ')}) — бот не поймёт, чей это разговор`,
+      );
+    }
+    mapping[username] = user;
+  }
+  return mapping;
+}
+
+/**
+ * ICARUS_SESSION_IDLE_MINUTES: сколько минут тишины означают «разговор закончен»
+ * (после этого icarus сжимает сессию pi и гасит её). Пусто — не трогать значение
+ * из конфига: на хосте его могли настроить руками.
+ */
+function parseIdleMinutes(value: string | undefined): number | null {
+  const text = value?.trim() ?? '';
+  if (text === '') return null;
+  const minutes = Number(text);
+  if (!Number.isFinite(minutes) || minutes < 0 || Math.floor(minutes) !== minutes) {
+    throw new Error(`ICARUS_SESSION_IDLE_MINUTES: «${value}» — ожидалось целое число минут (0 и больше)`);
+  }
+  return minutes;
+}
+
 /**
  * Чистая правка конфига: на вход текст, на выход текст. Генератор ключа вынесен
  * параметром, чтобы тест не зависел от случайности.
@@ -163,7 +225,37 @@ export function renderConfig(
   if (urlOverride) doc.url = urlOverride;
   const url = typeof doc.url === 'string' && doc.url.trim() !== '' ? doc.url.trim() : null;
 
-  return { text: HEADER + stringifyYaml(doc, { lineWidth: 0 }), users, port, dataDir, dns, apiKeySource, url };
+  // Час тишины — правило продукта, а не местная настройка: разговор, затихший на
+  // sessionIdleMinutes, icarus считает законченным, сжимает и закрывает. На хосте
+  // его можно переопределить, но деплой ставит своё (по умолчанию час).
+  const idleOverride = parseIdleMinutes(overrides.sessionIdleMinutes);
+  if (idleOverride !== null) doc.sessionIdleMinutes = idleOverride;
+  const sessionIdleMinutes = Number(doc.sessionIdleMinutes ?? 60);
+
+  // telegram.mapping — кто из телеграма чей человек. Рядом в конфиге живёт только
+  // токен (да и тот обычно берётся из .env), поэтому блок правим целиком: маппинг
+  // приезжает из variables.ICARUS_TELEGRAM_MAPPING, а не правится руками на хосте.
+  const telegram = parseTelegramMapping(overrides.telegramMapping, users);
+  if (telegram !== null) {
+    const block = doc.telegram === undefined || doc.telegram === null ? {} : asRecord(doc.telegram, 'telegram');
+    if (Object.keys(telegram).length > 0) block.mapping = telegram;
+    else delete block.mapping;
+    // Пустой блок в конфиге только путает: нечего настраивать — ключа нет.
+    if (Object.keys(block).length > 0) doc.telegram = block;
+    else delete doc.telegram;
+  }
+
+  return {
+    text: HEADER + stringifyYaml(doc, { lineWidth: 0 }),
+    users,
+    port,
+    dataDir,
+    dns,
+    apiKeySource,
+    url,
+    telegram,
+    sessionIdleMinutes,
+  };
 }
 
 function parseArgs(argv: string[]): { config: string } {
@@ -195,6 +287,8 @@ function main(): void {
     apiKey: process.env.ICARUS_API_KEY,
     dns: process.env.ICARUS_DNS,
     url: process.env.ICARUS_URL,
+    telegramMapping: process.env.ICARUS_TELEGRAM_MAPPING,
+    sessionIdleMinutes: process.env.ICARUS_SESSION_IDLE_MINUTES,
   });
 
   // Ключ API лежит в этом файле, поэтому 600 — и на новый файл, и на старый:
@@ -205,10 +299,19 @@ function main(): void {
   const where = result.apiKeySource === 'env' ? 'из секрета' : result.apiKeySource === 'config' ? 'прежний' : 'сгенерирован';
   const dns = result.dns === null ? 'не трогал' : result.dns.length > 0 ? result.dns.join(', ') : 'убран';
   const panel = result.url ?? 'не задан — ссылки поведут на localhost';
+  const telegram =
+    result.telegram === null
+      ? 'не трогал'
+      : Object.keys(result.telegram).length > 0
+        ? Object.entries(result.telegram)
+            .map(([username, user]) => `@${username}→${user}`)
+            .join(', ')
+        : 'убран';
   process.stdout.write(
     `config.yaml (${source === EXAMPLE_CONFIG ? 'из примера' : 'прежний'}): ` +
       `люди ${result.users.join(', ')}; порт ${result.port}; dataDir ${result.dataDir}; ` +
-      `docker.dns ${dns}; ключ API — ${where}; url ${panel}\n`,
+      `docker.dns ${dns}; ключ API — ${where}; url ${panel}; telegram ${telegram}; ` +
+      `тишина ${result.sessionIdleMinutes} мин\n`,
   );
 }
 
