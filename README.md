@@ -18,10 +18,9 @@ LibreChat ──OpenAI API──► icarus ──docker exec + JSONL──► pi
     │                       │                                   ├─ разбор         (факты → полки → git)
     │                       │                                   ├─ веб-поиск      (web_search, web_fetch)
     │                       │                                   ├─ MCP            (pi-mcp-extension)
-    │                       │                                   ├─ скиллы         (SKILL.md из LibreChat)
+    │                       │                                   ├─ скиллы         (SKILL.md в ~/.pi/agent/skills)
     │                       │                                   └─ эскалация      (быстро / сильно / зрение)
     │                       └─ панель памяти (просмотр, поиск, откат, забывание, удаление файла)
-    └── Management API ──► синхронизация скиллов (SKILL.md → ~/.pi/agent/skills)
 ```
 
 ## Что уже работает
@@ -33,9 +32,8 @@ LibreChat ──OpenAI API──► icarus ──docker exec + JSONL──► pi
 - веб-поиск и MCP-серверы без правки кода;
 - эскалация моделей: болтовня, поиск и чтение — на быстрой, работа руками (bash, правки, MCP) — на сильной, картинки — на зрячей;
 - панель памяти: личная ссылка от Икара — смотреть, искать, откатывать коммит, забывать строку, удалять файл целиком;
-- скиллы: написанные в UI LibreChat `SKILL.md` синхронизируются в каталог pi (`~/.pi/agent/skills`)
-  и работают как родные скиллы pi — модель видит каталог в промпте и читает тело по требованию.
-  Настройка — `skills.sync` в `config.yaml`, разбор и стенд — в `research/08-librechat-skills.md`.
+- скиллы pi: `SKILL.md` в `~/.pi/agent/skills` человека работает как родной скилл pi — модель видит
+  каталог в промпте и читает тело по требованию. Синхронизации с LibreChat нет (см. «Скиллы» ниже).
 
 ## Запуск
 
@@ -95,16 +93,6 @@ mcp: {}                         # MCP-серверы
 users:                          # люди: только id
   - probe
   - probe2
-
-# skills:                       # скиллы из UI LibreChat → каталог pi (~/.pi/agent/skills)
-#   sync:
-#     url: https://librechat.example.com   # Management API этого LibreChat
-#     intervalSeconds: 300   # по умолчанию и так 300: чаще незачем
-#     audience: icarus-skills              # как в endpoints.agents.managementApi
-#     tokenUrl: https://idp.example.com/token
-#     clientId: icarus-sync
-#     clientSecret: ${LIBRECHAT_SKILLS_CLIENT_SECRET}
-#     accounts: []                         # пусто — набор скиллов общий для всех людей
 ```
 
 Провайдер `deepinfra` — не встроенный в pi, поэтому его описание (базовый адрес, протокол,
@@ -136,14 +124,10 @@ BRAVE_API_KEY=...         # необязательная альтернатив�
 `dataDir/users/probe` и id сессии pi. Тот же id должен быть у человека в LibreChat — он приезжает
 заголовком `x-icarus-user-id`. Модели, ключи и MCP общие, так что новый человек — это одна строка.
 
-Скиллы — единственное, что едет из LibreChat в обратную сторону. Блок `skills.sync` включает
-синхронизацию: icarus раз в `intervalSeconds` (по умолчанию раз в пять минут) забирает скиллы
-через `GET /api/agents/v1/skills` — обычный проход это один запрос за списком, тела
-перечитываются только у скиллов, у которых сдвинулись `version`/`updatedAt`
-(Management API LibreChat, только OIDC machine-токен) и раскладывает их в
-`~/.pi/agent/skills` человека. Изменения перезапускают живые сессии pi, история разговоров при
-этом не теряется. Без блока `skills` (или с пустым `url`) синхронизация выключена. Подробности,
-настройка `managementApi` и стендовая OIDC-заглушка — в `research/08-librechat-skills.md`.
+Скиллы pi лежат в `~/.pi/agent/skills` человека (каталог монтируется сервисом: `runtime/users/<id>/pi-agent/skills`).
+pi показывает модели имена и описания, а тело `SKILL.md` читает по требованию. Кладут их пока файлами
+руками — синхронизацию с LibreChat через его Management API убрали (она требовала OIDC-провайдера,
+тенанта и свежего LibreChat; разбор — в `research/08-librechat-skills.md`), панель правки скиллов — отдельная задача.
 
 ## Команды
 
@@ -173,16 +157,9 @@ BRAVE_API_KEY=...         # необязательная альтернатив�
 ./script/regenerate_user_passwords - < пароль.txt   # пароль со stdin, чтобы не светить в истории
 ```
 
-Стенд умеет и скиллы: `endpoints.agents.managementApi` в `docker/librechat/librechat.yaml` привязан к
-пользователю LibreChat, а OIDC-провайдера изображает `docker/librechat/oidc-stub` — один его экземпляр
-поднимается внутри контейнера LibreChat (LibreChat по http пускает только к localhost), второй живёт
-сервисом `oidc` и выдаёт токен icarus; ключ подписи общий, в `docker/librechat/oidc-data/`.
-Скилл, написанный в UI, через несколько секунд оказывается в `runtime/users/<id>/pi-agent/skills/`.
-Стенд монтирует не шаблон конфига, а рабочую копию `docker/librechat/librechat.local.yaml`
-(в git не попадает): привязку к пользователю LibreChat — ObjectId из Mongo — `./script/server
---with-librechat` подставляет в неё сам, до старта стека или сразу после. Руками тот же шаг делает
-`./script/librechat-skills-bind` (он же перезапускает LibreChat, чтобы тот перечитал конфиг) —
-нужен, только если пользователя завели позже.
+Стенд — это ровно `api` + `mongodb` с конфигом `docker/librechat/librechat.yaml`: кастомные
+эндпоинты (Icarus и эхо-пробник) и всё, что нужно, чтобы снимать живой запрос LibreChat → icarus.
+Никакого OIDC и Management API в нём больше нет: синхронизацию скиллов убрали.
 
 ## Проверки
 
