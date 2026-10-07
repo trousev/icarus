@@ -1,4 +1,4 @@
-// Панель памяти: git-история — то, что делает откат честным.
+// Панель управления, раздел памяти: git-история — то, что делает откат честным.
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';

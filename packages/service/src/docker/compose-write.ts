@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { parseEnv } from 'node:util';
-import { DEFAULT_CONFIG_PATH, ENV_FILE, ensurePanelSecret, loadConfig, loadEnvFile, publicHost, REPO_ROOT, userContainer } from '../config.ts';
+import { DEFAULT_CONFIG_PATH, ENV_FILE, loadConfig, loadEnvFile, publicHost, REPO_ROOT, userContainer } from '../config.ts';
 import { prepareUser } from '../workspace.ts';
 import { COMPOSE_PROJECT, DEFAULT_SERVICE_IMAGE, renderCompose, type ComposeOptions } from './compose.ts';
 import { sourceRevision } from './revision.ts';
@@ -149,10 +149,6 @@ function main(): void {
   // недостающие маунты root-овыми, и агент внутри контейнера не сможет писать в память.
   for (const user of config.users) prepareUser(config, user);
 
-  // Секрет панели — до сборки compose: из него выводятся личные ключи ссылок,
-  // которые уезжают в окружение контейнеров.
-  const panelSecret = ensurePanelSecret(config.dataDir);
-
   let extraGroups: string[] = [];
   if (docker.socketPath) {
     extraGroups = socketGroups(fs.statSync(docker.socketPath).gid, process.getgid?.() ?? 0);
@@ -168,7 +164,6 @@ function main(): void {
     dockerHost: docker.dockerHost,
     extraGroups,
     serviceImage: args.serviceImage,
-    panelSecret,
     // Отпечаток кода считаем здесь, на хосте, и кладём в окружение сервиса: иначе
     // `docker compose up` не заметит, что код в bind-mount'е сменился, и оставит
     // работать старый процесс (см. revision.ts).
@@ -178,8 +173,8 @@ function main(): void {
   };
 
   const yaml = renderCompose(config, options);
-  // В окружении людей теперь есть личные ключи ссылок на память — файл держим 600,
-  // как config.yaml и .env: читает его только тот, кто запускает docker compose.
+  // Файл держим 600, как config.yaml и .env: секретов в нём нет (ключи едут env_file),
+  // но лишние глаза ему ни к чему, а читает его только тот, кто запускает compose.
   fs.writeFileSync(args.out, yaml, { mode: 0o600 });
   fs.chmodSync(args.out, 0o600);
 

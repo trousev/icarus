@@ -52,8 +52,6 @@ export type ComposeOptions = {
   serviceImage?: string;
   /** env-файл с ключами (.env в корне репозитория), если он есть: едет в сервис и людям. */
   envFile?: string;
-  /** Секрет панели: из него выводятся личные ключи ссылок на память (см. ensurePanelSecret). */
-  panelSecret: string;
   /**
    * Отпечаток кода сервиса (см. revision.ts). Исходники монтируются в контейнер, а не
    * запекаются в образ, поэтому без отпечатка `docker compose up` не считает смену кода
@@ -98,15 +96,11 @@ export function userVolumes(config: IcarusConfig, user: UserConfig): string[] {
 }
 
 /** Метки владения: по ним /healthz понимает, чей контейнер и не устарел ли он. */
-export function userLabels(
-  config: IcarusConfig,
-  user: UserConfig,
-  panelSecret: string,
-): Record<string, string> {
+export function userLabels(config: IcarusConfig, user: UserConfig): Record<string, string> {
   return {
     [LABEL_MANAGED]: '1',
     [LABEL_USER]: user.id,
-    [LABEL_SPEC]: specFor(config, user, panelSecret),
+    [LABEL_SPEC]: specFor(config, user),
   };
 }
 
@@ -220,8 +214,8 @@ export function renderCompose(config: IcarusConfig, options: ComposeOptions): st
       // осиротело и, завершившись, висело зомби. init (tini) в роли PID 1 подчищает
       // такие сироты — ровно как в контейнере сервиса ниже.
       init: true,
-      labels: userLabels(config, user, options.panelSecret),
-      environment: containerEnv(config, user, options.panelSecret),
+      labels: userLabels(config, user),
+      environment: containerEnv(config, user),
       volumes: userVolumes(config, user),
       ...dnsServers,
       ...envFile,

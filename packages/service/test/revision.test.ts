@@ -53,8 +53,8 @@ test('новый файл и удаление файла меняют отпеч
 });
 
 test('расширения входят в отпечаток: их правка тоже пересоздаёт сервис', () => {
-  const base = sourceRevision(sandbox({ 'packages/extensions/memory-panel.ts': 'версия 1' }), ENTRIES);
-  const changed = sourceRevision(sandbox({ 'packages/extensions/memory-panel.ts': 'версия 2' }), ENTRIES);
+  const base = sourceRevision(sandbox({ 'packages/extensions/control-panel.ts': 'версия 1' }), ENTRIES);
+  const changed = sourceRevision(sandbox({ 'packages/extensions/control-panel.ts': 'версия 2' }), ENTRIES);
 
   assert.notEqual(base, changed, 'расширения копируются людям при старте сервиса — их смена важна');
 });

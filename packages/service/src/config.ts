@@ -4,7 +4,6 @@
 // лежит на верхнем уровне; у человека остаётся только id — из него выводятся имя
 // контейнера, каталоги в dataDir и id сессии pi. Иначе конфиг растёт с каждым
 // человеком, а настройки у людей незаметно разъезжаются.
-import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -55,6 +54,23 @@ export type TelegramConfig = {
   mapping: Record<string, string>;
 };
 
+/**
+ * Панель управления: как сервис узнаёт, кто её открыл.
+ *
+ * Пароля у панели нет и быть не должно: человека называет SSO-прокси (на проде —
+ * Authelia за nginx), а сервис читает его имя из заголовка. Поэтому панель обязана
+ * жить за прокси: порт icarus, открытый в обход него, — это чужая память в чужих руках.
+ */
+export type PanelConfig = {
+  /** Заголовок, которым прокси называет вошедшего: Authelia кладёт Remote-User. */
+  userHeader: string;
+  /**
+   * Человек, которым панель прикидывается без SSO, — только для локального запуска.
+   * Задан на проде — панель открыта всем, кто дотянется до порта (сервис об этом ругается).
+   */
+  devUser?: string;
+};
+
 export type DockerConfig = {
   image: string;
   network?: string;
@@ -69,13 +85,15 @@ export type IcarusConfig = {
   port: number;
   apiKey: string;
   /**
-   * Внешний адрес панели памяти: его получает человек в личной ссылке от Икара.
+   * Внешний адрес панели управления: по нему человек открывает её из чата и из закладки.
    * Внутри контейнера localhost бесполезен, поэтому на проде это публичный адрес.
    */
   url: string;
   dataDir: string;
   sessionIdleMinutes: number;
   docker: DockerConfig;
+  /** Панель управления: заголовок прокси и (для локального запуска) человек без SSO. */
+  panel: PanelConfig;
   /** Модели всех людей: уровни (tier) раздаёт эскалация. */
   models: ModelConfig[];
   /** Ключи провайдеров: подобранные из .env и явные из auth в config.yaml. */
@@ -469,6 +487,25 @@ function parseTelegram(
   return { token, mapping };
 }
 
+/** Заголовок Authelia по умолчанию: его подставляет nginx из ответа /api/verify. */
+export const DEFAULT_PANEL_USER_HEADER = 'Remote-User';
+
+/**
+ * Разбор panel: заголовок прокси и человек для локального запуска. Незнакомый devUser —
+ * ошибка, а не «панель никого не найдёт»: опечатку в id видно сразу на старте.
+ */
+function parsePanel(value: unknown, users: UserConfig[]): PanelConfig {
+  const record = value === undefined || value === null ? {} : asRecord(value, 'panel');
+  const devUser = optionalString(record.devUser, 'panel.devUser');
+  if (devUser !== undefined && !users.some((user) => user.id === devUser)) {
+    throw new Error(`panel.devUser: человека «${devUser}» нет в users`);
+  }
+  return {
+    userHeader: optionalString(record.userHeader, 'panel.userHeader') ?? DEFAULT_PANEL_USER_HEADER,
+    ...(devUser === undefined ? {} : { devUser }),
+  };
+}
+
 export function loadConfig(file: string, env: NodeJS.ProcessEnv = process.env): IcarusConfig {
   const resolved = expandValue(file, env);
 
@@ -513,6 +550,7 @@ export function loadConfig(file: string, env: NodeJS.ProcessEnv = process.env): 
     url: expandValue(optionalString(raw.url, 'url') ?? `http://${publicHost(host)}:${port}`, env),
     dataDir: expandValue(optionalString(raw.dataDir, 'dataDir') ?? '~/icarus', env),
     sessionIdleMinutes: numberOr(raw.sessionIdleMinutes, 'sessionIdleMinutes', 60),
+    panel: parsePanel(raw.panel, users),
     docker: {
       image: optionalString(dockerRaw.image, 'docker.image') ?? 'icarus-user:dev',
       ...(network === undefined ? {} : { network }),
@@ -579,29 +617,4 @@ export function userContainer(config: IcarusConfig, user: UserConfig): string {
 /** 0.0.0.0 и :: — это «слушать везде»; в ссылке им делать нечего, остаётся localhost. */
 export function publicHost(host: string): string {
   return host === '0.0.0.0' || host === '::' || host === '' ? 'localhost' : host;
-}
-
-/**
- * Секрет панели: им подписываются личные ссылки. Лежит в dataDir и монтируется
- * только сервису — в контейнеры людей он не попадает ни файлом, ни переменной
- * окружения (общий .env уехал бы всем, и по нему можно было бы подделать чужую
- * ссылку). Нет файла — заводим. Сервис читает секрет на старте, так что для
- * ротации мало удалить файл: старые ссылки обесценит новый секрет, контейнеры
- * пересоздаст изменившийся отпечаток, а сервис надо ещё и перезапустить.
- */
-export function ensurePanelSecret(dataDir: string): string {
-  const file = path.join(dataDir, 'panel-secret');
-  try {
-    const existing = fs.readFileSync(file, 'utf8').trim();
-    if (existing) return existing;
-  } catch {
-    /* файла ещё нет — заведём ниже */
-  }
-
-  const secret = randomBytes(32).toString('hex');
-  fs.mkdirSync(dataDir, { recursive: true });
-  // 600 и на новый файл, и на существующий: writeFileSync режим старого не меняет.
-  fs.writeFileSync(file, `${secret}\n`, { mode: 0o600 });
-  fs.chmodSync(file, 0o600);
-  return secret;
 }

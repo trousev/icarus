@@ -1,13 +1,26 @@
-// Страница панели памяти: один HTML, никакой сборки и зависимостей.
+// Страница панели управления: один HTML, никакой сборки и зависимостей.
 //
-// Общего входа с ключом нет: страница открывается личной ссылкой от Икара, и пропуск
-// из неё же уходит в заголовке каждого запроса к API. Протухший или битый пропуск —
-// это не форма входа, а подсказка попросить у Икара свежую.
+// Входа с паролем здесь нет и не должно быть: панель стоит за SSO-прокси, и все её
+// запросы — обычные same-origin запросы браузера, к которым прокси сам прикладывает
+// имя вошедшего. Поэтому в ссылке нет ни ключа, ни токена: если человека не назвал
+// прокси, страница честно объясняет, чего не хватает (см. PanelDenial).
 //
-// Разделов три: личная память, семейная и математика. Математика приходит из сервиса
-// как read-only: у неё нет истории и кнопок правки, зато графики показываются
-// картинкой, а не строкой base64.
-export type PanelSession = { user: string; scopes: Record<string, 'memory' | 'maple'> } | null;
+// Разделов пока один — память, но шапка рисует их списком из сервиса (SECTIONS):
+// следующий раздел появится вкладкой, а не переделкой страницы. Внутри памяти три
+// части: личная, семейная и математика. Математика приходит из сервиса как read-only:
+// у неё нет истории и кнопок правки, зато графики показываются картинкой, а не base64.
+export type PanelSection = { id: string; label: string };
+
+/** Отказ доступа: что случилось и что с этим делать. */
+export type PanelDenial = { status: 401 | 403; message: string; hint: string };
+
+export type PanelSession = {
+  user: string;
+  sections: PanelSection[];
+  scopes: Record<string, 'memory' | 'maple'>;
+};
+
+export type PanelView = PanelSession | PanelDenial;
 
 const SCOPE_LABELS: Record<string, string> = {
   personal: 'личная',
@@ -15,25 +28,34 @@ const SCOPE_LABELS: Record<string, string> = {
   maple: 'математика',
 };
 
-export function panelHtml(session: PanelSession): string {
-  const scopeOptions = session
-    ? Object.keys(session.scopes)
-        .map((name) => `<option value="${name}">${SCOPE_LABELS[name] ?? escapeHtml(name)}</option>`)
-        .join('')
-    : '';
-  const modes = session ? JSON.stringify(session.scopes) : '{}';
+const PANEL_TITLE = 'Icarus Control Panel';
+
+function isDenial(view: PanelView): view is PanelDenial {
+  return 'status' in view;
+}
+
+export function panelHtml(view: PanelView): string {
+  return isDenial(view) ? denialPage(view) : sessionPage(view);
+}
+
+/** Оболочка страницы: шапка документа и стили одни на всех. */
+function shell(body: string): string {
   return `<!doctype html>
 <html lang="ru">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Икар — память</title>
+<title>${PANEL_TITLE}</title>
 <style>
   :root { color-scheme: dark; --bg:#14161a; --panel:#1b1e24; --line:#2a2f38; --text:#e6e8ec; --dim:#8b93a1; --accent:#7aa2f7; --danger:#f7768e; }
   * { box-sizing: border-box; }
   body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 ui-sans-serif, system-ui, sans-serif; }
   header { display:flex; gap:12px; align-items:center; padding:12px 16px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
-  h1 { font-size:15px; margin:0 12px 0 0; font-weight:600; }
+  h1 { font-size:15px; margin:0 12px 0 0; font-weight:600; letter-spacing:.2px; }
+  .sections { display:flex; gap:4px; margin-right:4px; }
+  .section { padding:4px 10px; border-radius:6px; color:var(--dim); text-decoration:none; }
+  .section:hover { color:var(--text); }
+  .section.active { background:var(--panel); color:var(--accent); }
   .who { color:var(--accent); margin-right:4px; }
   select, input, button { background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:6px 10px; font:inherit; }
   button { cursor:pointer; }
@@ -74,10 +96,37 @@ export function panelHtml(session: PanelSession): string {
 </style>
 </head>
 <body>
-${
-  session
-    ? `<header>
-  <h1>Икар · память</h1>
+${body}
+</body>
+</html>`;
+}
+
+/**
+ * Отказ: прокси не назвал человека (401) или назвал того, кого нет в конфиге (403).
+ * Это не форма входа — панель не умеет логинить, — а объяснение, где искать причину.
+ */
+function denialPage(denial: PanelDenial): string {
+  return shell(`<div class="banner">
+  <h1>${PANEL_TITLE}</h1>
+  <p class="muted">${escapeHtml(denial.message)}</p>
+  <p class="muted">${escapeHtml(denial.hint)}</p>
+</div>`);
+}
+
+function sessionPage(session: PanelSession): string {
+  const scopeOptions = Object.keys(session.scopes)
+    .map((name) => `<option value="${name}">${SCOPE_LABELS[name] ?? escapeHtml(name)}</option>`)
+    .join('');
+  const sections = session.sections
+    .map(
+      (section, index) =>
+        `<a class="section${index === 0 ? ' active' : ''}" href="/panel">${escapeHtml(section.label)}</a>`,
+    )
+    .join('');
+  const modes = JSON.stringify(session.scopes);
+  return shell(`<header>
+  <h1>${PANEL_TITLE}</h1>
+  <nav class="sections">${sections}</nav>
   <span class="who">${escapeHtml(session.user)}</span>
   <select id="scope">${scopeOptions}</select>
   <input id="q" placeholder="поиск по разделу" size="28">
@@ -90,17 +139,25 @@ ${
   <div class="col" id="history"></div>
 </main>
 <script>
-const params = new URLSearchParams(location.search);
-const token = params.get('t') || '';
 const modes = ${modes};
 let current = null;
 
+// Запросы уходят как есть, без заголовков авторизации: панель стоит за SSO-прокси,
+// и он узнаёт человека по своей сессионной куке. Приехал не JSON — значит, вместо
+// ответа API браузер получил страницу входа: сессия истекла, и об этом надо сказать
+// человеку, а не показывать «Unexpected token <».
 const api = async (path, options = {}) => {
   const response = await fetch(path, {
     ...options,
-    headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json', ...(options.headers || {}) },
+    headers: { 'content-type': 'application/json', ...(options.headers || {}) },
   });
-  if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error?.message || response.statusText);
+  const type = response.headers.get('content-type') || '';
+  if (!response.ok || !type.includes('application/json')) {
+    const message = type.includes('application/json')
+      ? (await response.json().catch(() => ({}))).error?.message || response.statusText
+      : 'сессия входа истекла — обнови страницу';
+    throw new Error(message);
+  }
   return response.json();
 };
 const qs = (extra = {}) => new URLSearchParams({ scope: scope.value, ...extra }).toString();
@@ -179,10 +236,10 @@ async function openFile(path) {
   document.querySelectorAll('.file').forEach((el) => el.classList.toggle('active', el.dataset.path === path));
   const box = document.getElementById('content');
 
-  // Картинку тянем байтами с пропуском в заголовке и показываем как <img>: base64
-  // в JSON раздул бы ответ втрое, а графики Maple — это gif на сотни килобайт.
+  // Картинку тянем байтами и показываем как <img>: base64 в JSON раздул бы ответ
+  // втрое, а графики Maple — это gif на сотни килобайт.
   if (isImage(path)) {
-    const response = await fetch(base + '&raw=1', { headers: { authorization: 'Bearer ' + token } });
+    const response = await fetch(base + '&raw=1');
     if (!response.ok) { box.innerHTML = '<p class="muted">Картинка не открылась.</p>'; return; }
     const url = URL.createObjectURL(await response.blob());
     box.innerHTML = '<div class="row"><b>' + esc(path) + '</b></div><img class="plot" alt="' + esc(path) + '">';
@@ -261,26 +318,17 @@ const scope = document.getElementById('scope');
 
 (async () => {
   const state = await api('/panel/api/state');
-  document.title = 'Икар — память · ' + state.user;
+  document.title = '${PANEL_TITLE} · ' + state.user;
   document.querySelector('.who').textContent = state.user;
   scope.onchange = loadFiles;
   document.getElementById('search').onclick = guard(doSearch);
   document.getElementById('q').onkeydown = (e) => { if (e.key === 'Enter') guard(doSearch)(); };
   await loadFiles();
 })().catch((error) => { document.getElementById('files').innerHTML = '<p class="muted">' + esc(error.message) + '</p>'; });
-</script>`
-    : `<div class="banner">
-  <h1>Икар · память</h1>
-  <p class="muted">Ссылка не сработала: она истекла или подпись не та.</p>
-  <p class="muted">Попроси Икара: «дай ссылку на управление памятью» — он выдаст свежую,
-  и она откроет только твою память.</p>
-</div>`
-}
-</body>
-</html>`;
+</script>`);
 }
 
-/** Экранирование для единственного недоверенного значения — имени пользователя. */
+/** Экранирование для недоверенных значений: имя человека из заголовка и тексты отказа. */
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (char) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char] ?? char,

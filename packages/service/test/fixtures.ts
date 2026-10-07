@@ -6,8 +6,8 @@ import path from 'node:path';
 import type { IcarusConfig, UserConfig } from '../src/config.ts';
 
 export const API_KEY = 'test-token';
-/** Секрет панели для тестов: из него выводятся личные ключи ссылок на память. */
-export const PANEL_SECRET = 'test-panel-secret';
+/** Заголовок, которым SSO-прокси называет вошедшего: так делает Authelia за nginx. */
+export const PANEL_USER_HEADER = 'Remote-User';
 /** Провайдер и модель тестов: id содержит «/», как у любой модели DeepInfra. */
 export const PROVIDER = 'deepinfra';
 export const MODEL_ID = 'deepseek-ai/DeepSeek-V4.1-Flash';
@@ -21,6 +21,7 @@ export function makeConfig(overrides: Partial<IcarusConfig> = {}): IcarusConfig 
     url: 'http://localhost:8081',
     dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-test-')),
     sessionIdleMinutes: 30,
+    panel: { userHeader: PANEL_USER_HEADER },
     docker: { image: 'icarus-user:dev', prefix: 'icarus-user', socket: null },
     models: [
       { provider: PROVIDER, id: MODEL_ID, thinking: 'off', tier: 'fast' },

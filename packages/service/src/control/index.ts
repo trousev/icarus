@@ -1,21 +1,19 @@
-// HTTP-часть панели памяти: тонкий JSON-слой над файлами и git.
+// Панель управления Icarus: HTTP-часть — тонкий JSON-слой над файлами и git.
 //
-// Доступа по общему ключу здесь нет намеренно: один ключ на всех открывал память
-// всех. Вместо него — личная ссылка от Икара: пропуск подписан секретом сервиса,
-// живёт ограниченное время и называет ровно одного человека. Чей это пропуск,
-// решает только он: параметр user из запроса игнорируется, поэтому чужую память
-// через свою ссылку не открыть.
+// Человека называет SSO-прокси (см. identity.ts), поэтому параметра user в запросах нет
+// и подменить его нельзя: чужую память через свою сессию не открыть. Разделов у панели
+// пока один — память, но устроена она как раздел: добавить следующий — это дописать
+// его в SECTIONS и завести ему маршруты /panel/api/<раздел>/… рядом с памятью.
 //
-// Разделов три: личная память, семейная и математика. Математика — не память в
-// том же смысле: её файлы создаёт Maple, и панель показывает их только для чтения
-// (ни «забыть», ни откатов): журнал сессии — это код, из которого сессия
-// восстанавливается, и построчная правка его сломает.
+// Внутри памяти три части: личная, семейная и математика. Математика — не память в том
+// же смысле: её файлы создаёт Maple, и панель показывает их только для чтения (ни
+// «забыть», ни откатов): журнал сессии — это код, из которого сессия восстанавливается,
+// и построчная правка его сломает.
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import fs from 'node:fs';
 import { findUser, userPaths, type IcarusConfig } from '../config.ts';
-import { readJsonBody, headerValue } from '../http/openai.ts';
+import { readJsonBody } from '../http/openai.ts';
 import { errorBody } from '../http/sse.ts';
-import { verifyPanelCredential } from '../../../extensions/lib/panel-link.ts';
 import {
   isImageFile,
   listFiles,
@@ -28,10 +26,14 @@ import {
   searchMemory,
 } from './memory.ts';
 import { commitAll, ensureRepo, log, revert, show } from './git.ts';
-import { panelHtml } from './ui.ts';
+import { identifyPanelUser } from './identity.ts';
+import { panelHtml, type PanelSection } from './ui.ts';
 import { log as logger } from '../log.ts';
 
-export type PanelContext = { config: IcarusConfig; panelSecret: string };
+export type PanelContext = { config: IcarusConfig };
+
+/** Разделы панели: порядок здесь — порядок вкладок в шапке. */
+export const SECTIONS: PanelSection[] = [{ id: 'memory', label: 'Память' }];
 
 type Scope = 'personal' | 'shared' | 'maple';
 /** Режим раздела: memory правится построчно, maple — только смотрится. */
@@ -40,22 +42,6 @@ export type ScopeMode = 'memory' | 'maple';
 function json(res: ServerResponse, status: number, payload: unknown): void {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(payload));
-}
-
-/** Пропуск приходит заголовком (запросы API) или в самой ссылке (страница). */
-function credentialOf(req: IncomingMessage, url: URL): string | null {
-  const header = headerValue(req, 'authorization');
-  if (header?.startsWith('Bearer ')) return header.slice('Bearer '.length).trim();
-  return url.searchParams.get('t');
-}
-
-/** Чей это пропуск и не истёк ли он. null — доступа нет. */
-function authorize(req: IncomingMessage, url: URL, ctx: PanelContext): string | null {
-  const credential = credentialOf(req, url);
-  if (!credential) return null;
-  const verified = verifyPanelCredential(ctx.panelSecret, credential);
-  if (!verified.ok) return null;
-  return findUser(ctx.config, verified.userId) ? verified.userId : null;
 }
 
 /** Раздел запроса: всё незнакомое — личная память, как и раньше. */
@@ -92,22 +78,35 @@ export async function handlePanel(
   ctx: PanelContext,
 ): Promise<boolean> {
   const { config } = ctx;
+  const access = identifyPanelUser(req, config);
 
   if (url.pathname === '/panel' || url.pathname === '/panel/') {
-    const userId = authorize(req, url, ctx);
-    res.writeHead(userId ? 200 : 401, { 'content-type': 'text/html; charset=utf-8' });
-    res.end(panelHtml(userId ? { user: userId, scopes: scopesFor(config) } : null));
+    res.writeHead(access.ok ? 200 : access.denial.status, { 'content-type': 'text/html; charset=utf-8' });
+    res.end(
+      panelHtml(
+        access.ok
+          ? { user: access.identity.userId, sections: SECTIONS, scopes: scopesFor(config) }
+          : access.denial,
+      ),
+    );
     return true;
   }
 
   if (!url.pathname.startsWith('/panel/api/')) return false;
 
-  const userId = authorize(req, url, ctx);
-  if (!userId) {
-    json(res, 401, errorBody('ссылка неверна или истекла — попроси у Икара свежую', 'authentication_error'));
+  if (!access.ok) {
+    json(
+      res,
+      access.denial.status,
+      errorBody(
+        `${access.denial.message}. ${access.denial.hint}`,
+        access.denial.status === 401 ? 'authentication_error' : 'permission_error',
+      ),
+    );
     return true;
   }
 
+  const userId = access.identity.userId;
   const route = url.pathname.slice('/panel/api/'.length);
 
   if (req.method === 'GET' && route === 'state') {
@@ -124,12 +123,12 @@ export async function handlePanel(
     // показывает, а репозиторий заводить «на будущее» незачем.
     if (config.mcp?.maple) fs.mkdirSync(paths.maple, { recursive: true });
     const scopes = scopesFor(config);
-    json(res, 200, { user: userId, scopes: Object.keys(scopes), modes: scopes });
+    json(res, 200, { user: userId, sections: SECTIONS, scopes: Object.keys(scopes), modes: scopes });
     return true;
   }
 
   // У GET область приходит в query, у POST — в теле. Человека в запросе нет:
-  // он уже назван пропуском, и подменить его нельзя.
+  // его уже назвал прокси, и подменить его нельзя.
   const body = req.method === 'POST' ? ((await readJsonBody(req)) as Record<string, unknown>) : {};
   const scope = parseScope(url.searchParams.get('scope') ?? body.scope);
   const mode = modeFor(scope);
