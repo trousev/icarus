@@ -182,3 +182,43 @@ export function removeLine(
   fs.writeFileSync(full, lines.join('\n'));
   return { ok: true, message: `убрал строку ${index + 1}` };
 }
+
+/**
+ * Убирает несколько записей разом — то, что в панели отмечают галочками.
+ *
+ * Номера строк берутся из того же файла, который сейчас на диске, поэтому и
+ * проверяются все сразу: одна промахнувшаяся строка (файл изменил агент между
+ * открытием панели и нажатием «удалить») отменяет всю пачку. Так честнее, чем
+ * удалить половину и оставить человека разбираться, что именно пропало.
+ */
+export function removeLines(
+  root: string,
+  relative: string,
+  lineNumbers: number[],
+  allowed: ReadonlySet<string> = MEMORY_EXTENSIONS,
+): { ok: boolean; message: string; removed?: number } {
+  const full = resolveInside(root, relative, allowed);
+  if (!full) return { ok: false, message: 'такой файл трогать нельзя' };
+  if (!fs.existsSync(full)) return { ok: false, message: 'файла нет' };
+
+  const wanted = new Set<number>();
+  for (const value of lineNumbers) {
+    if (!Number.isInteger(value) || value < 1) return { ok: false, message: 'номер строки непонятный' };
+    wanted.add(value);
+  }
+  if (wanted.size === 0) return { ok: false, message: 'ничего не выбрано' };
+
+  const lines = fs.readFileSync(full, 'utf8').split('\n');
+  for (const line of wanted) {
+    if (line > lines.length) return { ok: false, message: `строки ${line} в файле уже нет` };
+  }
+
+  const kept = lines.filter((_, index) => !wanted.has(index + 1));
+  fs.writeFileSync(full, kept.join('\n'));
+  return { ok: true, message: `убрал записей: ${wanted.size}`, removed: wanted.size };
+}
+
+/** Сколько файлов лежит в разделе: панель показывает это числом у раздела. */
+export function countFiles(root: string, allowed: ReadonlySet<string> = MEMORY_EXTENSIONS): number {
+  return listFiles(root, '', allowed).length;
+}

@@ -81,12 +81,23 @@ test('без заголовка прокси панель не пускает и
 
 test('человека называет заголовок: панель открывается со своим именем', async () => {
   await withServer(async (base) => {
-    const response = await fetch(`${base}/panel`, { headers: asUser('probe') });
+    // Старый адрес ведёт на память: он и раньше её открывал, и в закладках он есть.
+    const root = await fetch(`${base}/panel`, { headers: asUser('probe'), redirect: 'manual' });
+    assert.equal(root.status, 302);
+    assert.equal(root.headers.get('location'), '/panel/memory?scope=personal');
+
+    const response = await fetch(`${base}/panel/memory?scope=personal`, { headers: asUser('probe') });
     assert.equal(response.status, 200);
     const html = await response.text();
     assert.match(html, /Icarus Control Panel/);
-    assert.match(html, /class="who">probe</, 'в шапке — имя вошедшего');
+    assert.match(html, /"user":"probe"/, 'в странице — имя вошедшего: его назвал прокси');
+    assert.match(html, /Icarus \/ Память \/ <b>Личная<\/b>/, 'крошки знают, где мы');
     assert.doesNotMatch(html, /panel\.devUser/, 'объяснять отказ нечего: доступ есть');
+
+    // Раздел математики — свой адрес, и там та же панель.
+    const maple = await fetch(`${base}/panel/maple?scope=maple`, { headers: asUser('probe') });
+    assert.equal(maple.status, 200);
+    assert.match(await maple.text(), /Icarus \/ <b>Математика<\/b>/);
   });
 });
 
@@ -112,9 +123,25 @@ test('незнакомого человека панель не пускает, 
   });
 });
 
+test('адрес раздела с хвостовым слэшем открывается, а битое тело — отказ, не падение', async () => {
+  await withServer(async (base) => {
+    // Браузер и человек дописывают слэш просто так: раздел от этого не должен пропадать.
+    const slash = await fetch(`${base}/panel/memory/`, { headers: asUser('probe') });
+    assert.equal(slash.status, 200);
+    assert.match(await slash.text(), /Icarus Control Panel/);
+
+    const broken = await fetch(`${base}/panel/memory/forget-many`, {
+      method: 'POST',
+      headers: { ...asUser('probe'), 'content-type': 'application/json' },
+      body: '{это не json',
+    });
+    assert.equal(broken.status, 400, 'битый запрос — отказ, а не исключение посреди обработки');
+  });
+});
+
 test('страница не зовёт нативные confirm и её скрипт компилируется', async () => {
   await withServer(async (base) => {
-    const html = await (await fetch(`${base}/panel`, { headers: asUser('probe') })).text();
+    const html = await (await fetch(`${base}/panel/memory`, { headers: asUser('probe') })).text();
 
     // Нативные модалки браузер глушит, если вкладка не активна, и confirm() молча
     // возвращает false — кнопки «забыть»/«откатить» перестают работать. Свой диалог
@@ -137,7 +164,14 @@ test('панель показывает только память своего �
       scopes: string[];
       modes: Record<string, string>;
     };
-    assert.deepEqual(state.sections, [{ id: 'memory', label: 'Память' }], 'разделов пока один — память');
+    assert.deepEqual(
+      state.sections,
+      [
+        { id: 'memory', label: 'Память' },
+        { id: 'maple', label: 'Математика' },
+      ],
+      'разделы панели приходят из сервиса',
+    );
     assert.deepEqual(state.scopes, ['personal', 'shared', 'maple']);
     assert.deepEqual(state.modes, { personal: 'memory', shared: 'memory', maple: 'maple' });
 
@@ -152,6 +186,73 @@ test('панель показывает только память своего �
     // Чужого файла не достать: человека задаёт заголовок, а не запрос.
     const alien = await api(base, 'probe', 'file?scope=personal&path=secret.md');
     assert.equal(alien.status, 404);
+  });
+});
+
+test('записи памяти приезжают с датами из истории, а пачка удаляется одним коммитом', async () => {
+  await withServer(async (base, config) => {
+    const memory = userPaths(config, probe('probe')).memory;
+    // Память живёт в git: даты записей — это даты коммитов, которые их тронули.
+    assert.equal(await commitAll(memory, 'memory: разбор разговора'), true);
+
+    const data = (await (await api(base, 'probe', 'entries?scope=personal&path=identity.md')).json()) as {
+      total: number;
+      entries: Array<{ line: number; kind: string; date: string | null }>;
+    };
+    assert.equal(data.total, 1);
+    assert.deepEqual(
+      data.entries.map((entry) => [entry.line, entry.kind]),
+      [
+        [1, 'heading'],
+        [2, 'note'],
+      ],
+    );
+    assert.match(String(data.entries[1].date), /^\d{4}-\d{2}-\d{2}$/, 'у записи есть дата коммита');
+
+    // Заголовок — не запись: снести его значит снести весь раздел вместе с записями.
+    const heading = await api(base, 'probe', 'forget-many', {
+      method: 'POST',
+      body: JSON.stringify({ scope: 'personal', path: 'identity.md', lines: [1] }),
+    });
+    assert.equal(heading.status, 400);
+    assert.match(String(((await heading.json()) as { error: { message: string } }).error.message), /не запись/);
+
+    const removal = await api(base, 'probe', 'forget-many', {
+      method: 'POST',
+      body: JSON.stringify({ scope: 'personal', path: 'identity.md', lines: [2] }),
+    });
+    assert.equal(removal.status, 200);
+    assert.equal(((await removal.json()) as { removed: number }).removed, 1);
+    assert.doesNotMatch(String(fs.readFileSync(path.join(memory, 'identity.md'))), /Москве/, 'запись убрана');
+
+    // Удаление пачки — тоже правка памяти, а значит коммит, который видно в истории.
+    const commits = (await (await api(base, 'probe', 'history?scope=personal')).json()) as {
+      commits: Array<{ subject: string }>;
+    };
+    assert.match(commits.commits[0].subject, /убрать записей/);
+  });
+});
+
+test('история файла показывает коммиты с числом строк, а чужие пути не читает', async () => {
+  await withServer(async (base, config) => {
+    const memory = userPaths(config, probe('probe')).memory;
+    assert.equal(await commitAll(memory, 'memory: разбор разговора'), true);
+    fs.appendFileSync(path.join(memory, 'identity.md'), '- Тишина после 23:00\n');
+    assert.equal(await commitAll(memory, 'memory: дописал предпочтение'), true);
+
+    const history = (await (
+      await api(base, 'probe', 'file-history?scope=personal&path=identity.md')
+    ).json()) as { commits: Array<{ subject: string; added: number; removed: number; hash: string }> };
+    assert.equal(history.commits.length, 2);
+    assert.match(history.commits[0].subject, /дописал предпочтение/);
+    assert.equal(history.commits[0].added, 1, 'в панели видно, сколько строк прибавил коммит');
+    assert.ok(history.commits[0].hash.length >= 40);
+
+    // Историю чужого файла не показываем: путь проверяется так же, как при чтении.
+    const alien = (await (
+      await api(base, 'probe', 'file-history?scope=personal&path=secret.md')
+    ).json()) as { commits: unknown[] };
+    assert.deepEqual(alien.commits, []);
   });
 });
 
@@ -279,6 +380,21 @@ test('раздел математики показывает расчёты Mapl
       body: JSON.stringify({ scope: 'maple', path: 'osc.jsonl' }),
     });
     assert.equal(remove.status, 400);
+
+    // Новые маршруты разделов читают то же самое и так же не дают править Maple:
+    // раздел в адресе сильнее области в запросе.
+    const journalEntries = (await (
+      await fetch(`${base}/panel/maple/entries?scope=maple&path=osc.jsonl`, { headers: asUser('probe') })
+    ).json()) as { entries: Array<{ text: string }>; capped: boolean };
+    assert.equal(journalEntries.capped, false);
+    assert.match(journalEntries.entries.map((entry) => entry.text).join('\n'), /dsolve/);
+
+    const sneaky = await fetch(`${base}/panel/maple/forget-many`, {
+      method: 'POST',
+      headers: { ...asUser('probe'), 'content-type': 'application/json' },
+      body: JSON.stringify({ scope: 'personal', path: 'osc.jsonl', lines: [1] }),
+    });
+    assert.equal(sneaky.status, 400, 'математика правится только со стороны Maple');
 
     // И чужого человека в математике тоже не видно.
     assert.equal((await api(base, 'probe', 'file?scope=maple&path=чужой.jsonl')).status, 404);
