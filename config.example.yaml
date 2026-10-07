@@ -119,7 +119,10 @@ mcp:
 #     mode: ro
 
 # Люди: только id. Тот же id должен быть у человека в LibreChat — он приезжает
-# заголовком x-icarus-user-id (в стенде это {{LIBRECHAT_USER_USERNAME}}).
+# заголовком x-icarus-user-id. В стенде это {{LIBRECHAT_USER_USERNAME}} (там пароли,
+# ldapId не заполнен), на проде — {{LIBRECHAT_USER_LDAPID}}, то есть uid из LDAP;
+# именно uid, а не username: username LibreChat собирает из givenName.
+
 users:
   - probe
   - probe2
