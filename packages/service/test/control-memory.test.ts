@@ -1,11 +1,11 @@
-// Панель памяти: защита путей, поиск, забывание и git-откат.
+// Панель управления: защита путей, поиск, забывание и git-откат.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { listFiles, mapleExtensions, readImageFile, readMemoryFile, removeFile, removeLine, resolveInside, searchMemory } from '../src/panel/memory.ts';
-import { commitAll, ensureRepo, log, revert, show } from '../src/panel/git.ts';
+import { listFiles, mapleExtensions, readImageFile, readMemoryFile, removeFile, removeLine, resolveInside, searchMemory } from '../src/control/memory.ts';
+import { commitAll, ensureRepo, log, revert, show } from '../src/control/git.ts';
 
 function tempRoot(): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-panel-'));

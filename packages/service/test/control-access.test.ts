@@ -1,5 +1,5 @@
-// Панель памяти по личной ссылке: без пропуска не пускает, с пропуском показывает
-// ровно своего человека, а чужой id в запросе ничего не меняет.
+// Панель управления за SSO-прокси: человека называет заголовок, чужого он не открывает,
+// а без заголовка панель объясняет, что обязана стоять за прокси.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -7,10 +7,8 @@ import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { createServer } from '../src/http/server.ts';
 import { userPaths, type IcarusConfig } from '../src/config.ts';
-import { commitAll } from '../src/panel/git.ts';
-import { containerEnv } from '../src/docker/spec.ts';
-import { derivePanelKey, signPanelCredential } from '../../extensions/lib/panel-link.ts';
-import { makeConfig, PANEL_SECRET, probe } from './fixtures.ts';
+import { commitAll } from '../src/control/git.ts';
+import { makeConfig, PANEL_USER_HEADER, probe } from './fixtures.ts';
 
 function seed(root: string, files: Record<string, string>): void {
   for (const [relative, content] of Object.entries(files)) {
@@ -20,17 +18,20 @@ function seed(root: string, files: Record<string, string>): void {
   }
 }
 
-function tokenFor(userId: string, ttlMs = 60_000): string {
-  return signPanelCredential(derivePanelKey(PANEL_SECRET, userId), userId, Date.now() + ttlMs);
+/** Так выглядит запрос, дошедший до сервиса через Authelia: он и назвал человека. */
+function asUser(userId?: string): Record<string, string> {
+  return userId === undefined ? {} : { [PANEL_USER_HEADER]: userId };
 }
 
 async function withServer(
   handler: (base: string, config: IcarusConfig) => Promise<void>,
+  overrides: Partial<IcarusConfig> = {},
 ): Promise<void> {
   const config = makeConfig({
     users: [probe('probe'), probe('probe2')],
     // Maple настроен: у панели появляется третий раздел — математика.
     mcp: { maple: { command: 'node', args: ['/opt/icarus/tools/maple-mcp/server.mjs'] } },
+    ...overrides,
   });
   seed(userPaths(config, probe('probe')).memory, {
     'identity.md': '# Кто\n- Живёт в Москве\n',
@@ -45,7 +46,7 @@ async function withServer(
   });
   seed(userPaths(config, probe('probe2')).maple, { 'чужой.jsonl': '{"code":"secret"}:\n' });
 
-  const server = createServer(config, {} as never, PANEL_SECRET);
+  const server = createServer(config, {} as never);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address() as AddressInfo;
   try {
@@ -55,39 +56,65 @@ async function withServer(
   }
 }
 
-function api(base: string, token: string, route: string, init: RequestInit = {}): Promise<Response> {
+function api(base: string, userId: string | undefined, route: string, init: RequestInit = {}): Promise<Response> {
   return fetch(`${base}/panel/api/${route}`, {
     ...init,
-    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', ...(init.headers ?? {}) },
+    headers: { ...asUser(userId), 'content-type': 'application/json', ...(init.headers ?? {}) },
   });
 }
 
-test('без ссылки панель не пускает и объясняет, где её взять', async () => {
+test('без заголовка прокси панель не пускает и объясняет, где искать причину', async () => {
   await withServer(async (base) => {
     const page = await fetch(`${base}/panel`);
     assert.equal(page.status, 401);
-    assert.match(await page.text(), /Попроси Икара/);
+    const html = await page.text();
+    assert.match(html, /Remote-User/, 'сказано, какого заголовка не хватает');
+    assert.match(html, /SSO-прокси/, 'сказано, за чем панель должна стоять');
+    assert.match(html, /panel\.devUser/, 'сказано, как запустить локально');
 
     const api401 = await fetch(`${base}/panel/api/files`);
     assert.equal(api401.status, 401);
     const body = (await api401.json()) as { error?: { message?: string } };
-    assert.match(String(body.error?.message), /истекла/);
+    assert.match(String(body.error?.message), /Remote-User/);
   });
 });
 
-test('личная ссылка открывает страницу со своим именем', async () => {
+test('человека называет заголовок: панель открывается со своим именем', async () => {
   await withServer(async (base) => {
-    const response = await fetch(`${base}/panel?t=${encodeURIComponent(tokenFor('probe'))}`);
+    const response = await fetch(`${base}/panel`, { headers: asUser('probe') });
     assert.equal(response.status, 200);
     const html = await response.text();
-    assert.match(html, /Икар · память/);
-    assert.doesNotMatch(html, /Попроси Икара/);
+    assert.match(html, /Icarus Control Panel/);
+    assert.match(html, /class="who">probe</, 'в шапке — имя вошедшего');
+    assert.doesNotMatch(html, /panel\.devUser/, 'объяснять отказ нечего: доступ есть');
+  });
+});
+
+test('корень домена уводит в панель', async () => {
+  await withServer(async (base) => {
+    const response = await fetch(base, { redirect: 'manual' });
+    assert.equal(response.status, 302);
+    assert.equal(response.headers.get('location'), '/panel');
+  });
+});
+
+test('незнакомого человека панель не пускает, а не показывает пустую память', async () => {
+  await withServer(async (base) => {
+    // Человек есть в LDAP, но его нет в users: config.yaml — сказать надо именно это.
+    const page = await fetch(`${base}/panel`, { headers: asUser('stranger') });
+    assert.equal(page.status, 403);
+    assert.match(await page.text(), /«stranger» не заведён в Icarus/);
+
+    const response = await api(base, 'stranger', 'files');
+    assert.equal(response.status, 403);
+    const body = (await response.json()) as { error?: { message?: string } };
+    assert.match(String(body.error?.message), /ICARUS_USERS/);
   });
 });
 
 test('страница не зовёт нативные confirm и её скрипт компилируется', async () => {
   await withServer(async (base) => {
-    const html = await (await fetch(`${base}/panel?t=${encodeURIComponent(tokenFor('probe'))}`)).text();
+    const html = await (await fetch(`${base}/panel`, { headers: asUser('probe') })).text();
 
     // Нативные модалки браузер глушит, если вкладка не активна, и confirm() молча
     // возвращает false — кнопки «забыть»/«откатить» перестают работать. Свой диалог
@@ -103,18 +130,18 @@ test('страница не зовёт нативные confirm и её скри
   });
 });
 
-test('личная ссылка показывает только память своего человека', async () => {
+test('панель показывает только память своего человека', async () => {
   await withServer(async (base) => {
-    const token = tokenFor('probe');
-
-    const state = (await (await api(base, token, 'state')).json()) as {
+    const state = (await (await api(base, 'probe', 'state')).json()) as {
+      sections: Array<{ id: string; label: string }>;
       scopes: string[];
       modes: Record<string, string>;
     };
+    assert.deepEqual(state.sections, [{ id: 'memory', label: 'Память' }], 'разделов пока один — память');
     assert.deepEqual(state.scopes, ['personal', 'shared', 'maple']);
     assert.deepEqual(state.modes, { personal: 'memory', shared: 'memory', maple: 'maple' });
 
-    const files = (await (await api(base, token, 'files?scope=personal')).json()) as {
+    const files = (await (await api(base, 'probe', 'files?scope=personal')).json()) as {
       user: string;
       files: Array<{ path: string }>;
     };
@@ -122,16 +149,15 @@ test('личная ссылка показывает только память �
     const paths = files.files.map((file) => file.path).sort();
     assert.deepEqual(paths, ['identity.md', 'people/barsik.md']);
 
-    // Чужого файла по своей ссылке не достать.
-    const alien = await api(base, token, 'file?scope=personal&path=secret.md');
+    // Чужого файла не достать: человека задаёт заголовок, а не запрос.
+    const alien = await api(base, 'probe', 'file?scope=personal&path=secret.md');
     assert.equal(alien.status, 404);
   });
 });
 
-test('подмена user в запросе игнорируется — человека задаёт только ссылка', async () => {
+test('подмена user в запросе игнорируется — человека задаёт только заголовок', async () => {
   await withServer(async (base) => {
-    const token = tokenFor('probe');
-    const response = await api(base, token, 'files?scope=personal&user=probe2');
+    const response = await api(base, 'probe', 'files?scope=personal&user=probe2');
     assert.equal(response.status, 200);
     const body = (await response.json()) as { user: string; files: Array<{ path: string }> };
     assert.equal(body.user, 'probe', 'user из query не влияет');
@@ -143,10 +169,30 @@ test('подмена user в запросе игнорируется — чел�
   });
 });
 
-test('семейная память доступна по личной ссылке, но остаётся общей', async () => {
+test('старый личный пропуск в ссылке не нужен и ничего не ломает', async () => {
   await withServer(async (base) => {
-    const token = tokenFor('probe');
-    const shared = await api(base, token, 'file?scope=shared&path=family.md');
+    // Ссылки из чата остались у людей в закладках: параметр t просто игнорируется,
+    // а человека по-прежнему называет прокси.
+    const page = await fetch(`${base}/panel?t=probe%3A123%3Adeadbeef`, { headers: asUser('probe') });
+    assert.equal(page.status, 200);
+  });
+});
+
+test('panel.devUser пускает без прокси, но слово прокси сильнее', async () => {
+  const config = { panel: { userHeader: PANEL_USER_HEADER, devUser: 'probe' } };
+  await withServer(async (base, _config) => {
+    const local = await fetch(`${base}/panel/api/state`);
+    assert.equal(local.status, 200);
+    assert.equal(((await local.json()) as { user: string }).user, 'probe', 'локально — человек из конфига');
+
+    const throughProxy = await api(base, 'probe2', 'state');
+    assert.equal(((await throughProxy.json()) as { user: string }).user, 'probe2', 'прокси называет человека сам');
+  }, config);
+});
+
+test('семейная память доступна, но остаётся общей', async () => {
+  await withServer(async (base) => {
+    const shared = await api(base, 'probe', 'file?scope=shared&path=family.md');
     assert.equal(shared.status, 200);
     const body = (await shared.json()) as { content: string };
     assert.match(body.content, /Общий факт/);
@@ -155,14 +201,13 @@ test('семейная память доступна по личной ссыл�
 
 test('файл памяти удаляется целиком коммитом и возвращается откатом', async () => {
   await withServer(async (base, config) => {
-    const token = tokenFor('probe');
     const memory = userPaths(config, probe('probe')).memory;
     const barsik = path.join(memory, 'people/barsik.md');
     // Память живёт в git: к моменту удаления файл уже в истории разбора — иначе
     // возвращать откатом было бы нечего, и удаление оказалось бы необратимым.
     assert.equal(await commitAll(memory, 'memory: разбор разговора'), true);
 
-    const deletion = await api(base, token, 'delete', {
+    const deletion = await api(base, 'probe', 'delete', {
       method: 'POST',
       body: JSON.stringify({ scope: 'personal', path: 'people/barsik.md' }),
     });
@@ -172,11 +217,11 @@ test('файл памяти удаляется целиком коммитом �
     assert.equal(fs.existsSync(barsik), false, 'файл удалён с диска');
 
     // Удаление — обычная правка памяти: коммит видно в истории, и он откатывается.
-    const commits = (await (await api(base, token, 'history?scope=personal')).json()) as {
+    const commits = (await (await api(base, 'probe', 'history?scope=personal')).json()) as {
       commits: Array<{ hash: string; subject: string }>;
     };
     assert.match(commits.commits[0].subject, /удалить файл/);
-    const revert = await api(base, token, 'revert', {
+    const revert = await api(base, 'probe', 'revert', {
       method: 'POST',
       body: JSON.stringify({ scope: 'personal', commit: commits.commits[0].hash }),
     });
@@ -187,9 +232,8 @@ test('файл памяти удаляется целиком коммитом �
 
 test('удаление файла: чужое, не-markdown и выход из каталога не проходят', async () => {
   await withServer(async (base) => {
-    const token = tokenFor('probe');
     const attempt = (body: Record<string, unknown>) =>
-      api(base, token, 'delete', { method: 'POST', body: JSON.stringify(body) });
+      api(base, 'probe', 'delete', { method: 'POST', body: JSON.stringify(body) });
 
     assert.equal((await attempt({ scope: 'personal', path: '../../etc/passwd.md' })).status, 400);
     assert.equal((await attempt({ scope: 'personal', path: 'osc.jsonl' })).status, 400, 'чужой формат не трогаем');
@@ -200,99 +244,69 @@ test('удаление файла: чужое, не-markdown и выход из 
 
 test('раздел математики показывает расчёты Maple, но не даёт их править', async () => {
   await withServer(async (base) => {
-    const token = tokenFor('probe');
-
-    const files = (await (await api(base, token, 'files?scope=maple')).json()) as {
+    const files = (await (await api(base, 'probe', 'files?scope=maple')).json()) as {
       mode: string;
       files: Array<{ path: string }>;
     };
     assert.equal(files.mode, 'maple', 'раздел математики помечен как read-only');
     assert.deepEqual(files.files.map((file) => file.path).sort(), ['0123456789abcdef.gif', 'osc.jsonl']);
 
-    const journal = await api(base, token, 'file?scope=maple&path=osc.jsonl');
+    const journal = await api(base, 'probe', 'file?scope=maple&path=osc.jsonl');
     assert.equal(journal.status, 200);
     assert.match(String(((await journal.json()) as { content: string }).content), /dsolve/);
 
     // График — байтами, а не строкой в JSON: так его показывает <img> в панели.
-    const plot = await api(base, token, 'file?scope=maple&path=0123456789abcdef.gif&raw=1');
+    const plot = await api(base, 'probe', 'file?scope=maple&path=0123456789abcdef.gif&raw=1');
     assert.equal(plot.status, 200);
     assert.equal(plot.headers.get('content-type'), 'image/gif');
     assert.equal(await plot.text(), 'GIF89a');
 
     // Журнал сессии — это код, из которого Maple восстанавливает состояние:
     // построчная правка через панель его сломала бы.
-    const forget = await api(base, token, 'forget', {
+    const forget = await api(base, 'probe', 'forget', {
       method: 'POST',
       body: JSON.stringify({ scope: 'maple', path: 'osc.jsonl', line: '{' }),
     });
     assert.equal(forget.status, 400);
-    const revert = await api(base, token, 'revert', {
+    const revert = await api(base, 'probe', 'revert', {
       method: 'POST',
       body: JSON.stringify({ scope: 'maple', commit: 'deadbee' }),
     });
     assert.equal(revert.status, 400);
     // Удалить журнал целиком — тоже правка, и в математике её быть не должно.
-    const remove = await api(base, token, 'delete', {
+    const remove = await api(base, 'probe', 'delete', {
       method: 'POST',
       body: JSON.stringify({ scope: 'maple', path: 'osc.jsonl' }),
     });
     assert.equal(remove.status, 400);
 
     // И чужого человека в математике тоже не видно.
-    assert.equal((await api(base, token, 'file?scope=maple&path=чужой.jsonl')).status, 404);
+    assert.equal((await api(base, 'probe', 'file?scope=maple&path=чужой.jsonl')).status, 404);
   });
 });
 
 test('панель не отдаёт журнал Maple как память', async () => {
   await withServer(async (base) => {
-    const token = tokenFor('probe');
-    // Каталоги разные: файл математики по личной ссылке не открывается вовсе.
-    assert.equal((await api(base, token, 'file?scope=personal&path=osc.jsonl')).status, 404);
+    // Каталоги разные: файл математики в личной памяти не открывается вовсе.
+    assert.equal((await api(base, 'probe', 'file?scope=personal&path=osc.jsonl')).status, 404);
     // И наоборот: markdown памяти не притворяется расчётом Maple.
-    assert.equal((await api(base, token, 'file?scope=maple&path=identity.md')).status, 404);
+    assert.equal((await api(base, 'probe', 'file?scope=maple&path=identity.md')).status, 404);
   });
 });
 
 test('без Maple в конфиге раздела математики нет и через API', async () => {
   const config = makeConfig({ users: [probe('probe')] });
   seed(userPaths(config, probe('probe')).maple, { 'osc.jsonl': '{}\n' });
-  const server = createServer(config, {} as never, PANEL_SECRET);
+  const server = createServer(config, {} as never);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address() as AddressInfo;
   try {
     const base = `http://127.0.0.1:${port}`;
-    const token = tokenFor('probe');
-    const state = (await (await api(base, token, 'state')).json()) as { scopes: string[] };
+    const state = (await (await api(base, 'probe', 'state')).json()) as { scopes: string[] };
     assert.deepEqual(state.scopes, ['personal', 'shared'], 'выключенный раздел не предлагается');
-    // Старые файлы на диске остались — но чужого доступа к ним у панели быть не должно.
-    assert.equal((await api(base, token, 'files?scope=maple')).status, 404);
+    // Старые файлы на диске остались — но доступа к ним у панели быть не должно.
+    assert.equal((await api(base, 'probe', 'files?scope=maple')).status, 404);
   } finally {
     server.close();
   }
-});
-
-test('протухшая, подделанная и чужая ссылка не проходят', async () => {
-  await withServer(async (base) => {
-    assert.equal((await api(base, tokenFor('probe', -1000), 'files')).status, 401, 'срок вышел');
-
-    const alienKey = derivePanelKey('чужой-секрет', 'probe');
-    const forged = signPanelCredential(alienKey, 'probe', Date.now() + 60_000);
-    assert.equal((await api(base, forged, 'files')).status, 401, 'подпись не сошлась');
-
-    assert.equal((await api(base, tokenFor('stranger'), 'files')).status, 401, 'такого человека нет в конфиге');
-  });
-});
-
-test('ключ, который уезжает в контейнер, открывает панель у сервиса', async () => {
-  await withServer(async (base, config) => {
-    // Ровно та связка, что в бою: compose кладёт в контейнер ICARUS_PANEL_KEY,
-    // Икар подписывает им ссылку, сервис проверяет её своим секретом.
-    const key = containerEnv(config, probe('probe'), PANEL_SECRET).ICARUS_PANEL_KEY;
-    const token = signPanelCredential(key, 'probe', Date.now() + 60_000);
-
-    const state = await api(base, token, 'state');
-    assert.equal(state.status, 200);
-    const body = (await state.json()) as { scopes: string[] };
-    assert.deepEqual(body.scopes, ['personal', 'shared', 'maple']);
-  });
 });

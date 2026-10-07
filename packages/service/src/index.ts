@@ -1,5 +1,5 @@
 // Точка входа icarus.
-import { DEFAULT_CONFIG_PATH, ensurePanelSecret, loadConfig, loadEnvFile } from './config.ts';
+import { DEFAULT_CONFIG_PATH, loadConfig, loadEnvFile } from './config.ts';
 import { log } from './log.ts';
 import { prepareUser } from './workspace.ts';
 import { reapStalePi, waitForContainers } from './docker/manager.ts';
@@ -18,6 +18,14 @@ log.info('конфиг загружен', { path: configPath, users: config.user
 
 if (Object.keys(config.auth).length === 0) {
   log.warn('ни одного ключа провайдера: положи их в .env (образец .env.example) или в auth: config.yaml');
+}
+
+// Персону панели задаёт прокси (Remote-User). Если человек прописан в конфиге напрямую,
+// панель пускает к его памяти любого, кто дотянется до порта, — на проде это дыра.
+if (config.panel.devUser !== undefined) {
+  log.warn('panel.devUser задан: панель пускает без SSO — так делают только локально', {
+    user: config.panel.devUser,
+  });
 }
 
 for (const user of config.users) {
@@ -40,8 +48,7 @@ const registry = new SessionRegistry(config);
 // Telegram — второй вход к тому же Икару: тот же реестр сессий, та же память.
 // Не настроен (нет токена или маппинга) — бот просто не поднимается.
 const telegram = startTelegramBot(config, registry);
-// Панель памяти пускает только по личным ссылкам: проверять их подпись нечем без секрета.
-const server = createServer(config, registry, ensurePanelSecret(config.dataDir));
+const server = createServer(config, registry);
 
 server.listen(config.port, config.host, () => {
   log.info('icarus слушает', { url: `http://${config.host}:${config.port}`, users: config.users.length });

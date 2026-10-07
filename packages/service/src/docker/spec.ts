@@ -4,7 +4,6 @@
 // контейнеры, а не только тот, который первым попал под руку.
 import { createHash } from 'node:crypto';
 import { userContainer, type IcarusConfig, type UserConfig } from '../config.ts';
-import { derivePanelKey } from '../../../extensions/lib/panel-link.ts';
 
 export const LABEL_MANAGED = 'icarus.managed';
 export const LABEL_USER = 'icarus.user';
@@ -22,30 +21,24 @@ export function modelTierEnv(config: IcarusConfig): Record<string, string> {
 
 /**
  * Окружение контейнера: уровни моделей и общее из config.yaml, а поверх — личное
- * человека: кто он и каким ключом подписывает ссылку на свою память. Личные
- * значения идут последними: их нельзя перебить общим env — иначе один человек
- * подписывал бы ссылки за другого.
+ * человека: кто он и где живёт панель управления. Личные значения идут последними:
+ * их нельзя перебить общим env — иначе один человек отвечал бы за другого.
  */
-export function containerEnv(
-  config: IcarusConfig,
-  user: UserConfig,
-  panelSecret: string,
-): Record<string, string> {
+export function containerEnv(config: IcarusConfig, user: UserConfig): Record<string, string> {
   return {
     ...modelTierEnv(config),
     ...config.env,
     ICARUS_USER_ID: user.id,
-    ICARUS_PANEL_KEY: derivePanelKey(panelSecret, user.id),
     ICARUS_URL: config.url,
   };
 }
 
 /** Всё, что влияет на содержимое контейнера, но не является секретом. */
-export function specFor(config: IcarusConfig, user: UserConfig, panelSecret: string): string {
+export function specFor(config: IcarusConfig, user: UserConfig): string {
   const mounts = [...config.mounts]
     .map((mount) => `${mount.host}:${mount.container}:${mount.mode ?? 'rw'}`)
     .sort();
-  const env = containerEnv(config, user, panelSecret);
+  const env = containerEnv(config, user);
   const payload = JSON.stringify({
     image: config.docker.image,
     network: config.docker.network ?? null,

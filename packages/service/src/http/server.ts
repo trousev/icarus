@@ -7,21 +7,29 @@ import { userPaths, type IcarusConfig } from '../config.ts';
 import type { SessionRegistry } from '../sessions/registry.ts';
 import { errorBody } from './sse.ts';
 import { handleChatCompletions, headerValue } from './openai.ts';
-import { handlePanel } from '../panel/api.ts';
+import { handlePanel } from '../control/index.ts';
 import { listManaged } from '../docker/manager.ts';
 import { planReconciliation } from '../docker/reconcile.ts';
 
 export const PUBLIC_MODEL_ID = 'icarus';
 
-export function createServer(config: IcarusConfig, registry: SessionRegistry, panelSecret: string): http.Server {
+export function createServer(config: IcarusConfig, registry: SessionRegistry): http.Server {
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
 
+    // Панель управления — то, ради чего человек вообще открывает этот порт: на проде
+    // весь домен смотрит сюда, и корень уводит в панель, а не в 404 сервиса.
+    if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
+      res.writeHead(302, { location: '/panel' });
+      res.end();
+      return;
+    }
+
     if (url.pathname === '/panel' || url.pathname.startsWith('/panel/')) {
       try {
-        if (await handlePanel(req, res, url, { config, panelSecret })) return;
+        if (await handlePanel(req, res, url, { config })) return;
       } catch (error) {
-        log.error('ошибка панели памяти', { error: redact(String(error)) });
+        log.error('ошибка панели управления', { error: redact(String(error)) });
         if (!res.headersSent) {
           res.writeHead(500, { 'content-type': 'application/json' });
           res.end(JSON.stringify(errorBody('панель сломалась', 'server_error')));
@@ -36,7 +44,7 @@ export function createServer(config: IcarusConfig, registry: SessionRegistry, pa
       let containers: Record<string, number> = { managed: 0 };
       try {
         const managed = await listManaged(config);
-        const plan = planReconciliation({ config, users: config.users, containers: managed, panelSecret });
+        const plan = planReconciliation({ config, users: config.users, containers: managed });
         containers = {
           managed: managed.length,
           running: managed.filter((container) => container.running).length,

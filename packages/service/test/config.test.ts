@@ -9,7 +9,6 @@ import {
   DEFAULT_CONFIG_PATH,
   REPO_ROOT,
   detectAuth,
-  ensurePanelSecret,
   findTelegramUser,
   loadConfig,
   loadEnvFile,
@@ -422,13 +421,19 @@ test('publicHost прячет «слушать везде»', () => {
   assert.equal(publicHost('icarus.example'), 'icarus.example');
 });
 
-test('секрет панели заводится один раз и переживает перезапуск', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-secret-'));
-  const first = ensurePanelSecret(dir);
-  assert.match(first, /^[0-9a-f]{64}$/);
-  assert.equal(ensurePanelSecret(dir), first, 'второй вызов читает тот же файл');
+test('панель: заголовок прокси по умолчанию, а devUser проверяется по людям', () => {
+  const plain = loadConfig(writeConfig(MINIMAL), {});
+  assert.equal(plain.panel.userHeader, 'Remote-User', 'умолчание — заголовок Authelia');
+  assert.equal(plain.panel.devUser, undefined, 'без SSO панель никого не пускает');
 
-  const mode = fs.statSync(path.join(dir, 'panel-secret')).mode & 0o777;
-  assert.equal(mode, 0o600, 'секрет не должен быть читаем всем');
+  const custom = loadConfig(writeConfig(`${MINIMAL}panel:\n  userHeader: X-Forwarded-User\n  devUser: probe\n`), {});
+  assert.equal(custom.panel.userHeader, 'X-Forwarded-User', 'заголовок другого прокси задаётся конфигом');
+  assert.equal(custom.panel.devUser, 'probe');
+
+  // Опечатка в devUser — это «панель не пустит никого», и знать об этом надо на старте.
+  assert.throws(
+    () => loadConfig(writeConfig(`${MINIMAL}panel:\n  devUser: probe2\n`), {}),
+    /panel\.devUser: человека «probe2» нет в users/,
+  );
 });
 
