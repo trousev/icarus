@@ -1,11 +1,15 @@
 // Владение контейнерами: отпечаток, метки, стек docker compose и план реконсиляции.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { containerEnv, specFor } from '../src/docker/spec.ts';
 import { describePlan, planIsQuiet, planReconciliation } from '../src/docker/reconcile.ts';
 import { reapStalePi } from '../src/docker/manager.ts';
 import { DEFAULT_SERVICE_IMAGE, publishAddress, renderCompose, userLabels } from '../src/docker/compose.ts';
+import { socketGroups } from '../src/docker/compose-write.ts';
 import type { IcarusConfig } from '../src/config.ts';
 import { makeConfig, PANEL_SECRET, probe } from './fixtures.ts';
 
@@ -332,4 +336,27 @@ test('reaper: чужой код возврата и падение docker не �
     throw new Error('docker недоступен');
   };
   assert.equal(await reapStalePi(config, 'icarus-user-probe', broken), false);
+});
+
+test('доступ к сокету docker: к gid сокета добавляем gid группы docker', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-groups-'));
+  const groupFile = path.join(dir, 'group');
+  fs.writeFileSync(groupFile, 'root:x:0:\ndocker:x:125:\nnogroup:x:65534:\n');
+
+  // Docker Desktop и rootless-докер: хост видит сокет как nobody:nogroup (65534),
+  // а внутри контейнера он root:docker (125) — иначе сервис получает permission denied.
+  assert.deepEqual(socketGroups(65534, 1000, groupFile), ['65534', '125']);
+
+  // Обычный Linux: сокет и есть группа docker — второй записи не появляется.
+  assert.deepEqual(socketGroups(125, 1000, groupFile), ['125']);
+
+  // Rootless с сокетом в домашнем каталоге: свой gid и так уезжает в user контейнера,
+  // остаётся только группа docker — вреда от неё нет.
+  assert.deepEqual(socketGroups(1000, 1000, groupFile), ['125']);
+
+  // Сокет root:root — gid 0 ничего не даёт, берём хотя бы группу docker.
+  assert.deepEqual(socketGroups(0, 1000, groupFile), ['125']);
+
+  // Нет /etc/group — остаётся только gid сокета, как было раньше.
+  assert.deepEqual(socketGroups(65534, 1000, path.join(dir, 'нет-такого')), ['65534']);
 });
