@@ -26,9 +26,8 @@ export function ensureDirs(config: IcarusConfig, user: UserConfig): void {
     paths.incoming,
     paths.sessions,
     paths.piAgent,
-    // Каталог скиллов заводим заранее и пустым: так его видит pi, и так же в него
-    // пишет синхронизация. prepareUser его не чистит — это не управляемый каталог
-    // расширений, а место, куда скиллы приезжают из LibreChat (см. skills/sync.ts).
+    // Каталог скиллов заводим заранее и пустым: так его видит pi. prepareUser его
+    // не чистит — это не управляемый каталог расширений, а место для скиллов человека.
     paths.skills,
     paths.sharedMemory,
   ]) {

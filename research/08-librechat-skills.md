@@ -1,7 +1,10 @@
 # 08 — Скиллы LibreChat и pi: почему не доходили и как доехали
 
-**Статус:** разбор + реализованный вариант B1 (синхронизация через Management API),
-проверен на локальном стенде. **Дата:** 21.09.2026.
+**Статус:** разбор. Реализованный вариант B1 (синхронизация через Management API) **убран из кода** —
+файлов, которые здесь упомянуты (`packages/service/src/skills/**`, `docker/librechat/oidc-stub`,
+`script/librechat-skills-bind`, `skills.sync` в конфиге), в репозитории больше нет. Причина — в конце §7;
+на смену синхронизации идёт панель правки скиллов. Остальное — история решений и карта чужого API,
+она полезна, если к теме вернёмся. **Дата:** 21.09.2026.
 **Метод.** Цепочку проследил по нашему коду (`packages/service/src/**`, `packages/extensions/**`,
 `docker/librechat/*`) и по исходникам pi 0.85.1 в `node_modules/@earendil-works/pi-coding-agent/dist/**`.
 Поведение LibreChat — по официальным докам и по исходникам LibreChat на GitHub (ссылки в конце);
@@ -211,6 +214,12 @@ LibreChat = UI + история + панель памяти, агент и ег�
 
 - `docker/librechat/librechat.yaml`: включён `endpoints.agents.managementApi` (OIDC `http://localhost:9100`,
   audience `icarus-skills`, привязка `clientId: icarus-sync` → `userId`/`tenantId` пользователя стенда).
+  Сам блок — **не наша выдумка**: его валидирует LibreChat (`packages/data-provider/src/config.ts`,
+  `managementApiSchema` → `managementApiAuthSchema` → `managementClientBindingSchema`), читает
+  `packages/api/src/middleware/management.ts` (`config.endpoints?.agents?.managementApi?.auth`),
+  а поля `userId` (ObjectId), `tenantId` (не `__SYSTEM__`), `subject`, `enabled` — его схемы, и обе
+  схемы `.strict()`, то есть опечатка в ключе не «тихо проигнорируется», а не пройдёт валидацию.
+  Наше здесь только содержимое: адрес заглушки, `audience` и ObjectId человека.
 - `docker/librechat/oidc-stub/server.mjs`: OIDC-заглушка для локального стенда (JWKS + discovery +
   `POST /token` по client_credentials, ключ генерируется сам в `docker/librechat/oidc-data/`).
   В бою вместо неё — настоящий провайдер.
@@ -262,6 +271,32 @@ LibreChat = UI + история + панель памяти, агент и ег�
   каталог из pi; повторный проход с тем же набором ничего не переписывает (сессии не дёргаются).
 - `./script/test` — 284 теста, включая `skills-sync.test.ts` и `skills-prompt.test.ts`;
   `./script/lint` (tsc + eslint) чисто.
+
+### Почему в итоге убрали (07.10.2026)
+
+Разбор на стенде был верный, но на боевом хосте синхронизация не могла заработать, и выяснилось это
+только при живом разборе прода:
+
+- **Management API принимает только OIDC machine-токены** (`getEnabledAuth` требует
+  `managementApi.auth.oidc.enabled` + `issuer` + `audience`; API-ключи управленческие роуты не смотрят
+  вообще). Значит нужен настоящий OIDC-провайдер с клиентом, привязанным к пользователю и тенанту.
+- **Issuer обязан быть `https://`**, http LibreChat пускает только к `localhost`, `127.0.0.1`, `[::1]`
+  и `*.localhost`. Наш стендовый трюк (заглушка внутри контейнера LibreChat, issuer `http://localhost:9100`)
+  на проде означал бы правку его compose и нашу самоделку в роли провайдера.
+- **Тенант.** У прод-пользователей и у скилла `tenantId` не было, а биндинг требует непустой тенант,
+  запрещает `__SYSTEM__` и ищет пользователя как `findUser({_id, tenantId})`; скилл отдаётся только
+  если `skill.tenantId === req.user.tenantId`.
+- **Версия.** На проде стоял `v0.8.6-rc1`, где `managementApi` и роута `/api/agents/v1/skills` нет
+  вообще; фича появилась только в v0.8.8 (`#15545` контракт, `#15555` M2M-аутентификация,
+  `#15561` чтение, `#15642` скиллы).
+- **Молчание.** Проход с пустым списком скиллов не писал в лог ничего: снаружи это выглядело как
+  «синхронизация сломана», и именно так и выглядело.
+
+Плюс сеть: `icarus`, `LibreChat` и `authelia` живут в разных docker-сетях, а публичный https из
+контейнеров на этом хосте не проходит (hairpin, `unsafe legacy renegotiation disabled`) — понадобились
+бы ещё и маршруты. Цена всей обвязки оказалась выше пользы, поэтому синхронизацию убрали вместе со
+стендовой OIDC-заглушкой, `script/librechat-skills-bind` и секцией `skills.sync`; скиллы pi остаются
+файлами в `~/.pi/agent/skills`, а редактирование придёт панелью.
 
 ## 8. Что осталось за кадром
 
