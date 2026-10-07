@@ -79,6 +79,21 @@ test('журнал в индекс не тащим, а люди и темы — 
   assert.match(index, /Сестра, живёт в Порту/);
 });
 
+test('имена всех файлов видны, даже когда факты в бюджет не влезли', () => {
+  const root = tempMemory();
+  fs.writeFileSync(path.join(root, 'identity.md'), bullets('очень длинный факт про человека', 300));
+  fs.writeFileSync(path.join(root, 'projects/домашняя_сеть.md'), bullets('роутер', 3));
+  fs.writeFileSync(path.join(root, 'projects/щенок.md'), bullets('щенок', 3));
+
+  const index = memoryIndex(root);
+  assert.match(
+    index,
+    /^Файлы памяти \(пиши в существующий, близнецов не заводи\): identity\.md, projects\/домашняя_сеть\.md, projects\/щенок\.md/,
+    'список имён идёт первым и не режется бюджетом',
+  );
+  assert.ok(index.length <= INDEX_BUDGET, `индекс разросся: ${index.length} символов`);
+});
+
 test('явные лимиты по-прежнему работают', () => {
   const root = tempMemory();
   fs.writeFileSync(path.join(root, 'identity.md'), bullets('факт', 10));
@@ -89,7 +104,10 @@ test('явные лимиты по-прежнему работают', () => {
 
   const oneFile = memoryIndex(root, 1);
   assert.match(oneFile, /факт №1/);
-  assert.doesNotMatch(oneFile, /preferences\.md/, 'maxFiles остаётся ограничителем');
+  // maxFiles ограничивает блоки с фактами, а не список имён: имена — самое дешёвое,
+  // по ним разбор и понимает, какие темы уже заняты.
+  assert.doesNotMatch(oneFile, /вкус №1/, 'maxFiles остаётся ограничителем блоков');
+  assert.match(oneFile, /Файлы памяти .*preferences\.md/, 'но имя файла видно всегда');
 });
 
 test('на пустой памяти индекс пуст', () => {
