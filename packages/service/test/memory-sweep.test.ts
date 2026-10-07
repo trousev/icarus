@@ -1,6 +1,6 @@
 // Ежедневная уборка памяти: чистые функции без pi — промпт, разбор плана и его
-// применение. Главное здесь — уборка переносит и переформулирует, но не удаляет:
-// несовпавший или непонятный пункт пропускается, а не отменяет весь план.
+// применение. Главное здесь — уборка переносит, переформулирует и сливает, но не
+// удаляет: несовпавший или непонятный пункт пропускается, а не отменяет весь план.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -9,6 +9,7 @@ import path from 'node:path';
 import {
   applySweepPlan,
   buildSweepPrompt,
+  collectJournals,
   collectMemoryFiles,
   lineNumberOf,
   parseSweepPlan,
@@ -17,7 +18,14 @@ import {
   sweepDue,
   sweepStatePath,
   writeSweepState,
+  SWEEP_PROMPT_BUDGET,
+  type SweepPlan,
 } from '../../extensions/lib/memory-sweep.ts';
+
+/** План для теста: то, что в нём не проверяем, — пустое. */
+function planOf(parts: Partial<SweepPlan>): SweepPlan {
+  return { merges: [], moves: [], rewrites: [], ...parts };
+}
 
 function tempMemory(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-sweep-'));
@@ -31,35 +39,54 @@ function read(root: string, rel: string): string {
   return fs.readFileSync(path.join(root, rel), 'utf8');
 }
 
-test('уборка видит полки и журнал текущего и прошлого месяца', () => {
+test('уборка видит полки, но не читает журналы', () => {
   const root = tempMemory();
   fs.writeFileSync(path.join(root, 'identity.md'), '- Зовут Саня\n');
   fs.writeFileSync(path.join(root, 'preferences.md'), '- Кофе без сахара\n');
   fs.writeFileSync(path.join(root, 'people/маша.md'), '- Сестра\n');
   fs.writeFileSync(path.join(root, 'projects/дом.md'), '- Строит дом\n');
-  fs.writeFileSync(path.join(root, 'journal/2026-09.md'), '- 15.09 — разговор\n');
+  fs.writeFileSync(path.join(root, 'journal/2026-09.md'), '# 2026-09\n- 15.09 — разговор\n');
   fs.writeFileSync(path.join(root, 'journal/2026-08.md'), '- 01.08 — разговор\n');
   fs.writeFileSync(path.join(root, 'journal/2026-07.md'), '- 01.07 — старое\n');
 
-  const files = collectMemoryFiles(root, new Date(2026, 8, 15));
+  const files = collectMemoryFiles(root);
   assert.deepEqual(
     files.map((file) => file.path),
-    ['identity.md', 'preferences.md', 'people/маша.md', 'projects/дом.md', 'journal/2026-09.md', 'journal/2026-08.md'],
+    ['identity.md', 'preferences.md', 'people/маша.md', 'projects/дом.md'],
   );
 });
 
-test('в январе прошлым месяцем считается декабрь прошлого года', () => {
+test('журналы отдаются наличием: имя, записи, объём', () => {
   const root = tempMemory();
-  fs.writeFileSync(path.join(root, 'journal/2025-12.md'), '- 20.12 — разговор\n');
+  fs.writeFileSync(path.join(root, 'journal/2026-09.md'), '# 2026-09\n- 15.09 — разговор\n- 16.09 — ещё\n');
+  fs.writeFileSync(path.join(root, 'journal/2025-12.md'), '- 20.12 — старое\n');
 
-  const files = collectMemoryFiles(root, new Date(2026, 0, 5));
-  assert.deepEqual(files.map((file) => file.path), ['journal/2025-12.md']);
+  const journals = collectJournals(root);
+  assert.deepEqual(
+    journals.map((journal) => journal.path),
+    ['journal/2025-12.md', 'journal/2026-09.md'],
+    'журналы перечисляем все: это только список, а не содержимое',
+  );
+  assert.equal(journals[0].entries, 1);
+  assert.equal(journals[1].entries, 2);
+  assert.ok(journals[1].bytes > 0);
+});
+
+test('содержимое журнала в промпт не попадает — только наличие', () => {
+  const root = tempMemory();
+  fs.writeFileSync(path.join(root, 'identity.md'), '- Зовут Саня\n');
+  fs.writeFileSync(path.join(root, 'journal/2026-09.md'), '- 15.09 — секретная строка журнала\n');
+
+  const prompt = buildSweepPrompt(collectMemoryFiles(root), new Date(2026, 8, 15), collectJournals(root));
+  assert.match(prompt, /journal\/2026-09\.md — 1 записей/, 'файл назван и посчитан');
+  assert.doesNotMatch(prompt, /секретная строка журнала/, 'содержимого журнала в промпте нет');
+  assert.doesNotMatch(prompt, /L1: - 15\.09/, 'строк журнала в нумерации нет');
 });
 
 test('промпт уборки содержит память и запрещает удаление', () => {
   const root = tempMemory();
   fs.writeFileSync(path.join(root, 'identity.md'), '- Переехал в Порту на полгода\n');
-  const prompt = buildSweepPrompt(collectMemoryFiles(root, new Date(2026, 8, 15)), new Date(2026, 8, 15));
+  const prompt = buildSweepPrompt(collectMemoryFiles(root), new Date(2026, 8, 15));
 
   assert.match(prompt, /Переехал в Порту на полгода/, 'модель должна видеть саму память');
   assert.match(prompt, /L1: - Переехал в Порту на полгода/, 'строки памяти пронумерованы');
@@ -69,6 +96,9 @@ test('промпт уборки содержит память и запреща�
   assert.match(prompt, /Не выдумывай|не выдумывай|Выдумывать факты/);
   assert.match(prompt, /projects\/zdorovie\.md/);
   assert.match(prompt, /по состоянию на 15\.09\.2026/);
+  assert.match(prompt, /merges/, 'близнецов велено сливать');
+  assert.match(prompt, /щенок\.md, projects\/собака\.md, projects\/дори\.md/, 'пример близнецов назван');
+  assert.match(prompt, /разбей|Разросшийся файл/, 'разросшиеся файлы велено дробить по темам');
 });
 
 test('план без цели и любое удаление отбрасываются', () => {
@@ -163,7 +193,7 @@ test('перенос уносит строку из источника и сох
 
   const result = applySweepPlan(
     root,
-    {
+    planOf({
       moves: [
         {
           from: 'identity.md',
@@ -173,7 +203,7 @@ test('перенос уносит строку из источника и сох
         },
       ],
       rewrites: [],
-    },
+    }),
     new Date(2026, 8, 15),
   );
 
@@ -189,12 +219,12 @@ test('перенос без append сохраняет строку дослов�
   fs.writeFileSync(path.join(root, 'identity.md'), '- Пьёт сенчу (его слова: «пью сенчу»)\n');
   fs.writeFileSync(path.join(root, 'preferences.md'), '- Кофе без сахара\n');
 
-  applySweepPlan(root, {
+  applySweepPlan(root, planOf({
     moves: [
       { from: 'identity.md', quote: '- Пьёт сенчу (его слова: «пью сенчу»)', to: 'preferences.md' },
     ],
     rewrites: [],
-  });
+  }));
 
   assert.match(read(root, 'preferences.md'), /- Пьёт сенчу \(его слова: «пью сенчу»\)/);
   assert.doesNotMatch(read(root, 'identity.md'), /сенчу/);
@@ -204,7 +234,7 @@ test('перенос создаёт целевой файл, если его е�
   const root = tempMemory();
   fs.writeFileSync(path.join(root, 'identity.md'), '- Болел ангиной в марте\n');
 
-  const result = applySweepPlan(root, {
+  const result = applySweepPlan(root, planOf({
     moves: [
       {
         from: 'identity.md',
@@ -214,7 +244,7 @@ test('перенос создаёт целевой файл, если его е�
       },
     ],
     rewrites: [],
-  });
+  }));
 
   assert.deepEqual(result.changed.sort(), ['identity.md', 'projects/здоровье.md']);
   assert.match(read(root, 'projects/здоровье.md'), /ангина в марте/);
@@ -225,10 +255,10 @@ test('эквивалентная строка в цели не дублируе�
   fs.writeFileSync(path.join(root, 'identity.md'), '- Кофе без сахара\n');
   fs.writeFileSync(path.join(root, 'preferences.md'), '- Кофе без сахара\n');
 
-  const result = applySweepPlan(root, {
+  const result = applySweepPlan(root, planOf({
     moves: [{ from: 'identity.md', quote: '- Кофе без сахара', to: 'preferences.md' }],
     rewrites: [],
-  });
+  }));
 
   assert.deepEqual(result.changed, [], 'трогать нечего: факт уже на месте');
   assert.deepEqual(result.skipped, ['preferences.md']);
@@ -243,10 +273,10 @@ test('похожая строка в цели: перенос пропущен, 
   fs.writeFileSync(path.join(root, 'identity.md'), source);
   fs.writeFileSync(path.join(root, 'preferences.md'), target);
 
-  const result = applySweepPlan(root, {
+  const result = applySweepPlan(root, planOf({
     moves: [{ from: 'identity.md', quote: '- Не будить раньше 09:00.', to: 'preferences.md' }],
     rewrites: [],
-  });
+  }));
 
   assert.deepEqual(result.changed, [], 'ничего не переписываем');
   assert.deepEqual(result.skipped, ['preferences.md']);
@@ -261,10 +291,10 @@ test('перенос в тот же файл — это переформулир
 
   const result = applySweepPlan(
     root,
-    {
+    planOf({
       moves: [{ from: 'identity.md', quote: '- Работает в банке', to: 'identity.md', append: '- Работает в банке, в IT' }],
       rewrites: [],
-    },
+    }),
     new Date(2026, 8, 15),
   );
 
@@ -282,7 +312,7 @@ test('переформулировка меняет строку, а сосед�
 
   const result = applySweepPlan(
     root,
-    {
+    planOf({
       moves: [],
       rewrites: [
         {
@@ -291,7 +321,7 @@ test('переформулировка меняет строку, а сосед�
           to: '- По состоянию на 15.09.2026: живёт в Порту',
         },
       ],
-    },
+    }),
     new Date(2026, 8, 15),
   );
 
@@ -306,14 +336,14 @@ test('несовпавший пункт пропускается, остальн
   const root = tempMemory();
   fs.writeFileSync(path.join(root, 'identity.md'), '- Работает в банке\n- Зовут Саня\n');
 
-  const result = applySweepPlan(root, {
+  const result = applySweepPlan(root, planOf({
     moves: [
       { from: 'identity.md', index: 1, quote: '- Работает в банке', to: 'preferences.md' },
       // Как в жизни: цитата с задвоенным хвостом, такой строки в файле нет.
       { from: 'identity.md', quote: '- Зовут Саня (его слова: «Зовут Саня») (его слова: «Зовут Саня»)', to: 'preferences.md' },
     ],
     rewrites: [],
-  });
+  }));
 
   assert.deepEqual(result.changed.sort(), ['identity.md', 'preferences.md']);
   assert.deepEqual(result.skipped, ['identity.md']);
@@ -325,10 +355,10 @@ test('номер находит строку, даже если цитата о�
   const root = tempMemory();
   fs.writeFileSync(path.join(root, 'identity.md'), '- Работает в банке\n-   Зовут   Саня\n');
 
-  const result = applySweepPlan(root, {
+  const result = applySweepPlan(root, planOf({
     moves: [{ from: 'identity.md', index: 2, quote: '- Зовут Саня', to: 'preferences.md' }],
     rewrites: [],
-  });
+  }));
 
   assert.deepEqual(result.changed.sort(), ['identity.md', 'preferences.md']);
   assert.deepEqual(result.skipped, []);
@@ -340,10 +370,10 @@ test('цитата, скопированная вместе с номером и
   const root = tempMemory();
   fs.writeFileSync(path.join(root, 'identity.md'), '- Работает в банке\n- Зовут Саня\n');
 
-  const result = applySweepPlan(root, {
+  const result = applySweepPlan(root, planOf({
     moves: [{ from: 'identity.md', index: 2, quote: 'L2: - Зовут Саня', to: 'preferences.md' }],
     rewrites: [],
-  });
+  }));
 
   assert.deepEqual(result.changed.sort(), ['identity.md', 'preferences.md']);
   assert.match(read(root, 'preferences.md'), /- Зовут Саня/);
@@ -354,11 +384,11 @@ test('чужой номер не мешает: точная цитата ище�
   const root = tempMemory();
   fs.writeFileSync(path.join(root, 'identity.md'), '- Работает в банке\n- Зовут Саня\n');
 
-  const result = applySweepPlan(root, {
+  const result = applySweepPlan(root, planOf({
     moves: [],
     // Номер указывает на первую строку, цитата — на вторую. Цитата точная и одна такая.
     rewrites: [{ file: 'identity.md', index: 1, quote: '- Зовут Саня', to: '- Зовут Саня, из Москвы' }],
-  });
+  }));
 
   assert.deepEqual(result.changed, ['identity.md']);
   const saved = read(root, 'identity.md');
@@ -371,10 +401,10 @@ test('дубль строки без верного якоря не правим
   const before = '- Кофе без сахара\n- Кофе без сахара\n';
   fs.writeFileSync(path.join(root, 'identity.md'), before);
 
-  const result = applySweepPlan(root, {
+  const result = applySweepPlan(root, planOf({
     moves: [],
     rewrites: [{ file: 'identity.md', quote: '- Кофе без сахара', to: '- Кофе без сахара и молока' }],
-  });
+  }));
 
   assert.deepEqual(result.changed, [], 'непонятно, какую из двух строк править');
   assert.deepEqual(result.skipped, ['identity.md']);
@@ -385,10 +415,10 @@ test('неизвестная полка в применении пропуска
   const root = tempMemory();
   fs.writeFileSync(path.join(root, 'identity.md'), '- Зовут Саня\n');
 
-  const result = applySweepPlan(root, {
+  const result = applySweepPlan(root, planOf({
     moves: [{ from: 'identity.md', quote: '- Зовут Саня', to: 'shared-memory/общее.md' }],
     rewrites: [],
-  });
+  }));
 
   assert.deepEqual(result.changed, []);
   assert.deepEqual(result.skipped, ['shared-memory/общее.md']);
@@ -401,12 +431,174 @@ test('журнал уборки дописывается отдельной ст
 
   const result = applySweepPlan(
     root,
-    { moves: [], rewrites: [], journal: 'перенёс переезд в проекты' },
+    planOf({ moves: [], rewrites: [], journal: 'перенёс переезд в проекты' }),
     new Date(2026, 8, 15),
   );
 
   assert.deepEqual(result.changed, ['journal/2026-09.md']);
   assert.match(read(root, 'journal/2026-09.md'), /- 15\.09 — уборка: перенёс переезд в проекты/);
+});
+
+test('слияние близнецов: содержимое переезжает, источники исчезают', () => {
+  const root = tempMemory();
+  fs.writeFileSync(path.join(root, 'projects/щенок.md'), '- Забрали щенка 28.09.2026\n');
+  fs.writeFileSync(path.join(root, 'projects/собака.md'), '- Завели бассет-хаунда\n');
+  fs.writeFileSync(path.join(root, 'projects/дори.md'), '- Зовут Дори\n');
+
+  const result = applySweepPlan(root, planOf({
+    merges: [{ into: 'projects/дори.md', files: ['projects/щенок.md', 'projects/собака.md'] }],
+  }));
+
+  assert.deepEqual(result.changed.sort(), ['projects/дори.md', 'projects/собака.md', 'projects/щенок.md']);
+  assert.deepEqual(result.skipped, []);
+  const merged = read(root, 'projects/дори.md');
+  assert.match(merged, /- Зовут Дори/, 'свои строки цели живы');
+  assert.match(merged, /- Забрали щенка 28\.09\.2026/, 'уникальное из первого источника переехало');
+  assert.match(merged, /- Завели бассет-хаунда/, 'уникальное из второго источника переехало');
+  assert.equal(fs.existsSync(path.join(root, 'projects/щенок.md')), false, 'источник исчез');
+  assert.equal(fs.existsSync(path.join(root, 'projects/собака.md')), false, 'и второй тоже');
+});
+
+test('слияние выбрасывает повторы, но не теряет уникальное', () => {
+  const root = tempMemory();
+  fs.writeFileSync(path.join(root, 'projects/щенок.md'), '- Щенку 3 месяца\n- Забрали 28.09.2026\n');
+  fs.writeFileSync(path.join(root, 'projects/дори.md'), '- По состоянию на 27.09.2026 — щенку 3 месяца.\n');
+
+  applySweepPlan(root, planOf({
+    merges: [{ into: 'projects/дори.md', files: ['projects/щенок.md'] }],
+  }));
+
+  const merged = read(root, 'projects/дори.md');
+  assert.equal(merged.match(/3 месяца/g)?.length, 1, 'тот же факт не задвоился');
+  assert.match(merged, /Забрали 28\.09\.2026/, 'уникальная строка не потерялась');
+});
+
+test('слияние с нечитаемым источником пропускается целиком', () => {
+  const root = tempMemory();
+  fs.writeFileSync(path.join(root, 'projects/дори.md'), '- Зовут Дори\n');
+
+  const result = applySweepPlan(root, planOf({
+    merges: [{ into: 'projects/дори.md', files: ['projects/щенок.md'] }],
+  }));
+
+  assert.deepEqual(result.changed, [], 'ничего не тронуто');
+  assert.deepEqual(result.skipped, ['projects/дори.md']);
+  assert.equal(read(root, 'projects/дори.md'), '- Зовут Дори\n');
+});
+
+test('разбор слияний: только файлы-темы, без себя и повторов', () => {
+  const plan = parseSweepPlan(
+    JSON.stringify({
+      merges: [
+        {
+          into: 'projects/дори.md',
+          files: ['projects/щенок.md', 'projects/щенок.md', 'projects/дори.md', 'identity.md', 'shared-memory/общее.md'],
+        },
+        // Полку слить нельзя: identity.md — место, а не тема.
+        { into: 'identity.md', files: ['projects/щенок.md'] },
+        { into: 'projects/дом.md', files: [] },
+      ],
+    }),
+  );
+
+  assert.deepEqual(plan?.merges, [{ into: 'projects/дори.md', files: ['projects/щенок.md'] }]);
+  assert.deepEqual(plan?.moves, []);
+});
+
+test('цепочка слияний не теряет факты: щенок → дори → собаки', () => {
+  const root = tempMemory();
+  fs.writeFileSync(path.join(root, 'projects/щенок.md'), '- Щенку 3 месяца\n');
+  fs.writeFileSync(path.join(root, 'projects/дори.md'), '- Зовут Дори\n');
+  fs.writeFileSync(path.join(root, 'projects/собаки.md'), '- Собака живёт в доме\n');
+
+  const result = applySweepPlan(root, planOf({
+    merges: [
+      { into: 'projects/дори.md', files: ['projects/щенок.md'] },
+      { into: 'projects/собаки.md', files: ['projects/дори.md'] },
+    ],
+  }));
+
+  assert.deepEqual(result.skipped, []);
+  const merged = read(root, 'projects/собаки.md');
+  assert.match(merged, /Собака живёт в доме/);
+  assert.match(merged, /Зовут Дори/, 'промежуточная цель доехала до конца цепочки');
+  assert.match(merged, /Щенку 3 месяца/, 'и дальний источник тоже');
+  assert.equal(fs.existsSync(path.join(root, 'projects/щенок.md')), false);
+  assert.equal(fs.existsSync(path.join(root, 'projects/дори.md')), false);
+});
+
+test('кольцо слияний пропускается: непонятно, кто кого поглощает', () => {
+  const root = tempMemory();
+  fs.writeFileSync(path.join(root, 'projects/а.md'), '- Факт А\n');
+  fs.writeFileSync(path.join(root, 'projects/б.md'), '- Факт Б\n');
+
+  const result = applySweepPlan(root, planOf({
+    merges: [
+      { into: 'projects/а.md', files: ['projects/б.md'] },
+      { into: 'projects/б.md', files: ['projects/а.md'] },
+    ],
+  }));
+
+  assert.deepEqual(result.changed, []);
+  assert.deepEqual(result.skipped, ['projects/а.md', 'projects/б.md']);
+  assert.equal(read(root, 'projects/а.md'), '- Факт А\n');
+  assert.equal(read(root, 'projects/б.md'), '- Факт Б\n');
+});
+
+test('перенос из слитого файла пропускается: файла в памяти уже нет', () => {
+  const root = tempMemory();
+  fs.writeFileSync(path.join(root, 'projects/щенок.md'), '- Щенку 3 месяца\n');
+  fs.writeFileSync(path.join(root, 'projects/дори.md'), '- Зовут Дори\n');
+
+  const result = applySweepPlan(root, planOf({
+    merges: [{ into: 'projects/дори.md', files: ['projects/щенок.md'] }],
+    moves: [{ from: 'projects/щенок.md', quote: '- Щенку 3 месяца', to: 'preferences.md' }],
+  }));
+
+  assert.deepEqual(result.skipped, ['projects/щенок.md']);
+  assert.match(read(root, 'projects/дори.md'), /Щенку 3 месяца/, 'строка осталась в слитом файле');
+  assert.equal(fs.existsSync(path.join(root, 'preferences.md')), false, 'в чужую полку не уехала');
+});
+
+test('опустевший файл-тема исчезает, а полка остаётся', () => {
+  const root = tempMemory();
+  fs.writeFileSync(path.join(root, 'identity.md'), '- Единственная строка\n');
+  fs.writeFileSync(path.join(root, 'projects/щенок.md'), '- Щенку 3 месяца\n');
+
+  const result = applySweepPlan(root, planOf({
+    moves: [
+      { from: 'identity.md', quote: '- Единственная строка', to: 'preferences.md' },
+      { from: 'projects/щенок.md', quote: '- Щенку 3 месяца', to: 'projects/дори.md' },
+    ],
+  }));
+
+  assert.ok(result.changed.includes('projects/щенок.md'));
+  assert.equal(fs.existsSync(path.join(root, 'identity.md')), true, 'полка живёт всегда');
+  assert.equal(fs.existsSync(path.join(root, 'projects/щенок.md')), false, 'тема без строк исчезла');
+  assert.match(read(root, 'projects/дори.md'), /Щенку 3 месяца/);
+});
+
+test('файл показывается целиком, обрезки «показано начало» больше нет', () => {
+  const root = tempMemory();
+  const content = `${Array.from({ length: 500 }, (_, index) => `- факт ${index}`).join('\n')}\n`;
+  fs.writeFileSync(path.join(root, 'preferences.md'), content);
+
+  const prompt = buildSweepPrompt(collectMemoryFiles(root), new Date(2026, 8, 15));
+  assert.match(prompt, /L500: - факт 499/, 'виден последний пункт файла');
+  assert.doesNotMatch(prompt, /показано начало/);
+});
+
+test('файл, не влезший в бюджет, не показывается, но назван', () => {
+  const root = tempMemory();
+  fs.writeFileSync(path.join(root, 'identity.md'), '- Зовут Саня\n');
+  const huge = '- оченьдлиннаястрока\n'.repeat(Math.ceil(SWEEP_PROMPT_BUDGET / 10) + 10);
+  fs.writeFileSync(path.join(root, 'projects/огромный.md'), huge);
+
+  const prompt = buildSweepPrompt(collectMemoryFiles(root), new Date(2026, 8, 15));
+  assert.match(prompt, /L1: - Зовут Саня/, 'маленький файл на месте');
+  assert.doesNotMatch(prompt, /оченьдлиннаястрока/, 'огрызок большого файла не показываем');
+  assert.match(prompt, /Не показаны/);
+  assert.match(prompt, /projects\/огромный\.md — \d+ символов/);
 });
 
 test('интервал уборки читается из окружения, 0 — выключено', () => {

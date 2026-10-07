@@ -13,6 +13,7 @@ import { commitMemory, runOneShot } from "./memory-extractor.ts";
 import {
   applySweepPlan,
   buildSweepPrompt,
+  collectJournals,
   collectMemoryFiles,
   parseSweepPlan,
   readSweepState,
@@ -54,12 +55,15 @@ export default function (pi: ExtensionAPI) {
 
     running = true;
     try {
-      const files = collectMemoryFiles(MEMORY, startedAt);
+      const files = collectMemoryFiles(MEMORY);
       if (files.length === 0) {
         log("память пуста — убирать нечего");
         return;
       }
-      const plan = parseSweepPlan(await runOneShot(buildSweepPrompt(files, startedAt), TIMEOUT_MS));
+      // Журналы в промпт не кладём: только их наличие. Уборка их всё равно не трогает.
+      const plan = parseSweepPlan(
+        await runOneShot(buildSweepPrompt(files, startedAt, collectJournals(MEMORY)), TIMEOUT_MS),
+      );
       if (!plan) {
         log("модель не вернула разбираемый план — память не трогаю");
         return;
@@ -70,7 +74,8 @@ export default function (pi: ExtensionAPI) {
         return;
       }
       const committed = await commitMemory(MEMORY, `memory: уборка (${result.changed.length} файлов)`);
-      log(`убрано: ${result.changed.join(", ")}${committed ? "" : " (без коммита)"}`);
+      const merged = plan.merges.length > 0 ? `, слияний ${plan.merges.length}` : "";
+      log(`убрано: ${result.changed.join(", ")}${merged}${committed ? "" : " (без коммита)"}`);
     } catch (error) {
       log(`уборка сорвалась, память не тронута: ${String(error)}`);
     } finally {

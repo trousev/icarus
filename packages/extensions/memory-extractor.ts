@@ -119,10 +119,39 @@ export const INDEX_BUDGET = 4000;
  * identity.md в 20+ фактов разбор не видел поздние и заводил дубли. Теперь файл
  * показывается целиком, пока влезает в бюджет, — а бюджет и есть ограничитель.
  * Явный maxLines остаётся для вызывающих, которым нужен свой потолок.
+ *
+ * Первой строкой идут имена ВСЕХ файлов: они дешевле фактов, а без них разбор не
+ * знал, что тема уже занята, и заводил projects/сеть.md рядом с projects/домашняя_сеть.md.
  */
 export function memoryIndex(root: string, maxFiles = 25, maxLines = Infinity): string {
   const blocks: string[] = [];
-  let used = 0;
+
+  const names: string[] = [];
+  const collectNames = (dir: string, prefix = ''): void => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      if (entry.name.startsWith('.')) continue;
+      const rel = `${prefix}${entry.name}`;
+      if (entry.isDirectory()) {
+        if (entry.name === 'journal') continue; // журнал не полка разбора
+        collectNames(path.join(dir, entry.name), `${rel}/`);
+        continue;
+      }
+      if (entry.name.endsWith('.md')) names.push(rel);
+    }
+  };
+  collectNames(root);
+
+  const list = names.join(', ');
+  // Список имён не должен съесть индекс целиком: в худшем случае показываем половину.
+  const clipped = list.length > INDEX_BUDGET / 2 ? `${list.slice(0, INDEX_BUDGET / 2).trimEnd()}…` : list;
+  const header = names.length === 0 ? '' : `Файлы памяти (пиши в существующий, близнецов не заводи): ${clipped}`;
+  let used = header ? header.length + 1 : 0;
 
   const walk = (dir: string, prefix = ''): void => {
     let entries: fs.Dirent[];
@@ -178,7 +207,7 @@ export function memoryIndex(root: string, maxFiles = 25, maxLines = Infinity): s
   };
 
   walk(root);
-  return blocks.join('\n');
+  return [header, ...blocks].filter((part) => part.length > 0).join('\n');
 }
 
 function tokens(text: string): Set<string> {
@@ -250,7 +279,8 @@ export function buildExtractionPrompt(
   это» про твой совет, факта о нём здесь нет. Цитаты нет — запись отбрасывается.
 - Личное и бытовое — да. Секреты, пароли, номера карт — нет.
 - Пиши короткими строками в виде пунктов списка, от третьего лица или безлично.
-- Не повторяй то, что уже записано, и не заводи второй файл про то же самое.
+- Не повторяй то, что уже записано, и не заводи второй файл про то же самое: если тема
+  уже есть в списке файлов — пиши в существующий, даже если он назван иначе.
 - Разовая просьба («найди», «переведи») — это не факт о человеке. Но если он сам назвал
   признак, привычку, вкус или постоянное дело — это факт.
 - Устойчивое и временное — по разным полкам. Устойчивое (кто человек, где живёт, характер,
