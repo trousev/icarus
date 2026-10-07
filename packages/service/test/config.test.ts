@@ -5,7 +5,16 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { DEFAULT_CONFIG_PATH, REPO_ROOT, detectAuth, ensurePanelSecret, loadConfig, loadEnvFile, publicHost } from '../src/config.ts';
+import {
+  DEFAULT_CONFIG_PATH,
+  REPO_ROOT,
+  detectAuth,
+  ensurePanelSecret,
+  findTelegramUser,
+  loadConfig,
+  loadEnvFile,
+  publicHost,
+} from '../src/config.ts';
 
 function writeConfig(text: string): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-config-'));
@@ -34,7 +43,7 @@ test('минимальный конфиг дочитывается умолча�
   assert.equal(config.url, 'http://localhost:8081', 'без url ссылка ведёт на localhost');
   assert.equal(config.host, '0.0.0.0');
   assert.equal(config.port, 8081);
-  assert.equal(config.sessionIdleMinutes, 30);
+  assert.equal(config.sessionIdleMinutes, 60, 'час тишины: разговор закончен — сжать и закрыть');
   assert.equal(config.docker.image, 'icarus-user:dev');
   assert.equal(config.docker.prefix, 'icarus-user');
   assert.equal(config.docker.socket, null);
@@ -43,6 +52,7 @@ test('минимальный конфиг дочитывается умолча�
   assert.deepEqual(config.auth, {});
   assert.deepEqual(config.env, {});
   assert.deepEqual(config.mcp, {});
+  assert.equal(config.telegram, null, 'без токена и маппинга бот выключен');
 });
 
 test('общее для всех читается целиком: модели, ключи, маунты, MCP', () => {
@@ -348,6 +358,59 @@ test('несуществующий файл — понятная ошибка, �
 
 test('пустой файл не притворяется конфигом', () => {
   assert.throws(() => loadConfig(writeConfig(''), {}), /ожидался объект/);
+});
+
+// --- telegram -----------------------------------------------------------------
+
+/** Маппинг telegram → человек: в yaml имя с «@» берётся в кавычки, иначе не разберётся. */
+const TELEGRAM = `${MINIMAL}telegram_mapping:
+  '@trousev': probe
+`;
+
+test('маппинг telegram читается отдельным ключом и по имени без «@»', () => {
+  const config = loadConfig(writeConfig(TELEGRAM), { TELEGRAM_BOT_TOKEN: 'bot-token' });
+
+  assert.deepEqual(config.telegram, { token: 'bot-token', mapping: { trousev: 'probe' } });
+  assert.equal(findTelegramUser(config, 'trousev')?.id, 'probe');
+  assert.equal(findTelegramUser(config, '@TrOuSev')?.id, 'probe', 'имя сравниваем без @ и регистра');
+  assert.equal(findTelegramUser(config, 'кто-то'), undefined);
+  assert.equal(findTelegramUser(config, undefined), undefined);
+});
+
+test('telegram.mapping внутри блока — то же самое, и токен можно задать строкой', () => {
+  const file = writeConfig(`${MINIMAL}telegram:
+  token: \${MY_BOT_TOKEN}
+  mapping:
+    '@trousev': probe
+`);
+  const config = loadConfig(file, { MY_BOT_TOKEN: 'from-env' });
+  assert.deepEqual(config.telegram, { token: 'from-env', mapping: { trousev: 'probe' } });
+});
+
+test('без токена и без маппинга бот просто выключен', () => {
+  assert.equal(loadConfig(writeConfig(MINIMAL), {}).telegram, null, 'нет ни токена, ни маппинга');
+  assert.equal(loadConfig(writeConfig(TELEGRAM), {}).telegram, null, 'есть маппинг, но нет токена');
+  assert.equal(
+    loadConfig(writeConfig(`${MINIMAL}telegram: {}\n`), { TELEGRAM_BOT_TOKEN: 'bot-token' }).telegram,
+    null,
+    'есть токен, но некому отвечать',
+  );
+});
+
+test('telegram-имя, ведущее к незаведённому человеку, — ошибка', () => {
+  const file = writeConfig(`${MINIMAL}telegram_mapping:\n  '@trousev': vita\n`);
+  assert.throws(() => loadConfig(file, { TELEGRAM_BOT_TOKEN: 'bot-token' }), /нет в users/);
+});
+
+test('имя без «@» в yaml не разбирается — и об этом сказано словами', () => {
+  const file = writeConfig(`${MINIMAL}telegram_mapping:\n  @trousev: probe\n`);
+  // yaml падает на «@» раньше нас: сообщение объясняет, что имя надо взять в кавычки.
+  assert.throws(() => loadConfig(file, { TELEGRAM_BOT_TOKEN: 'bot-token' }), /не разбирается как YAML/);
+});
+
+test('мусор вместо telegram username ловим с подсказкой про кавычки', () => {
+  const file = writeConfig(`${MINIMAL}telegram_mapping:\n  'трусев': probe\n`);
+  assert.throws(() => loadConfig(file, { TELEGRAM_BOT_TOKEN: 'bot-token' }), /не похоже на telegram username/);
 });
 
 // --- секрет панели ------------------------------------------------------------

@@ -27,6 +27,20 @@ export function piArgsFor(model: ModelConfig, sessionId: string): string[] {
   ];
 }
 
+/**
+ * Сколько ждём сжатие. Это обычный вызов модели, но промпт у него — весь разговор,
+ * поэтому таймаут щедрый: уборка памяти ходит в модель с тем же запасом в 10 минут.
+ */
+export const COMPACT_TIMEOUT_MS = 600_000;
+
+/**
+ * Итог сжатия. «Нечего сжимать» — не ошибка: у короткого разговора и у уже
+ * сжатого контекста pi отвечает именно так.
+ */
+export type CompactResult =
+  | { status: 'compacted'; tokensBefore: number; tokensAfter: number }
+  | { status: 'nothing' };
+
 export class PiSession {
   readonly key: string;
   readonly sessionId: string;
@@ -46,6 +60,8 @@ export class PiSession {
   private client: RpcClient;
   private listeners = new Set<(event: RpcEvent) => void>();
   private detach: () => void;
+  /** Сжатие в полёте: пока оно идёт, ход в эту сессию пускать нельзя. */
+  private compactingTask: Promise<void> | null = null;
 
   constructor(
     config: IcarusConfig,
@@ -64,7 +80,9 @@ export class PiSession {
 
     this.client = new RpcClient(config, container, piArgsFor(model, this.sessionId));
     this.detach = this.client.onEvent((event) => {
-      if (event.type === 'agent_settled') this.busy = false;
+      // Во время сжатия сессия занята не ходом: `agent_settled` тут ни при чём,
+      // иначе ход влез бы в сессию посреди переписывания контекста.
+      if (event.type === 'agent_settled' && !this.compactingTask) this.busy = false;
       if (event.type === 'agent_end') this.turns += 1;
       this.lastUsed = Date.now();
       for (const listener of this.listeners) listener(event);
@@ -102,6 +120,68 @@ export class PiSession {
     if (response.success !== true) {
       this.busy = false;
       throw new Error(`pi отказался принять реплику: ${String(response.error ?? 'без причины')}`);
+    }
+  }
+
+  /**
+   * Идёт ли сжатие: реестр по этому обещанию решает, подождать или пустить ход.
+   * Пока оно не завершилось, `busy` держится поднятым — вклиниться нельзя.
+   */
+  get compacting(): Promise<void> | null {
+    return this.compactingTask;
+  }
+
+  /**
+   * Сжатие контекста: pi пересказывает моделью старую часть разговора и дописывает
+   * в сессию запись-пересказ — дальше в промпт едет пересказ и недавние реплики, а
+   * не вся история. История при этом не теряется, файл сессии append-only.
+   *
+   * Долго: это обычный вызов модели, но промпт у него — весь разговор. Поэтому на
+   * время сжатия сессия занята, и второй раз сжать её же нельзя.
+   */
+  async compact(customInstructions?: string): Promise<CompactResult> {
+    if (this.compactingTask) throw new Error('сжатие уже идёт');
+    const task = this.runCompact(customInstructions);
+    // Хвост для ожидающих: своё падение они увидят сами, а `compacting` не должен
+    // превращаться в необработанный reject, если на него никто не подписался.
+    this.compactingTask = task.then(
+      () => undefined,
+      () => undefined,
+    );
+    try {
+      return await task;
+    } finally {
+      this.compactingTask = null;
+    }
+  }
+
+  private async runCompact(customInstructions?: string): Promise<CompactResult> {
+    this.busy = true;
+    const command: Record<string, unknown> = { type: 'compact' };
+    if (customInstructions) command.customInstructions = customInstructions;
+
+    try {
+      const response = await this.client.request(command, COMPACT_TIMEOUT_MS);
+      if (response.success !== true) {
+        const reason = String(response.error ?? '');
+        // Короткий разговор и уже сжатый контекст — это не поломка.
+        if (/nothing to compact|already compacted/i.test(reason)) return { status: 'nothing' };
+        throw new Error(`pi отказался сжимать: ${reason || 'без причины'}`);
+      }
+
+      const data = (response.data ?? {}) as Record<string, unknown>;
+      const tokensBefore = Number(data.tokensBefore ?? 0);
+      const tokensAfter = Number(data.estimatedTokensAfter ?? 0);
+      log.info('сессия сжата', {
+        user: this.user.id,
+        conversation: this.conversationId.slice(0, 8),
+        tokensBefore,
+        tokensAfter,
+      });
+      return { status: 'compacted', tokensBefore, tokensAfter };
+    } finally {
+      this.busy = false;
+      this.lastUsed = Date.now();
     }
   }
 

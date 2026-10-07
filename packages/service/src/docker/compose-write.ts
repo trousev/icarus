@@ -87,6 +87,45 @@ function resolveDocker(config: ReturnType<typeof loadConfig>): {
   return { socketPath: null, dockerHost: socket };
 }
 
+/** gid группы по имени — из того же /etc/group, где его берёт сам docker. */
+export function groupGid(name: string, groupFile = '/etc/group'): number | null {
+  let text: string;
+  try {
+    text = fs.readFileSync(groupFile, 'utf8');
+  } catch {
+    return null;
+  }
+  for (const line of text.split('\n')) {
+    const [entry, , gid] = line.split(':');
+    if (entry !== name) continue;
+    const value = Number(gid);
+    if (Number.isInteger(value)) return value;
+  }
+  return null;
+}
+
+/**
+ * Дополнительные группы сервиса — из-за сокета docker он ходит в контейнеры людей.
+ *
+ * Одного gid сокета мало. У Docker Desktop и rootless-докера сокет принадлежит
+ * пользователю из чужого user namespace: хост видит его как `nobody:nogroup` (65534),
+ * а внутри контейнера он `root:docker` (125). Добавив 65534, мы не даём сервису ничего —
+ * `docker inspect` из контейнера отвечает `permission denied`, и каждый ход падает на
+ * «контейнер не найден», хотя на хосте всё работает. Поэтому к gid сокета добавляем gid
+ * группы `docker`: он одинаковый с обеих сторон (проверено: `--group-add 125` доступ
+ * даёт, `--group-add 65534` — нет). Лишняя безвредная группа в худшем случае просто
+ * ничего не открывает.
+ */
+export function socketGroups(socketGid: number, ownGid: number, groupFile = '/etc/group'): string[] {
+  const groups: number[] = [];
+  const add = (gid: number | null): void => {
+    if (gid === null || gid === 0 || gid === ownGid || groups.includes(gid)) return;
+    groups.push(gid);
+  };
+  add(socketGid);
+  add(groupGid('docker', groupFile));
+  return groups.map(String);
+}
 /** Порт стенда берём из его .env, чтобы он не разъезжался с librechat.yaml. */
 function librechatPort(dir: string): number {
   try {
@@ -116,9 +155,7 @@ function main(): void {
 
   let extraGroups: string[] = [];
   if (docker.socketPath) {
-    const gid = fs.statSync(docker.socketPath).gid;
-    const ownGid = process.getgid?.() ?? 0;
-    if (gid !== 0 && gid !== ownGid) extraGroups = [String(gid)];
+    extraGroups = socketGroups(fs.statSync(docker.socketPath).gid, process.getgid?.() ?? 0);
   }
 
   const librechatDir = path.join(REPO_ROOT, 'docker', 'librechat');
