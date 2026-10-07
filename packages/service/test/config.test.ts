@@ -52,6 +52,7 @@ test('минимальный конфиг дочитывается умолча�
   assert.deepEqual(config.env, {});
   assert.deepEqual(config.mcp, {});
   assert.equal(config.telegram, null, 'без токена и маппинга бот выключен');
+  assert.equal(config.speech, null, 'без ключа провайдера голосовые не расшифровываются');
 });
 
 test('общее для всех читается целиком: модели, ключи, маунты, MCP', () => {
@@ -410,6 +411,77 @@ test('имя без «@» в yaml не разбирается — и об это
 test('мусор вместо telegram username ловим с подсказкой про кавычки', () => {
   const file = writeConfig(`${MINIMAL}telegram_mapping:\n  'трусев': probe\n`);
   assert.throws(() => loadConfig(file, { TELEGRAM_BOT_TOKEN: 'bot-token' }), /не похоже на telegram username/);
+});
+
+// --- голосовые ----------------------------------------------------------------
+
+test('по умолчанию голосовые расшифровывает Whisper у DeepInfra', () => {
+  const config = loadConfig(writeConfig(MINIMAL), { DEEPINFRA_API_KEY: 'deepinfra-key' });
+
+  assert.deepEqual(config.speech, {
+    provider: 'deepinfra',
+    model: 'openai/whisper-large-v3',
+    baseUrl: 'https://api.deepinfra.com/v1/openai',
+    apiKey: 'deepinfra-key',
+  });
+});
+
+test('speech задаётся явно: провайдер, модель, язык', () => {
+  const file = writeConfig(`${MINIMAL}speech:
+  provider: deepinfra
+  model: openai/whisper-large-v3-turbo
+  language: ru
+`);
+  const config = loadConfig(file, { DEEPINFRA_API_KEY: 'deepinfra-key' });
+
+  assert.equal(config.speech?.model, 'openai/whisper-large-v3-turbo');
+  assert.equal(config.speech?.language, 'ru');
+  assert.equal(config.speech?.apiKey, 'deepinfra-key', 'ключ берётся из auth, а не из блока');
+});
+
+test('speech: none выключает распознавание даже с ключом', () => {
+  const off = loadConfig(writeConfig(`${MINIMAL}speech: none\n`), { DEEPINFRA_API_KEY: 'key' });
+  assert.equal(off.speech, null);
+  assert.equal(loadConfig(writeConfig(`${MINIMAL}speech: false\n`), { DEEPINFRA_API_KEY: 'key' }).speech, null);
+});
+
+test('провайдер без ключа — распознавание выключено, а не падение', () => {
+  assert.equal(loadConfig(writeConfig(MINIMAL), {}).speech, null);
+  assert.equal(loadConfig(writeConfig(MINIMAL), { OPENAI_API_KEY: 'openai-key' }).speech, null);
+});
+
+test('незнакомый провайдер без адреса — ошибка с подсказкой', () => {
+  const file = writeConfig(`${MINIMAL}speech:\n  provider: whisperbox\n`);
+  assert.throws(() => loadConfig(file, {}), /не знаю адреса распознавания.*speech\.baseUrl/s);
+});
+
+test('незнакомому провайдеру адрес, модель и ключ задаются руками', () => {
+  const file = writeConfig(`${MINIMAL}auth:
+  whisperbox: secret
+speech:
+  provider: whisperbox
+  model: whisper-large
+  baseUrl: https://speech.example/v1/
+`);
+  const config = loadConfig(file, {});
+
+  assert.equal(config.speech?.baseUrl, 'https://speech.example/v1', 'хвостовой слэш не удваивается');
+  assert.equal(config.speech?.model, 'whisper-large');
+  assert.equal(config.speech?.apiKey, 'secret');
+});
+
+test('адрес есть, а модели нет — тоже ошибка, а не выдуманный id', () => {
+  const file = writeConfig(`${MINIMAL}speech:\n  provider: whisperbox\n  baseUrl: https://speech.example/v1\n`);
+  assert.throws(() => loadConfig(file, {}), /не знаю модели распознавания.*speech\.model/s);
+});
+
+test('провайдер распознавания может не быть среди моделей чата', () => {
+  const file = writeConfig(`${MINIMAL}speech:\n  provider: openai\n`);
+  const config = loadConfig(file, { OPENAI_API_KEY: 'openai-key' });
+
+  assert.equal(config.speech?.provider, 'openai');
+  assert.equal(config.speech?.baseUrl, 'https://api.openai.com/v1');
+  assert.equal(config.speech?.model, 'whisper-1', 'у каждого провайдера своя модель распознавания');
 });
 
 // --- секрет панели ------------------------------------------------------------

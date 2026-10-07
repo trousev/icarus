@@ -6,11 +6,17 @@
 //
 // Разговоры у бота свои, отдельные от LibreChat: Telegram — другой канал и другой
 // контекст. Память при этом одна и та же — она живёт у человека, а не у канала.
-import { findTelegramUser, type IcarusConfig, type UserConfig } from '../config.ts';
+//
+// Вложения разбираем те же, что и вход LibreChat: картинки уезжают модели нативно
+// и ложатся в incoming/, голосовые — расшифровкой (см. attachments.ts, speech.ts).
+import { findTelegramUser, userPaths, type IcarusConfig, type UserConfig } from '../config.ts';
 import { log, redact } from '../log.ts';
+import { buildPrompt } from '../prompt.ts';
 import { phraseForToolEnd, phraseForToolStart } from '../reasoning.ts';
+import { speechTranscriber, type Transcriber } from '../speech.ts';
 import type { CompactOutcome, SessionRegistry } from '../sessions/registry.ts';
 import type { PiSession } from '../sessions/pi-session.ts';
+import { collectIncoming, type Incoming, type IncomingVoice } from './attachments.ts';
 import { describeTelegramError, TelegramApi, type TelegramMessage, type TelegramUpdate } from './api.ts';
 import { TelegramReply } from './reply.ts';
 
@@ -28,6 +34,7 @@ export const GREETING = [
   'Привет! Я Икар.',
   '',
   'Пиши как есть — я помню наши разговоры и умею много чего руками: искать в интернете, считать, читать файлы.',
+  'Присылай фото и голосовые: посмотрю и послушаю.',
   '',
   '/compact — подвести итог разговора, если он разросся.',
 ].join('\n');
@@ -36,7 +43,15 @@ export const NO_USERNAME =
   'Не могу тебя узнать: в Telegram у тебя не задан username, а я различаю людей по нему. ' +
   'Заведи username в настройках Telegram и напиши ещё раз.';
 
-export const TEXT_ONLY = 'Пока понимаю только текст: пришли то же самое словами.';
+/** Сообщение, из которого нечего взять: ни текста, ни вложения. */
+export const NOTHING_TO_READ = 'Тут нечего разбирать: пришли текстом, фото или голосовым.';
+
+/** Голосовое, а расшифровывать нечем: голосового провайдера нет или он выключен. */
+export const VOICE_NO_SPEECH =
+  'Голосовые пока не расшифровываю: в конфиге не задана модель распознавания речи. Напиши словами.';
+
+/** Расшифровка вышла пустой: тишина, музыка или слишком тихая запись. */
+export const VOICE_EMPTY = 'В голосовом не разобрал ни слова — попробуй ещё раз или напиши словами.';
 
 export const UNKNOWN_COMMAND = 'Пока умею только /compact.';
 
@@ -47,6 +62,31 @@ export function unknownUser(username: string): string {
     `Не знаю тебя: @${username} не привязан ни к кому в конфиге. ` +
     'Попроси добавить твой telegram-username в telegram.mapping.'
   );
+}
+
+/** Вложение, которое бот не разбирает: видео, стикер, аудиофайл, документ. */
+export function unsupportedText(kind: string): string {
+  // Документ — единственное, что человек может прислать картинкой: подсказываем.
+  return kind === 'документ'
+    ? 'Пока не разбираю документы: пришли нужное картинкой или словами.'
+    : `Пока не разбираю ${kind}: пришли то же самое словами.`;
+}
+
+export function attachmentFailed(reason: string): string {
+  return `Не смог забрать вложение из Telegram: ${reason}`;
+}
+
+export function transcriptionFailed(reason: string): string {
+  return `Не разобрал голосовое: ${reason}`;
+}
+
+/**
+ * Голосовое в реплике помечаем: Икар должен знать, что это была диктовка, — в речи
+ * нет ни пунктуации, ни разметки, и требовать их с человека не за что.
+ */
+export function voicePrompt(text: string, duration: number | null): string {
+  const mark = duration === null ? '[голосовое]' : `[голосовое, ${Math.round(duration)} с]`;
+  return `${mark} ${text}`;
 }
 
 /**
@@ -93,6 +133,8 @@ export type TelegramBotOptions = {
   api?: TelegramApi;
   pollTimeoutSeconds?: number;
   editIntervalMs?: number;
+  /** Чем расшифровывать голосовые; null — не расшифровываем (подменяется в тестах). */
+  transcribe?: Transcriber | null;
 };
 
 /**
@@ -124,6 +166,8 @@ export class TelegramBot {
   private api: TelegramApi;
   private pollTimeoutSeconds: number;
   private editIntervalMs: number;
+  /** null — распознавание речи не настроено: голосовые честно просим словами. */
+  private transcribe: Transcriber | null;
 
   private stopped = false;
   private abort = new AbortController();
@@ -138,6 +182,7 @@ export class TelegramBot {
     this.api = options.api ?? new TelegramApi(config.telegram.token);
     this.pollTimeoutSeconds = options.pollTimeoutSeconds ?? POLL_TIMEOUT_SECONDS;
     this.editIntervalMs = options.editIntervalMs ?? EDIT_INTERVAL_MS;
+    this.transcribe = options.transcribe === undefined ? speechTranscriber(config) : options.transcribe;
   }
 
   start(): void {
@@ -206,15 +251,23 @@ export class TelegramBot {
       return;
     }
 
-    const text = message.text?.trim() ?? '';
-    if (text === '') {
-      // Фото, голосовые и документы бот пока не разбирает: честнее сказать словами.
-      await this.say(message.chat.id, TEXT_ONLY);
+    let incoming: Incoming;
+    try {
+      incoming = await collectIncoming(this.api, message, userPaths(this.config, user).incoming);
+    } catch (error) {
+      log.warn('телеграм: вложение не забралось', { user: user.id, error: describeTelegramError(error) });
+      await this.say(message.chat.id, attachmentFailed(describeTelegramError(error)));
       return;
     }
 
-    if (isCommand(text)) {
-      const command = commandOf(text);
+    if (incoming.unsupported) {
+      await this.say(message.chat.id, unsupportedText(incoming.unsupported));
+      return;
+    }
+
+    // Командой может быть и подпись к фото: человек шлёт снимок и просит подвести итог.
+    if (isCommand(incoming.text)) {
+      const command = commandOf(incoming.text);
       if (command === '/start') {
         await this.say(message.chat.id, GREETING);
         return;
@@ -228,16 +281,63 @@ export class TelegramBot {
       return;
     }
 
-    await this.runTurn(message, user, text);
+    // Ни текста, ни вложения: остальное бот уже назвал бы отказом.
+    if (incoming.text === '' && incoming.images.length === 0 && !incoming.voice) {
+      await this.say(message.chat.id, NOTHING_TO_READ);
+      return;
+    }
+
+    await this.runTurn(message, user, incoming);
   }
 
-  /** Ход: заготовка ответа, реплика в pi, поток событий — в правки сообщения. */
-  private async runTurn(message: TelegramMessage, user: UserConfig, text: string): Promise<void> {
+  /**
+   * Голосовое — в текст. null значит «расшифровать не вышло»: человеку уже сказали
+   * почему, и начинать ход не с чего.
+   */
+  private async listen(voice: IncomingVoice, reply: TelegramReply): Promise<string | null> {
+    if (!this.transcribe) {
+      reply.push(VOICE_NO_SPEECH);
+      await reply.finish();
+      return null;
+    }
+
+    // Расшифровка — тоже ожидание: человек должен видеть, что его слушают.
+    reply.setStatus('🎤 слушаю голосовое');
+    let transcript: string;
+    try {
+      transcript = await this.transcribe(voice.audio, voice.mimeType);
+    } catch (error) {
+      log.warn('телеграм: голосовое не расшифровалось', { error: describeTelegramError(error) });
+      reply.push(transcriptionFailed(describeTelegramError(error)));
+      await reply.finish();
+      return null;
+    }
+    reply.setStatus('');
+
+    // Пустая расшифровка — это тишина или музыка: ход начинать не с чего.
+    const spoken = transcript.trim();
+    if (spoken === '') {
+      reply.push(VOICE_EMPTY);
+      await reply.finish();
+      return null;
+    }
+    return voicePrompt(spoken, voice.duration);
+  }
+
+  /** Ход: заготовка ответа, расшифровка голосового, реплика в pi, поток событий — в правки сообщения. */
+  private async runTurn(message: TelegramMessage, user: UserConfig, incoming: Incoming): Promise<void> {
     const conversationId = conversationIdFor(message, user.id);
     const reply = new TelegramReply(this.api, message.chat.id, { intervalMs: this.editIntervalMs });
     // Заготовку показываем до поднятия сессии: контейнер и pi стартуют секунды,
     // и человек должен видеть, что его услышали.
     await reply.start();
+
+    let text = incoming.text;
+    if (incoming.voice) {
+      const spoken = await this.listen(incoming.voice, reply);
+      if (spoken === null) return;
+      text = spoken;
+    }
 
     let session: PiSession;
     try {
@@ -291,7 +391,15 @@ export class TelegramBot {
     });
 
     try {
-      await session.prompt(text);
+      // Картинки уезжают модели нативно, а путь к ним — в реплике: без подписи
+      // текст остаётся пустым, и приписка про файлы держит реплику непустой.
+      await session.prompt(
+        buildPrompt(
+          text,
+          incoming.images.map((image) => image.file),
+        ),
+        incoming.images.map(({ data, mimeType }) => ({ data, mimeType })),
+      );
       await settled;
     } catch (error) {
       log.error('телеграм: ход сорвался', { user: user.id, error: redact(String(error)) });
