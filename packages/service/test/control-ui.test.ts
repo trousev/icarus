@@ -73,8 +73,11 @@ test('шапка подписана Icarus Control Panel и рисует раз�
   assert.match(html, /<title>Icarus Control Panel<\/title>/);
   assert.match(html, /<b>Icarus<\/b>/, 'в сайдбаре — имя панели');
   assert.match(html, /document\.title = 'Icarus Control Panel · ' \+ cfg\.user/);
-  assert.match(html, /href="\/panel\/memory\?scope=maple"/, 'раздел из SECTIONS — ссылкой в сайдбаре');
-  assert.match(html, /href="\/panel\/maple\?scope=maple"/);
+  // Область в ссылке несёт только память: у математики своей области нет, и
+  // `?scope=personal` в её адресе — это и была та путаница с двумя входами.
+  assert.match(html, /href="\/panel\/memory\?scope=maple"/, 'раздел памяти — ссылкой с областью');
+  assert.match(html, /href="\/panel\/maple"/, 'у математики область в адресе не тащим');
+  assert.doesNotMatch(html, /href="\/panel\/maple\?/, 'лишнего параметра у раздела математики нет');
   assert.match(html, /icarus-core-2/, 'в подвале видно, какая модель работает');
 
   // Следующий раздел — это ещё одна ссылка, а не переделка страницы.
@@ -82,7 +85,7 @@ test('шапка подписана Icarus Control Panel и рисует раз�
     { ...SESSION, sections: [...SESSION.sections, { id: 'sessions', label: 'Разговоры' }] },
     { section: 'memory', scope: 'personal' },
   );
-  assert.match(withSessions, /href="\/panel\/sessions\?scope=personal">Разговоры</);
+  assert.match(withSessions, /href="\/panel\/sessions">Разговоры</);
 });
 
 test('панель не приносит с собой никаких пропусков: вход делает прокси', () => {

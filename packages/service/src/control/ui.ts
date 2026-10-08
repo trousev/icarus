@@ -254,12 +254,18 @@ function sessionPage(session: PanelSession, page: PanelPage): string {
 
   // Скиллы показываем подписью, а не ссылкой: редактор скиллов ещё не сделан, и
   // мёртвая ссылка хуже, чем честное «скоро».
+  //
+  // Область в ссылке несёт только память: у математики своей области нет, и
+  // `?scope=personal` в её адресе — это ровно та путаница, когда раздел показывал
+  // личную память под своим заголовком.
   const nav = session.sections
-    .map(
-      (item) =>
-        `<a class="${item.id === page.section ? 'active' : ''}" href="/panel/${item.id}?scope=${scope}">` +
-        `${escapeHtml(item.label)}<em id="count-${item.id}"></em></a>`,
-    )
+    .map((item) => {
+      const href = `/panel/${item.id}${item.id === 'memory' ? `?scope=${scope}` : ''}`;
+      return (
+        `<a class="${item.id === page.section ? 'active' : ''}" href="${href}">` +
+        `${escapeHtml(item.label)}<em id="count-${item.id}"></em></a>`
+      );
+    })
     .join('');
 
   const areas = maple
@@ -278,7 +284,10 @@ function sessionPage(session: PanelSession, page: PanelPage): string {
     scope,
     file: page.file ?? null,
     tab: page.tab === 'history' ? 'history' : 'notes',
-    mode: session.scopes[scope] ?? 'memory',
+    // Режим — свойство раздела, а не области: математика не область памяти, и
+    // спрашивать про неё `scopes[scope]` значит получить «memory» и попросить у
+    // сервера личную память под заголовком математики.
+    mode: maple ? 'maple' : 'memory',
     scopes,
     labels: Object.fromEntries(scopes.map((name) => [name, scopeLabel(session, name)])),
   };
@@ -371,16 +380,24 @@ const humanSize = (bytes) => bytes < 1024 ? bytes + ' б' : (bytes / 1024).toFix
 const day = (iso) => { const [y, m, d] = String(iso).split('-'); return y && m && d ? d + '.' + m + '.' + y : String(iso); };
 const stamp = (iso) => String(iso).slice(0, 16).replace('T', ' ');
 const isImage = (path) => /\\.(gif|jpe?g|bmp)$/i.test(path);
-const endpoint = (name, extra = {}) => '/panel/' + (cfg.mode === 'maple' ? 'maple' : 'memory') + '/' + name + '?' +
-  new URLSearchParams({ scope: cfg.scope, ...extra }).toString();
+// Адрес запроса: раздел задаёт корень, область уточняет память. У математики
+// области нет, и scope в её запросах только сбивал бы с толку.
+const endpoint = (name, extra = {}) => {
+  const query = cfg.mode === 'maple' ? { ...extra } : { scope: cfg.scope, ...extra };
+  const suffix = new URLSearchParams(query).toString();
+  return '/panel/' + (cfg.mode === 'maple' ? 'maple' : 'memory') + '/' + name + (suffix ? '?' + suffix : '');
+};
 
 // Адрес — это и есть состояние: файл и вкладку видно в ссылке, «назад» работает.
 function go(patch) {
   const next = { scope: cfg.scope, file: cfg.file, tab: cfg.tab, ...patch };
-  const query = new URLSearchParams({ scope: next.scope });
+  const query = new URLSearchParams();
+  // Область в адресе есть только у памяти: у математики её нет вовсе.
+  if (cfg.mode !== 'maple') query.set('scope', next.scope);
   if (next.file) query.set('file', next.file);
   if (next.file && next.tab === 'history') query.set('tab', 'history');
-  location.href = '/panel/' + cfg.section + '?' + query.toString();
+  const suffix = query.toString();
+  location.href = '/panel/' + cfg.section + (suffix ? '?' + suffix : '');
 }
 
 // Свой диалог вместо window.confirm: браузер глушит нативные модалки, если

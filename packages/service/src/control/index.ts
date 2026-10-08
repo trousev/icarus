@@ -48,7 +48,7 @@ type Scope = 'personal' | 'shared' | 'maple';
 /** Режим раздела: memory правится построчно, maple — только смотрится. */
 export type ScopeMode = 'memory' | 'maple';
 
-/** Заголовки областей памяти: их рисует панель, и держать их в браузере незачем. */
+/** Заголовки областей: их рисует панель, и держать их в браузере незачем. */
 const SCOPE_LABELS: Record<string, string> = {
   personal: 'Личная',
   shared: 'Семейная',
@@ -74,13 +74,35 @@ export function disposition(relative: string): string {
   return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`;
 }
 
-/** Раздел запроса: всё незнакомое — личная память, как и раньше. */
-function parseScope(raw: unknown): Scope {
-  return raw === 'shared' || raw === 'maple' ? raw : 'personal';
+/**
+ * Область памяти из запроса: всё незнакомое — личная, как и раньше.
+ *
+ * Математики здесь нет намеренно: это не область памяти, а отдельный раздел со
+ * своим корнем и своим правом на запись. Пока она была и тем и другим, панель
+ * показывала её дважды — таблеткой среди областей и разделом в сайдбаре, — а
+ * `/panel/memory?scope=maple` рисовал чужие файлы под заголовком памяти.
+ */
+function parseScope(raw: unknown): 'personal' | 'shared' {
+  return raw === 'shared' ? raw : 'personal';
 }
 
 function modeFor(scope: Scope): ScopeMode {
   return scope === 'maple' ? 'maple' : 'memory';
+}
+
+/**
+ * Какую область читает запрос.
+ *
+ * У новых маршрутов раздел стоит в адресе (`/panel/maple/files`) и решает всё:
+ * область из query там только путала бы. У старых (`/panel/api/*`) раздела в
+ * адресе нет — они и раньше называли область параметром, и открытая в браузере
+ * вкладка панели должна продолжать работать после обновления сервиса.
+ */
+function scopeFor(section: string | undefined, raw: unknown): Scope {
+  if (section === 'maple') return 'maple';
+  if (section === 'memory') return parseScope(raw);
+  const legacy = raw === 'shared' || raw === 'maple' ? raw : 'personal';
+  return legacy;
 }
 
 /** Корень раздела и набор расширений, которые в нём вообще допустимы. */
@@ -94,11 +116,10 @@ function resolveScope(config: IcarusConfig, userId: string, scope: Scope) {
 }
 
 /** Какие области есть у человека и что в них можно делать. */
-function scopesFor(config: IcarusConfig): Record<string, ScopeMode> {
-  const scopes: Record<string, ScopeMode> = { personal: 'memory', shared: 'memory', maple: 'maple' };
-  // Каталог математики не заводим без Maple: пустой раздел только путал бы.
-  if (!config.mcp?.maple) delete scopes.maple;
-  return scopes;
+function scopesFor(): Record<string, ScopeMode> {
+  // Областей ровно две, и обе — память. Математика сюда не входит: у неё свой
+  // раздел в сайдбаре, и в списке областей она появлялась бы вторым входом туда же.
+  return { personal: 'memory', shared: 'memory' };
 }
 
 /** Репозитории и каталоги, без которых раздел не открыть: панель их и заводит. */
@@ -191,14 +212,16 @@ async function sectionPage(
   const session: PanelSession = {
     user: userId,
     sections: SECTIONS,
-    scopes: scopesFor(config),
+    scopes: scopesFor(),
     scopeLabels: SCOPE_LABELS,
     model: config.models[0]?.id ?? '—',
     storage: 'git · local',
   };
   return panelHtml(session, {
     ...page,
-    scope: parseScope(url.searchParams.get('scope')),
+    // Область — только у памяти: у математики её нет, и тащить туда личную значит
+    // показывать раздел в виде, которого не бывает.
+    scope: scopeFor(page.section, url.searchParams.get('scope')),
     file: url.searchParams.get('file') ?? undefined,
     tab: url.searchParams.get('tab') === 'history' ? 'history' : 'notes',
   });
@@ -235,7 +258,7 @@ async function handleApi(
       return;
     }
     await prepare(config, userId);
-    const scopes = scopesFor(config);
+    const scopes = scopesFor();
     json(res, 200, {
       user: userId,
       sections: SECTIONS,
@@ -259,8 +282,9 @@ async function handleApi(
       return;
     }
   }
-  // Раздел в адресе главнее области: /panel/maple/… — это математика.
-  const scope = route?.section === 'maple' ? 'maple' : parseScope(url.searchParams.get('scope') ?? body.scope);
+  // Раздел в адресе старше области: /panel/maple/… — это математика, каким бы
+  // ни был scope в запросе, а /panel/memory/… — только память.
+  const scope = scopeFor(route?.section, url.searchParams.get('scope') ?? body.scope);
   const mode = modeFor(scope);
   const resolved = resolveScope(config, userId, scope);
   if (!resolved) {

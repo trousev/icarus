@@ -109,6 +109,35 @@ test('корень домена уводит в панель', async () => {
   });
 });
 
+test('раздел решает, что за область: математика не притворяется памятью и наоборот', async () => {
+  await withServer(async (base) => {
+    // Раньше область слушалась вперёд раздела, и `/panel/maple?scope=personal`
+    // показывал личную память под заголовком математики — а математика при этом
+    // висела ещё и третьей областью. Дуба нет: раздел и область развязаны.
+    const personalInMaple = (await (
+      await fetch(`${base}/panel/maple/files?scope=personal`, { headers: asUser('probe') })
+    ).json()) as { mode: string; files: Array<{ path: string }> };
+    assert.equal(personalInMaple.mode, 'maple');
+    assert.deepEqual(
+      personalInMaple.files.map((file) => file.path).sort(),
+      ['0123456789abcdef.gif', 'osc.jsonl'],
+      'раздел математики отдаёт расчёты, что бы ни стояло в scope',
+    );
+
+    // И наоборот: maple в области памяти больше не открывает чужой каталог.
+    const mapleInMemory = (await (
+      await fetch(`${base}/panel/memory/files?scope=maple`, { headers: asUser('probe') })
+    ).json()) as { scope: string; mode: string; files: Array<{ path: string }> };
+    assert.equal(mapleInMemory.scope, 'personal', 'незнакомая область — это личная память');
+    assert.equal(mapleInMemory.mode, 'memory');
+    assert.deepEqual(mapleInMemory.files.map((file) => file.path).sort(), ['identity.md', 'people/barsik.md']);
+
+    // Своей областью математику не объявить: её нет в списке областей.
+    const state = (await (await api(base, 'probe', 'state')).json()) as { scopes: string[] };
+    assert.deepEqual(state.scopes, ['personal', 'shared']);
+  });
+});
+
 test('незнакомого человека панель не пускает, а не показывает пустую память', async () => {
   await withServer(async (base) => {
     // Человек есть в LDAP, но его нет в users: config.yaml — сказать надо именно это.
@@ -172,8 +201,10 @@ test('панель показывает только память своего �
       ],
       'разделы панели приходят из сервиса',
     );
-    assert.deepEqual(state.scopes, ['personal', 'shared', 'maple']);
-    assert.deepEqual(state.modes, { personal: 'memory', shared: 'memory', maple: 'maple' });
+    // Областей памяти ровно две: математика — отдельный раздел, а не третья
+    // область. Пока она была и тем и другим, панель показывала её дважды.
+    assert.deepEqual(state.scopes, ['personal', 'shared'], 'математика не область памяти');
+    assert.deepEqual(state.modes, { personal: 'memory', shared: 'memory' });
 
     const files = (await (await api(base, 'probe', 'files?scope=personal')).json()) as {
       user: string;
