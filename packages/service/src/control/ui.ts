@@ -140,6 +140,9 @@ function shell(body: string): string {
   .file-head { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; padding:16px 18px 12px; }
   /* Пока файл не открыт, шапка с пустым именем только занимает место. */
   .file-head[hidden] { display:none; }
+  /* Вкладки и «Скачать» — одним углом: вкладки переключают, кнопка забирает файл. */
+  .head-actions { display:flex; gap:8px; align-items:center; flex:0 0 auto; }
+  .head-actions [hidden] { display:none; }
   .file-head strong { font-family:ui-monospace, monospace; font-size:15px; }
   .meta { color:var(--dim); font-size:12px; margin-top:4px; }
   .tabs { display:flex; gap:4px; background:var(--raise); border-radius:9px; padding:3px; }
@@ -327,9 +330,12 @@ function sessionPage(session: PanelSession, page: PanelPage): string {
             <strong id="file-name">${page.file ? escapeHtml(page.file) : ''}</strong>
             <div class="meta" id="file-meta"></div>
           </div>
-          <div class="tabs" id="tabs" hidden>
-            <a class="tab${config.tab === 'notes' ? ' active' : ''}" href="#" data-tab="notes">${maple ? 'Содержимое' : 'Записи'}</a>
-            <a class="tab${config.tab === 'history' ? ' active' : ''}" href="#" data-tab="history">История</a>
+          <div class="head-actions">
+            <div class="tabs" id="tabs" hidden>
+              <a class="tab${config.tab === 'notes' ? ' active' : ''}" href="#" data-tab="notes">${maple ? 'Содержимое' : 'Записи'}</a>
+              <a class="tab${config.tab === 'history' ? ' active' : ''}" href="#" data-tab="history">История</a>
+            </div>
+            <button class="btn" id="download" hidden>Скачать</button>
           </div>
         </div>
         <div class="file-body" id="content"></div>
@@ -472,6 +478,24 @@ async function openFile(path) {
   go({ file: path, tab: 'notes' });
 }
 
+// Скачивание — запрос за байтами и <a download>, а не переход по адресу: переход
+// увёл бы со страницы, а неудачное скачивание оставило бы человека с пустой
+// вкладкой вместо панели. Сервер при этом всё равно отдаёт имя в заголовке —
+// страница его не разбирает, а берёт последний кусок пути, который и так знает.
+el('download').onclick = guard(async () => {
+  if (!cfg.file) return;
+  const response = await fetch(endpoint('file', { path: cfg.file, download: '1' }));
+  if (!response.ok) throw new Error('файл не отдался: ' + response.status);
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(await response.blob());
+  link.download = cfg.file.split('/').pop();
+  document.body.append(link);
+  link.click();
+  link.remove();
+  // Освобождаем blob сразу после клика: держать копию файла в памяти незачем.
+  setTimeout(() => URL.revokeObjectURL(link.href), 10000);
+});
+
 // ── записи памяти ────────────────────────────────────────────────────────────
 // Строка файла — это запись с галочкой, заголовок раздела или просто текст.
 // Выделение живёт в браузере и никуда не уезжает, пока не нажали «удалить».
@@ -591,6 +615,9 @@ function showFileHead(path, meta, tabs) {
   el('file-name').textContent = path || '';
   el('file-meta').textContent = meta || '';
   el('tabs').hidden = !tabs;
+  // Скачать можно любой файл раздела — и память, и график Maple: это чтение,
+  // а не правка, и упирается оно в те же проверки пути, что и остальные запросы.
+  el('download').hidden = !path;
 }
 
 async function renderContent() {

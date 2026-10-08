@@ -60,6 +60,20 @@ function json(res: ServerResponse, status: number, payload: unknown): void {
   res.end(JSON.stringify(payload));
 }
 
+/**
+ * Заголовок для скачивания: имя файла как есть, а не «file».
+ *
+ * Имена в памяти русские, а в ASCII-варианте заголовка кириллицы быть не может —
+ * поэтому имя едет дважды: подчищенное для старых браузеров и percent-encoded
+ * (RFC 5987) для всех остальных. Без второго браузер сохранил бы «здоровье.md»
+ * как «______.md».
+ */
+export function disposition(relative: string): string {
+  const name = relative.split('/').pop() ?? 'file';
+  const ascii = name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`;
+}
+
 /** Раздел запроса: всё незнакомое — личная память, как и раньше. */
 function parseScope(raw: unknown): Scope {
   return raw === 'shared' || raw === 'maple' ? raw : 'personal';
@@ -286,21 +300,39 @@ async function handleApi(
 
   if (req.method === 'GET' && (name === 'file' || name === 'file-raw')) {
     const relative = url.searchParams.get('path') ?? '';
-    const raw = name === 'file-raw' || url.searchParams.get('raw') === '1';
-    // raw=1 — за картинкой: график отдаём байтами, а не строкой в JSON.
+    const asFile = url.searchParams.get('download') === '1';
+    // Картинку отдаём байтами всегда, как её ни просят: строкой в JSON график не
+    // уедет, да и читать .gif как utf8 — значит испортить его на глазах у человека.
+    const raw = name === 'file-raw' || url.searchParams.get('raw') === '1' || isImageFile(relative);
     if (raw && isImageFile(relative)) {
       const image = readImageFile(root, relative, allowed);
       if (!image) {
         json(res, 404, errorBody('картинка не найдена или недоступна'));
         return;
       }
-      res.writeHead(200, { 'content-type': image.type, 'cache-control': 'private, max-age=300' });
+      res.writeHead(200, {
+        'content-type': image.type,
+        'cache-control': 'private, max-age=300',
+        ...(asFile ? { 'content-disposition': disposition(relative) } : {}),
+      });
       fs.createReadStream(image.file).pipe(res);
       return;
     }
     const content = readMemoryFile(root, relative, allowed);
     if (content === null) {
       json(res, 404, errorBody('файл не найден или недоступен'));
+      return;
+    }
+    // download=1 — отдать файл как файл: браузер сохранит его под тем же именем,
+    // а не покажет текстом. Проверки пути тут те же, что и у обычного чтения.
+    if (asFile) {
+      const body = Buffer.from(content, 'utf8');
+      res.writeHead(200, {
+        'content-type': 'text/plain; charset=utf-8',
+        'content-length': String(body.byteLength),
+        'content-disposition': disposition(relative),
+      });
+      res.end(body);
       return;
     }
     json(res, 200, { path: relative, content });

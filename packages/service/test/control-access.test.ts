@@ -256,6 +256,52 @@ test('история файла показывает коммиты с числ�
   });
 });
 
+test('файл скачивается как файл: имя в заголовке, байты как есть', async () => {
+  await withServer(async (base, config) => {
+    const memory = userPaths(config, probe('probe')).memory;
+    // Кириллица в имени — не редкость (projects/здоровье.md), а в ASCII-варианте
+    // заголовка её быть не может: имя обязано уехать дважды.
+    fs.writeFileSync(path.join(memory, 'projects.md'), '- Проверка\n');
+    fs.mkdirSync(path.join(memory, 'projects'), { recursive: true });
+    fs.writeFileSync(path.join(memory, 'projects', 'здоровье.md'), '- По состоянию на 21.09.2026 — всё хорошо\n');
+
+    const text = await fetch(`${base}/panel/memory/file?scope=personal&path=identity.md&download=1`, {
+      headers: asUser('probe'),
+    });
+    assert.equal(text.status, 200);
+    assert.match(String(text.headers.get('content-disposition')), /^attachment; filename="identity\.md"/);
+    assert.match(String(await text.text()), /Живёт в Москве/, 'содержимое отдаётся как есть');
+
+    const cyrillic = await fetch(
+      `${base}/panel/memory/file?scope=personal&path=${encodeURIComponent('projects/здоровье.md')}&download=1`,
+      { headers: asUser('probe') },
+    );
+    const disposition = String(cyrillic.headers.get('content-disposition'));
+    assert.match(disposition, /filename="________\.md"/, 'ASCII-вариант без кириллицы');
+    assert.match(disposition, /filename\*=UTF-8''%D0%B7%D0%B4%D0%BE%D1%80%D0%BE%D0%B2%D1%8C%D0%B5\.md/, 'имя целиком — в UTF-8');
+
+    // График Maple: скачивание не должно превращать картинку в текст.
+    const plot = await fetch(`${base}/panel/maple/file?scope=maple&path=0123456789abcdef.gif&download=1`, {
+      headers: asUser('probe'),
+    });
+    assert.equal(plot.headers.get('content-type'), 'image/gif');
+    assert.equal(await plot.text(), 'GIF89a', 'байты те же, что и у <img>');
+
+    // Скачивание — это чтение, а не правка: проверки пути тут те же.
+    const alien = await fetch(`${base}/panel/memory/file?scope=personal&path=secret.md&download=1`, {
+      headers: asUser('probe'),
+    });
+    assert.equal(alien.status, 404);
+    assert.equal(
+      (await fetch(`${base}/panel/memory/file?scope=personal&path=../../etc/passwd.md&download=1`, {
+        headers: asUser('probe'),
+      })).status,
+      404,
+      'за пределы раздела скачивание не выводит',
+    );
+  });
+});
+
 test('подмена user в запросе игнорируется — человека задаёт только заголовок', async () => {
   await withServer(async (base) => {
     const response = await api(base, 'probe', 'files?scope=personal&user=probe2');
