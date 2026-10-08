@@ -13,7 +13,7 @@ import {
   attachmentFailed,
   compactText,
   conversationIdFor,
-  newText,
+  clearText,
   parseCommand,
   skillsText,
   statsText,
@@ -189,7 +189,7 @@ function makeBot(
     /** Чем кончились команды бота: по умолчанию всё хорошо. */
     stop?: unknown;
     stats?: unknown;
-    reset?: unknown;
+    clear?: unknown;
     skills?: unknown;
     /** Чем расшифровывать голосовые: как в бою, но без сети; null — нечем. */
     transcribe?: ((audio: Uint8Array, mimeType: string) => Promise<string>) | null;
@@ -230,9 +230,9 @@ function makeBot(
         }
       );
     },
-    reset: async (user: { id: string }, conversationId: string) => {
-      record('new', user, conversationId);
-      return options.reset ?? { status: 'started' };
+    clear: async (user: { id: string }, conversationId: string) => {
+      record('clear', user, conversationId);
+      return options.clear ?? { status: 'started' };
     },
     commands: async (user: { id: string }, conversationId: string) => {
       record('skills', user, conversationId);
@@ -526,7 +526,7 @@ test('/start и /help рассказывают, что бот умеет, и в 
   await bot.handleUpdate(messageUpdate('/help'));
   assert.match(chatText(state, 42), /\/stop — остановиться/);
   assert.match(chatText(state, 42), /\/stats —/);
-  assert.equal(HELP.includes('/new'), true);
+  assert.equal(HELP.includes('/clear'), true);
   assert.deepEqual(session.prompts, [], 'команды в разговор не уезжают');
 });
 
@@ -617,12 +617,12 @@ test('/stats рассказывает цифры разговора, а не с�
   assert.match(text, /Потрачено: \$0\.450/);
 });
 
-test('/new начинает разговор заново и честно говорит про память', async () => {
+test('/clear начинает разговор заново и честно говорит про память', async () => {
   const { bot, state, calls } = makeBot();
 
-  await bot.handleUpdate(messageUpdate('/new'));
+  await bot.handleUpdate(messageUpdate('/clear'));
 
-  assert.deepEqual(calls, [{ command: 'new', user: 'probe', conversationId: 'telegram-42' }]);
+  assert.deepEqual(calls, [{ command: 'clear', user: 'probe', conversationId: 'telegram-42' }]);
   assert.match(chatText(state, 42), /с чистого листа/);
   assert.match(chatText(state, 42), /Память не трогал/);
 });
@@ -664,15 +664,15 @@ test('что отвечаем на каждый исход сжатия', () => 
   assert.match(compactText({ status: 'failed', error: 'нет ключа' }), /нет ключа/);
 });
 
-test('что отвечаем на исходы /stop, /new и /skills', () => {
+test('что отвечаем на исходы /stop, /clear и /skills', () => {
   assert.match(stopText({ status: 'stopped' }), /Остановился/);
   assert.match(stopText({ status: 'idle' }), /ничего не делаю/);
   assert.match(stopText({ status: 'no-session' }), /нечего/);
   assert.match(stopText({ status: 'failed', error: 'таймаут' }), /таймаут/);
 
-  assert.match(newText({ status: 'started' }), /в архив/);
-  assert.match(newText({ status: 'empty' }), /и так с чистого листа/);
-  assert.match(newText({ status: 'busy' }), /сначала \/stop/);
+  assert.match(clearText({ status: 'started' }), /в архив/);
+  assert.match(clearText({ status: 'empty' }), /и так с чистого листа/);
+  assert.match(clearText({ status: 'busy' }), /сначала \/stop/);
 
   assert.match(skillsText({ status: 'ok', commands: [] }), /ничего нет/);
   assert.match(

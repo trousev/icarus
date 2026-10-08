@@ -162,7 +162,7 @@ users:
 #
 # Токен бота в конфиге не нужен: он подхватывается из .env (TELEGRAM_BOT_TOKEN,
 # образец .env.example). Нет токена или пусто в mapping — бот не поднимается, а
-# сервис работает как раньше. Команды бота: /compact, /stop, /stats, /new,
+# сервис работает как раньше. Команды бота: /compact, /stop, /stats, /clear,
 # /skills и /help — что каждая делает, написано в README, раздел «Telegram».
 #
 # telegram:

@@ -16,9 +16,9 @@ import { phraseForToolEnd, phraseForToolStart } from '../reasoning.ts';
 import { speechTranscriber, type Transcriber } from '../speech.ts';
 import type {
   AbortOutcome,
+  ClearOutcome,
   CommandsOutcome,
   CompactOutcome,
-  ResetOutcome,
   SessionRegistry,
   StatsOutcome,
 } from '../sessions/registry.ts';
@@ -40,7 +40,7 @@ export const COMMANDS = [
   { command: 'compact', description: 'подвести итог разговора' },
   { command: 'stop', description: 'остановить ответ' },
   { command: 'stats', description: 'токены, деньги, контекст' },
-  { command: 'new', description: 'начать разговор заново' },
+  { command: 'clear', description: 'начать разговор заново' },
   { command: 'skills', description: 'скиллы и шаблоны' },
 ];
 
@@ -48,7 +48,7 @@ export const COMMANDS = [
  * Команды, которые бот разбирает сам. Всё остальное с косой черты — реплика для pi:
  * у него свои команды (`/skill:имя`, промпт-шаблоны), и отбирать их у человека нельзя.
  */
-export const BOT_COMMANDS = new Set(['start', 'help', 'compact', 'stop', 'stats', 'new', 'skills']);
+export const BOT_COMMANDS = new Set(['start', 'help', 'compact', 'stop', 'stats', 'clear', 'skills']);
 
 export const GREETING = [
   'Привет! Я Икар.',
@@ -67,7 +67,7 @@ export const HELP = [
   '/compact <пожелание> — то же, но с оговоркой, что важно сохранить',
   '/stop — остановиться, если я ушёл не туда',
   '/stats — сколько токенов и денег ушло и сколько занято в контексте',
-  '/new — начать разговор с чистого листа (память остаётся при мне)',
+  '/clear — начать разговор с чистого листа (память остаётся при мне)',
   '/skills — что у меня есть сверх разговора: скиллы и шаблоны',
   '',
   'Ещё я понимаю фото и голосовые, помню прошлые разговоры и умею искать в интернете.',
@@ -234,8 +234,8 @@ export function statsText(outcome: StatsOutcome): string {
   return lines.length > 0 ? lines.join('\n') : 'Разговор пока пустой: ни реплик, ни токенов.';
 }
 
-/** Что ответить на /new. */
-export function newText(outcome: ResetOutcome): string {
+/** Что ответить на /clear. */
+export function clearText(outcome: ClearOutcome): string {
   switch (outcome.status) {
     case 'started':
       return 'Начали с чистого листа: прошлую нить убрал в архив. Память не трогал — то, что я о вас знаю, осталось.';
@@ -458,8 +458,8 @@ export class TelegramBot {
         return this.say(chatId, stopText(await this.registry.abort(user, conversationId)));
       case 'stats':
         return this.say(chatId, statsText(await this.registry.stats(user, conversationId)));
-      case 'new':
-        return this.say(chatId, newText(await this.registry.reset(user, conversationId)));
+      case 'clear':
+        return this.say(chatId, clearText(await this.registry.clear(user, conversationId)));
       case 'skills':
         return this.say(chatId, skillsText(await this.registry.commands(user, conversationId)));
       default:
