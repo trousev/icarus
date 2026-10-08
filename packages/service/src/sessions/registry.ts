@@ -1,10 +1,12 @@
 // Реестр сессий: (пользователь, разговор) → живой процесс pi.
 // Держит контейнеры тёплыми, гасит простаивающие сессии, защищает от параллельных ходов.
+import fs from 'node:fs';
+import path from 'node:path';
 import { ensureContainerRunning } from '../docker/manager.ts';
 import { log, redact } from '../log.ts';
-import { COMPACT_TIMEOUT_MS, PiSession, type CompactResult } from './pi-session.ts';
+import { COMPACT_TIMEOUT_MS, PiSession, sessionIdFor, type CompactResult, type PiCommand } from './pi-session.ts';
 import { runOneShot, type OneShotOptions } from './one-shot.ts';
-import type { IcarusConfig, ModelConfig, UserConfig } from '../config.ts';
+import { userPaths, type IcarusConfig, type ModelConfig, type UserConfig } from '../config.ts';
 
 /** Как реестр создаёт сессии и поднимает контейнеры: в тестах это заглушки. */
 export type SessionFactory = (
@@ -28,6 +30,30 @@ export type CompactOutcome =
   | { status: 'busy' }
   | { status: 'failed'; error: string };
 
+/** Чем кончилась попытка остановить ход (команда /stop). */
+export type AbortOutcome =
+  | { status: 'stopped' }
+  | { status: 'idle' }
+  | { status: 'no-session' }
+  | { status: 'failed'; error: string };
+
+/** Чем кончился новый разговор (команда /new). */
+export type ResetOutcome =
+  | { status: 'started' }
+  | { status: 'empty' }
+  | { status: 'busy' }
+  | { status: 'failed'; error: string };
+
+/** Что рассказать человеку про разговор (команда /stats). */
+export type StatsOutcome =
+  | { status: 'ok'; stats: Record<string, unknown> }
+  | { status: 'failed'; error: string };
+
+/** Что вообще можно позвать в разговоре (команда /skills). */
+export type CommandsOutcome =
+  | { status: 'ok'; commands: PiCommand[] }
+  | { status: 'failed'; error: string };
+
 /** Ждёт обещание не дольше таймаута: дольше — пусть решает тот, кто просил. */
 async function waitFor(promise: Promise<void>, timeoutMs: number): Promise<void> {
   let timer: NodeJS.Timeout | undefined;
@@ -41,6 +67,33 @@ async function waitFor(promise: Promise<void>, timeoutMs: number): Promise<void>
   } finally {
     if (timer) clearTimeout(timer);
   }
+}
+
+/**
+ * Убирает файлы разговора в `archive/` рядом. pi ищет сессию по id среди файлов
+ * каталога (`<когда создан>_<id>.jsonl`), поэтому переименование в подкаталог для
+ * него значит «такого разговора нет» — и следующий ход начинается с чистого листа.
+ * Историю не удаляем: человек всегда может попросить поднять её из архива.
+ */
+async function archiveSessionFiles(dir: string, sessionId: string): Promise<number> {
+  let names: string[];
+  try {
+    names = await fs.promises.readdir(dir);
+  } catch (error) {
+    // Разговора ещё не было — каталога сессий может не быть вовсе.
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0;
+    throw error;
+  }
+
+  const mine = names.filter((name) => name === `${sessionId}.jsonl` || name.endsWith(`_${sessionId}.jsonl`));
+  if (mine.length === 0) return 0;
+
+  const archive = path.join(dir, 'archive');
+  await fs.promises.mkdir(archive, { recursive: true });
+  for (const name of mine) {
+    await fs.promises.rename(path.join(dir, name), path.join(archive, name));
+  }
+  return mine.length;
 }
 
 export class SessionRegistry {
@@ -173,14 +226,95 @@ export class SessionRegistry {
    * если разговор уже затих и был сжат уборкой, сжимать нечего, и следующая реплика
    * просто поднимет pi по сжатой истории.
    */
-  async compact(user: UserConfig, conversationId: string): Promise<CompactOutcome> {
+  async compact(user: UserConfig, conversationId: string, customInstructions?: string): Promise<CompactOutcome> {
     const session = this.sessions.get(`${user.id}:${conversationId}`);
     if (!session || !session.alive) return { status: 'no-session' };
     if (session.busy || session.compacting) return { status: 'busy' };
     try {
-      return await session.compact();
+      return await session.compact(customInstructions);
     } catch (error) {
       log.warn('сжатие по команде не вышло', { user: user.id, error: redact(String(error)) });
+      return { status: 'failed', error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  /**
+   * Прерывание хода по просьбе человека: команда `/stop`. Работает только с живой
+   * занятой сессией — если pi уже молчит, прерывать нечего, и это не ошибка.
+   */
+  async abort(user: UserConfig, conversationId: string): Promise<AbortOutcome> {
+    const session = this.sessions.get(`${user.id}:${conversationId}`);
+    if (!session || !session.alive) return { status: 'no-session' };
+    if (!session.busy && !session.compacting) return { status: 'idle' };
+    const stopped = await session.abort();
+    return stopped ? { status: 'stopped' } : { status: 'failed', error: 'pi не подтвердил прерывание' };
+  }
+
+  /**
+   * Цифры разговора: токены, деньги, занятый контекст. Сессию при необходимости
+   * поднимаем: файл разговора на месте, pi продолжит его — и цифры будут те же,
+   * что человек видел до затишья.
+   */
+  async stats(user: UserConfig, conversationId: string): Promise<StatsOutcome> {
+    try {
+      const session = await this.acquire(user, conversationId);
+      const stats = await session.getStats();
+      if (!stats) return { status: 'failed', error: 'pi не рассказал про разговор' };
+      return { status: 'ok', stats };
+    } catch (error) {
+      log.warn('не удалось спросить у pi статистику', { user: user.id, error: redact(String(error)) });
+      return { status: 'failed', error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  /** Что можно позвать в разговоре: скиллы человека, промпт-шаблоны, команды расширений. */
+  async commands(user: UserConfig, conversationId: string): Promise<CommandsOutcome> {
+    try {
+      const session = await this.acquire(user, conversationId);
+      return { status: 'ok', commands: await session.getCommands() };
+    } catch (error) {
+      log.warn('не удалось спросить у pi список команд', { user: user.id, error: redact(String(error)) });
+      return { status: 'failed', error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  /**
+   * Новый разговор по просьбе человека: команда `/new`. Идентификатор разговора
+   * выводится из человека и чата и не меняется, поэтому «начать заново» — это убрать
+   * файл сессии в архив: без этого pi открыл бы прошлую историю. Живой процесс гасим:
+   * он держит разговор в памяти и всё равно дописывал бы старый файл.
+   *
+   * Память тут ни при чём: она лежит в /workspace/memory и `/new` её не трогает.
+   */
+  async reset(user: UserConfig, conversationId: string): Promise<ResetOutcome> {
+    const key = `${user.id}:${conversationId}`;
+    const busy = (): boolean => {
+      const live = this.sessions.get(key);
+      return Boolean(live && (live.busy || live.compacting));
+    };
+    if (busy()) return { status: 'busy' };
+
+    // Уборка могла застать этот разговор: она сжимает и закрывает его прямо сейчас.
+    const closing = this.closing.get(key);
+    if (closing) await waitFor(closing, COMPACT_TIMEOUT_MS + 5_000);
+    if (busy()) return { status: 'busy' };
+
+    const session = this.sessions.get(key);
+    if (session) {
+      session.dispose();
+      if (this.sessions.get(key) === session) this.sessions.delete(key);
+    }
+
+    try {
+      const archived = await archiveSessionFiles(userPaths(this.config, user).sessions, sessionIdFor(user.id, conversationId));
+      log.info('разговор начат заново', {
+        user: user.id,
+        conversation: conversationId.slice(0, 8),
+        archived,
+      });
+      return archived > 0 ? { status: 'started' } : { status: 'empty' };
+    } catch (error) {
+      log.warn('не удалось убрать прошлый разговор в архив', { user: user.id, error: redact(String(error)) });
       return { status: 'failed', error: error instanceof Error ? error.message : String(error) };
     }
   }

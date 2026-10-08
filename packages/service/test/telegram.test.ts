@@ -13,10 +13,15 @@ import {
   attachmentFailed,
   compactText,
   conversationIdFor,
-  isCommand,
+  newText,
+  parseCommand,
+  skillsText,
+  statsText,
+  stopText,
   unsupportedText,
   voicePrompt,
   GREETING,
+  HELP,
   NO_USERNAME,
   UNKNOWN_COMMAND,
 } from '../src/telegram/bot.ts';
@@ -181,6 +186,11 @@ function makeBot(
     steps?: Step[];
     config?: ReturnType<typeof makeConfig>;
     compact?: unknown;
+    /** Чем кончились команды бота: по умолчанию всё хорошо. */
+    stop?: unknown;
+    stats?: unknown;
+    reset?: unknown;
+    skills?: unknown;
     /** Чем расшифровывать голосовые: как в бою, но без сети; null — нечем. */
     transcribe?: ((audio: Uint8Array, mimeType: string) => Promise<string>) | null;
     /** Файлы, которые «лежат» в Telegram: id → байты. */
@@ -191,12 +201,50 @@ function makeBot(
     options.config ??
     makeConfig({ telegram: { token: 'bot-token', mapping: { trousev: 'probe' } } });
   const session = fakeSession(options.steps ?? ANSWER_STEPS);
-  const compactCalls: Array<{ user: string; conversationId: string }> = [];
+  const calls: Array<{ command: string; user: string; conversationId: string; args?: string }> = [];
+  const record = (command: string, user: { id: string }, conversationId: string, args?: string) => {
+    calls.push({ command, user: user.id, conversationId, ...(args ? { args } : {}) });
+  };
   const registry = {
     acquire: async () => session,
-    compact: async (user: { id: string }, conversationId: string) => {
-      compactCalls.push({ user: user.id, conversationId });
+    compact: async (user: { id: string }, conversationId: string, customInstructions?: string) => {
+      record('compact', user, conversationId, customInstructions);
       return options.compact ?? { status: 'compacted', tokensBefore: 1200, tokensAfter: 300 };
+    },
+    abort: async (user: { id: string }, conversationId: string) => {
+      record('stop', user, conversationId);
+      return options.stop ?? { status: 'stopped' };
+    },
+    stats: async (user: { id: string }, conversationId: string) => {
+      record('stats', user, conversationId);
+      return (
+        options.stats ?? {
+          status: 'ok',
+          stats: {
+            userMessages: 12,
+            toolCalls: 40,
+            tokens: { input: 50_000, output: 10_000, cacheRead: 45_000, total: 105_000 },
+            cost: 0.45,
+            contextUsage: { tokens: 68_000, contextWindow: 200_000, percent: 34 },
+          },
+        }
+      );
+    },
+    reset: async (user: { id: string }, conversationId: string) => {
+      record('new', user, conversationId);
+      return options.reset ?? { status: 'started' };
+    },
+    commands: async (user: { id: string }, conversationId: string) => {
+      record('skills', user, conversationId);
+      return (
+        options.skills ?? {
+          status: 'ok',
+          commands: [
+            { name: 'skill:brave-search', description: 'поиск в интернете', source: 'skill' },
+            { name: 'fix-tests', description: 'починить тесты', source: 'prompt' },
+          ],
+        }
+      );
     },
   };
   const { api, state } = fakeApi(options.files ?? { IMAGE: JPEG, VOICE: JPEG });
@@ -204,7 +252,7 @@ function makeBot(
   const transcribe =
     'transcribe' in options ? options.transcribe : async () => 'привет из голосового';
   const bot = new TelegramBot(config, registry as never, { api, editIntervalMs: 0, transcribe });
-  return { bot, session, state, compactCalls, config };
+  return { bot, session, state, calls, config };
 }
 
 function messageUpdate(text: string, options: { username?: string; chatId?: number; type?: string } = {}): TelegramUpdate {
@@ -461,32 +509,133 @@ test('пустое сообщение разбирать нечего — так
 });
 
 test('подпись к фото может быть командой', async () => {
-  const { bot, state, compactCalls } = makeBot();
+  const { bot, state, calls } = makeBot();
 
   await bot.handleUpdate(photoUpdate({ caption: '/compact' }));
 
-  assert.deepEqual(compactCalls, [{ user: 'probe', conversationId: 'telegram-42' }]);
+  assert.deepEqual(calls, [{ command: 'compact', user: 'probe', conversationId: 'telegram-42' }]);
   assert.match(chatText(state, 42), /Подвёл итог/);
 });
 
-test('/start здоровается, незнакомая команда — подсказка', async () => {
+test('/start и /help рассказывают, что бот умеет, и в разговор не лезут', async () => {
   const { bot, session, state } = makeBot();
 
   await bot.handleUpdate(messageUpdate('/start'));
   assert.equal(chatText(state, 42), GREETING);
 
   await bot.handleUpdate(messageUpdate('/help'));
-  assert.match(chatText(state, 42), new RegExp(UNKNOWN_COMMAND));
+  assert.match(chatText(state, 42), /\/stop — остановиться/);
+  assert.match(chatText(state, 42), /\/stats —/);
+  assert.equal(HELP.includes('/new'), true);
   assert.deepEqual(session.prompts, [], 'команды в разговор не уезжают');
 });
 
+test('незнакомая команда без аргументов — подсказка, с аргументами — реплика для pi', async () => {
+  const { bot, session, state } = makeBot();
+
+  await bot.handleUpdate(messageUpdate('/summarize'));
+  assert.match(chatText(state, 42), new RegExp(UNKNOWN_COMMAND));
+  assert.deepEqual(session.prompts, [], 'выдуманную команду модели не показываем');
+
+  // У pi есть свои команды (шаблоны, скиллы) — их бот не отбирает.
+  await bot.handleUpdate(messageUpdate('/fix-tests прогони'));
+  assert.deepEqual(session.prompts, ['/fix-tests прогони']);
+});
+
 test('/compact сжимает разговор этого чата и рассказывает цифры', async () => {
-  const { bot, state, compactCalls } = makeBot();
+  const { bot, state, calls } = makeBot();
 
   await bot.handleUpdate(messageUpdate('/compact'));
 
-  assert.deepEqual(compactCalls, [{ user: 'probe', conversationId: 'telegram-42' }]);
+  assert.deepEqual(calls, [{ command: 'compact', user: 'probe', conversationId: 'telegram-42' }]);
   assert.match(chatText(state, 42), /Подвёл итог: 1[\s\u00a0]?200 → 300 токенов/);
+});
+
+test('/compact с пожеланием передаёт его pi: человек решает, что важно сохранить', async () => {
+  const { bot, calls } = makeBot();
+
+  await bot.handleUpdate(messageUpdate('/compact сохрани про математику'));
+
+  assert.deepEqual(calls, [
+    { command: 'compact', user: 'probe', conversationId: 'telegram-42', args: 'сохрани про математику' },
+  ]);
+});
+
+test('/stop прерывает ход и говорит об этом', async () => {
+  const { bot, state, calls } = makeBot();
+
+  await bot.handleUpdate(messageUpdate('/stop'));
+
+  assert.deepEqual(calls, [{ command: 'stop', user: 'probe', conversationId: 'telegram-42' }]);
+  assert.match(chatText(state, 42), /Остановился/);
+});
+
+test('/stop, когда бот и так молчит, не делает вид, что остановил', async () => {
+  const { bot, state } = makeBot({ stop: { status: 'idle' } });
+
+  await bot.handleUpdate(messageUpdate('/stop'));
+
+  assert.match(chatText(state, 42), /ничего не делаю/);
+});
+
+test('/stop идёт мимо очереди: ход, который он отменяет, ещё в работе', async () => {
+  const { bot, session, calls } = makeBot();
+  let release: () => void = () => {};
+  const answer = session.prompt.bind(session);
+  // Ход, который «думает» до особого разрешения: ровно то, что человек хочет прервать.
+  session.prompt = async (text: string) => {
+    await new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await answer(text);
+  };
+
+  let turnFinished = false;
+  const turn = bot.enqueue(messageUpdate('привет')).then(() => {
+    turnFinished = true;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await bot.enqueue(messageUpdate('/stop'));
+
+  assert.equal(turnFinished, false, 'ход всё ещё идёт');
+  assert.deepEqual(calls, [{ command: 'stop', user: 'probe', conversationId: 'telegram-42' }], 'стоп дошёл до реестра');
+
+  release();
+  await turn;
+});
+
+test('/stats рассказывает цифры разговора, а не сырой ответ pi', async () => {
+  const { bot, state, calls } = makeBot();
+
+  await bot.handleUpdate(messageUpdate('/stats'));
+  const text = chatText(state, 42);
+
+  assert.deepEqual(calls, [{ command: 'stats', user: 'probe', conversationId: 'telegram-42' }]);
+  assert.match(text, /Твоих реплик: 12, шагов с инструментами: 40/);
+  assert.match(text, /Токенов всего: 105[\s\u00a0]000 \(вход 50[\s\u00a0]000, выход 10[\s\u00a0]000, из кэша 45[\s\u00a0]000\)/);
+  assert.match(text, /Занято в контексте: 34% \(68[\s\u00a0]000 из 200[\s\u00a0]000\)/);
+  assert.match(text, /Потрачено: \$0\.450/);
+});
+
+test('/new начинает разговор заново и честно говорит про память', async () => {
+  const { bot, state, calls } = makeBot();
+
+  await bot.handleUpdate(messageUpdate('/new'));
+
+  assert.deepEqual(calls, [{ command: 'new', user: 'probe', conversationId: 'telegram-42' }]);
+  assert.match(chatText(state, 42), /с чистого листа/);
+  assert.match(chatText(state, 42), /Память не трогал/);
+});
+
+test('/skills перечисляет, что можно позвать в чате', async () => {
+  const { bot, state, calls } = makeBot();
+
+  await bot.handleUpdate(messageUpdate('/skills'));
+  const text = chatText(state, 42);
+
+  assert.deepEqual(calls, [{ command: 'skills', user: 'probe', conversationId: 'telegram-42' }]);
+  assert.match(text, /\/skill:brave-search — поиск в интернете/);
+  assert.match(text, /\/fix-tests — починить тесты/);
 });
 
 test('в группе у каждого человека свой разговор', () => {
@@ -496,11 +645,16 @@ test('в группе у каждого человека свой разгово
   assert.equal(conversationIdFor(priv.message!, 'probe'), 'telegram-99');
 });
 
-test('командой считаем только «/слово», а не «/etc/hosts»', () => {
-  assert.equal(isCommand('/compact'), true);
-  assert.equal(isCommand('/compact@the_icarus_bot'), true);
-  assert.equal(isCommand('/etc/hosts'), false);
-  assert.equal(isCommand('а /compact потом'), false);
+test('команда — это «/слово [аргументы]», а не «/etc/hosts»', () => {
+  assert.deepEqual(parseCommand('/compact'), { name: 'compact', args: '' });
+  assert.deepEqual(parseCommand('/compact@the_icarus_bot'), { name: 'compact', args: '' });
+  assert.deepEqual(parseCommand('/compact сохрани про математику'), {
+    name: 'compact',
+    args: 'сохрани про математику',
+  });
+  assert.equal(parseCommand('/etc/hosts'), null);
+  assert.equal(parseCommand('а /compact потом'), null);
+  assert.equal(parseCommand('/skill:brave-search'), null, 'команды pi бот не разбирает');
 });
 
 test('что отвечаем на каждый исход сжатия', () => {
@@ -508,6 +662,29 @@ test('что отвечаем на каждый исход сжатия', () => 
   assert.match(compactText({ status: 'no-session' }), /уже сжат/);
   assert.match(compactText({ status: 'busy' }), /когда договорю/);
   assert.match(compactText({ status: 'failed', error: 'нет ключа' }), /нет ключа/);
+});
+
+test('что отвечаем на исходы /stop, /new и /skills', () => {
+  assert.match(stopText({ status: 'stopped' }), /Остановился/);
+  assert.match(stopText({ status: 'idle' }), /ничего не делаю/);
+  assert.match(stopText({ status: 'no-session' }), /нечего/);
+  assert.match(stopText({ status: 'failed', error: 'таймаут' }), /таймаут/);
+
+  assert.match(newText({ status: 'started' }), /в архив/);
+  assert.match(newText({ status: 'empty' }), /и так с чистого листа/);
+  assert.match(newText({ status: 'busy' }), /сначала \/stop/);
+
+  assert.match(skillsText({ status: 'ok', commands: [] }), /ничего нет/);
+  assert.match(
+    skillsText({ status: 'ok', commands: [{ name: 'fix-tests', description: 'починить', source: 'prompt' }] }),
+    /\/fix-tests — починить/,
+  );
+  assert.match(skillsText({ status: 'failed', error: 'нет связи' }), /нет связи/);
+});
+
+test('/stats без цифр не выдумывает их', () => {
+  assert.match(statsText({ status: 'ok', stats: {} }), /пустой/);
+  assert.match(statsText({ status: 'failed', error: 'pi молчит' }), /pi молчит/);
 });
 
 test('длинный ответ доезжает целиком и по границам', async () => {

@@ -41,6 +41,19 @@ export type CompactResult =
   | { status: 'compacted'; tokensBefore: number; tokensAfter: number }
   | { status: 'nothing' };
 
+/**
+ * Что можно позвать в разговоре, кроме обычной реплики: скилл человека, промпт-шаблон
+ * или команда расширения. Собирает их pi — свой список мы бы неизбежно разошёлся с ним.
+ */
+export type PiCommand = {
+  name: string;
+  description?: string;
+  /** Откуда команда: extension, prompt или skill. */
+  source?: string;
+  /** Где лежит: user, project или path (у расширений не бывает). */
+  location?: string;
+};
+
 export class PiSession {
   readonly key: string;
   readonly sessionId: string;
@@ -185,14 +198,20 @@ export class PiSession {
     }
   }
 
-  /** Прерывание: соединение с LibreChat оборвалось. */
-  async abort(): Promise<void> {
-    if (!this.client.alive) return;
+  /**
+   * Прерывание хода: соединение с LibreChat оборвалось или человек попросил `/stop`.
+   * Отвечает, подтвердил ли pi прерывание: молчаливое «наверное, остановился» тут
+   * хуже ошибки — человек ждёт ответа и не знает, ждать ли ещё.
+   */
+  async abort(): Promise<boolean> {
+    if (!this.client.alive) return false;
     try {
       await this.client.request({ type: 'abort' }, 20_000);
       log.info('ход прерван', { user: this.user.id, conversation: this.conversationId.slice(0, 8) });
+      return true;
     } catch (error) {
       log.warn('прерывание не подтвердилось', { error: String(error) });
+      return false;
     } finally {
       this.busy = false;
     }
@@ -211,6 +230,21 @@ export class PiSession {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Список команд разговора — скиллы, промпт-шаблоны, команды расширений. Спрашиваем
+   * у pi, а не читаем каталоги сами: он один знает и про пакеты, и про доверие к проекту.
+   */
+  async getCommands(): Promise<PiCommand[]> {
+    const response = await this.client.request({ type: 'get_commands' }, 20_000);
+    const data = response.data as { commands?: PiCommand[] } | undefined;
+    return (data?.commands ?? []).map((command) => ({
+      name: command.name,
+      ...(command.description ? { description: command.description } : {}),
+      ...(command.source ? { source: command.source } : {}),
+      ...(command.location ? { location: command.location } : {}),
+    }));
   }
 
   dispose(): void {
