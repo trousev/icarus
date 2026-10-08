@@ -1,6 +1,6 @@
-// Команды человека поверх реестра сессий: /stop, /stats, /skills и /new.
+// Команды человека поверх реестра сессий: /stop, /stats, /skills и /clear.
 // Докера и модели тут нет: сессии — заглушки (см. RegistryDeps), а разговор
-// для /new — обычный файл в каталоге сессий человека.
+// для /clear — обычный файл в каталоге сессий человека.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -146,7 +146,7 @@ test('/skills отдаёт то, что собрал pi', async () => {
   }
 });
 
-test('/new убирает файл разговора в архив и гасит процесс', async () => {
+test('/clear убирает файл разговора в архив и гасит процесс', async () => {
   const config = makeConfig();
   const session = fakeSession();
   const { registry } = makeRegistry(session, config);
@@ -154,7 +154,7 @@ test('/new убирает файл разговора в архив и гаси�
 
   try {
     await registry.acquire(probe(), 'conv');
-    assert.deepEqual(await registry.reset(probe(), 'conv'), { status: 'started' });
+    assert.deepEqual(await registry.clear(probe(), 'conv'), { status: 'started' });
 
     assert.equal(fs.existsSync(file), false, 'pi больше не найдёт этот разговор');
     assert.deepEqual(fs.readdirSync(path.join(path.dirname(file), 'archive')), [path.basename(file)]);
@@ -165,16 +165,16 @@ test('/new убирает файл разговора в архив и гаси�
   }
 });
 
-test('/new без начатого разговора не выдумывает архив', async () => {
+test('/clear без начатого разговора не выдумывает архив', async () => {
   const { registry } = makeRegistry(fakeSession());
   try {
-    assert.deepEqual(await registry.reset(probe(), 'conv'), { status: 'empty' });
+    assert.deepEqual(await registry.clear(probe(), 'conv'), { status: 'empty' });
   } finally {
     registry.dispose();
   }
 });
 
-test('/new во время хода не рвёт разговор: сначала /stop', async () => {
+test('/clear во время хода не рвёт разговор: сначала /stop', async () => {
   const config = makeConfig();
   const session = fakeSession({ busy: true });
   const { registry } = makeRegistry(session, config);
@@ -182,7 +182,7 @@ test('/new во время хода не рвёт разговор: сначал
 
   try {
     await registry.acquire(probe(), 'conv');
-    assert.deepEqual(await registry.reset(probe(), 'conv'), { status: 'busy' });
+    assert.deepEqual(await registry.clear(probe(), 'conv'), { status: 'busy' });
     assert.equal(fs.existsSync(file), true, 'разговор на месте');
     assert.equal(session.disposed, 0);
   } finally {
@@ -190,14 +190,14 @@ test('/new во время хода не рвёт разговор: сначал
   }
 });
 
-test('/new не трогает чужие разговоры в том же каталоге', async () => {
+test('/clear не трогает чужие разговоры в том же каталоге', async () => {
   const config = makeConfig();
   const { registry } = makeRegistry(fakeSession(), config);
   const mine = putSessionFile(config, 'conv');
   const other = putSessionFile(config, 'другой-разговор');
 
   try {
-    assert.deepEqual(await registry.reset(probe(), 'conv'), { status: 'started' });
+    assert.deepEqual(await registry.clear(probe(), 'conv'), { status: 'started' });
     assert.equal(fs.existsSync(other), true);
     assert.equal(fs.existsSync(mine), false);
   } finally {

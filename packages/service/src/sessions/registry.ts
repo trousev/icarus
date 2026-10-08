@@ -37,8 +37,8 @@ export type AbortOutcome =
   | { status: 'no-session' }
   | { status: 'failed'; error: string };
 
-/** Чем кончился новый разговор (команда /new). */
-export type ResetOutcome =
+/** Чем кончился новый разговор (команда /clear). */
+export type ClearOutcome =
   | { status: 'started' }
   | { status: 'empty' }
   | { status: 'busy' }
@@ -279,14 +279,14 @@ export class SessionRegistry {
   }
 
   /**
-   * Новый разговор по просьбе человека: команда `/new`. Идентификатор разговора
+   * Новый разговор по просьбе человека: команда `/clear`. Идентификатор разговора
    * выводится из человека и чата и не меняется, поэтому «начать заново» — это убрать
    * файл сессии в архив: без этого pi открыл бы прошлую историю. Живой процесс гасим:
    * он держит разговор в памяти и всё равно дописывал бы старый файл.
    *
-   * Память тут ни при чём: она лежит в /workspace/memory и `/new` её не трогает.
+   * Память тут ни при чём: она лежит в /workspace/memory и `/clear` её не трогает.
    */
-  async reset(user: UserConfig, conversationId: string): Promise<ResetOutcome> {
+  async clear(user: UserConfig, conversationId: string): Promise<ClearOutcome> {
     const key = `${user.id}:${conversationId}`;
     const busy = (): boolean => {
       const live = this.sessions.get(key);
