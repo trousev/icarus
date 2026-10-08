@@ -163,14 +163,20 @@ function shell(body: string): string {
   button.solid { background:var(--danger); border-color:var(--danger); color:#0f1116; }
 
   .rows { display:flex; flex-direction:column; }
-  .row { display:flex; gap:14px; align-items:flex-start; padding:11px 8px; border-radius:8px; }
+  /* Строку выравниваем по базовой линии: галочка, номер и текст — на одной строке,
+     иначе номер с галочкой всплывают над текстом. Номер и дата — тем же кеглем и
+     интерлиньяжем, что и текст: тогда базовая линия у них общая. */
+  .row { display:flex; gap:14px; align-items:baseline; padding:11px 8px; border-radius:8px; }
   .row:hover { background:var(--raise); }
   .row.sel { background:var(--accent-soft); }
-  .row input { margin:5px 0 0; width:15px; height:15px; accent-color:var(--accent); flex:0 0 auto; cursor:pointer; }
-  .num { color:var(--dim); font:12px/1.6 ui-monospace, monospace; width:26px; flex:0 0 auto; padding-top:2px;
+  /* У чекбокса базовой линии нет: он не в потоке текста, поэтому подтягиваем его
+     к строке вручную — иначе он висит выше текста и номера. */
+  .row input { margin:0; position:relative; top:3px; width:15px; height:15px;
+               accent-color:var(--accent); flex:0 0 auto; cursor:pointer; }
+  .num { color:var(--dim); font:12px/1.6 ui-monospace, monospace; width:26px; flex:0 0 auto;
          user-select:none; -webkit-user-select:none; }
   .row-text { flex:1; min-width:0; word-break:break-word; }
-  .date { color:var(--dim); font-size:12px; white-space:nowrap; padding-top:2px; }
+  .date { color:var(--dim); font-size:12px; white-space:nowrap; }
   /* Заголовок раздела — не запись: галочки у него нет, и трогать его нечем. */
   .row.heading { background:var(--raise); cursor:default; }
   .row.heading .row-text { font-weight:500; }
