@@ -165,6 +165,13 @@ users:
 # сервис работает как раньше. Команды бота: /compact, /stop, /stats, /clear,
 # /skills и /help — что каждая делает, написано в README, раздел «Telegram».
 #
+# Топики (мультичат: свой разговор на топик) включаются не здесь и не в чате, а в
+# Mini App @BotFather: My bots → бот → Bot Settings → Threads Settings → Threaded
+# Mode. В текстовом меню /mybots этого пункта нет; прямая ссылка на Mini App —
+# https://t.me/BotFather?startapp. Режим выключен — /topic не зовёт Telegram, а
+# объясняет, где галочка, а разговор остаётся один на чат. Команды топиков:
+# /topic [имя] — завести разговор, /topics — какие бот помнит, /rename — переименовать.
+#
 # telegram:
 #   mapping:
 #     '@trousev': probe

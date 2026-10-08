@@ -281,7 +281,7 @@ export async function handleChatCompletions(
   }
 
   if (session.busy) {
-    log.warn('ход уже идёт, отклоняю', { userId, conversation: conversationId.slice(0, 8) });
+    log.warn('ход уже идёт, отклоняю', { userId, conversation: conversationId });
     res.writeHead(409, { 'content-type': 'application/json' });
     res.end(JSON.stringify(errorBody('в этом разговоре уже идёт ответ', 'conflict_error')));
     return;
@@ -300,7 +300,7 @@ export async function handleChatCompletions(
       );
       log.warn('история разошлась, продолжаю свою сессию', {
         user: user.id,
-        conversation: conversationId.slice(0, 8),
+        conversation: conversationId,
         reason: comparison.reason,
       });
     }
@@ -309,7 +309,7 @@ export async function handleChatCompletions(
   }
 
   const prompt = buildPrompt(text, files);
-  log.info('ход', { user: user.id, conversation: conversationId.slice(0, 8), chars: prompt.length, stream });
+  log.info('ход', { user: user.id, conversation: conversationId, chars: prompt.length, stream });
 
   if (!stream) {
     await runBuffered(res, session, id, model, prompt, images);
@@ -499,7 +499,7 @@ async function runStreaming(
     closed = true;
     log.info('клиент оборвал соединение — прерываю ход', {
       user: session.user.id,
-      conversation: session.conversationId.slice(0, 8),
+      conversation: session.conversationId,
     });
     void session.abort();
   });

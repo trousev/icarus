@@ -5,8 +5,46 @@
 // берёт на себя: сервису не нужен ни домен, ни сертификат.
 import { redact } from '../log.ts';
 
-export type TelegramUser = { id: number; username?: string; first_name?: string };
+export type TelegramUser = {
+  id: number;
+  username?: string;
+  first_name?: string;
+  /**
+   * Топики в личке: два флага из getMe. Первый — режим включён владельцем бота
+   * (BotFather → Bot Settings → Threads Settings → Threaded Mode), второй — можно ли
+   * заводить топики человеку. Без первого createForumTopic отвечает «the chat is not
+   * a forum», поэтому спрашиваем до, а не после.
+   */
+  has_topics_enabled?: boolean;
+  allows_users_to_create_topics?: boolean;
+};
 export type TelegramChat = { id: number; type: string };
+
+/** Топик: то, что нужно знать боту, — номер и имя. Цвет и эмодзи необязательны. */
+export type ForumTopic = {
+  message_thread_id: number;
+  name: string;
+  icon_color?: number;
+  icon_custom_emoji_id?: string;
+};
+
+/** Служебное сообщение о созданном топике: по нему узнаём топики, заведённые человеком. */
+export type TelegramForumTopicCreated = {
+  name: string;
+  icon_color?: number;
+  icon_custom_emoji_id?: string;
+  /**
+   * Имя не задавали руками: Telegram подставил «New Topic», и его стоит переписать
+   * осмысленным (так и написано в описании поля).
+   */
+  is_name_implicit?: boolean;
+};
+
+/** Цвета иконок топика: список из шести — исчерпывающий, других Bot API не принимает. */
+export const TOPIC_ICON_COLORS = [7322096, 16766590, 13338331, 9367192, 16749490, 16478047] as const;
+
+/** Предел имени топика по документации Bot API. */
+export const TOPIC_NAME_LIMIT = 128;
 
 /** Фото: один и тот же кадр лестницей размеров, до последнего — сжатый JPEG. */
 export type TelegramPhotoSize = {
@@ -39,6 +77,16 @@ export type TelegramMessage = {
   message_id: number;
   chat: TelegramChat;
   from?: TelegramUser;
+  /**
+   * Топик, в котором сообщение. В личке с включённым Threaded Mode приходит у всего,
+   * что написано внутри топика; у корня чата и у General-топика его может не быть
+   * вовсе или он равен 1 — и то и другое значит «корень» (см. topicThreadId).
+   */
+  message_thread_id?: number;
+  is_topic_message?: boolean;
+  /** Служебное: человек (или бот) завёл топик — запоминаем имя и номер. */
+  forum_topic_created?: TelegramForumTopicCreated;
+  forum_topic_edited?: { name?: string };
   text?: string;
   caption?: string;
   photo?: TelegramPhotoSize[];
@@ -190,8 +238,16 @@ export class TelegramApi {
     return Buffer.from(await response.arrayBuffer());
   }
 
-  sendMessage(chatId: number, text: string): Promise<SentMessage> {
-    return this.call<SentMessage>('sendMessage', { chat_id: chatId, text });
+  /**
+   * Сообщение в чат или в топик. `message_thread_id` передаём только когда он есть:
+   * в чате без топиков Telegram на это поле отвечает ошибкой.
+   */
+  sendMessage(chatId: number, text: string, threadId?: number | null): Promise<SentMessage> {
+    return this.call<SentMessage>('sendMessage', {
+      chat_id: chatId,
+      text,
+      ...(threadId ? { message_thread_id: threadId } : {}),
+    });
   }
 
   /** Правка сообщения. «Не изменилось» — не ошибка: значит, показывать нечего. */
@@ -204,11 +260,37 @@ export class TelegramApi {
     }
   }
 
-  async sendChatAction(chatId: number, action = 'typing'): Promise<void> {
-    await this.call('sendChatAction', { chat_id: chatId, action });
+  async sendChatAction(chatId: number, action = 'typing', threadId?: number | null): Promise<void> {
+    await this.call('sendChatAction', {
+      chat_id: chatId,
+      action,
+      ...(threadId ? { message_thread_id: threadId } : {}),
+    });
   }
 
-  /** Меню команд: единственная команда бота — сжать разговор. */
+  /**
+   * Заводит топик в личке (для супергруппы нужны права админа с can_manage_topics).
+   * Без включённого Threaded Mode отвечает 400 «the chat is not a forum» — поэтому
+   * перед вызовом смотрим has_topics_enabled из getMe.
+   */
+  createForumTopic(chatId: number, name: string, iconColor?: number): Promise<ForumTopic> {
+    return this.call<ForumTopic>('createForumTopic', {
+      chat_id: chatId,
+      name: name.slice(0, TOPIC_NAME_LIMIT),
+      icon_color: iconColor ?? topicIconColor(name),
+    });
+  }
+
+  /** Переименование топика: номер берётся из сообщения, имя — человеческое. */
+  async editForumTopic(chatId: number, threadId: number, name: string): Promise<void> {
+    await this.call('editForumTopic', {
+      chat_id: chatId,
+      message_thread_id: threadId,
+      name: name.slice(0, TOPIC_NAME_LIMIT),
+    });
+  }
+
+  /** Меню команд: сжать разговор и завести новый топик. */
   async setMyCommands(commands: Array<{ command: string; description: string }>): Promise<void> {
     await this.call('setMyCommands', { commands });
   }
@@ -216,6 +298,16 @@ export class TelegramApi {
   getMe(): Promise<TelegramUser & { is_bot?: boolean }> {
     return this.call('getMe', {});
   }
+}
+
+/**
+ * Цвет иконки топика по имени: Telegram принимает ровно шесть значений, а выбор
+ * делаем детерминированным — один и тот же разговор всегда одного цвета.
+ */
+export function topicIconColor(name: string): number {
+  let hash = 0;
+  for (const char of name) hash = (hash * 31 + (char.codePointAt(0) ?? 0)) % 1_000_003;
+  return TOPIC_ICON_COLORS[hash % TOPIC_ICON_COLORS.length];
 }
 
 /** Короткий человеческий текст ошибки для логов: без токена в пути запроса. */
