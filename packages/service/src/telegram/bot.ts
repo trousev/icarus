@@ -14,7 +14,14 @@ import { log, redact } from '../log.ts';
 import { buildPrompt } from '../prompt.ts';
 import { phraseForToolEnd, phraseForToolStart } from '../reasoning.ts';
 import { speechTranscriber, type Transcriber } from '../speech.ts';
-import type { CompactOutcome, SessionRegistry } from '../sessions/registry.ts';
+import type {
+  AbortOutcome,
+  CommandsOutcome,
+  CompactOutcome,
+  ResetOutcome,
+  SessionRegistry,
+  StatsOutcome,
+} from '../sessions/registry.ts';
 import type { PiSession } from '../sessions/pi-session.ts';
 import { collectIncoming, type Incoming, type IncomingVoice } from './attachments.ts';
 import { describeTelegramError, TelegramApi, type TelegramMessage, type TelegramUpdate } from './api.ts';
@@ -27,8 +34,21 @@ export const EDIT_INTERVAL_MS = 1200;
 /** Пауза после сбойного опроса: сеть моргнула — не долбим Telegram в цикле. */
 const RETRY_AFTER_FAILURE_MS = 3000;
 
-/** Единственная команда бота: она же в меню Telegram. */
-export const COMMANDS = [{ command: 'compact', description: 'подвести итог разговора' }];
+/** Команды бота: они же в меню Telegram (описания короткие — там мало места). */
+export const COMMANDS = [
+  { command: 'help', description: 'что я умею' },
+  { command: 'compact', description: 'подвести итог разговора' },
+  { command: 'stop', description: 'остановить ответ' },
+  { command: 'stats', description: 'токены, деньги, контекст' },
+  { command: 'new', description: 'начать разговор заново' },
+  { command: 'skills', description: 'скиллы и шаблоны' },
+];
+
+/**
+ * Команды, которые бот разбирает сам. Всё остальное с косой черты — реплика для pi:
+ * у него свои команды (`/skill:имя`, промпт-шаблоны), и отбирать их у человека нельзя.
+ */
+export const BOT_COMMANDS = new Set(['start', 'help', 'compact', 'stop', 'stats', 'new', 'skills']);
 
 export const GREETING = [
   'Привет! Я Икар.',
@@ -36,7 +56,22 @@ export const GREETING = [
   'Пиши как есть — я помню наши разговоры и умею много чего руками: искать в интернете, считать, читать файлы.',
   'Присылай фото и голосовые: посмотрю и послушаю.',
   '',
-  '/compact — подвести итог разговора, если он разросся.',
+  '/help — что я умею.',
+].join('\n');
+
+/** Что показать на /help: те же команды, что в меню Telegram, но с объяснением. */
+export const HELP = [
+  'Что я умею в чате:',
+  '',
+  '/compact — подвести итог разговора, если он разросся',
+  '/compact <пожелание> — то же, но с оговоркой, что важно сохранить',
+  '/stop — остановиться, если я ушёл не туда',
+  '/stats — сколько токенов и денег ушло и сколько занято в контексте',
+  '/new — начать разговор с чистого листа (память остаётся при мне)',
+  '/skills — что у меня есть сверх разговора: скиллы и шаблоны',
+  '',
+  'Ещё я понимаю фото и голосовые, помню прошлые разговоры и умею искать в интернете.',
+  'Всё остальное — просто пиши словами.',
 ].join('\n');
 
 export const NO_USERNAME =
@@ -53,7 +88,7 @@ export const VOICE_NO_SPEECH =
 /** Расшифровка вышла пустой: тишина, музыка или слишком тихая запись. */
 export const VOICE_EMPTY = 'В голосовом не разобрал ни слова — попробуй ещё раз или напиши словами.';
 
-export const UNKNOWN_COMMAND = 'Пока умею только /compact.';
+export const UNKNOWN_COMMAND = 'Такой команды не знаю. /help — что я умею.';
 
 export const BUSY = 'Ещё думаю над прошлым сообщением — секунду.';
 
@@ -100,17 +135,33 @@ export function conversationIdFor(message: TelegramMessage, userId: string): str
     : `telegram-${message.chat.id}-${userId}`;
 }
 
-/** `/compact` или `/compact@the_icarus_bot` — команда, а не реплика. */
-export function isCommand(text: string): boolean {
-  return /^\/[a-zA-Z0-9_]+(@[a-zA-Z0-9_]+)?$/.test(text.trim());
-}
+/** Разобранная команда: имя без «/» и без «@бота», и всё, что человек написал после. */
+export type ParsedCommand = { name: string; args: string };
 
-function commandOf(text: string): string {
-  return text.trim().replace(/@[a-zA-Z0-9_]+$/, '').toLowerCase();
+/**
+ * `/compact`, `/compact@the_icarus_bot`, `/compact пожелание` — команда; `/etc/hosts`
+ * и «а /compact потом» — реплика. Аргументы разбираем только у своих команд: у pi
+ * есть собственные (`/skill:имя`, промпт-шаблоны), и в них мы не лезем.
+ */
+export function parseCommand(text: string): ParsedCommand | null {
+  const match = /^\/([a-zA-Z0-9_]+)(?:@[a-zA-Z0-9_]+)?(?:\s+([\s\S]*))?$/.exec(text.trim());
+  const name = match?.[1];
+  if (!name) return null;
+  return { name: name.toLowerCase(), args: (match?.[2] ?? '').trim() };
 }
 
 function tokens(value: number): string {
   return Math.round(value).toLocaleString('ru-RU');
+}
+
+/** Число из ответа pi: там всё необязательное, и падать на пропуске незачем. */
+function count(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+/** Деньги в отчёте: у разговора на день копейки и есть цена, округлять их жалко. */
+function money(value: number): string {
+  return `$${value < 1 ? value.toFixed(3) : value.toFixed(2)}`;
 }
 
 /** Что ответить на /compact: решает не бот, а реестр сессий. */
@@ -127,6 +178,98 @@ export function compactText(outcome: CompactOutcome): string {
     case 'failed':
       return `Не получилось сжать: ${outcome.error}`;
   }
+}
+
+/** Что ответить на /stop. */
+export function stopText(outcome: AbortOutcome): string {
+  switch (outcome.status) {
+    case 'stopped':
+      return 'Остановился. Скажи, если нужно иначе.';
+    case 'idle':
+      return 'Я и так ничего не делаю — можно писать.';
+    case 'no-session':
+      return 'Останавливать нечего: разговор ещё не начат или уже закрыт.';
+    case 'failed':
+      return `Не получилось остановиться: ${outcome.error}`;
+  }
+}
+
+/** Что ответить на /stats: цифры разговора человеческими словами. */
+export function statsText(outcome: StatsOutcome): string {
+  if (outcome.status === 'failed') return `Не смог посчитать: ${outcome.error}`;
+
+  const stats = outcome.stats;
+  const used = (stats.tokens ?? {}) as Record<string, unknown>;
+  const context = (stats.contextUsage ?? {}) as Record<string, unknown>;
+  const lines: string[] = [];
+
+  const replies = count(stats.userMessages);
+  const tools = count(stats.toolCalls);
+  if (replies !== null) {
+    lines.push(
+      tools !== null && tools > 0
+        ? `Твоих реплик: ${tokens(replies)}, шагов с инструментами: ${tokens(tools)}.`
+        : `Твоих реплик: ${tokens(replies)}.`,
+    );
+  }
+
+  const total = count(used.total);
+  if (total !== null && total > 0) {
+    const parts = [`вход ${tokens(count(used.input) ?? 0)}`, `выход ${tokens(count(used.output) ?? 0)}`];
+    const cached = count(used.cacheRead);
+    if (cached !== null && cached > 0) parts.push(`из кэша ${tokens(cached)}`);
+    lines.push(`Токенов всего: ${tokens(total)} (${parts.join(', ')}).`);
+  }
+
+  const percent = count(context.percent);
+  const contextTokens = count(context.tokens);
+  const window = count(context.contextWindow);
+  if (percent !== null && contextTokens !== null && window !== null) {
+    lines.push(`Занято в контексте: ${Math.round(percent)}% (${tokens(contextTokens)} из ${tokens(window)}).`);
+  }
+
+  const cost = count(stats.cost);
+  if (cost !== null && cost > 0) lines.push(`Потрачено: ${money(cost)}.`);
+
+  return lines.length > 0 ? lines.join('\n') : 'Разговор пока пустой: ни реплик, ни токенов.';
+}
+
+/** Что ответить на /new. */
+export function newText(outcome: ResetOutcome): string {
+  switch (outcome.status) {
+    case 'started':
+      return 'Начали с чистого листа: прошлую нить убрал в архив. Память не трогал — то, что я о вас знаю, осталось.';
+    case 'empty':
+      return 'Разговор и так с чистого листа — начинать заново нечего.';
+    case 'busy':
+      return 'Сейчас думаю над ответом: сначала /stop, потом начнём заново.';
+    case 'failed':
+      return `Не получилось начать заново: ${outcome.error}`;
+  }
+}
+
+/** Порядок в списке команд: сначала скиллы человека, потом шаблоны и команды. */
+function commandRank(source: string | undefined): number {
+  if (source === 'skill') return 0;
+  if (source === 'prompt') return 1;
+  return 2;
+}
+
+/** Что ответить на /skills: что человек может позвать сам. */
+export function skillsText(outcome: CommandsOutcome): string {
+  if (outcome.status === 'failed') return `Не смог спросить у pi: ${outcome.error}`;
+  if (outcome.commands.length === 0) {
+    return 'Сверх разговора у меня сейчас ничего нет — только память, поиск и руки. Скажи, чего не хватает.';
+  }
+
+  const lines = ['Вот что можно позвать прямо в чате:', ''];
+  const commands = [...outcome.commands].sort(
+    (a, b) => commandRank(a.source) - commandRank(b.source) || a.name.localeCompare(b.name),
+  );
+  for (const command of commands) {
+    lines.push(command.description ? `/${command.name} — ${command.description}` : `/${command.name}`);
+  }
+  return lines.join('\n');
 }
 
 export type TelegramBotOptions = {
@@ -222,7 +365,7 @@ export class TelegramBot {
           // Подтверждаем сразу: недоигранное сообщение лучше не переигрывать при
           // перезапуске — ошибку хода человек увидит ответом, а не тишиной.
           this.offset = update.update_id + 1;
-          this.enqueue(update);
+          void this.enqueue(update);
         }
       } catch (error) {
         if (this.stopped) return;
@@ -232,12 +375,18 @@ export class TelegramBot {
     }
   }
 
-  /** Ставит сообщение в очередь своего чата: разговоры разных людей не ждут друг друга. */
-  private enqueue(update: TelegramUpdate): void {
+  /**
+   * Ставит сообщение в очередь своего чата: разговоры разных людей не ждут друг друга.
+   * `/stop` идёт мимо очереди: ход, который он отменяет, сейчас в работе, и ждать его
+   * конца — значит не отменить ничего.
+   */
+  enqueue(update: TelegramUpdate): Promise<void> {
     const key = String(update.message?.chat.id ?? 'unknown');
-    void this.queue
-      .add(key, () => this.handleUpdate(update))
-      .catch((error) => log.error('телеграм: сообщение сорвалось', { error: describeTelegramError(error) }));
+    const text = update.message?.text ?? update.message?.caption ?? '';
+    const task = (): Promise<void> => this.handleUpdate(update);
+    const settled = parseCommand(text)?.name === 'stop' ? task() : this.queue.add(key, task);
+    void settled.catch((error) => log.error('телеграм: сообщение сорвалось', { error: describeTelegramError(error) }));
+    return settled;
   }
 
   async handleUpdate(update: TelegramUpdate): Promise<void> {
@@ -266,19 +415,18 @@ export class TelegramBot {
     }
 
     // Командой может быть и подпись к фото: человек шлёт снимок и просит подвести итог.
-    if (isCommand(incoming.text)) {
-      const command = commandOf(incoming.text);
-      if (command === '/start') {
-        await this.say(message.chat.id, GREETING);
+    const command = parseCommand(incoming.text);
+    if (command) {
+      if (BOT_COMMANDS.has(command.name)) {
+        await this.runCommand(message, user, command);
         return;
       }
-      if (command === '/compact') {
-        const outcome = await this.registry.compact(user, conversationIdFor(message, user.id));
-        await this.say(message.chat.id, compactText(outcome));
+      // Незнакомая команда без аргументов — почти наверняка опечатка: подсказываем.
+      // С аргументами это уже реплика: у pi есть свои команды, и отбирать их нельзя.
+      if (command.args === '') {
+        await this.say(message.chat.id, UNKNOWN_COMMAND);
         return;
       }
-      await this.say(message.chat.id, UNKNOWN_COMMAND);
-      return;
     }
 
     // Ни текста, ни вложения: остальное бот уже назвал бы отказом.
@@ -288,6 +436,35 @@ export class TelegramBot {
     }
 
     await this.runTurn(message, user, incoming);
+  }
+
+  /**
+   * Команда бота: человек ждёт короткого ответа, а не потока от модели. Разбирает
+   * команды бот, а не pi: у pi на каждую из них свой RPC-вызов, и половина смысла
+   * команды — в том, что она не тратит ни токенов, ни контекста разговора.
+   */
+  private async runCommand(message: TelegramMessage, user: UserConfig, command: ParsedCommand): Promise<void> {
+    const chatId = message.chat.id;
+    const conversationId = conversationIdFor(message, user.id);
+
+    switch (command.name) {
+      case 'start':
+        return this.say(chatId, GREETING);
+      case 'help':
+        return this.say(chatId, HELP);
+      case 'compact':
+        return this.say(chatId, compactText(await this.registry.compact(user, conversationId, command.args || undefined)));
+      case 'stop':
+        return this.say(chatId, stopText(await this.registry.abort(user, conversationId)));
+      case 'stats':
+        return this.say(chatId, statsText(await this.registry.stats(user, conversationId)));
+      case 'new':
+        return this.say(chatId, newText(await this.registry.reset(user, conversationId)));
+      case 'skills':
+        return this.say(chatId, skillsText(await this.registry.commands(user, conversationId)));
+      default:
+        return this.say(chatId, UNKNOWN_COMMAND);
+    }
   }
 
   /**
