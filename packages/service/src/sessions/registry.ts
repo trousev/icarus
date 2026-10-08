@@ -202,7 +202,7 @@ export class SessionRegistry {
       }
       log.info('сессия перезапускается: ресурсы человека обновились', {
         user: user.id,
-        conversation: conversationId.slice(0, 8),
+        conversation: conversationId,
         from: existing.generation,
         to: generation,
       });

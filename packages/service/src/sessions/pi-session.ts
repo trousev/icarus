@@ -103,7 +103,7 @@ export class PiSession {
 
     log.info('сессия создана', {
       user: user.id,
-      conversation: conversationId.slice(0, 8),
+      conversation: conversationId,
       model: `${model.provider}/${model.id}`,
     });
   }
@@ -187,7 +187,7 @@ export class PiSession {
       const tokensAfter = Number(data.estimatedTokensAfter ?? 0);
       log.info('сессия сжата', {
         user: this.user.id,
-        conversation: this.conversationId.slice(0, 8),
+        conversation: this.conversationId,
         tokensBefore,
         tokensAfter,
       });
@@ -207,7 +207,7 @@ export class PiSession {
     if (!this.client.alive) return false;
     try {
       await this.client.request({ type: 'abort' }, 20_000);
-      log.info('ход прерван', { user: this.user.id, conversation: this.conversationId.slice(0, 8) });
+      log.info('ход прерван', { user: this.user.id, conversation: this.conversationId });
       return true;
     } catch (error) {
       log.warn('прерывание не подтвердилось', { error: String(error) });
@@ -251,6 +251,6 @@ export class PiSession {
     this.detach();
     this.listeners.clear();
     this.client.dispose();
-    log.info('сессия закрыта', { user: this.user.id, conversation: this.conversationId.slice(0, 8) });
+    log.info('сессия закрыта', { user: this.user.id, conversation: this.conversationId });
   }
 }

@@ -18,11 +18,15 @@ import {
   skillsText,
   statsText,
   stopText,
+  topicThreadId,
   unsupportedText,
   voicePrompt,
   GREETING,
   HELP,
+  NO_TOPICS_MODE,
   NO_USERNAME,
+  RENAME_NEEDS_NAME,
+  RENAME_OUTSIDE,
   UNKNOWN_COMMAND,
 } from '../src/telegram/bot.ts';
 import {
@@ -135,15 +139,24 @@ function fakeSession(steps: Step[] = ANSWER_STEPS) {
 /** Чат глазами Telegram: сообщения заводятся отправкой и меняются правками. */
 function fakeApi(files: Record<string, Buffer> = {}) {
   const state = {
-    messages: [] as Array<{ chatId: number; id: number; text: string }>,
+    messages: [] as Array<{ chatId: number; id: number; text: string; threadId: number | null }>,
     nextId: 1,
     typing: 0,
+    /** Куда ушло последнее «печатает…»: в топике это должно быть то же место. */
+    typingThreadId: null as number | null,
     files: new Map(Object.entries(files)),
     downloaded: [] as string[],
+    /** Threaded Mode: в бою это флаги getMe, в тестах — переключатель. */
+    topicsEnabled: false,
+    /** Заведённые топики и их номера: как их выдал бы Telegram. */
+    topics: [] as Array<{ chatId: number; threadId: number; name: string }>,
+    nextThreadId: 2,
+    /** Переименования: chatId, топик, новое имя. */
+    renames: [] as Array<{ chatId: number; threadId: number; name: string }>,
   };
   const api = {
-    async sendMessage(chatId: number, text: string) {
-      const message = { chatId, id: state.nextId, text };
+    async sendMessage(chatId: number, text: string, threadId: number | null = null) {
+      const message = { chatId, id: state.nextId, text, threadId };
       state.nextId += 1;
       state.messages.push(message);
       return { message_id: message.id };
@@ -153,12 +166,31 @@ function fakeApi(files: Record<string, Buffer> = {}) {
       if (!message) throw new TelegramError('message to edit not found', 400);
       message.text = text;
     },
-    async sendChatAction() {
+    async sendChatAction(_chatId: number, _action = 'typing', threadId: number | null = null) {
       state.typing += 1;
+      state.typingThreadId = threadId;
     },
     async setMyCommands() {},
     async getMe() {
-      return { id: 1, username: 'the_icarus_bot' };
+      return {
+        id: 1,
+        username: 'the_icarus_bot',
+        has_topics_enabled: state.topicsEnabled,
+        allows_users_to_create_topics: state.topicsEnabled,
+      };
+    },
+    async createForumTopic(chatId: number, name: string) {
+      if (!state.topicsEnabled) throw new TelegramError('Bad Request: the chat is not a forum', 400);
+      const topic = { chatId, threadId: state.nextThreadId, name };
+      state.nextThreadId += 1;
+      state.topics.push(topic);
+      return { message_thread_id: topic.threadId, name: topic.name };
+    },
+    async editForumTopic(chatId: number, threadId: number, name: string) {
+      if (!state.topicsEnabled) throw new TelegramError('Bad Request: the chat is not a forum', 400);
+      state.renames.push({ chatId, threadId, name });
+      const topic = state.topics.find((item) => item.chatId === chatId && item.threadId === threadId);
+      if (topic) topic.name = name;
     },
     async getFile(fileId: string) {
       if (!state.files.has(fileId)) throw new TelegramError('file not found', 400);
@@ -174,9 +206,18 @@ function fakeApi(files: Record<string, Buffer> = {}) {
   return { api, state };
 }
 
+/** Что уехало в корень чата: сообщения топиков сюда не попадают. */
 function chatText(state: ReturnType<typeof fakeApi>['state'], chatId: number): string {
   return state.messages
-    .filter((message) => message.chatId === chatId)
+    .filter((message) => message.chatId === chatId && message.threadId === null)
+    .map((message) => message.text)
+    .join('\n');
+}
+
+/** Только то, что уехало в конкретный топик: в корне чата ответа быть не должно. */
+function topicText(state: ReturnType<typeof fakeApi>['state'], chatId: number, threadId: number): string {
+  return state.messages
+    .filter((message) => message.chatId === chatId && message.threadId === threadId)
     .map((message) => message.text)
     .join('\n');
 }
@@ -195,6 +236,8 @@ function makeBot(
     transcribe?: ((audio: Uint8Array, mimeType: string) => Promise<string>) | null;
     /** Файлы, которые «лежат» в Telegram: id → байты. */
     files?: Record<string, Buffer>;
+    /** Threaded Mode у бота: с ним /new заводит топик, без него — объясняет, где галочка. */
+    topics?: boolean;
   } = {},
 ) {
   const config =
@@ -248,6 +291,7 @@ function makeBot(
     },
   };
   const { api, state } = fakeApi(options.files ?? { IMAGE: JPEG, VOICE: JPEG });
+  state.topicsEnabled = options.topics ?? false;
   // Расшифровка по умолчанию рабочая: тест про «распознавания нет» задаёт null явно.
   const transcribe =
     'transcribe' in options ? options.transcribe : async () => 'привет из голосового';
@@ -255,8 +299,11 @@ function makeBot(
   return { bot, session, state, calls, config };
 }
 
-function messageUpdate(text: string, options: { username?: string; chatId?: number; type?: string } = {}): TelegramUpdate {
-  const { username = 'trousev', chatId = 42, type = 'private' } = options;
+function messageUpdate(
+  text: string,
+  options: { username?: string; chatId?: number; type?: string; threadId?: number } = {},
+): TelegramUpdate {
+  const { username = 'trousev', chatId = 42, type = 'private', threadId } = options;
   return {
     update_id: 1,
     message: {
@@ -264,6 +311,22 @@ function messageUpdate(text: string, options: { username?: string; chatId?: numb
       chat: { id: chatId, type },
       from: username === '' ? { id: 7 } : { id: 7, username },
       text,
+      ...(threadId === undefined ? {} : { message_thread_id: threadId, is_topic_message: true }),
+    },
+  };
+}
+
+/** Служебное сообщение: человек завёл топик сам (кнопка «All Messages»). */
+function topicCreatedUpdate(name: string, threadId: number, chatId = 42): TelegramUpdate {
+  return {
+    update_id: 2,
+    message: {
+      message_id: 20,
+      chat: { id: chatId, type: 'private' },
+      from: { id: 7, username: 'trousev' },
+      message_thread_id: threadId,
+      is_topic_message: true,
+      forum_topic_created: { name, icon_color: 7322096, is_name_implicit: true },
     },
   };
 }
@@ -777,4 +840,140 @@ test('очередь: сбой одной задачи не рвёт следу�
   });
 
   assert.deepEqual(order, ['после сбоя']);
+});
+
+// --- топики: разговор = чат + топик -----------------------------------------
+
+test('разговор — это чат и топик: у каждого топика своя сессия', () => {
+  assert.equal(conversationIdFor(messageUpdate('привет').message!, 'probe'), 'telegram-42');
+  assert.equal(
+    conversationIdFor(messageUpdate('привет', { threadId: 1 }).message!, 'probe'),
+    'telegram-42',
+    'General — тот же корень чата',
+  );
+  assert.equal(conversationIdFor(messageUpdate('привет', { threadId: 17 }).message!, 'probe'), 'telegram-42-17');
+});
+
+test('в группе топик разделяет и людей', () => {
+  const topic = messageUpdate('привет', { chatId: 99, type: 'supergroup', threadId: 5 });
+  assert.equal(conversationIdFor(topic.message!, 'probe'), 'telegram-99-probe-5');
+  assert.equal(conversationIdFor(messageUpdate('привет', { chatId: 99, type: 'supergroup' }).message!, 'probe'), 'telegram-99-probe');
+});
+
+test('topicThreadId: корень и General — одно место, топик — другое', () => {
+  assert.equal(topicThreadId(messageUpdate('привет').message!), null);
+  assert.equal(topicThreadId(messageUpdate('привет', { threadId: 1 }).message!), null);
+  assert.equal(topicThreadId(messageUpdate('привет', { threadId: 17 }).message!), 17);
+});
+
+test('команду с остатком разбираем, а «а /topic» — не команда', () => {
+  assert.deepEqual(parseCommand('/topic Письмо из налоговой'), {
+    name: 'topic',
+    args: 'Письмо из налоговой',
+  });
+  assert.deepEqual(parseCommand('/rename@the_icarus_bot Налоги'), { name: 'rename', args: 'Налоги' });
+  assert.equal(parseCommand('а /topic'), null);
+});
+
+test('/topic заводит топик и отвечает уже в нём', async () => {
+  const { bot, state } = makeBot({ topics: true });
+
+  await bot.handleUpdate(messageUpdate('/topic Письмо из налоговой'));
+
+  assert.deepEqual(state.topics.map((topic) => topic.name), ['Письмо из налоговой']);
+  const threadId = state.topics[0].threadId;
+  assert.match(topicText(state, 42, threadId), /Завёл разговор «Письмо из налоговой»/);
+  assert.equal(chatText(state, 42), '', 'в корне чата ответа нет');
+});
+
+test('/topic без имени заводит разговор по умолчанию', async () => {
+  const { bot, state } = makeBot({ topics: true });
+
+  await bot.handleUpdate(messageUpdate('/topic'));
+
+  assert.deepEqual(state.topics.map((topic) => topic.name), ['Новый разговор']);
+});
+
+test('/topic без Threaded Mode не зовёт Telegram, а объясняет, где галочка', async () => {
+  const { bot, state } = makeBot({ topics: false });
+
+  await bot.handleUpdate(messageUpdate('/topic'));
+
+  assert.deepEqual(state.topics, [], 'топик не заводим — режим выключен');
+  assert.equal(chatText(state, 42), NO_TOPICS_MODE);
+  assert.match(chatText(state, 42), /Threads Settings/);
+});
+
+test('ответ в топике уезжает в топик, а не в корень', async () => {
+  const { bot, session, state } = makeBot({ topics: true });
+
+  await bot.handleUpdate(messageUpdate('привет', { threadId: 17 }));
+
+  assert.equal(session.prompts.length, 1);
+  assert.equal(chatText(state, 42), '', 'в корне чата пусто');
+  assert.match(topicText(state, 42, 17), /Привет, Саня/);
+  assert.equal(state.typingThreadId, 17, '«печатает…» — в том же топике');
+});
+
+test('/compact сжимает разговор того топика, где написали', async () => {
+  const { bot, calls } = makeBot({ topics: true });
+
+  await bot.handleUpdate(messageUpdate('/compact', { threadId: 17 }));
+
+  assert.deepEqual(calls, [{ command: 'compact', user: 'probe', conversationId: 'telegram-42-17' }]);
+});
+
+test('/topics показывает топики, которые бот видел', async () => {
+  const { bot, state } = makeBot({ topics: true });
+
+  await bot.handleUpdate(topicCreatedUpdate('Работа', 5));
+  await bot.handleUpdate(messageUpdate('/topic Отпуск'));
+  await bot.handleUpdate(messageUpdate('/topics'));
+
+  const text = chatText(state, 42);
+  assert.match(text, /• Работа/);
+  assert.match(text, /• Отпуск/);
+});
+
+test('/topics честно говорит, что списка топиков у бота нет', async () => {
+  const { bot, state } = makeBot({ topics: true });
+
+  await bot.handleUpdate(messageUpdate('/topics'));
+
+  assert.match(chatText(state, 42), /не знаю ни одного топика/);
+});
+
+test('/rename меняет имя текущего топика', async () => {
+  const { bot, state } = makeBot({ topics: true });
+
+  await bot.handleUpdate(messageUpdate('/rename Налоги', { threadId: 17 }));
+
+  assert.deepEqual(state.renames, [{ chatId: 42, threadId: 17, name: 'Налоги' }]);
+  assert.match(topicText(state, 42, 17), /называется «Налоги»/);
+});
+
+test('/rename в корне чата переименовывать нечего', async () => {
+  const { bot, state } = makeBot({ topics: true });
+
+  await bot.handleUpdate(messageUpdate('/rename Налоги'));
+
+  assert.deepEqual(state.renames, []);
+  assert.equal(chatText(state, 42), RENAME_OUTSIDE);
+});
+
+test('/rename без имени подсказывает форму', async () => {
+  const { bot, state } = makeBot({ topics: true });
+
+  await bot.handleUpdate(messageUpdate('/rename', { threadId: 17 }));
+
+  assert.deepEqual(state.renames, []);
+  assert.equal(topicText(state, 42, 17), RENAME_NEEDS_NAME);
+});
+
+test('/start при включённых топиках рассказывает про /topic', async () => {
+  const { bot, state } = makeBot({ topics: true });
+
+  await bot.handleUpdate(messageUpdate('/start'));
+
+  assert.match(chatText(state, 42), /\/topic — завести отдельный разговор/);
 });

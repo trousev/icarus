@@ -40,6 +40,11 @@ export type ReplyOptions = {
   intervalMs?: number;
   /** Часы: в тестах подменяются, чтобы не ждать throttle. */
   now?: () => number;
+  /**
+   * Топик, в котором идёт разговор: новые сообщения и «печатает…» уезжают туда.
+   * Правка сообщения номера топика не требует — он уже в самом сообщении.
+   */
+  threadId?: number | null;
 };
 
 export class TelegramReply {
@@ -47,6 +52,7 @@ export class TelegramReply {
   private chatId: number;
   private intervalMs: number;
   private now: () => number;
+  private threadId: number | null;
 
   /** Текст активного сообщения; всё, что не влезло раньше, уже разослано. */
   private tail = '';
@@ -65,13 +71,14 @@ export class TelegramReply {
     this.chatId = chatId;
     this.intervalMs = options.intervalMs ?? 1200;
     this.now = options.now ?? Date.now;
+    this.threadId = options.threadId ?? null;
   }
 
   /** Заводит сообщение-заготовку: человек видит, что его услышали, ещё до ответа. */
   async start(): Promise<void> {
     this.keepTyping();
     try {
-      const sent = await this.api.sendMessage(this.chatId, PLACEHOLDER);
+      const sent = await this.api.sendMessage(this.chatId, PLACEHOLDER, this.threadId);
       this.messageId = sent.message_id;
       this.lastEdit = this.now();
     } catch (error) {
@@ -144,7 +151,7 @@ export class TelegramReply {
   private async write(messageId: number | null, text: string): Promise<void> {
     if (!text) return;
     if (messageId === null) {
-      const sent = await this.api.sendMessage(this.chatId, text);
+      const sent = await this.api.sendMessage(this.chatId, text, this.threadId);
       this.messageId = sent.message_id;
     } else {
       await this.api.editMessageText(this.chatId, messageId, text);
@@ -177,7 +184,7 @@ export class TelegramReply {
 
   private keepTyping(): void {
     const tick = () => {
-      void this.api.sendChatAction(this.chatId).catch((error) => {
+      void this.api.sendChatAction(this.chatId, 'typing', this.threadId).catch((error) => {
         log.debug('телеграм: «печатает» не отправилось', { error: describeTelegramError(error) });
       });
     };
