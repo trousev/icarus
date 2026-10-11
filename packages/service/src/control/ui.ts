@@ -20,7 +20,7 @@ export type PanelDenial = { status: 401 | 403; message: string; hint: string };
 export type PanelSession = {
   user: string;
   sections: PanelSection[];
-  scopes: Record<string, 'memory' | 'maple'>;
+  scopes: Record<string, 'memory' | 'skills' | 'maple'>;
   /** Заголовки областей: у каждой своё имя, и придумывать их в браузере незачем. */
   scopeLabels?: Record<string, string>;
   /** Модель и хранилище — то, чем человек проверяет, что смотрит в ту панель. */
@@ -35,6 +35,8 @@ export type PanelPage = {
   section: string;
   scope?: string;
   file?: string;
+  /** Пустой редактор нового скилла: файла ещё нет, а страница уже есть. */
+  fresh?: boolean;
   tab?: 'notes' | 'history';
 };
 
@@ -54,6 +56,9 @@ const MEMORY_ABOUT =
   'Профиль, предпочтения и распорядок дня — то, что агент учитывает в первую очередь.';
 const MAPLE_ABOUT =
   'Журналы сессий, воркшиты и графики Maple. Раздел только для чтения: файлы создаёт сам Maple.';
+const SKILLS_ABOUT =
+  'Скиллы Икара: он видит их имена и описания и читает инструкцию, когда задача совпала. ' +
+  'Сохранённый скилл уезжает в следующий же ответ — идущий разговор не рвётся.';
 
 function isDenial(view: PanelView): view is PanelDenial {
   return 'status' in view;
@@ -160,6 +165,8 @@ function shell(body: string): string {
   .bar button, .btn { background:var(--raise); color:var(--text); border:1px solid var(--line);
                       border-radius:8px; padding:7px 14px; }
   .bar button:hover, .btn:hover { border-color:var(--accent); }
+  /* Отказ проверки в редакторе скилла: видно там же, где кнопка «Сохранить». */
+  #skill-status.bad { color:var(--danger); }
   button.primary { background:var(--accent); border-color:var(--accent); color:#0f1116; font-weight:500; }
   button.danger { color:var(--danger); }
   button.danger:hover { border-color:var(--danger); }
@@ -209,6 +216,27 @@ function shell(body: string): string {
   .file .grow { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
                 font-family:ui-monospace, monospace; font-size:13px; }
   .file small { color:var(--dim); margin-left:12px; }
+  /* Скилл в списке — имя и одной строкой описание: по описанию модель и решает,
+     когда скилл открывать, поэтому в списке оно важнее размера файла. */
+  .file.skill .grow { white-space:normal; }
+  .file.skill b { display:block; font-weight:500; }
+  .file.skill .grow small { display:block; margin:2px 0 0; font-family:ui-sans-serif, system-ui, sans-serif;
+                            font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .file .flag { color:var(--danger); margin-left:12px; cursor:help; }
+
+  /* Редактор скилла: поля вместо построчных записей — тут пишут файл целиком. */
+  .field { display:flex; flex-direction:column; gap:7px; padding:0 0 14px; }
+  .field label { color:var(--dim); font-size:10px; letter-spacing:.14em; }
+  .field input[type=text], .field textarea { background:var(--bg); border:1px solid var(--line);
+      border-radius:9px; color:var(--text); font:inherit; padding:10px 12px; width:100%; }
+  .field input[type=text] { font-family:ui-monospace, monospace; }
+  .field textarea { resize:vertical; font:13px/1.7 ui-monospace, monospace; }
+  .field textarea:focus, .field input[type=text]:focus { outline:none; border-color:var(--accent); }
+  .field textarea#skill-body { min-height:320px; }
+  .hint { color:var(--dim); font-size:12px; margin:0; padding:0 0 14px; }
+  .check { display:flex; gap:9px; align-items:center; color:var(--dim); font-size:13px; padding:0 0 16px; }
+  .check input { accent-color:var(--accent); margin:0; }
+  .hint code, .check code { font-family:ui-monospace, monospace; color:var(--text); }
   .hit { padding:9px 12px; border-radius:8px; cursor:pointer; }
   .hit:hover { background:var(--raise); }
   .hit b { color:var(--accent); font-weight:500; font-family:ui-monospace, monospace; font-size:12px; }
@@ -246,17 +274,21 @@ function denialPage(denial: PanelDenial): string {
 function sessionPage(session: PanelSession, page: PanelPage): string {
   const scopes = Object.keys(session.scopes);
   const scope = page.scope && session.scopes[page.scope] ? page.scope : scopes[0];
+  const skills = page.section === 'skills';
   const maple = page.section === 'maple';
+  // Режим — свойство раздела. Он решает, какие маршруты зовёт страница и каким
+  // рендером рисуется правая колонка: память правится построчно, скиллы — файлом,
+  // математика только смотрится.
+  const mode = skills ? 'skills' : maple ? 'maple' : 'memory';
   const sectionLabel = session.sections.find((item) => item.id === page.section)?.label ?? 'Память';
-  const title = maple ? 'Математика' : scopeLabel(session, scope);
-  const about = maple ? MAPLE_ABOUT : MEMORY_ABOUT;
-  const breadcrumbs = [`Icarus`, sectionLabel, ...(maple ? [] : [title])];
+  const title = skills ? 'Скиллы' : maple ? 'Математика' : scopeLabel(session, scope);
+  const about = skills ? SKILLS_ABOUT : maple ? MAPLE_ABOUT : MEMORY_ABOUT;
+  // Крошки не повторяют заголовок, когда раздел назван так же: «Скиллы / Скиллы»
+  // не сообщает ничего.
+  const breadcrumbs = [`Icarus`, sectionLabel, ...(maple || skills ? [] : [title])];
 
-  // Скиллы показываем подписью, а не ссылкой: редактор скиллов ещё не сделан, и
-  // мёртвая ссылка хуже, чем честное «скоро».
-  //
-  // Область в ссылке несёт только память: у математики своей области нет, и
-  // `?scope=personal` в её адресе — это ровно та путаница, когда раздел показывал
+  // Область в ссылке несёт только память: у скиллов и математики своей области нет,
+  // и `?scope=personal` в их адресе — это ровно та путаница, когда раздел показывал
   // личную память под своим заголовком.
   const nav = session.sections
     .map((item) => {
@@ -268,7 +300,7 @@ function sessionPage(session: PanelSession, page: PanelPage): string {
     })
     .join('');
 
-  const areas = maple
+  const areas = maple || skills
     ? ''
     : `<nav class="areas">${scopes
         .map(
@@ -283,11 +315,9 @@ function sessionPage(session: PanelSession, page: PanelPage): string {
     section: page.section,
     scope,
     file: page.file ?? null,
+    fresh: Boolean(page.fresh),
     tab: page.tab === 'history' ? 'history' : 'notes',
-    // Режим — свойство раздела, а не области: математика не область памяти, и
-    // спрашивать про неё `scopes[scope]` значит получить «memory» и попросить у
-    // сервера личную память под заголовком математики.
-    mode: maple ? 'maple' : 'memory',
+    mode,
     scopes,
     labels: Object.fromEntries(scopes.map((name) => [name, scopeLabel(session, name)])),
   };
@@ -315,33 +345,33 @@ function sessionPage(session: PanelSession, page: PanelPage): string {
       )
       .join(' / ')}</div>
     <div class="search">
-      <input id="q" placeholder="Поиск по памяти и скиллам" size="30">
+      <input id="q" placeholder="${skills ? 'Поиск по скиллам' : maple ? 'Поиск по математике' : 'Поиск по памяти'}" size="30">
     </div>
     <div class="status"><i></i>Агент активен</div>
   </div>
   <div class="content">
-    <p class="section-title">${maple ? 'МАТЕМАТИКА' : 'ПАМЯТЬ АГЕНТА'}</p>
+    <p class="section-title">${skills ? 'СКИЛЛЫ АГЕНТА' : maple ? 'МАТЕМАТИКА' : 'ПАМЯТЬ АГЕНТА'}</p>
     <div class="head">
       <div class="lead">
         <h1>${escapeHtml(title)}</h1>
         <p class="about">${about}</p>
       </div>
-      ${areas}
+      ${skills ? '<button class="btn primary" id="new-skill">Новый скилл</button>' : areas}
     </div>
     <div class="cols">
       <div class="card">
-        <div class="card-head"><span>${maple ? 'ФАЙЛЫ MAPLE' : 'ФАЙЛЫ'}</span><span id="files-count"></span></div>
+        <div class="card-head"><span>${skills ? 'СКИЛЛЫ' : maple ? 'ФАЙЛЫ MAPLE' : 'ФАЙЛЫ'}</span><span id="files-count"></span></div>
         <div id="files"><p class="empty">Читаю…</p></div>
       </div>
       <div class="card" id="content-card">
-        <div class="file-head" id="file-head"${page.file ? '' : ' hidden'}>
+        <div class="file-head" id="file-head"${page.file || page.fresh ? '' : ' hidden'}>
           <div>
             <strong id="file-name">${page.file ? escapeHtml(page.file) : ''}</strong>
             <div class="meta" id="file-meta"></div>
           </div>
           <div class="head-actions">
             <div class="tabs" id="tabs" hidden>
-              <a class="tab${config.tab === 'notes' ? ' active' : ''}" href="#" data-tab="notes">${maple ? 'Содержимое' : 'Записи'}</a>
+              <a class="tab${config.tab === 'notes' ? ' active' : ''}" href="#" data-tab="notes">${skills ? 'Скилл' : maple ? 'Содержимое' : 'Записи'}</a>
               <a class="tab${config.tab === 'history' ? ' active' : ''}" href="#" data-tab="history">История</a>
             </div>
             <button class="btn" id="download" hidden>Скачать</button>
@@ -380,21 +410,32 @@ const humanSize = (bytes) => bytes < 1024 ? bytes + ' б' : (bytes / 1024).toFix
 const day = (iso) => { const [y, m, d] = String(iso).split('-'); return y && m && d ? d + '.' + m + '.' + y : String(iso); };
 const stamp = (iso) => String(iso).slice(0, 16).replace('T', ' ');
 const isImage = (path) => /\\.(gif|jpe?g|bmp)$/i.test(path);
-// Адрес запроса: раздел задаёт корень, область уточняет память. У математики
-// области нет, и scope в её запросах только сбивал бы с толку.
+// Русское число: «1 скилл», «2 скилла», «5 скиллов». Считаем по правилу, а не по
+// остатку от деления: 11 и 12 — исключение, и без него панель писала бы «11 скилл».
+const plural = (n, one, few, many) => {
+  const tens = n % 100, ones = n % 10;
+  if (tens >= 11 && tens <= 14) return many;
+  if (ones === 1) return one;
+  if (ones >= 2 && ones <= 4) return few;
+  return many;
+};
+// Адрес запроса: раздел задаёт корень, область уточняет память. У скиллов и
+// математики области нет, и scope в их запросах только сбивал бы с толку.
 const endpoint = (name, extra = {}) => {
-  const query = cfg.mode === 'maple' ? { ...extra } : { scope: cfg.scope, ...extra };
+  const query = cfg.mode === 'memory' ? { scope: cfg.scope, ...extra } : { ...extra };
   const suffix = new URLSearchParams(query).toString();
-  return '/panel/' + (cfg.mode === 'maple' ? 'maple' : 'memory') + '/' + name + (suffix ? '?' + suffix : '');
+  return '/panel/' + cfg.section + '/' + name + (suffix ? '?' + suffix : '');
 };
 
-// Адрес — это и есть состояние: файл и вкладку видно в ссылке, «назад» работает.
+// Адрес — это и есть состояние: файл, вкладку и пустой редактор видно в ссылке,
+// «назад» работает.
 function go(patch) {
-  const next = { scope: cfg.scope, file: cfg.file, tab: cfg.tab, ...patch };
+  const next = { scope: cfg.scope, file: cfg.file, tab: cfg.tab, fresh: cfg.fresh, ...patch };
   const query = new URLSearchParams();
-  // Область в адресе есть только у памяти: у математики её нет вовсе.
-  if (cfg.mode !== 'maple') query.set('scope', next.scope);
+  // Область в адресе есть только у памяти: у скиллов и математики её нет вовсе.
+  if (cfg.mode === 'memory') query.set('scope', next.scope);
   if (next.file) query.set('file', next.file);
+  if (next.fresh) query.set('new', '1');
   if (next.file && next.tab === 'history') query.set('tab', 'history');
   const suffix = query.toString();
   location.href = '/panel/' + cfg.section + (suffix ? '?' + suffix : '');
@@ -461,7 +502,7 @@ async function loadCounts() {
 
 async function loadFiles() {
   const data = await api(endpoint('files'));
-  el('files-count').textContent = data.files.length + ' ' + (data.files.length === 1 ? 'файл' : 'файлов');
+  el('files-count').textContent = data.files.length + ' ' + plural(data.files.length, 'файл', 'файла', 'файлов');
   const box = el('files');
   if (!data.files.length) {
     box.innerHTML = '<p class="empty">' + (cfg.mode === 'maple' ? 'Расчётов пока нет.' : 'Память пока пуста.') + '</p>';
@@ -488,6 +529,141 @@ async function loadFiles() {
   }
   box.innerHTML = '<div class="files">' + parts.join('') + '</div>';
   box.querySelectorAll('.file').forEach((node) => node.onclick = guard(() => openFile(node.dataset.path)));
+}
+
+// ── скиллы ───────────────────────────────────────────────────────────────────
+// Скилл — это не файл в списке, а единица работы: имя, описание и инструкция.
+// Поэтому список показывает скиллы (с описанием — по нему модель и решает, когда
+// скилл открывать), а правая колонка — редактор файла целиком.
+async function loadSkills() {
+  const data = await api(endpoint('files'));
+  const skills = data.skills || [];
+  el('files-count').textContent = skills.length + ' ' + plural(skills.length, 'скилл', 'скилла', 'скиллов');
+  const box = el('files');
+  if (!skills.length) {
+    box.innerHTML = '<p class="empty">Скиллов пока нет: нажми «Новый скилл» и напиши первый.</p>';
+    return;
+  }
+  box.innerHTML = '<div class="files">' + skills.map((skill) =>
+    '<a class="file skill' + (skill.id === cfg.file ? ' active' : '') + '" href="#" data-id="' + esc(skill.id) + '">' +
+    '<span class="grow"><b>' + esc(skill.name) + '</b>' +
+    (skill.description ? '<small>' + esc(skill.description) + '</small>' : '') + '</span>' +
+    // Сломанный скилл pi пропустит молча — здесь об этом говорит пометка, а
+    // подробность («нет описания», «frontmatter не разбирается») лежит в подсказке.
+    (skill.problem
+      ? '<small class="flag" title="' + esc(skill.problem) + '">⚠</small>'
+      : '<small>' + skill.files + ' ' + plural(skill.files, 'файл', 'файла', 'файлов') + '</small>') +
+    '</a>').join('') + '</div>';
+  box.querySelectorAll('.file').forEach((node) => node.onclick = guard(() => openSkill(node.dataset.id)));
+}
+
+function openSkill(id) {
+  if (id === cfg.file && !cfg.fresh) return;
+  go({ file: id, fresh: false, tab: 'notes' });
+}
+
+/** Разметка редактора: статичная, значения подставляет fillSkill. */
+function skillForm() {
+  return '<div class="bar" id="skill-bar"><span class="grow" id="skill-status">Скилл уедет Икару после сохранения.</span>' +
+    '<button class="primary" id="skill-save">Сохранить</button>' +
+    '<button class="danger" id="skill-delete"' + (cfg.file ? '' : ' hidden') + '>Удалить</button></div>' +
+    '<div class="field"><label for="skill-name">ИМЯ — КАТАЛОГ СКИЛЛА</label>' +
+    '<input id="skill-name" type="text" spellcheck="false" autocomplete="off" placeholder="pirate-mode"></div>' +
+    '<p class="hint">Строчные латинские буквы, цифры и дефис: имя становится именем каталога, а в разговоре — командой <code>/skill:имя</code>.</p>' +
+    '<div class="field"><label for="skill-description">КОГДА ПРИМЕНЯТЬ</label>' +
+    '<textarea id="skill-description" rows="2" placeholder="Что делает скилл и в какой момент его звать."></textarea></div>' +
+    '<p class="hint">По этой строке Икар и решает, что пора открыть инструкцию: без описания pi скилл пропустит.</p>' +
+    '<div class="field"><label for="skill-body">ИНСТРУКЦИЯ (SKILL.MD)</label>' +
+    '<textarea id="skill-body" spellcheck="false" placeholder="# Как это делать&#10;&#10;1. …"></textarea></div>' +
+    '<label class="check"><input type="checkbox" id="skill-hidden"> скрыть от модели: звать только командой <code>/skill:имя</code></label>';
+}
+
+function fillSkill(data) {
+  el('skill-name').value = data ? data.name : '';
+  el('skill-description').value = data ? data.description : '';
+  el('skill-body').value = data ? data.body : '';
+  el('skill-hidden').checked = Boolean(data && data.hidden);
+}
+
+function skillStatus(text, bad) {
+  const node = el('skill-status');
+  if (!node) return;
+  node.textContent = text;
+  node.classList.toggle('bad', Boolean(bad));
+}
+
+/** Сохранение: файл, коммит и пометка «ресурсы обновились» — одним запросом. */
+async function saveSkill(id) {
+  const payload = {
+    name: el('skill-name').value.trim(),
+    description: el('skill-description').value.trim(),
+    body: el('skill-body').value,
+    hidden: el('skill-hidden').checked,
+  };
+  if (id) payload.id = id;
+  skillStatus('Сохраняю…');
+
+  let result;
+  try {
+    result = await api(endpoint('save'), { method: 'POST', body: JSON.stringify(payload) });
+  } catch (error) {
+    // Отказ проверки показываем строкой состояния, а не вместо редактора: иначе
+    // вместе с «нет описания» пропал бы и текст, который человек только что написал.
+    skillStatus('Не сохранилось: ' + (error && error.message ? error.message : error), true);
+    return;
+  }
+
+  // Дальше живём по адресу сохранённого скилла: имя могло смениться, и вместе с
+  // ним переехал каталог — перезагрузка вернула бы человека к старой ссылке.
+  cfg.file = result.id;
+  cfg.fresh = false;
+  history.replaceState(null, '', '/panel/skills?file=' + encodeURIComponent(result.id));
+  await Promise.all([loadCounts(), loadSkills()]);
+  await renderSkill();
+  skillStatus(result.committed ? 'Сохранено · коммит ' + String(result.commit || '').slice(0, 7) : 'Сохранено, но коммит не вышел — загляни в историю');
+}
+
+async function deleteSkill(data) {
+  if (!data) return;
+  if (!(await askConfirm('Удалить скилл «' + data.name + '»?\\n\\nВместе с файлами бандла. Это коммит: вернуть можно откатом в истории.', 'удалить'))) return;
+  await api(endpoint('delete'), { method: 'POST', body: JSON.stringify({ id: data.id }) });
+  go({ file: null, fresh: false, tab: 'notes' });
+}
+
+/**
+ * Правая колонка в разделе скиллов: пустой редактор нового скилла, редактор
+ * открытого или история — та же, что у памяти.
+ */
+async function renderSkill() {
+  if (!cfg.file) {
+    if (!cfg.fresh) {
+      showFileHead(null, null, false);
+      el('content').innerHTML = '<p class="empty">Выбери скилл слева или заведи новый: «Новый скилл».</p>';
+      return;
+    }
+    // Пустой редактор: скачивать пока нечего, вкладок истории ещё нет.
+    showFileHead('Новый скилл', 'ещё не сохранён', false, false);
+    el('content').innerHTML = skillForm();
+    fillSkill(null);
+    el('skill-save').onclick = guard(() => saveSkill(null));
+    el('skill-name').focus();
+    return;
+  }
+
+  const data = await api(endpoint('skill', { id: cfg.file }));
+  // Дата изменения — день, а не метка времени: в шапке рядом с путём и числом
+  // файлов часы только шумят.
+  const meta = data.id + ' · ' + data.files + ' ' + plural(data.files, 'файл', 'файла', 'файлов') +
+    ' · изменён ' + day(String(data.modified).slice(0, 10)) + (data.problem ? ' · ⚠ ' + data.problem : '');
+  showFileHead(data.name, meta, true);
+  if (cfg.tab === 'history') {
+    await renderHistory();
+    return;
+  }
+  el('content').innerHTML = skillForm();
+  fillSkill(data);
+  el('skill-save').onclick = guard(() => saveSkill(data.id));
+  el('skill-delete').onclick = guard(() => deleteSkill(data));
 }
 
 async function openFile(path) {
@@ -577,17 +753,19 @@ async function removeSelected(data) {
   if (!lines.length) return;
   const word = lines.length === 1 ? 'запись' : 'записей: ' + lines.length;
   if (!(await askConfirm('Убрать из памяти ' + word + '?\\n\\nЭто коммит: вернуть можно откатом в истории.', 'убрать'))) return;
-  await api('/panel/' + (cfg.mode === 'maple' ? 'maple' : 'memory') + '/forget-many', {
+  await api(endpoint('forget-many'), {
     method: 'POST',
-    body: JSON.stringify({ scope: cfg.scope, path: data.path, lines }),
+    body: JSON.stringify({ path: data.path, lines }),
   });
   selection = new Set();
   location.reload();
 }
 
 // ── история файла ────────────────────────────────────────────────────────────
+// В памяти история — по открытому файлу, у скиллов — по всему каталогу: скилл это
+// каталог, и коммит «скилл «pirate-mode»» читается лучше, чем история его SKILL.md.
 async function renderHistory() {
-  const data = await api(endpoint('file-history', { path: cfg.file }));
+  const data = await api(cfg.mode === 'skills' ? endpoint('history') : endpoint('file-history', { path: cfg.file }));
   el('content').innerHTML = data.commits.length
     ? '<div class="hist">' + data.commits.map((commit) =>
         '<div class="commit" data-hash="' + esc(commit.hash) + '"><span class="dot"></span><div class="grow">' +
@@ -595,14 +773,14 @@ async function renderHistory() {
         '<small>' + esc(commit.short) + ' · ' + esc(commit.author) + ' · ' + stamp(commit.date) +
         '</small></div><span><span class="plus">+' + commit.added + '</span> <span class="minus">−' + commit.removed + '</span></span></div>',
       ).join('') + '</div>'
-    : '<p class="empty">Истории у этого файла пока нет.</p>';
+    : '<p class="empty">' + (cfg.mode === 'skills' ? 'Скиллы ещё не меняли: истории нет.' : 'Истории у этого файла пока нет.') + '</p>';
   el('content').querySelectorAll('.commit').forEach((node) => node.onclick = guard(() => showCommit(node.dataset.hash, node)));
 }
 
 /** Дифф открывается под коммитом: до этого в колонке видно саму историю. */
 async function showCommit(hash, node) {
   el('content').querySelectorAll('.commit').forEach((other) => other.classList.toggle('active', other === node));
-  const data = await api('/panel/api/show?scope=' + cfg.scope + '&commit=' + hash);
+  const data = await api(endpoint('show', { commit: hash }));
   node.insertAdjacentHTML('afterend',
     '<div class="diff"><pre class="diff">' + esc(data.patch || 'пустой дифф') + '</pre>' +
     '<div class="diff-actions"><button class="primary" id="revert">Откатить</button>' +
@@ -616,7 +794,7 @@ async function showCommit(hash, node) {
   };
   diff.querySelector('#revert').onclick = guard(async () => {
     if (!(await askConfirm('Откатить коммит ' + hash.slice(0, 8) + '? Изменения вернутся обратным коммитом.', 'откатить'))) return;
-    await api('/panel/api/revert', { method: 'POST', body: JSON.stringify({ scope: cfg.scope, commit: hash }) });
+    await api(endpoint('revert'), { method: 'POST', body: JSON.stringify({ commit: hash }) });
     selection = new Set();
     location.reload();
   });
@@ -626,18 +804,27 @@ async function showCommit(hash, node) {
 /**
  * Шапка открытого файла: имя, подпись и вкладки. Пока файла нет, её нет тоже —
  * пустая шапка с прочерком только сбивает с толку.
+ *
+ * Скачивание включается отдельно: у нового скилла имя есть, а файла ещё нет, и
+ * кнопка «Скачать» на пустом редакторе обещала бы несуществующее.
  */
-function showFileHead(path, meta, tabs) {
+function showFileHead(path, meta, tabs, download = Boolean(path)) {
   el('file-head').hidden = !path;
   el('file-name').textContent = path || '';
   el('file-meta').textContent = meta || '';
   el('tabs').hidden = !tabs;
-  // Скачать можно любой файл раздела — и память, и график Maple: это чтение,
-  // а не правка, и упирается оно в те же проверки пути, что и остальные запросы.
-  el('download').hidden = !path;
+  // Скачать можно любой файл раздела — и память, и график Maple, и SKILL.md: это
+  // чтение, а не правка, и упирается оно в те же проверки пути, что и остальные
+  // запросы.
+  el('download').hidden = !download;
 }
 
 async function renderContent() {
+  // У скиллов своя правая колонка: там редактор, а не записи с галочками.
+  if (cfg.mode === 'skills') {
+    await renderSkill();
+    return;
+  }
   const path = cfg.file;
   if (!path) {
     showFileHead(null, null, false);
@@ -681,11 +868,18 @@ function renderReadOnly(data) {
 }
 
 // ── поиск ────────────────────────────────────────────────────────────────────
+// Строка поиска ищет в открытом разделе: в памяти — по записям, в скиллах — по их
+// файлам, в математике — по журналам. Обещать «по памяти и скиллам» сразу значило
+// бы врать: чужие корни раздел не читает.
 async function doSearch() {
   const query = el('q').value.trim();
   if (query.length < 2) return;
-  const data = await api('/panel/memory/search?scope=' + cfg.scope + '&q=' + encodeURIComponent(query));
-  showFileHead('Поиск', '«' + query + '» · найдено: ' + data.hits.length, false);
+  if (cfg.mode === 'skills') {
+    await searchSkills(query);
+    return;
+  }
+  const data = await api(endpoint('search', { q: query }));
+  showFileHead('Поиск', '«' + query + '» · найдено: ' + data.hits.length, false, false);
   el('content').innerHTML = data.hits.length
     ? '<div class="files">' + data.hits.map((hit) =>
         '<div class="hit" data-path="' + esc(hit.path) + '"><b>' + esc(hit.path) + ':' + hit.line + '</b><div>' + esc(hit.text) + '</div></div>',
@@ -694,15 +888,30 @@ async function doSearch() {
   el('content').querySelectorAll('.hit').forEach((node) => node.onclick = guard(() => go({ file: node.dataset.path, tab: 'notes' })));
 }
 
+/** Поиск по скиллам: находка открывает сам скилл, а не строку в файле. */
+async function searchSkills(query) {
+  const data = await api(endpoint('search', { q: query }));
+  showFileHead('Поиск', '«' + query + '» · найдено: ' + data.hits.length, false, false);
+  el('content').innerHTML = data.hits.length
+    ? '<div class="files">' + data.hits.map((hit) =>
+        '<div class="hit" data-id="' + esc(hit.id) + '"><b>' + esc(hit.name) + ':' + hit.line + '</b><div>' + esc(hit.text) + '</div></div>',
+      ).join('') + '</div>'
+    : '<p class="empty">Ничего не нашлось.</p>';
+  el('content').querySelectorAll('.hit').forEach((node) => node.onclick = guard(() => go({ file: node.dataset.id, fresh: false, tab: 'notes' })));
+}
+
 el('tabs').querySelectorAll('.tab').forEach((tab) => tab.onclick = guard((event) => {
   event.preventDefault();
   go({ tab: tab.dataset.tab });
 }));
 el('q').onkeydown = (event) => { if (event.key === 'Enter') guard(doSearch)(); };
+// «Новый скилл» — это адрес, а не скрытое состояние: ссылку на пустой редактор
+// можно переслать, а «назад» возвращает к списку.
+if (el('new-skill')) el('new-skill').onclick = guard(() => go({ file: null, fresh: true, tab: 'notes' }));
 
 (async () => {
   document.title = '${PANEL_TITLE} · ' + cfg.user;
-  await Promise.all([loadCounts(), loadFiles(), renderContent()]);
+  await Promise.all([loadCounts(), cfg.mode === 'skills' ? loadSkills() : loadFiles(), renderContent()]);
 })().catch(fail);
 </script>`);
 }

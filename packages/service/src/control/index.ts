@@ -3,11 +3,17 @@
 // Человека называет SSO-прокси (см. identity.ts), поэтому параметра user в запросах нет
 // и подменить его нельзя: чужую память через свою сессию не открыть.
 //
-// Разделы живут по своим адресам: /panel/memory — память, /panel/maple — математика.
-// Внутри памяти три области: личная, семейная и математика; математика — не память в
-// том же смысле: её файлы создаёт Maple, и панель показывает их только для чтения
-// (ни «забыть», ни откатов): журнал сессии — это код, из которого сессия
-// восстанавливается, и построчная правка его сломает.
+// Разделы живут по своим адресам: /panel/memory — память, /panel/skills — скиллы,
+// /panel/maple — математика. Внутри памяти три области: личная, семейная и математика;
+// математика — не память в том же смысле: её файлы создаёт Maple, и панель показывает
+// их только для чтения (ни «забыть», ни откатов): журнал сессии — это код, из которого
+// сессия восстанавливается, и построчная правка его сломает.
+//
+// Скиллы — третий вид раздела: их пишет человек, и правка тут не построчная, а целым
+// файлом (`SKILL.md`). Панель — автор скиллов, pi — их читатель: каталог скиллов
+// человека монтируется в контейнер как `~/.pi/agent/skills`, откуда pi берёт их при
+// старте сессии. Поэтому после сохранения панель поднимает поколение ресурсов: живой
+// разговор доигрывает на старом наборе, а следующий ход поднимает pi заново.
 //
 // Старые адреса (/panel/api/*) остаются рабочими: браузер держит открытую страницу
 // панели живой, и после обновления сервиса она не должна осыпаться на полуслове.
@@ -31,33 +37,70 @@ import {
   searchMemory,
 } from './memory.ts';
 import { parseEntries, readEntries } from './entries.ts';
-import { commitAll, ensureRepo, fileHistory, log, revert, show } from './git.ts';
+import { commitAll, ensureRepo, fileHistory, hasChanges, log, revert, show } from './git.ts';
 import { identifyPanelUser } from './identity.ts';
+import {
+  listSkills,
+  readSkill,
+  removeSkill,
+  searchSkills,
+  skillExtensions,
+  skillLabel,
+  skillScope,
+  writeSkill,
+} from './skills.ts';
 import { panelHtml, type PanelPage, type PanelSession } from './ui.ts';
 import { log as logger } from '../log.ts';
 
-export type PanelContext = { config: IcarusConfig };
+export type PanelContext = {
+  config: IcarusConfig;
+  /**
+   * Отметить, что медленные ресурсы человека (скиллы) поменялись: живая сессия pi
+   * держит их в памяти с самого старта, поэтому следующий ход поднимает её заново.
+   * Не передан — панель просто пишет файлы (так её гоняют тесты хранилища).
+   */
+  bump?: (userId: string) => void;
+};
 
 /** Разделы панели: порядок здесь — порядок в сайдбаре. */
 export const SECTIONS: { id: string; label: string }[] = [
   { id: 'memory', label: 'Память' },
+  { id: 'skills', label: 'Скиллы' },
   { id: 'maple', label: 'Математика' },
 ];
 
-type Scope = 'personal' | 'shared' | 'maple';
-/** Режим раздела: memory правится построчно, maple — только смотрится. */
-export type ScopeMode = 'memory' | 'maple';
+type Scope = 'personal' | 'shared' | 'skills' | 'maple';
+/** Режим раздела: memory правится построчно, skills — целым файлом, maple — только смотрится. */
+export type ScopeMode = 'memory' | 'skills' | 'maple';
 
 /** Заголовки областей: их рисует панель, и держать их в браузере незачем. */
 const SCOPE_LABELS: Record<string, string> = {
   personal: 'Личная',
   shared: 'Семейная',
+  skills: 'Скиллы',
   maple: 'Математика',
 };
 
 function json(res: ServerResponse, status: number, payload: unknown): void {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(payload));
+}
+
+/**
+ * Скиллы поменялись — pi об этом ещё не знает.
+ *
+ * Каталог скиллов pi читает один раз при старте процесса, поэтому правка файла сама
+ * по себе до живого разговора не доедет. Пометка «ресурсы обновились» говорит
+ * реестру сессий поднять следующую сессию заново: идущий ход доигрывает на прежнем
+ * наборе, а следующий ответ — уже с новым скиллом (см. SessionRegistry.bumpResources).
+ * Ошибка тут не должна отменять сохранение: файл уже записан и закоммичен.
+ */
+function bumpResources(ctx: PanelContext, userId: string): void {
+  try {
+    ctx.bump?.(userId);
+  } catch (error) {
+    logger.warn('не удалось отметить обновление скиллов', { user: userId, error: String(error) });
+  }
 }
 
 /**
@@ -75,6 +118,21 @@ export function disposition(relative: string): string {
 }
 
 /**
+ * Отдать текст файлом: браузер сохранит его под тем же именем, а не покажет
+ * страницей. Проверки пути — те же, что у обычного чтения: их делает тот, кто
+ * уже прочитал содержимое.
+ */
+function sendAttachment(res: ServerResponse, relative: string, content: string): void {
+  const body = Buffer.from(content, 'utf8');
+  res.writeHead(200, {
+    'content-type': 'text/plain; charset=utf-8',
+    'content-length': String(body.byteLength),
+    'content-disposition': disposition(relative),
+  });
+  res.end(body);
+}
+
+/**
  * Область памяти из запроса: всё незнакомое — личная, как и раньше.
  *
  * Математики здесь нет намеренно: это не область памяти, а отдельный раздел со
@@ -87,7 +145,9 @@ function parseScope(raw: unknown): 'personal' | 'shared' {
 }
 
 function modeFor(scope: Scope): ScopeMode {
-  return scope === 'maple' ? 'maple' : 'memory';
+  if (scope === 'maple') return 'maple';
+  if (scope === 'skills') return 'skills';
+  return 'memory';
 }
 
 /**
@@ -100,6 +160,7 @@ function modeFor(scope: Scope): ScopeMode {
  */
 function scopeFor(section: string | undefined, raw: unknown): Scope {
   if (section === 'maple') return 'maple';
+  if (section === 'skills') return 'skills';
   if (section === 'memory') return parseScope(raw);
   const legacy = raw === 'shared' || raw === 'maple' ? raw : 'personal';
   return legacy;
@@ -112,13 +173,15 @@ function resolveScope(config: IcarusConfig, userId: string, scope: Scope) {
   const paths = userPaths(config, user);
   if (scope === 'shared') return { root: paths.sharedMemory, allowed: memoryExtensions };
   if (scope === 'maple') return { root: paths.maple, allowed: mapleExtensions };
+  if (scope === 'skills') return { root: paths.skills, allowed: skillExtensions };
   return { root: paths.memory, allowed: memoryExtensions };
 }
 
 /** Какие области есть у человека и что в них можно делать. */
 function scopesFor(): Record<string, ScopeMode> {
-  // Областей ровно две, и обе — память. Математика сюда не входит: у неё свой
-  // раздел в сайдбаре, и в списке областей она появлялась бы вторым входом туда же.
+  // Областей ровно две, и обе — память. Скиллы и математика сюда не входят: это
+  // разделы со своим корнем, и в списке областей они появлялись бы вторым входом
+  // туда же — ровно та путаница, из-за которой математику отсюда убрали.
   return { personal: 'memory', shared: 'memory' };
 }
 
@@ -129,6 +192,10 @@ async function prepare(config: IcarusConfig, userId: string): Promise<void> {
   const paths = userPaths(config, user);
   await ensureRepo(paths.memory);
   await ensureRepo(paths.sharedMemory);
+  // Скиллы — свой репозиторий внутри каталога, который pi читает как `~/.pi/agent/skills`.
+  // Отдельный от pi-agent: в самом pi-agent лежат auth.json и mcp.json с ключами, и
+  // заводить репозиторий над ними значило бы коммитить ключи.
+  await ensureRepo(paths.skills);
   // Математику в git не берём: журналы переписываются на каждом шаге расчёта,
   // и коммит на каждый вызов Maple — это история ни о чём. Панель её и не
   // показывает, а репозиторий заводить «на будущее» незачем.
@@ -143,6 +210,9 @@ function countsFor(config: IcarusConfig, userId: string): Record<string, number>
   const counts: Record<string, number> = {
     personal: countFiles(paths.memory, memoryExtensions),
     shared: countFiles(paths.sharedMemory, memoryExtensions),
+    // У скиллов считаем не файлы, а сами скиллы: бандл из десятка файлов —
+    // это один скилл, и число рядом с разделом должно значить именно это.
+    skills: listSkills(paths.skills).length,
   };
   if (config.mcp?.maple) counts.maple = countFiles(paths.maple, mapleExtensions);
   return counts;
@@ -176,6 +246,14 @@ export async function handlePanel(
 
   const page = routePage(url.pathname);
   if (page) {
+    // Раздел математики есть только там, где настроен Maple. Прятать его из
+    // сайдбара мало: в закладках у людей он остался, и открытая страница молча
+    // показывала бы пустой раздел, у которого каждый запрос — отказ.
+    if (page.section === 'maple' && !config.mcp?.maple) {
+      res.writeHead(302, { location: '/panel/memory' });
+      res.end();
+      return true;
+    }
     const html = access.ok ? await sectionPage(config, access.identity.userId, page, url) : panelHtml(access.denial);
     res.writeHead(access.ok ? 200 : access.denial.status, { 'content-type': 'text/html; charset=utf-8' });
     res.end(html);
@@ -190,16 +268,21 @@ export async function handlePanel(
   return false;
 }
 
-/** Раздел из адреса: /panel/memory и /panel/maple. Всё прочее — не наша страница. */
+/** Раздел из адреса: /panel/memory, /panel/skills и /panel/maple. */
 function routePage(pathname: string): PanelPage | null {
-  const match = /^\/panel\/(memory|maple)\/?$/.exec(pathname);
+  const match = /^\/panel\/(memory|skills|maple)\/?$/.exec(pathname);
   return match ? { section: match[1] } : null;
 }
 
 /** Маршрут API из адреса: /panel/<раздел>/<имя>. */
 function routeApi(pathname: string): { section: string; name: string } | null {
-  const match = /^\/panel\/(memory|maple)\/([\w-]+)$/.exec(pathname);
+  const match = /^\/panel\/(memory|skills|maple)\/([\w-]+)$/.exec(pathname);
   return match ? { section: match[1], name: match[2] } : null;
+}
+
+/** Разделы панели у этого человека: математика есть только там, где настроен Maple. */
+function sectionsFor(config: IcarusConfig): { id: string; label: string }[] {
+  return SECTIONS.filter((section) => section.id !== 'maple' || Boolean(config.mcp?.maple));
 }
 
 async function sectionPage(
@@ -211,7 +294,7 @@ async function sectionPage(
   await prepare(config, userId);
   const session: PanelSession = {
     user: userId,
-    sections: SECTIONS,
+    sections: sectionsFor(config),
     scopes: scopesFor(),
     scopeLabels: SCOPE_LABELS,
     model: config.models[0]?.id ?? '—',
@@ -219,10 +302,13 @@ async function sectionPage(
   };
   return panelHtml(session, {
     ...page,
-    // Область — только у памяти: у математики её нет, и тащить туда личную значит
-    // показывать раздел в виде, которого не бывает.
+    // Область — только у памяти: у скиллов и математики её нет, и тащить туда личную
+    // значит показывать раздел в виде, которого не бывает.
     scope: scopeFor(page.section, url.searchParams.get('scope')),
     file: url.searchParams.get('file') ?? undefined,
+    // Пустой редактор нового скилла — тоже состояние, и живёт оно в адресе: ссылку
+    // «заведи скилл» можно переслать, а «назад» возвращает к списку.
+    fresh: url.searchParams.get('new') === '1',
     tab: url.searchParams.get('tab') === 'history' ? 'history' : 'notes',
   });
 }
@@ -261,7 +347,7 @@ async function handleApi(
     const scopes = scopesFor();
     json(res, 200, {
       user: userId,
-      sections: SECTIONS,
+      sections: sectionsFor(config),
       scopes: Object.keys(scopes),
       modes: scopes,
       labels: SCOPE_LABELS,
@@ -300,11 +386,120 @@ async function handleApi(
   }
 
   if (req.method === 'GET' && name === 'files') {
-    // Память — под git (её правки в панели откатываются коммитами), математика —
-    // просто каталог, который надо завести, если человек ещё ничего не считал.
-    if (mode === 'memory') await ensureRepo(root);
-    else fs.mkdirSync(root, { recursive: true });
+    // Память и скиллы — под git (их правки в панели откатываются коммитами),
+    // математика — просто каталог, который надо завести, если человек ещё ничего
+    // не считал.
+    if (mode === 'maple') fs.mkdirSync(root, { recursive: true });
+    else await ensureRepo(root);
+    // У скиллов «файлы» — это сами скиллы: каталог с SKILL.md внутри и его бандл.
+    // Панель показывает их списком, а не россыпью файлов, из которых они собраны.
+    if (mode === 'skills') {
+      json(res, 200, { user: userId, scope, mode, root, skills: listSkills(root) });
+      return;
+    }
     json(res, 200, { user: userId, scope, mode, root, files: listFiles(root, '', allowed) });
+    return;
+  }
+
+  // ── скиллы ──────────────────────────────────────────────────────────────────
+  // Раздел целиком свой: панель тут не «смотрит файлы», а пишет скиллы, поэтому и
+  // маршруты у него свои. Всё, что ниже этой ветки, до скиллов не доходит — иначе
+  // «забудь строку» и «удали файл» полезли бы в SKILL.md.
+  if (mode === 'skills') {
+    if (req.method === 'GET' && name === 'skill') {
+      const skill = readSkill(root, url.searchParams.get('id') ?? '');
+      if (!skill) {
+        json(res, 404, errorBody('скилл не найден или недоступен'));
+        return;
+      }
+      json(res, 200, skill);
+      return;
+    }
+
+    // Файл скилла целиком: панель открывает скилл редактором, а скачивание — это
+    // тот же SKILL.md, отданный файлом (и файлы бандла заодно).
+    if (req.method === 'GET' && name === 'file') {
+      const relative = url.searchParams.get('path') ?? '';
+      const content = readMemoryFile(root, relative, skillExtensions);
+      if (content === null) {
+        json(res, 404, errorBody('файл не найден или недоступен'));
+        return;
+      }
+      if (url.searchParams.get('download') === '1') {
+        sendAttachment(res, relative, content);
+        return;
+      }
+      json(res, 200, { path: relative, content });
+      return;
+    }
+
+    if (req.method === 'POST' && name === 'save') {
+      const result = writeSkill(root, {
+        ...(typeof body.id === 'string' && body.id ? { id: body.id } : {}),
+        name: String(body.name ?? ''),
+        description: String(body.description ?? ''),
+        body: String(body.body ?? ''),
+        hidden: body.hidden === true,
+      });
+      if (!result.ok) {
+        json(res, 400, errorBody(result.message, 'invalid_request_error'));
+        return;
+      }
+      // Коммит — часть сохранения: у скиллов та же история и тот же откат, что у памяти.
+      const committed = await commitAll(root, `skills: скилл «${skillLabel(result.id)}»`);
+      bumpResources(ctx, userId);
+      logger.info('панель: скилл сохранён', { user: userId, id: result.id, committed });
+      // Хеш коммита едет в панель: человек видит, что скилл не просто записан, а
+      // лёг в историю, откуда его можно вернуть.
+      const [head] = await log(root, 1);
+      json(res, 200, { ...result, committed, commit: head?.hash ?? '' });
+      return;
+    }
+
+    if (req.method === 'POST' && name === 'delete') {
+      const id = String(body.id ?? '');
+      const label = skillLabel(id);
+      // Файлы бандла человек мог положить руками и не закоммитить: удалять их
+      // безвозвратно нельзя, поэтому сначала фиксируем то, чего ещё нет в истории,
+      // — тогда откат удаления вернёт скилл целиком, а не один SKILL.md.
+      if (await hasChanges(root, skillScope(id))) {
+        await commitAll(root, `skills: ${label} перед удалением`);
+      }
+      const result = removeSkill(root, id);
+      if (result.ok) await commitAll(root, `skills: удалить «${label}»`);
+      if (result.ok) bumpResources(ctx, userId);
+      logger.info('панель: скилл удалён', { user: userId, id, ok: result.ok });
+      json(res, result.ok ? 200 : 400, result);
+      return;
+    }
+
+    if (req.method === 'GET' && name === 'history') {
+      // Без пути: у скиллов история общая по каталогу, но с теми же цифрами по
+      // строкам коммита, что у файла памяти, — их рисует одна и та же вёрстка.
+      json(res, 200, { commits: await fileHistory(root, '') });
+      return;
+    }
+
+    if (req.method === 'GET' && name === 'show') {
+      json(res, 200, await show(root, url.searchParams.get('commit') ?? ''));
+      return;
+    }
+
+    if (req.method === 'POST' && name === 'revert') {
+      const result = await revert(root, String(body.commit ?? ''));
+      if (result.ok) bumpResources(ctx, userId);
+      logger.info('панель: откат скиллов', { user: userId, ok: result.ok });
+      json(res, result.ok ? 200 : 400, result);
+      return;
+    }
+
+    if (req.method === 'GET' && name === 'search') {
+      const query = url.searchParams.get('q') ?? '';
+      json(res, 200, { query, hits: searchSkills(root, query, 50) });
+      return;
+    }
+
+    json(res, 404, errorBody(`неизвестный маршрут раздела скиллов: ${name}`));
     return;
   }
 
@@ -350,13 +545,7 @@ async function handleApi(
     // download=1 — отдать файл как файл: браузер сохранит его под тем же именем,
     // а не покажет текстом. Проверки пути тут те же, что и у обычного чтения.
     if (asFile) {
-      const body = Buffer.from(content, 'utf8');
-      res.writeHead(200, {
-        'content-type': 'text/plain; charset=utf-8',
-        'content-length': String(body.byteLength),
-        'content-disposition': disposition(relative),
-      });
-      res.end(body);
+      sendAttachment(res, relative, content);
       return;
     }
     json(res, 200, { path: relative, content });

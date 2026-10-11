@@ -132,6 +132,15 @@ test('раздел решает, что за область: математик�
     assert.equal(mapleInMemory.mode, 'memory');
     assert.deepEqual(mapleInMemory.files.map((file) => file.path).sort(), ['identity.md', 'people/barsik.md']);
 
+    // У скиллов области нет вовсе: что бы ни стояло в scope, раздел отдаёт скиллы,
+    // а не чужой каталог. Своей областью скиллы тоже не объявить.
+    const skills = (await (
+      await fetch(`${base}/panel/skills/files?scope=maple`, { headers: asUser('probe') })
+    ).json()) as { scope: string; mode: string; skills: unknown[] };
+    assert.equal(skills.scope, 'skills');
+    assert.equal(skills.mode, 'skills');
+    assert.deepEqual(skills.skills, [], 'пустой каталог скиллов — это пустой список скиллов');
+
     // Своей областью математику не объявить: её нет в списке областей.
     const state = (await (await api(base, 'probe', 'state')).json()) as { scopes: string[] };
     assert.deepEqual(state.scopes, ['personal', 'shared']);
@@ -197,13 +206,15 @@ test('панель показывает только память своего �
       state.sections,
       [
         { id: 'memory', label: 'Память' },
+        { id: 'skills', label: 'Скиллы' },
         { id: 'maple', label: 'Математика' },
       ],
       'разделы панели приходят из сервиса',
     );
-    // Областей памяти ровно две: математика — отдельный раздел, а не третья
-    // область. Пока она была и тем и другим, панель показывала её дважды.
-    assert.deepEqual(state.scopes, ['personal', 'shared'], 'математика не область памяти');
+    // Областей памяти ровно две: скиллы и математика — отдельные разделы со своим
+    // корнем, а не третья и четвёртая область. Пока математика была и тем и другим,
+    // панель показывала её дважды.
+    assert.deepEqual(state.scopes, ['personal', 'shared'], 'скиллы и математика не области памяти');
     assert.deepEqual(state.modes, { personal: 'memory', shared: 'memory' });
 
     const files = (await (await api(base, 'probe', 'files?scope=personal')).json()) as {
@@ -218,6 +229,24 @@ test('панель показывает только память своего �
     const alien = await api(base, 'probe', 'file?scope=personal&path=secret.md');
     assert.equal(alien.status, 404);
   });
+});
+
+test('без Maple раздела математики нет и в адресе: он уводит в память', async () => {
+  await withServer(
+    async (base) => {
+      const state = (await (await api(base, 'probe', 'state')).json()) as {
+        sections: Array<{ id: string }>;
+      };
+      assert.deepEqual(state.sections.map((section) => section.id), ['memory', 'skills'], 'математики нет в разделах');
+
+      // Ссылка на выключенный раздел осталась у людей в закладках: страница не
+      // должна открываться пустой, у которой каждый запрос — отказ.
+      const page = await fetch(`${base}/panel/maple`, { headers: asUser('probe'), redirect: 'manual' });
+      assert.equal(page.status, 302);
+      assert.equal(page.headers.get('location'), '/panel/memory');
+    },
+    { mcp: {} },
+  );
 });
 
 test('записи памяти приезжают с датами из истории, а пачка удаляется одним коммитом', async () => {
