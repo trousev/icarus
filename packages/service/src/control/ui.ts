@@ -26,6 +26,8 @@ export type PanelSession = {
   /** Модель и хранилище — то, чем человек проверяет, что смотрит в ту панель. */
   model?: string;
   storage?: string;
+  /** Есть ли кому написать скилл: в локальной панели контейнера с моделью нет. */
+  draftSkills?: boolean;
 };
 
 export type PanelView = PanelSession | PanelDenial;
@@ -165,6 +167,9 @@ function shell(body: string): string {
   .bar button, .btn { background:var(--raise); color:var(--text); border:1px solid var(--line);
                       border-radius:8px; padding:7px 14px; }
   .bar button:hover, .btn:hover { border-color:var(--accent); }
+  /* Пока модель пишет, кнопку не жмём второй раз: это минута и чужой токен. */
+  button:disabled { opacity:.55; cursor:default; }
+  button:disabled:hover { border-color:var(--line); }
   /* Отказ проверки в редакторе скилла: видно там же, где кнопка «Сохранить». */
   #skill-status.bad { color:var(--danger); }
   button.primary { background:var(--accent); border-color:var(--accent); color:#0f1116; font-weight:500; }
@@ -233,6 +238,13 @@ function shell(body: string): string {
   .field textarea { resize:vertical; font:13px/1.7 ui-monospace, monospace; }
   .field textarea:focus, .field input[type=text]:focus { outline:none; border-color:var(--accent); }
   .field textarea#skill-body { min-height:320px; }
+  /* «Напиши за меня»: отдельным блоком, потому что это другой способ начать скилл —
+     не «заполни поля», а «расскажи идею, поля заполнятся сами». */
+  .generator { border:1px solid var(--line); border-radius:11px; padding:14px 14px 4px;
+               margin:0 0 16px; background:var(--bg); }
+  .generator .field textarea { background:var(--panel); min-height:auto; font:inherit; }
+  .generator .row { display:flex; gap:10px; align-items:center; padding:0 0 12px; }
+  .generator .row .grow { flex:1; color:var(--dim); font-size:12px; }
   .hint { color:var(--dim); font-size:12px; margin:0; padding:0 0 14px; }
   .check { display:flex; gap:9px; align-items:center; color:var(--dim); font-size:13px; padding:0 0 16px; }
   .check input { accent-color:var(--accent); margin:0; }
@@ -319,6 +331,9 @@ function sessionPage(session: PanelSession, page: PanelPage): string {
     tab: page.tab === 'history' ? 'history' : 'notes',
     mode,
     scopes,
+    // Есть ли кому написать скилл. Локальная панель поднимается без контейнера с
+    // моделью — там кнопки нет вовсе, а не «есть, но всегда отказывает».
+    draftSkills: Boolean(session.draftSkills),
     labels: Object.fromEntries(scopes.map((name) => [name, scopeLabel(session, name)])),
   };
 
@@ -564,7 +579,19 @@ function openSkill(id) {
 
 /** Разметка редактора: статичная, значения подставляет fillSkill. */
 function skillForm() {
-  return '<div class="bar" id="skill-bar"><span class="grow" id="skill-status">Скилл уедет Икару после сохранения.</span>' +
+  // Блок «напиши за меня» — только у нового скилла и только когда есть кому писать.
+  // У открытого скилла он бы значил «перепиши моё», а это уже другая кнопка.
+  const generator = cfg.draftSkills && !cfg.file
+    ? '<div class="generator"><div class="field"><label for="skill-idea">НАПИСАТЬ ЗА МЕНЯ</label>' +
+      '<textarea id="skill-idea" rows="2" placeholder="Расскажи идею словами: «разбирать голосовые в текст и складывать в журнал»"></textarea></div>' +
+      '<div class="row"><span class="grow">Модель придумает имя, описание и инструкцию — останется проверить и сохранить.</span>' +
+      '<button class="btn" id="skill-write">Напиши за меня</button></div></div>'
+    : '';
+
+  return generator +
+    '<div class="bar" id="skill-bar"><span class="grow" id="skill-status">' +
+    (cfg.draftSkills && !cfg.file ? 'Опиши идею — или заполни поля сам.' : 'Скилл уедет Икару после сохранения.') +
+    '</span>' +
     '<button class="primary" id="skill-save">Сохранить</button>' +
     '<button class="danger" id="skill-delete"' + (cfg.file ? '' : ' hidden') + '>Удалить</button></div>' +
     '<div class="field"><label for="skill-name">ИМЯ — КАТАЛОГ СКИЛЛА</label>' +
@@ -590,6 +617,37 @@ function skillStatus(text, bad) {
   if (!node) return;
   node.textContent = text;
   node.classList.toggle('bad', Boolean(bad));
+}
+
+/**
+ * «Напиши за меня»: один запрос — и поля заполнены черновиком.
+ *
+ * На диске до этого не появляется ничего: черновик живёт в форме, а файл и коммит
+ * делает «Сохранить». Так человек видит, что именно уедет Икару, и может поправить.
+ */
+async function writeForMe() {
+  const idea = el('skill-idea').value.trim();
+  if (idea.length < 3) {
+    skillStatus('Опиши идею хотя бы парой слов', true);
+    return;
+  }
+
+  const button = el('skill-write');
+  button.disabled = true;
+  skillStatus('Пишу… на это уходит до полутора минут');
+  try {
+    const draft = await api(endpoint('draft'), { method: 'POST', body: JSON.stringify({ idea }) });
+    el('skill-name').value = draft.name || '';
+    el('skill-description').value = draft.description || '';
+    el('skill-body').value = draft.body || '';
+    skillStatus(draft.note ? 'Написано · ' + draft.note : 'Написано · проверь и сохрани');
+    // Имя не вышло — ведём человека туда, где от него что-то нужно.
+    (draft.name ? el('skill-body') : el('skill-name')).focus();
+  } catch (error) {
+    skillStatus('Не вышло: ' + (error && error.message ? error.message : error), true);
+  } finally {
+    button.disabled = false;
+  }
 }
 
 /** Сохранение: файл, коммит и пометка «ресурсы обновились» — одним запросом. */
@@ -646,7 +704,9 @@ async function renderSkill() {
     el('content').innerHTML = skillForm();
     fillSkill(null);
     el('skill-save').onclick = guard(() => saveSkill(null));
-    el('skill-name').focus();
+    if (el('skill-write')) el('skill-write').onclick = guard(writeForMe);
+    // Начинать тут логично с идеи: поля ниже заполнятся сами.
+    (el('skill-idea') || el('skill-name')).focus();
     return;
   }
 

@@ -39,6 +39,7 @@ import {
 import { parseEntries, readEntries } from './entries.ts';
 import { commitAll, ensureRepo, fileHistory, hasChanges, log, revert, show } from './git.ts';
 import { identifyPanelUser } from './identity.ts';
+import { parseSkillDraft, SKILL_IDEA_LIMIT } from './skill-draft.ts';
 import {
   listSkills,
   readSkill,
@@ -60,6 +61,12 @@ export type PanelContext = {
    * Не передан — панель просто пишет файлы (так её гоняют тесты хранилища).
    */
   bump?: (userId: string) => void;
+  /**
+   * Спросить модель: панель зовёт её, чтобы написать скилл по описанию человека.
+   * Не передан — кнопки «напиши за меня» нет вовсе (так живёт локальная панель:
+   * контейнера с моделью рядом с ней нет).
+   */
+  draft?: (userId: string, idea: string) => Promise<string>;
 };
 
 /** Разделы панели: порядок здесь — порядок в сайдбаре. */
@@ -254,7 +261,9 @@ export async function handlePanel(
       res.end();
       return true;
     }
-    const html = access.ok ? await sectionPage(config, access.identity.userId, page, url) : panelHtml(access.denial);
+    const html = access.ok
+      ? await sectionPage(config, access.identity.userId, page, url, typeof ctx.draft === 'function')
+      : panelHtml(access.denial);
     res.writeHead(access.ok ? 200 : access.denial.status, { 'content-type': 'text/html; charset=utf-8' });
     res.end(html);
     return true;
@@ -290,6 +299,7 @@ async function sectionPage(
   userId: string,
   page: PanelPage,
   url: URL,
+  draftSkills: boolean,
 ): Promise<string> {
   await prepare(config, userId);
   const session: PanelSession = {
@@ -299,6 +309,7 @@ async function sectionPage(
     scopeLabels: SCOPE_LABELS,
     model: config.models[0]?.id ?? '—',
     storage: 'git · local',
+    draftSkills,
   };
   return panelHtml(session, {
     ...page,
@@ -413,6 +424,46 @@ async function handleApi(
         return;
       }
       json(res, 200, skill);
+      return;
+    }
+
+    // «Напиши за меня»: человек описывает идею — модель собирает черновик скилла.
+    // Черновик только заполняет редактор: файл и коммит появляются после «Сохранить».
+    if (req.method === 'POST' && name === 'draft') {
+      if (!ctx.draft) {
+        json(res, 501, errorBody('в этой панели писать некому: рядом нет контейнера с моделью'));
+        return;
+      }
+      const idea = String(body.idea ?? '').trim();
+      if (!idea) {
+        json(res, 400, errorBody('опиши словами, что скилл должен делать', 'invalid_request_error'));
+        return;
+      }
+      if (idea.length > SKILL_IDEA_LIMIT) {
+        json(res, 400, errorBody(`идея длиннее ${SKILL_IDEA_LIMIT} символов — столько модели не нужно`, 'invalid_request_error'));
+        return;
+      }
+
+      let answer: string;
+      try {
+        answer = await ctx.draft(userId, idea);
+      } catch (error) {
+        logger.warn('панель: модель не написала скилл', { user: userId, error: String(error) });
+        json(res, 502, errorBody(`модель не ответила: ${error instanceof Error ? error.message : String(error)}`));
+        return;
+      }
+
+      // Занятые имена знает только диск: модель про них ничего не знает и вполне
+      // может предложить имя существующего скилла.
+      const taken = new Set(listSkills(root).map((skill) => skillLabel(skill.id)));
+      const parsed = parseSkillDraft(answer, taken);
+      if (!parsed.ok) {
+        logger.warn('панель: черновик скилла не разобрался', { user: userId, message: parsed.message });
+        json(res, 502, errorBody(parsed.message));
+        return;
+      }
+      logger.info('панель: скилл написан моделью', { user: userId, name: parsed.draft.name || '(имя не вышло)' });
+      json(res, 200, parsed.draft);
       return;
     }
 

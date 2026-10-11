@@ -81,6 +81,18 @@ test('раздел скиллов — редактор, а не список ф�
   assert.match(fresh, /fillSkill\(null\)/, 'у нового скилла полей ещё нет — значения пустые');
   assert.match(fresh, /go\(\{ file: null, fresh: true, tab: 'notes' \}\)/, 'кнопка ведёт в пустой редактор');
 
+  // «Напиши за меня» — блок с идеей и кнопкой; есть он только там, где есть кому
+  // писать: в панели без контейнера с моделью его не рисуют вовсе.
+  const canWrite = panelHtml({ ...session, draftSkills: true }, { section: 'skills', fresh: true });
+  assert.match(canWrite, /"draftSkills":true/);
+  assert.match(canWrite, /id="skill-idea"/, 'идею спрашивают одним полем');
+  assert.match(canWrite, /endpoint\('draft'\)/, 'кнопка уходит своим маршрутом');
+  assert.match(canWrite, /Напиши за меня/);
+
+  const noWriter = panelHtml({ ...session, draftSkills: false }, { section: 'skills', fresh: true });
+  assert.match(noWriter, /"draftSkills":false/);
+  assert.match(noWriter, /cfg\.draftSkills && !cfg\.file/, 'блок под условием, а не всегда');
+
   const open = panelHtml(session, { section: 'skills', file: 'pirate-mode/SKILL.md' });
   assert.match(open, /endpoint\('skill', \{ id: cfg\.file \}\)/, 'скилл открывается своим маршрутом');
   assert.match(open, /endpoint\('history'\)/, 'у скиллов история — по всему каталогу, а не по файлу');
