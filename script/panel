@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Локальная панель управления: посмотреть её на своих данных, без докера и pi.
+#
+#   ./script/panel                          панель на config.yaml, первый человек из users
+#   ./script/panel --user probe2            посмотреть другого человека
+#   ./script/panel --port 8099              другой порт (по умолчанию 8099: 8081 занят сервисом)
+#   ./script/panel --config /path/config.yaml   другой конфиг — например, копия с другим dataDir
+#
+# Панель работает с файлами и git: пишет память и скиллы туда же, куда настоящий
+# сервис, и коммитит их. Разговора тут нет — Икар отвечает только в сервисе.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+if [ ! -d node_modules ]; then
+  echo '[x] нет node_modules — сначала ./script/update' >&2
+  exit 1
+fi
+
+exec node packages/service/src/panel.ts "$@"
