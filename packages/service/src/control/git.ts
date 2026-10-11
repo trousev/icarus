@@ -76,7 +76,8 @@ export async function revert(dir: string, commit: string): Promise<{ ok: boolean
 }
 
 /**
- * История одного файла: коммит, который его тронул, и строки по нему.
+ * История коммитов и строк по ним: с путём — по одному файлу, без пути — по всему
+ * репозиторию (так живёт раздел скиллов: скилл это каталог, а не файл).
  *
  * Формат `--numstat` печатает «+N\t−M\tпуть» между строкой коммита и следующим
  * коммитом, поэтому разбираем блоками. Хеш и дату берём в одном формате с log(),
@@ -84,17 +85,17 @@ export async function revert(dir: string, commit: string): Promise<{ ok: boolean
  * суток у автора и на сервере разошлись бы.
  */
 export async function fileHistory(dir: string, relative: string, limit = 30): Promise<FileCommit[]> {
-  if (!relative || relative.includes('\u0000') || relative.startsWith('-')) return [];
-  const result = await git(dir, [
+  if (relative.includes('\u0000') || relative.startsWith('-')) return [];
+  const args = [
     'log',
     `-${limit}`,
     '--no-color',
     '--numstat',
     '--date=short',
     '--pretty=format:@@%H%x1f%h%x1f%an%x1f%ad%x1f%s',
-    '--',
-    relative,
-  ]);
+  ];
+  if (relative) args.push('--', relative);
+  const result = await git(dir, args);
   if (result.code !== 0) return [];
 
   const commits: FileCommit[] = [];
@@ -157,4 +158,17 @@ export async function commitAll(dir: string, message: string): Promise<boolean> 
   await git(dir, ['add', '-A']);
   const result = await git(dir, ['commit', '-q', '-m', message]);
   return result.code === 0;
+}
+
+/**
+ * Есть ли в этом месте незакоммиченное: правки или новые файлы.
+ *
+ * Нужно перед удалением: файлы бандла человек мог положить руками и не закоммитить,
+ * а `commitAll` их не увидит — untracked-файл в истории не появится, и откат
+ * удаления его не вернёт. Поэтому перед удалением спрашиваем и фиксируем.
+ */
+export async function hasChanges(dir: string, relative: string): Promise<boolean> {
+  if (!relative || relative.includes('\u0000')) return false;
+  const result = await git(dir, ['status', '--porcelain', '--', relative]);
+  return result.code === 0 && result.stdout.trim() !== '';
 }

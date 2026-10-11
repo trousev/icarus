@@ -706,8 +706,9 @@ export function userPaths(config: IcarusConfig, user: UserConfig) {
     piAgent: path.join(root, 'pi-agent'),
     /**
      * Скиллы: `~/.pi/agent/skills` внутри контейнера. Каталог агентский (не проектный),
-     * поэтому pi берёт его без всякого доверия к проекту. Никто, кроме pi, в него сейчас
-     * не пишет: скиллы кладут руками, панель правки скиллов — отдельная задача.
+     * поэтому pi берёт его без всякого доверия к проекту. Пишет сюда панель, раздел
+     * «Скиллы» (control/skills.ts), и держит каталог под git — историю и откат панель
+     * обещает те же, что у памяти.
      */
     skills: path.join(root, 'pi-agent', 'skills'),
     agentsMd: path.join(root, 'AGENTS.md'),

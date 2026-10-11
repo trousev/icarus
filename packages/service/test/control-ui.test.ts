@@ -43,7 +43,7 @@ test('память правится, математика только смот�
   assert.match(html, /counts\.personal/, 'счётчики берутся у сервиса');
 
   // Удаление записей живёт в разделе памяти и уходит своим маршрутом.
-  assert.match(html, /'\/panel\/' \+ \(cfg\.mode === 'maple' \? 'maple' : 'memory'\) \+ '\/forget-many'/, 'пачка уходит маршрутом раздела');
+  assert.match(html, /endpoint\('forget-many'\)/, 'пачка уходит маршрутом раздела');
   assert.match(html, /askConfirm\('Убрать из памяти '/);
 
   // А у математики ни галочек, ни истории файла: рендер другой ветки.
@@ -55,6 +55,40 @@ test('память правится, математика только смот�
     'у математики нет вкладки истории',
   );
   assert.match(maple, /\.file-head\[hidden\] \{ display:none; \}/, 'пустая шапка файла не занимает место');
+});
+
+test('раздел скиллов — редактор, а не список файлов с галочками', () => {
+  const session: PanelSession = {
+    ...SESSION,
+    sections: [
+      { id: 'memory', label: 'Память' },
+      { id: 'skills', label: 'Скиллы' },
+    ],
+    scopes: { personal: 'memory', shared: 'memory' },
+  };
+
+  const list = panelHtml(session, { section: 'skills' });
+  assert.match(list, /href="\/panel\/skills"/, 'раздел стоит в сайдбаре рядом с памятью');
+  assert.doesNotMatch(list, /href="\/panel\/skills\?/, 'области у скиллов нет — и параметра тоже');
+  assert.match(list, /id="new-skill"/, 'новый скилл заводится кнопкой');
+  assert.match(list, /cfg\.mode === 'skills' \? loadSkills\(\) : loadFiles\(\)/, 'список рисуется скиллами');
+  assert.doesNotMatch(list, /id="count-skills"[^>]*>5</, 'число у раздела приходит из сервиса');
+
+  // Пустой редактор нового скилла: раздел открывается и без файла, и это состояние
+  // живёт в адресе (`?new=1`), а не в скрытой переменной.
+  const fresh = panelHtml(session, { section: 'skills', fresh: true });
+  assert.match(fresh, /id="skill-body"/, 'тело SKILL.md правится тут же');
+  assert.match(fresh, /fillSkill\(null\)/, 'у нового скилла полей ещё нет — значения пустые');
+  assert.match(fresh, /go\(\{ file: null, fresh: true, tab: 'notes' \}\)/, 'кнопка ведёт в пустой редактор');
+
+  const open = panelHtml(session, { section: 'skills', file: 'pirate-mode/SKILL.md' });
+  assert.match(open, /endpoint\('skill', \{ id: cfg\.file \}\)/, 'скилл открывается своим маршрутом');
+  assert.match(open, /endpoint\('history'\)/, 'у скиллов история — по всему каталогу, а не по файлу');
+  assert.match(open, /endpoint\('save'\)/);
+  assert.match(open, /askConfirm\('Удалить скилл «'/, 'удаление спрашивает подтверждение');
+  // Отказ проверки не должен стирать черновик: сообщение уходит в строку состояния,
+  // а не вместо редактора (иначе «нет описания» уносит с собой весь написанный текст).
+  assert.match(open, /skillStatus\('Не сохранилось: '/, 'ошибка сохранения видна в редакторе');
 });
 
 test('без Maple раздела математики в панели нет', () => {

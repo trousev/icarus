@@ -27,7 +27,12 @@ export function createServer(config: IcarusConfig, registry: SessionRegistry): h
 
     if (url.pathname === '/panel' || url.pathname.startsWith('/panel/')) {
       try {
-        if (await handlePanel(req, res, url, { config })) return;
+        // Реестр панели нужен для одного: скилл, сохранённый в панели, должен доехать
+        // до живого разговора. Сессия pi держит каталог скиллов с самого старта,
+        // поэтому панель отмечает обновление ресурсов — и следующий ход поднимает pi
+        // заново (см. bumpResources в control/index.ts).
+        const ctx = { config, bump: (user: string) => void registry.bumpResources(user) };
+        if (await handlePanel(req, res, url, ctx)) return;
       } catch (error) {
         log.error('ошибка панели управления', { error: redact(String(error)) });
         if (!res.headersSent) {

@@ -27,7 +27,8 @@ export function ensureDirs(config: IcarusConfig, user: UserConfig): void {
     paths.sessions,
     paths.piAgent,
     // Каталог скиллов заводим заранее и пустым: так его видит pi. prepareUser его
-    // не чистит — это не управляемый каталог расширений, а место для скиллов человека.
+    // не чистит — это не управляемый каталог расширений, а место для скиллов человека,
+    // куда пишет панель (и заводит внутри него git-репозиторий, см. control/skills.ts).
     paths.skills,
     paths.sharedMemory,
   ]) {
