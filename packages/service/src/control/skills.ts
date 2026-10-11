@@ -24,8 +24,8 @@ import { resolveInside } from './memory.ts';
 const SKILL_FILE = 'SKILL.md';
 
 /** Ограничения спецификации: те же числа, что у pi в core/skills.ts. */
-const MAX_NAME_LENGTH = 64;
-const MAX_DESCRIPTION_LENGTH = 1024;
+export const SKILL_NAME_LIMIT = 64;
+export const SKILL_DESCRIPTION_LIMIT = 1024;
 
 /** В каталоге скиллов правим только markdown; всё прочее — файлы бандла. */
 export const skillExtensions = new Set(['.md']);
@@ -71,7 +71,7 @@ export type SkillResult = { ok: true; id: string; message: string } | { ok: fals
 export function validateSkillName(name: string): string | null {
   const value = name.trim();
   if (!value) return 'имя не может быть пустым';
-  if (value.length > MAX_NAME_LENGTH) return `имя длиннее ${MAX_NAME_LENGTH} символов`;
+  if (value.length > SKILL_NAME_LIMIT) return `имя длиннее ${SKILL_NAME_LIMIT} символов`;
   if (!/^[a-z0-9-]+$/.test(value)) return 'в имени — только строчные латинские буквы, цифры и дефис';
   if (value.startsWith('-') || value.endsWith('-')) return 'имя не начинается и не кончается дефисом';
   if (value.includes('--')) return 'в имени нет двух дефисов подряд';
@@ -82,8 +82,8 @@ export function validateSkillName(name: string): string | null {
 export function validateSkillDescription(description: string): string | null {
   const value = description.trim();
   if (!value) return 'без описания pi пропустит скилл: напиши, когда его применять';
-  if (value.length > MAX_DESCRIPTION_LENGTH) {
-    return `описание длиннее ${MAX_DESCRIPTION_LENGTH} символов — модели столько не нужно`;
+  if (value.length > SKILL_DESCRIPTION_LIMIT) {
+    return `описание длиннее ${SKILL_DESCRIPTION_LIMIT} символов — модели столько не нужно`;
   }
   return null;
 }
@@ -94,8 +94,11 @@ export function validateSkillDescription(description: string): string | null {
  * Формат тот же, что читает pi (`utils/frontmatter.ts`): YAML между двумя `---`.
  * Битый frontmatter — не повод прятать скилл: человек должен видеть, что лежит в
  * файле, и починить это руками, поэтому отдаём и `problem`.
+ *
+ * Наружу отдаётся ещё и затем, чтобы «напиши за меня» умело прочитать ответ
+ * модели, если она прислала готовый файл вместо JSON (control/skill-draft.ts).
  */
-function splitFrontmatter(content: string): {
+export function splitSkillFile(content: string): {
   frontmatter: Record<string, unknown>;
   body: string;
   problem?: string;
@@ -216,7 +219,7 @@ function bundleOf(root: string, file: string): SkillFile[] {
 function summaryOf(root: string, entry: { id: string; file: string }): SkillSummary {
   const stat = fs.statSync(entry.file);
   const raw = fs.readFileSync(entry.file, 'utf8');
-  const { frontmatter, problem } = splitFrontmatter(raw);
+  const { frontmatter, problem } = splitSkillFile(raw);
 
   const dirName = path.basename(path.dirname(entry.file));
   const fallbackName = path.basename(entry.file) === SKILL_FILE ? dirName : path.basename(entry.file, '.md');
@@ -261,7 +264,7 @@ export function readSkill(root: string, id: string): SkillDetail | null {
   if (!full || !fs.existsSync(full) || !fs.statSync(full).isFile()) return null;
 
   const raw = fs.readFileSync(full, 'utf8');
-  const { frontmatter, body } = splitFrontmatter(raw);
+  const { frontmatter, body } = splitSkillFile(raw);
   const summary = summaryOf(root, { id: relativeId(root, full), file: full });
   return { ...summary, body, frontmatter, bundle: bundleOf(root, full) };
 }
@@ -331,7 +334,7 @@ export function writeSkill(root: string, draft: SkillDraft): SkillResult {
     const renamed = renamedPath(current, root, name);
     if (typeof renamed === 'string') return { ok: false, message: renamed };
     file = renamed.file;
-    existing = splitFrontmatter(fs.readFileSync(current, 'utf8')).frontmatter;
+    existing = splitSkillFile(fs.readFileSync(current, 'utf8')).frontmatter;
 
     if (file !== current) {
       fs.mkdirSync(path.dirname(file), { recursive: true });

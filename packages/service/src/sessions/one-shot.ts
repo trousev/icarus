@@ -7,7 +7,16 @@ import { spawnDockerOnce } from '../docker/manager.ts';
 import { redact } from '../log.ts';
 import type { IcarusConfig, ModelConfig } from '../config.ts';
 
-export type OneShotOptions = { timeoutMs?: number; signal?: AbortSignal };
+export type OneShotOptions = {
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  /**
+   * Чем задать роль. По умолчанию — «отвечай ровно тем, о чём просят»: разовый
+   * вопрос затем и задают. Другая роль нужна там, где ответ читает код, а не
+   * человек (например, панель просит скилл в виде JSON).
+   */
+  systemPrompt?: string;
+};
 
 /** Сколько ждём ответ по умолчанию: дешёвая модель отвечает за секунды. */
 export const ONE_SHOT_TIMEOUT_MS = 12_000;
@@ -49,7 +58,7 @@ export function runOneShot(
   prompt: string,
   options: OneShotOptions = {},
 ): Promise<string> {
-  const { timeoutMs = ONE_SHOT_TIMEOUT_MS, signal } = options;
+  const { timeoutMs = ONE_SHOT_TIMEOUT_MS, signal, systemPrompt = ONE_SHOT_SYSTEM_PROMPT } = options;
 
   return new Promise<string>((resolve, reject) => {
     if (signal?.aborted) {
@@ -59,7 +68,7 @@ export function runOneShot(
 
     let child: ChildProcess;
     try {
-      child = spawnDockerOnce(config, container, ['pi', ...oneShotArgs(model, prompt, ONE_SHOT_SYSTEM_PROMPT)]);
+      child = spawnDockerOnce(config, container, ['pi', ...oneShotArgs(model, prompt, systemPrompt)]);
     } catch (error) {
       reject(error instanceof Error ? error : new Error(String(error)));
       return;

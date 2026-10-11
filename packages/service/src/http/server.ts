@@ -3,17 +3,32 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { log, redact } from '../log.ts';
-import { userPaths, type IcarusConfig } from '../config.ts';
+import { findUser, userPaths, type IcarusConfig } from '../config.ts';
 import type { SessionRegistry } from '../sessions/registry.ts';
 import { errorBody } from './sse.ts';
 import { handleChatCompletions, headerValue } from './openai.ts';
 import { handlePanel } from '../control/index.ts';
+import { skillDraftPrompt, SKILL_DRAFT_SYSTEM, SKILL_DRAFT_TIMEOUT_MS } from '../control/skill-draft.ts';
 import { listManaged } from '../docker/manager.ts';
 import { planReconciliation } from '../docker/reconcile.ts';
 
 export const PUBLIC_MODEL_ID = 'icarus';
 
-export function createServer(config: IcarusConfig, registry: SessionRegistry): http.Server {
+export type ServerOptions = {
+  /**
+   * Есть ли кому написать скилл в панели. По умолчанию — да, если реестр вообще
+   * умеет разовый вопрос: локальная панель (script/panel) поднимается без
+   * контейнера с моделью и говорит об этом прямо, а не кнопкой-обманкой.
+   */
+  draftSkills?: boolean;
+};
+
+export function createServer(
+  config: IcarusConfig,
+  registry: SessionRegistry,
+  options: ServerOptions = {},
+): http.Server {
+  const draftSkills = options.draftSkills ?? typeof registry.oneShot === 'function';
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
 
@@ -27,11 +42,28 @@ export function createServer(config: IcarusConfig, registry: SessionRegistry): h
 
     if (url.pathname === '/panel' || url.pathname.startsWith('/panel/')) {
       try {
-        // Реестр панели нужен для одного: скилл, сохранённый в панели, должен доехать
-        // до живого разговора. Сессия pi держит каталог скиллов с самого старта,
-        // поэтому панель отмечает обновление ресурсов — и следующий ход поднимает pi
-        // заново (см. bumpResources в control/index.ts).
-        const ctx = { config, bump: (user: string) => void registry.bumpResources(user) };
+        // Реестр панели нужен для двух вещей. Скилл, сохранённый в панели, должен
+        // доехать до живого разговора: сессия pi держит каталог скиллов с самого
+        // старта, поэтому панель отмечает обновление ресурсов — и следующий ход
+        // поднимает pi заново (см. bumpResources в control/index.ts). А кнопка
+        // «напиши за меня» просит модель разово — там же, где живут ключи и pi.
+        const ctx = {
+          config,
+          bump: (user: string) => void registry.bumpResources(user),
+          ...(draftSkills
+            ? {
+                draft: (userId: string, idea: string) => {
+                  const person = findUser(config, userId);
+                  if (!person) throw new Error(`человек ${userId} не заведён`);
+                  return registry.oneShot(person, skillDraftPrompt(idea), {
+                    tier: 'strong',
+                    systemPrompt: SKILL_DRAFT_SYSTEM,
+                    timeoutMs: SKILL_DRAFT_TIMEOUT_MS,
+                  });
+                },
+              }
+            : {}),
+        };
         if (await handlePanel(req, res, url, ctx)) return;
       } catch (error) {
         log.error('ошибка панели управления', { error: redact(String(error)) });

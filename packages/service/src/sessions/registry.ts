@@ -155,6 +155,11 @@ export class SessionRegistry {
     return this.config.models.find((model) => model.tier === 'fast') ?? this.config.models[0];
   }
 
+  /** Модель для работы, где важно качество: написать скилл, разобрать разговор. */
+  private strongModel(): ModelConfig {
+    return this.config.models.find((model) => model.tier === 'strong') ?? this.fastModel();
+  }
+
   private ensureUserContainer(user: UserConfig): Promise<string> {
     const pending = this.ensuring.get(user.id);
     if (pending) return pending;
@@ -175,11 +180,13 @@ export class SessionRegistry {
 
   /**
    * Разовый вопрос дешёвой модели в контейнере человека: тулов, сессии и персоны
-   * тут нет. Заголовки разговоров — первый потребитель, но не единственный.
+   * тут нет. Заголовки разговоров — первый потребитель, но не единственный:
+   * панель так просит написать скилл, и там нужен уровень повыше.
    */
-  async oneShot(user: UserConfig, prompt: string, options: OneShotOptions = {}): Promise<string> {
+  async oneShot(user: UserConfig, prompt: string, options: OneShotOptions & { tier?: 'fast' | 'strong' } = {}): Promise<string> {
     const container = await this.ensureUserContainer(user);
-    return runOneShot(this.config, container, this.fastModel(), prompt, options);
+    const { tier, ...rest } = options;
+    return runOneShot(this.config, container, tier === 'strong' ? this.strongModel() : this.fastModel(), prompt, rest);
   }
 
   /** Находит или поднимает сессию разговора. */

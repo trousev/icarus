@@ -18,25 +18,39 @@ function asUser(userId?: string): Record<string, string> {
   return userId === undefined ? {} : { [PANEL_USER_HEADER]: userId };
 }
 
-/** Заглушка реестра сессий: панель зовёт её ровно затем, чтобы отметить обновление. */
-function makeRegistry() {
+/**
+ * Заглушка реестра сессий. Панель зовёт её за двумя вещами: отметить обновление
+ * ресурсов и — кнопкой «напиши за меня» — спросить модель разово. Второе есть
+ * только у того реестра, которому есть чем отвечать: `answer` включает `oneShot`.
+ */
+function makeRegistry(answer?: string | (() => Promise<string>)) {
   const bumped: string[] = [];
+  const asked: Array<{ user: string; prompt: string }> = [];
   return {
     bumped,
+    asked,
     bumpResources(userId: string) {
       bumped.push(userId);
       return bumped.length;
     },
+    ...(answer === undefined
+      ? {}
+      : {
+          async oneShot(user: UserConfig, prompt: string) {
+            asked.push({ user: user.id, prompt });
+            return typeof answer === 'function' ? answer() : answer;
+          },
+        }),
   };
 }
 
 async function withServer(
   handler: (base: string, config: IcarusConfig, registry: ReturnType<typeof makeRegistry>) => Promise<void>,
-  overrides: Partial<IcarusConfig> = {},
+  options: { overrides?: Partial<IcarusConfig>; answer?: string | (() => Promise<string>); draftSkills?: boolean } = {},
 ): Promise<void> {
-  const config = makeConfig({ users: [probe('probe'), probe('probe2')], ...overrides });
-  const registry = makeRegistry();
-  const server = createServer(config, registry as never);
+  const config = makeConfig({ users: [probe('probe'), probe('probe2')], ...options.overrides });
+  const registry = makeRegistry(options.answer);
+  const server = createServer(config, registry as never, { draftSkills: options.draftSkills });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address() as AddressInfo;
   try {
@@ -207,4 +221,104 @@ test('страница раздела — редактор скиллов, а н
     assert.ok(script, 'в странице нет скрипта');
     assert.doesNotThrow(() => new Function(script), 'скрипт раздела скиллов не компилируется');
   });
+});
+
+test('«напиши за меня»: идея уезжает модели, черновик возвращается в редактор', async () => {
+  const draft = JSON.stringify({
+    name: 'Voice Notes',
+    description: 'Разбирает голосовые сообщения и складывает расшифровку в журнал.',
+    body: '# Как разбирать голосовые\n\n1. Расшифруй.\n2. Положи в journal/.\n',
+  });
+
+  await withServer(
+    async (base, config, registry) => {
+      const response = await post(base, 'draft', { idea: 'разбирать голосовые в текст и складывать в журнал' });
+      assert.equal(response.status, 200);
+      const result = (await response.json()) as { name: string; description: string; body: string };
+
+      assert.equal(result.name, 'voice-notes', 'имя приведено к правилам');
+      assert.match(result.body, /Расшифруй/);
+
+      // Модель спрашивают там же, где живут ключи и pi, — и от имени того человека,
+      // чья панель открыта.
+      assert.equal(registry.asked.length, 1);
+      assert.equal(registry.asked[0].user, 'probe');
+      assert.match(registry.asked[0].prompt, /разбирать голосовые в текст и складывать в журнал/);
+
+      // Черновик — только черновик: на диске до «Сохранить» ничего не появляется.
+      const root = userPaths(config, probe('probe')).skills;
+      assert.equal(fs.existsSync(path.join(root, 'voice-notes')), false, 'файл пишет сохранение, а не генерация');
+      const list = (await (await call(base, 'files')).json()) as { skills: unknown[] };
+      assert.deepEqual(list.skills, []);
+    },
+    { answer: draft },
+  );
+});
+
+test('имя из черновика не занимает чужое: занятое получает номер', async () => {
+  await withServer(
+    async (base) => {
+      await post(base, 'save', DRAFT);
+      const response = await post(base, 'draft', { idea: 'то же самое, но другими словами' });
+      assert.equal(response.status, 200);
+      const result = (await response.json()) as { name: string; note?: string };
+      assert.equal(result.name, 'pirate-mode-2');
+      assert.match(String(result.note), /занято/);
+    },
+    { answer: JSON.stringify({ name: 'pirate-mode', description: 'ок', body: 'тело' }) },
+  );
+});
+
+test('пустая идея и простыня до модели не доезжают', async () => {
+  await withServer(
+    async (base, _config, registry) => {
+      assert.equal((await post(base, 'draft', { idea: '   ' })).status, 400, 'пустую идею модели не отправляем');
+      assert.equal((await post(base, 'draft', { idea: 'х'.repeat(4001) })).status, 400, 'и простыню тоже');
+      assert.deepEqual(registry.asked, [], 'на отказ модель не звали');
+    },
+    { answer: 'не важно' },
+  );
+});
+
+test('модель ответила болтовнёй — панель говорит это словами, а не падает', async () => {
+  await withServer(
+    async (base) => {
+      const response = await post(base, 'draft', { idea: 'что-нибудь' });
+      assert.equal(response.status, 502);
+      const body = (await response.json()) as { error?: { message?: string } };
+      assert.match(String(body.error?.message), /JSON/);
+    },
+    { answer: 'Извини, не могу помочь.' },
+  );
+});
+
+test('модель не ответила вовсе — это тоже не падение панели', async () => {
+  await withServer(
+    async (base) => {
+      const response = await post(base, 'draft', { idea: 'что-нибудь' });
+      assert.equal(response.status, 502);
+      const body = (await response.json()) as { error?: { message?: string } };
+      assert.match(String(body.error?.message), /не ответила/);
+    },
+    { answer: () => Promise.reject(new Error('модель не ответила за 90000 мс')) },
+  );
+});
+
+test('без контейнера с моделью кнопки нет и маршрут честно отказывает', async () => {
+  await withServer(
+    async (base) => {
+      const response = await post(base, 'draft', { idea: 'что-нибудь' });
+      assert.equal(response.status, 501);
+      const body = (await response.json()) as { error?: { message?: string } };
+      assert.match(String(body.error?.message), /некому/);
+
+      const html = await (await fetch(base + '/panel/skills?new=1', { headers: asUser('probe') })).text();
+      // Разметку редактора собирает скрипт, поэтому «кнопки нет» проверяем по тому,
+      // что панель знает, писать ли ей: без этого блок был бы, но всегда отказывал.
+      assert.match(html, /"draftSkills":false/, 'панель знает, что писать некому');
+      assert.match(html, /cfg\.draftSkills && !cfg\.file/, 'блок рисуется только когда есть кому писать');
+      assert.match(html, /id="skill-body"/, 'остальной редактор на месте');
+    },
+    { draftSkills: false },
+  );
 });

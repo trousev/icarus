@@ -72,7 +72,11 @@ const registry = new SessionRegistry(config, {
   },
 });
 
-const server = createServer(config, registry);
+const server = createServer(config, registry, {
+  // Писать скилл за человека тут некому: модель живёт в контейнере, а его у
+  // локальной панели нет. Кнопки в редакторе поэтому не будет вовсе.
+  draftSkills: false,
+});
 server.listen(config.port, config.host, () => {
   log.info('локальная панель открыта', { url: `http://${config.host}:${config.port}/panel`, user: user.id });
 });
