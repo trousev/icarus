@@ -131,6 +131,22 @@ mcp:
 #     container: /opt/icarus/tools
 #     mode: ro
 
+# Home Assistant: MCP-сервер живёт в самом HA (адрес вида <хост>/api/mcp) и без
+# ключа отвечает 401 — авторизация у него не своя, а обычная для HA: долгоживущий
+# ключ доступа. Выписать его: <адрес HA>/profile/security → «Long-lived access
+# tokens» → «Create token»; ключ показывается один раз и живёт 10 лет. Выписать
+# может любой пользователь, но эндпоинт пустит только администратора, если у
+# интеграции Model Context Protocol Server включена опция «Require an administrator
+# account» (у новых записей — включена; не админу он ответит 403, а не 401).
+# Сам ключ — в .env, в конфиге только подстановка: он в git, а ключ нет.
+# Инструменты приедут Икару с префиксом: mcp_homeassistant_<имя>.
+#  homeassistant:
+#    transport: streamable-http
+#    url: http://10.0.0.16/api/mcp
+#    headers:
+#      Authorization: Bearer ${HOMEASSISTANT_TOKEN}
+#    lifecycle: eager
+
 # Люди: только id. Тот же id должен быть у человека в LibreChat — он приезжает
 # заголовком x-icarus-user-id. В стенде это {{LIBRECHAT_USER_USERNAME}} (там пароли,
 # ldapId не заполнен), на проде — {{LIBRECHAT_USER_LDAPID}}, то есть uid из LDAP;

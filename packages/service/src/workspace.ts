@@ -116,7 +116,12 @@ export function renderSettingsJson(config: IcarusConfig): string {
   return JSON.stringify(settings, null, 2) + '\n';
 }
 
-/** ~/.pi/agent/mcp.json — то, что читает pi-mcp-extension. */
+/**
+ * ~/.pi/agent/mcp.json — то, что читает pi-mcp-extension.
+ *
+ * Заголовки HTTP-серверов едут сюда как есть, вместе с ключом доступа: файл лежит
+ * рядом с auth.json, поэтому пишется закрытым на чтение (см. prepareUser).
+ */
 export function renderMcpJson(config: IcarusConfig): string {
   const servers = Object.fromEntries(
     Object.entries(config.mcp).map(([name, server]) => [
@@ -127,6 +132,7 @@ export function renderMcpJson(config: IcarusConfig): string {
         ...(server.args ? { args: server.args } : {}),
         ...(server.env ? { env: server.env } : {}),
         ...(server.url ? { url: server.url } : {}),
+        ...(server.headers ? { headers: server.headers } : {}),
         lifecycle: server.lifecycle ?? 'eager',
       },
     ]),
@@ -229,7 +235,12 @@ export function prepareUser(config: IcarusConfig, user: UserConfig) {
   fs.chmodSync(authPath, 0o600);
 
   writeFileSafe(path.join(paths.piAgent, 'settings.json'), renderSettingsJson(config));
-  writeFileSafe(path.join(paths.piAgent, 'mcp.json'), renderMcpJson(config));
+
+  // mcp.json может везти ключ доступа к MCP-серверу, поэтому права те же, что у
+  // auth.json: ключ модели и ключ к чужому сервису одинаково не для чужих глаз.
+  const mcpPath = path.join(paths.piAgent, 'mcp.json');
+  writeFileSafe(mcpPath, renderMcpJson(config), 0o600);
+  fs.chmodSync(mcpPath, 0o600);
 
   // models.json — описание кастомных провайдеров (DeepInfra): без него pi не найдёт
   // ни самой модели, ни её адреса. Пишем всегда, даже пустым: файл управляемый, и
