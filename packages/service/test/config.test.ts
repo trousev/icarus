@@ -108,6 +108,42 @@ users:
   assert.deepEqual(config.users, [{ id: 'probe' }, { id: 'probe2' }]);
 });
 
+// HTTP-MCP с ключом доступа: заголовок авторизации собирается подстановкой, как всё
+// секретное в конфиге — сам ключ лежит в .env, а не в config.yaml (он в git).
+test('mcp.headers: заголовки HTTP-сервера, ключ подставляется из окружения', () => {
+  const file = writeConfig(`apiKey: token
+models: [{ provider: deepinfra, id: flash, tier: fast }]
+mcp:
+  homeassistant:
+    url: http://10.0.0.16/api/mcp
+    headers:
+      Authorization: Bearer \${HOMEASSISTANT_TOKEN}
+users: [probe]
+`);
+  const config = loadConfig(file, { HOMEASSISTANT_TOKEN: 'llat' } as NodeJS.ProcessEnv);
+
+  assert.equal(config.mcp.homeassistant?.url, 'http://10.0.0.16/api/mcp');
+  assert.deepEqual(config.mcp.homeassistant?.headers, { Authorization: 'Bearer llat' });
+  assert.equal(config.mcp.homeassistant?.transport, undefined, 'транспорт выведет mcp.json: url — это HTTP');
+});
+
+test('mcp.headers: не строка — ошибка с путём до заголовка', () => {
+  const file = writeConfig(`apiKey: token
+models: [{ provider: deepinfra, id: flash, tier: fast }]
+mcp:
+  homeassistant:
+    url: http://10.0.0.16/api/mcp
+    headers:
+      Authorization: [Bearer, llat]
+users: [probe]
+`);
+
+  assert.throws(
+    () => loadConfig(file, {}),
+    /mcp\.homeassistant\.headers\.Authorization: ожидалась строка/,
+  );
+});
+
 test('docker.dns: список адресов, опечатка — ошибка с путём до поля', () => {
   const withDns = writeConfig(`apiKey: token
 docker:

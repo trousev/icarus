@@ -79,6 +79,10 @@ jobs:
           # Токен бота от @BotFather — уезжает в .env, откуда его читает config.yaml.
           # Не задан — блок telegram не поднимется, а сервис будет работать как раньше.
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          # Ключ к MCP Home Assistant — long-lived access token из его профиля
+          # (Профиль → Безопасность → Long-lived access tokens). Не задан — блок
+          # mcp.homeassistant в config.yaml останется без авторизации и HA ответит 401.
+          HOMEASSISTANT_TOKEN: ${{ secrets.HOMEASSISTANT_TOKEN }}
           # Где на хосте стоит Maple. Не задана — script/redeploy подставит /opt/maple18:
           # незаданная repo-переменная приезжает сюда пустой строкой, и пустое
           # окружение сильнее .env, поэтому script/redeploy считает '' за «не задано».

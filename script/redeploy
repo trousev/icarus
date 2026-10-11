@@ -38,6 +38,10 @@
 #   MAPLE_DIR         каталог установки Maple на хосте (по умолчанию /opt/maple18).
 #                     Оттуда же берётся путь CLI внутри контейнеров людей:
 #                     config.yaml подставляет ${MAPLE_DIR} в маунт и в MAPLE_BIN.
+#   HOMEASSISTANT_TOKEN  ключ к MCP Home Assistant (секрет): уезжает в .env и
+#                     подставляется в заголовок авторизации mcp.homeassistant.
+#                     Пусто — строку в .env не трогаем (блок в config.yaml без ключа
+#                     поднимется без авторизации, и HA ответит 401).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -160,6 +164,11 @@ upsert_env TAVILY_API_KEY "${TAVILY_API_KEY:-}"
 # Токен telegram-бота: без него блок telegram в config.yaml просто не поднимется.
 upsert_env TELEGRAM_BOT_TOKEN "${TELEGRAM_BOT_TOKEN:-}"
 [ -z "${TELEGRAM_BOT_TOKEN:-}" ] || say 'TELEGRAM_BOT_TOKEN обновлён в .env'
+
+# Ключ к MCP Home Assistant: без него mcp.homeassistant в config.yaml останется без
+# заголовка авторизации, и HA ответит 401 — сервер у Икара просто не появится.
+upsert_env HOMEASSISTANT_TOKEN "${HOMEASSISTANT_TOKEN:-}"
+[ -z "${HOMEASSISTANT_TOKEN:-}" ] || say 'HOMEASSISTANT_TOKEN обновлён в .env'
 
 # Путь к Maple: не секрет, но тоже задаётся снаружи (variables.MAPLE_DIR), чтобы
 # локаль и прод настраивались одинаково. Незаданная repo-переменная приезжает из

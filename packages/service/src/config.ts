@@ -35,6 +35,13 @@ export type McpServerConfig = {
   args?: string[];
   env?: Record<string, string>;
   url?: string;
+  /**
+   * Заголовки HTTP-транспорта (streamable-http, sse). Так MCP-серверы принимают
+   * ключ доступа: у Home Assistant это `Authorization: Bearer <ключ>`. В config.yaml
+   * сам ключ не пишем — он там же, где остальные секреты, то есть в .env:
+   * `Authorization: Bearer ${HOMEASSISTANT_TOKEN}`.
+   */
+  headers?: Record<string, string>;
   lifecycle?: 'eager' | 'lazy';
 };
 
@@ -437,6 +444,9 @@ function parseMcp(value: unknown, env: NodeJS.ProcessEnv): Record<string, McpSer
       ...(args.length === 0 ? {} : { args }),
       ...(server.env === undefined ? {} : { env: stringMap(server.env, `${where}.env`, env) }),
       ...(url === undefined ? {} : { url }),
+      ...(server.headers === undefined
+        ? {}
+        : { headers: stringMap(server.headers, `${where}.headers`, env) }),
       ...(lifecycle === undefined ? {} : { lifecycle }),
     };
   }
