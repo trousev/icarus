@@ -22,12 +22,16 @@ import { createServer } from './http/server.ts';
 /** Порт по умолчанию: 8081 занят настоящим сервисом, и путать их не надо. */
 const DEFAULT_PORT = 8099;
 
-type Args = { configPath: string; user?: string; port?: number };
+type Args = { configPath: string; user?: string; port?: number; withModel: boolean };
 
 function parseArgs(argv: string[]): Args {
-  const args: Args = { configPath: process.env.ICARUS_CONFIG ?? DEFAULT_CONFIG_PATH };
+  const args: Args = { configPath: process.env.ICARUS_CONFIG ?? DEFAULT_CONFIG_PATH, withModel: false };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
+    if (arg === '--with-model') {
+      args.withModel = true;
+      continue;
+    }
     if (arg === '--user' || arg === '--port' || arg === '--config') {
       const value = argv[index + 1];
       if (value === undefined) throw new Error(`${arg} без значения`);
@@ -38,7 +42,7 @@ function parseArgs(argv: string[]): Args {
       continue;
     }
     // Позиционный аргумент — путь к конфигу: так же зовётся и настоящий сервис.
-    if (arg.startsWith('-')) throw new Error(`не понимаю «${arg}»: жду --user, --port или --config`);
+    if (arg.startsWith('-')) throw new Error(`не понимаю «${arg}»: жду --user, --port, --config или --with-model`);
     args.configPath = arg;
   }
   return args;
@@ -66,16 +70,22 @@ log.info('локальная панель: данные и git готовы', { 
 // Разговор в локальной панели не поднимается: контейнеры — дело боевого сервиса.
 // Реестр тут настоящий (он же считает поколение скиллов), а вот поднять контейнер
 // ему нечем — и это честная ошибка, а не тихая поломка.
-const registry = new SessionRegistry(config, {
-  ensureContainer: async (_config, person) => {
-    throw new Error(`локальная панель: контейнер ${person.id} не поднимается — разговор живёт в настоящем сервисе`);
-  },
-});
+//
+// С `--with-model` реестр берёт контейнер как обычно: тогда работает «напиши за
+// меня» — вопрос уходит в контейнер человека, как в настоящем сервисе. Контейнеры
+// панель при этом не создаёт: нет стека — скажет об этом прямо
+// (см. ensureContainerRunning). Разговора тут всё равно нет: только разовый вопрос.
+const registry = args.withModel
+  ? new SessionRegistry(config)
+  : new SessionRegistry(config, {
+      ensureContainer: async (_config, person) => {
+        throw new Error(`локальная панель: контейнер ${person.id} не поднимается — разговор живёт в настоящем сервисе`);
+      },
+    });
 
 const server = createServer(config, registry, {
-  // Писать скилл за человека тут некому: модель живёт в контейнере, а его у
-  // локальной панели нет. Кнопки в редакторе поэтому не будет вовсе.
-  draftSkills: false,
+  // Без модели писать скилл за человека некому: кнопки в редакторе не будет вовсе.
+  draftSkills: args.withModel,
 });
 server.listen(config.port, config.host, () => {
   log.info('локальная панель открыта', { url: `http://${config.host}:${config.port}/panel`, user: user.id });
