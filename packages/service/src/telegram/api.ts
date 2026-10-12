@@ -3,7 +3,7 @@
 // Bot API — обычный JSON по https, поэтому клиент маленький и без зависимостей.
 // Всё, что нужно боту, — четыре метода; остальное (вебхук, TLS, очередь) Telegram
 // берёт на себя: сервису не нужен ни домен, ни сертификат.
-import { redact } from '../log.ts';
+import { log, redact } from '../log.ts';
 
 export type TelegramUser = {
   id: number;
@@ -102,7 +102,25 @@ export type TelegramMessage = {
 export type TelegramFile = { file_id: string; file_path?: string; file_size?: number };
 
 export type TelegramUpdate = { update_id: number; message?: TelegramMessage };
-export type SentMessage = { message_id: number };
+
+/**
+ * Отправленное сообщение: Telegram возвращает его же объектом, поэтому в ответе видно,
+ * куда сообщение легло на самом деле. Проверять это нужно: в личке с топиками Telegram
+ * умеет молча положить сообщение в общую ленту, подтвердив отправку (`ok: true`).
+ */
+export type SentMessage = {
+  message_id: number;
+  message_thread_id?: number | null;
+  is_topic_message?: boolean;
+};
+
+/** Легло ли сообщение в тот топик, который просили (см. sendMessage). */
+export function landedInThread(sent: SentMessage, asked: number): boolean {
+  // Номер топика Telegram возвращает у сообщений в топике — он и есть ответ.
+  if (typeof sent.message_thread_id === 'number') return sent.message_thread_id === asked;
+  // Номера нет, но флаг топика есть: считаем, что доехало.
+  return sent.is_topic_message === true;
+}
 
 export const TELEGRAM_API_BASE = 'https://api.telegram.org';
 /** Сколько ждём ответ Bot API, если вызов не сказал иного. */
@@ -241,13 +259,41 @@ export class TelegramApi {
   /**
    * Сообщение в чат или в топик. `message_thread_id` передаём только когда он есть:
    * в чате без топиков Telegram на это поле отвечает ошибкой.
+   *
+   * Про топики в личке Telegram умеет врать молча: отвечает `ok: true`, а сообщение
+   * лежит в общей ленте (см. landedInThread) — поэтому сверяем ответ и пишем в лог.
+   * А если топик отбит ошибкой «message thread not found», повторяем ответом на
+   * сообщение из топика (`anchorMessageId`): якорь уводит ответ в тот же топик.
    */
-  sendMessage(chatId: number, text: string, threadId?: number | null): Promise<SentMessage> {
-    return this.call<SentMessage>('sendMessage', {
-      chat_id: chatId,
-      text,
-      ...(threadId ? { message_thread_id: threadId } : {}),
-    });
+  async sendMessage(
+    chatId: number,
+    text: string,
+    threadId?: number | null,
+    anchorMessageId?: number,
+  ): Promise<SentMessage> {
+    const params: Record<string, unknown> = { chat_id: chatId, text };
+    if (threadId) params.message_thread_id = threadId;
+
+    try {
+      const sent = await this.call<SentMessage>('sendMessage', params);
+      if (threadId && !landedInThread(sent, threadId)) {
+        log.warn('телеграм: сообщение легло не в топик', {
+          chatId,
+          threadId,
+          landed: sent.message_thread_id ?? null,
+        });
+      }
+      return sent;
+    } catch (error) {
+      const reason = describeTelegramError(error);
+      if (!threadId || !anchorMessageId || !/message thread not found/i.test(reason)) throw error;
+      log.warn('телеграм: топик не принял сообщение — повторяю ответом-якорем', { chatId, threadId, error: reason });
+      return this.call<SentMessage>('sendMessage', {
+        chat_id: chatId,
+        text,
+        reply_parameters: { message_id: anchorMessageId },
+      });
+    }
   }
 
   /** Правка сообщения. «Не изменилось» — не ошибка: значит, показывать нечего. */

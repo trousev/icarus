@@ -32,6 +32,7 @@ import {
 import {
   TelegramApi,
   TelegramError,
+  landedInThread,
   type TelegramPhotoSize,
   type TelegramUpdate,
 } from '../src/telegram/api.ts';
@@ -106,6 +107,41 @@ test('Bot API: «message is not modified» — не ошибка', async () => {
   await api.editMessageText(1, 2, 'то же самое');
 });
 
+test('Bot API: видно, когда сообщение легло не в топик', () => {
+  // В личке с топиками Telegram умеет ответить ok и положить сообщение в общую ленту:
+  // это выдаёт ответ — в нём нет номера топика и флага топика.
+  assert.equal(landedInThread({ message_id: 1, message_thread_id: 17 }, 17), true);
+  assert.equal(landedInThread({ message_id: 1, is_topic_message: true }, 17), true);
+  assert.equal(landedInThread({ message_id: 1, message_thread_id: null }, 17), false);
+  assert.equal(landedInThread({ message_id: 1, message_thread_id: 3 }, 17), false);
+  assert.equal(landedInThread({ message_id: 1 }, 17), false);
+});
+
+test('Bot API: отбитый топик повторяем ответом-якорем', async () => {
+  const { calls, fetch } = fakeFetch([
+    { ok: false, error_code: 400, description: 'Bad Request: message thread not found' },
+    { ok: true, result: { message_id: 5, message_thread_id: 17, is_topic_message: true } },
+  ]);
+  const api = new TelegramApi('TOKEN', { fetch, baseUrl: 'https://tg.test' });
+
+  const sent = await api.sendMessage(1, 'привет', 17, 99);
+
+  assert.equal(sent.message_id, 5);
+  assert.equal(calls[1]?.body.message_thread_id, undefined, 'якорь вместо номера топика');
+  assert.deepEqual(calls[1]?.body.reply_parameters, { message_id: 99 });
+});
+
+test('Bot API: без якоря отбитый топик — ошибка, а не тихая отправка в корень', async () => {
+  const { fetch } = fakeFetch([{ ok: false, error_code: 400, description: 'Bad Request: message thread not found' }]);
+  const api = new TelegramApi('TOKEN', { fetch, baseUrl: 'https://tg.test' });
+
+  await assert.rejects(() => api.sendMessage(1, 'привет', 17), (error: unknown) => {
+    assert.ok(error instanceof TelegramError);
+    assert.match(error.message, /message thread not found/);
+    return true;
+  });
+});
+
 // --- бот --------------------------------------------------------------------
 
 type Step = Record<string, unknown>;
@@ -153,9 +189,14 @@ function fakeApi(files: Record<string, Buffer> = {}) {
     nextThreadId: 2,
     /** Переименования: chatId, топик, новое имя. */
     renames: [] as Array<{ chatId: number; threadId: number; name: string }>,
+    /** Telegram отбивает отправку в топик: так выглядит «ответ не доехал». */
+    failTopics: false,
   };
   const api = {
     async sendMessage(chatId: number, text: string, threadId: number | null = null) {
+      if (state.failTopics && threadId !== null) {
+        throw new TelegramError('Bad Request: message thread not found', 400);
+      }
       const message = { chatId, id: state.nextId, text, threadId };
       state.nextId += 1;
       state.messages.push(message);
@@ -236,8 +277,10 @@ function makeBot(
     transcribe?: ((audio: Uint8Array, mimeType: string) => Promise<string>) | null;
     /** Файлы, которые «лежат» в Telegram: id → байты. */
     files?: Record<string, Buffer>;
-    /** Threaded Mode у бота: с ним /new заводит топик, без него — объясняет, где галочка. */
+    /** Threaded Mode у бота: с ним /topic заводит топик, без него — объясняет, где галочка. */
     topics?: boolean;
+    /** Сколько живёт «свежий топик» (первое сообщение заведённого из ленты топика). */
+    freshTopicWindowMs?: number;
   } = {},
 ) {
   const config =
@@ -295,7 +338,12 @@ function makeBot(
   // Расшифровка по умолчанию рабочая: тест про «распознавания нет» задаёт null явно.
   const transcribe =
     'transcribe' in options ? options.transcribe : async () => 'привет из голосового';
-  const bot = new TelegramBot(config, registry as never, { api, editIntervalMs: 0, transcribe });
+  const bot = new TelegramBot(config, registry as never, {
+    api,
+    editIntervalMs: 0,
+    transcribe,
+    ...(options.freshTopicWindowMs === undefined ? {} : { freshTopicWindowMs: options.freshTopicWindowMs }),
+  });
   return { bot, session, state, calls, config };
 }
 
@@ -316,8 +364,12 @@ function messageUpdate(
   };
 }
 
-/** Служебное сообщение: человек завёл топик сам (кнопка «All Messages»). */
-function topicCreatedUpdate(name: string, threadId: number, chatId = 42): TelegramUpdate {
+/**
+ * Служебное сообщение: топик завёл клиент Telegram (кнопка «All Messages»). Имя у
+ * такого топика неявное — его дал клиент по первой реплике; `implicit: false` — это
+ * топик, имя которому человек выбрал сам.
+ */
+function topicCreatedUpdate(name: string, threadId: number, chatId = 42, implicit = true): TelegramUpdate {
   return {
     update_id: 2,
     message: {
@@ -326,7 +378,7 @@ function topicCreatedUpdate(name: string, threadId: number, chatId = 42): Telegr
       from: { id: 7, username: 'trousev' },
       message_thread_id: threadId,
       is_topic_message: true,
-      forum_topic_created: { name, icon_color: 7322096, is_name_implicit: true },
+      forum_topic_created: { name, icon_color: 7322096, is_name_implicit: implicit },
     },
   };
 }
@@ -915,6 +967,97 @@ test('ответ в топике уезжает в топик, а не в кор
   assert.equal(state.typingThreadId, 17, '«печатает…» — в том же топике');
 });
 
+test('первое сообщение топика из общей ленты уезжает в топик, а не в корень', async () => {
+  const { bot, state } = makeBot({ topics: true });
+
+  // Человек начал печатать в общей ленте: Telegram завёл топик и прислал служебку…
+  await bot.enqueue(topicCreatedUpdate('New Topic', 17));
+  // …а само сообщение приехало как сообщение корня: номера топика в нём нет.
+  await bot.enqueue(messageUpdate('привет из нового топика'));
+
+  assert.equal(chatText(state, 42), '', 'в корне чата пусто');
+  assert.match(topicText(state, 42, 17), /Привет, Саня/);
+  assert.equal(state.typingThreadId, 17, '«печатает…» — в том же топике');
+});
+
+test('разговор свежего топика считается по номеру топика, а не по корню', async () => {
+  const { bot, calls } = makeBot({ topics: true });
+
+  await bot.enqueue(topicCreatedUpdate('New Topic', 17));
+  await bot.enqueue(messageUpdate('/stats'));
+
+  assert.deepEqual(calls, [{ command: 'stats', user: 'probe', conversationId: 'telegram-42-17' }]);
+});
+
+test('свежий топик живёт окно, а не вечно', async () => {
+  const { bot, state } = makeBot({ topics: true, freshTopicWindowMs: -1 });
+
+  await bot.enqueue(topicCreatedUpdate('New Topic', 17));
+  await bot.enqueue(messageUpdate('привет'));
+
+  assert.match(chatText(state, 42), /Привет, Саня/);
+  assert.equal(topicText(state, 42, 17), '', 'опоздавшее сообщение в топик не тащим');
+});
+
+test('настоящий номер топика гасит свежий слот: корень остаётся корнем', async () => {
+  const { bot, state } = makeBot({ topics: true });
+
+  await bot.enqueue(topicCreatedUpdate('New Topic', 17));
+  // Клиент справился сам: сообщение пришло с номером топика — свежий слот больше не нужен.
+  await bot.enqueue(messageUpdate('в топике', { threadId: 17 }));
+  await bot.enqueue(messageUpdate('а это уже в корне'));
+
+  assert.equal(topicText(state, 42, 17), 'Привет, Саня', 'в топике один ответ');
+  assert.match(chatText(state, 42), /Привет, Саня/, 'и в корне свой');
+});
+
+test('топик, заведённый ботом, не перетягивает сообщение из общей ленты', async () => {
+  const { bot, state } = makeBot({ topics: true });
+
+  await bot.enqueue(messageUpdate('/topic Отпуск'));
+  const threadId = state.topics[0].threadId;
+  // Telegram присылает служебку и про наш топик — свежим его считать нельзя.
+  await bot.enqueue(topicCreatedUpdate('Отпуск', threadId));
+  await bot.enqueue(messageUpdate('просто сообщение в корне'));
+
+  assert.match(chatText(state, 42), /Привет, Саня/);
+  assert.doesNotMatch(topicText(state, 42, threadId), /Привет, Саня/);
+});
+
+test('/topic переспрашивает getMe: режим могли включить после старта', async () => {
+  const { bot, state } = makeBot({ topics: false });
+
+  await bot.handleUpdate(messageUpdate('/topic Первый'));
+  assert.equal(chatText(state, 42), NO_TOPICS_MODE);
+
+  // Человек сходил в BotFather и включил Threaded Mode — сервис при этом не перезапускали.
+  state.topicsEnabled = true;
+  await bot.handleUpdate(messageUpdate('/topic Второй'));
+
+  assert.deepEqual(state.topics.map((topic) => topic.name), ['Второй']);
+});
+
+test('если ответ в топик не уехал, бот говорит об этом в корне', async () => {
+  const { bot, state } = makeBot({ topics: true });
+  state.failTopics = true;
+
+  await bot.handleUpdate(messageUpdate('привет', { threadId: 17 }));
+
+  assert.equal(topicText(state, 42, 17), '', 'в топике пусто: отправку отбило');
+  assert.match(chatText(state, 42), /Не смог ответить в топик/);
+  assert.match(chatText(state, 42), /message thread not found/);
+});
+
+test('ответ на команду в топик тоже не теряется молча', async () => {
+  const { bot, state } = makeBot({ topics: true });
+  state.failTopics = true;
+
+  await bot.handleUpdate(messageUpdate('/stats', { threadId: 17 }));
+
+  assert.equal(topicText(state, 42, 17), '');
+  assert.match(chatText(state, 42), /Не смог ответить в топик/);
+});
+
 test('/compact сжимает разговор того топика, где написали', async () => {
   const { bot, calls } = makeBot({ topics: true });
 
@@ -926,13 +1069,27 @@ test('/compact сжимает разговор того топика, где н�
 test('/topics показывает топики, которые бот видел', async () => {
   const { bot, state } = makeBot({ topics: true });
 
-  await bot.handleUpdate(topicCreatedUpdate('Работа', 5));
+  // «Работа» — топик с именем, которое человек выбрал сам: его бот не переименовывает.
+  await bot.handleUpdate(topicCreatedUpdate('Работа', 5, 42, false));
   await bot.handleUpdate(messageUpdate('/topic Отпуск'));
   await bot.handleUpdate(messageUpdate('/topics'));
 
   const text = chatText(state, 42);
   assert.match(text, /• Работа/);
   assert.match(text, /• Отпуск/);
+});
+
+test('/topic в общей ленте переименовывает топик, который завёл клиент', async () => {
+  const { bot, state } = makeBot({ topics: true });
+
+  // Человек написал /topic прямо в ленте: клиент уже завёл топик с неявным именем.
+  await bot.enqueue(topicCreatedUpdate('New Topic', 17));
+  await bot.enqueue(messageUpdate('/topic Отпуск'));
+
+  assert.deepEqual(state.topics, [], 'второй топик не заводим');
+  assert.deepEqual(state.renames, [{ chatId: 42, threadId: 17, name: 'Отпуск' }]);
+  assert.match(topicText(state, 42, 17), /Завёл разговор «Отпуск»/);
+  assert.equal(chatText(state, 42), '', 'в корне чата пусто');
 });
 
 test('/topics честно говорит, что списка топиков у бота нет', async () => {

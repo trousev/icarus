@@ -45,6 +45,11 @@ export type ReplyOptions = {
    * Правка сообщения номера топика не требует — он уже в самом сообщении.
    */
   threadId?: number | null;
+  /**
+   * Сообщение человека внутри того же топика: ответом на него Telegram кладёт ответ
+   * в топик, даже если `message_thread_id` отобьёт (см. TelegramApi.sendMessage).
+   */
+  anchorMessageId?: number;
 };
 
 export class TelegramReply {
@@ -53,6 +58,7 @@ export class TelegramReply {
   private intervalMs: number;
   private now: () => number;
   private threadId: number | null;
+  private anchorMessageId: number | undefined;
 
   /** Текст активного сообщения; всё, что не влезло раньше, уже разослано. */
   private tail = '';
@@ -65,6 +71,8 @@ export class TelegramReply {
   /** Правки идут по очереди: две одновременные правки одного сообщения дерутся. */
   private chain: Promise<void> = Promise.resolve();
   private finished = false;
+  /** Последняя отправка не удалась: ответ человеку не доехал (см. failed). */
+  private failure: Error | null = null;
 
   constructor(api: TelegramApi, chatId: number, options: ReplyOptions = {}) {
     this.api = api;
@@ -72,13 +80,22 @@ export class TelegramReply {
     this.intervalMs = options.intervalMs ?? 1200;
     this.now = options.now ?? Date.now;
     this.threadId = options.threadId ?? null;
+    this.anchorMessageId = options.anchorMessageId;
+  }
+
+  /**
+   * Ответ не доехал: последняя отправка сорвалась. По этому флагу бот говорит
+   * человеку в корне чата — в топике он ждал бы молча.
+   */
+  get failed(): Error | null {
+    return this.failure;
   }
 
   /** Заводит сообщение-заготовку: человек видит, что его услышали, ещё до ответа. */
   async start(): Promise<void> {
     this.keepTyping();
     try {
-      const sent = await this.api.sendMessage(this.chatId, PLACEHOLDER, this.threadId);
+      const sent = await this.api.sendMessage(this.chatId, PLACEHOLDER, this.threadId, this.anchorMessageId);
       this.messageId = sent.message_id;
       this.lastEdit = this.now();
     } catch (error) {
@@ -151,12 +168,14 @@ export class TelegramReply {
   private async write(messageId: number | null, text: string): Promise<void> {
     if (!text) return;
     if (messageId === null) {
-      const sent = await this.api.sendMessage(this.chatId, text, this.threadId);
+      const sent = await this.api.sendMessage(this.chatId, text, this.threadId, this.anchorMessageId);
       this.messageId = sent.message_id;
     } else {
       await this.api.editMessageText(this.chatId, messageId, text);
     }
     this.lastEdit = this.now();
+    // Доехало: прошлые сбои больше не в счёт — человек видит ответ.
+    this.failure = null;
   }
 
   private schedule(): void {
@@ -177,6 +196,8 @@ export class TelegramReply {
   /** Очередь правок: следующая начинается после предыдущей, сбои не рвут цепочку. */
   private enqueue(task: () => Promise<void>): Promise<void> {
     this.chain = this.chain.then(task).catch((error) => {
+      // Сбой запоминаем: по нему бот скажет человеку в корне, что ответ не доехал.
+      this.failure = error instanceof Error ? error : new Error(String(error));
       log.warn('телеграм: ответ не обновился', { error: describeTelegramError(error) });
     });
     return this.chain;
