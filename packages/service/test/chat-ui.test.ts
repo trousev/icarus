@@ -21,6 +21,8 @@ test('чат — это лента с композером и диалогами
   assert.match(html, /id="new-chat"/);
   assert.match(html, /Чем займёмся\?/);
   assert.match(html, /id="chat-input"/);
+  assert.match(html, /id="chat-files"/, 'файл можно приложить');
+  assert.match(html, /id="chat-attach"/, 'кнопка приложения');
   assert.match(html, /Поиск по диалогам/);
   assert.match(html, /id="chat-list"/);
   assert.match(html, /href="\/panel\/memory"/, 'настройки памяти доступны из чата');

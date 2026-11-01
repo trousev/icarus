@@ -78,7 +78,10 @@ export function chatPage(session: PanelSession, options: ChatPageOptions): strin
     </section>
 
     <div class="composer">
+      <div class="pending" id="chat-pending" hidden></div>
       <div class="composer-box">
+        <button class="icon-btn attach" id="chat-attach" aria-label="Приложить файл" title="Приложить файл"${options.enabled ? '' : ' disabled'}>📎</button>
+        <input id="chat-files" type="file" multiple hidden>
         <textarea id="chat-input" rows="1" placeholder="Написать Icarus..."${options.enabled ? '' : ' disabled'}></textarea>
         <button class="send" id="chat-send" aria-label="Отправить"${options.enabled ? '' : ' disabled'}>↑</button>
       </div>
