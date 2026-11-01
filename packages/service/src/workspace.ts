@@ -8,6 +8,7 @@ import path from 'node:path';
 import { log } from './log.ts';
 import { renderModelsJson } from './providers.ts';
 import {
+  mcpLifecycle,
   REPO_ROOT,
   userPaths,
   userContainer,
@@ -42,6 +43,32 @@ export function ensureDirs(config: IcarusConfig, user: UserConfig): void {
   }
 }
 
+/**
+ * Подсказка про MCP-серверы, которые подключаются по требованию. Без неё модель
+ * не знает, что сервер вообще есть: при lifecycle: lazy его инструментов в промпте
+ * нет, а mcp_connect сам по себе никто не позовёт. Описание сервера (description)
+ * говорит, когда он нужен, — это и есть дешёвый триггер вместо отдельного скилла.
+ */
+function renderMcpOnDemand(config: IcarusConfig): string {
+  const lazy = Object.entries(config.mcp).filter(([, server]) => mcpLifecycle(server) === 'lazy');
+  if (lazy.length === 0) return '';
+
+  const bullets = lazy.map(([name, server]) => {
+    const description = (server.description ?? '').replace(/\s+/g, ' ').trim();
+    return `- \`${name}\`${description ? ` — ${description}` : ''}`;
+  });
+
+  return `
+## MCP-инструменты по требованию
+
+Эти серверы не подключены заранее: их инструменты не висят в каждом разговоре.
+Перед первым использованием вызови \`mcp_connect\` с \`name: "<имя>"\`, дождись
+подключения и работай появившимися инструментами. Посмотреть состояние — \`mcp_status\`.
+
+${bullets.join('\n')}
+`;
+}
+
 /** Карта окружения: то, что агент читает как AGENTS.md. */
 export function renderAgentsMd(config: IcarusConfig): string {
   const rows = [
@@ -74,6 +101,8 @@ export function renderAgentsMd(config: IcarusConfig): string {
 `
     : '';
 
+  const mcp = renderMcpOnDemand(config);
+
   return `# Где ты находишься
 
 Ты работаешь в контейнере. Всё, что тебе нужно, лежит в \`/workspace\`:
@@ -81,7 +110,7 @@ export function renderAgentsMd(config: IcarusConfig): string {
 | Путь | Что это | Как обращаться |
 |---|---|---|
 ${rows.join('\n')}
-
+${mcp}
 ## Как устроена память
 
 - \`memory/identity.md\` — кто этот человек: имя, привычки, устойчивые предпочтения.
@@ -134,7 +163,7 @@ export function renderMcpJson(config: IcarusConfig): string {
         ...(server.env ? { env: server.env } : {}),
         ...(server.url ? { url: server.url } : {}),
         ...(server.headers ? { headers: server.headers } : {}),
-        lifecycle: server.lifecycle ?? 'eager',
+        lifecycle: mcpLifecycle(server),
       },
     ]),
   );
