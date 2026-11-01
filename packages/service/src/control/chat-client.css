@@ -140,6 +140,12 @@
   max-width: min(720px, 86%); background: var(--accent-soft); color: var(--text);
   border-radius: 14px 14px 4px 14px; padding: 11px 15px; white-space: pre-wrap; word-break: break-word;
 }
+.turn.user .attachments { display:flex; gap:8px; flex-wrap:wrap; margin-top:9px; }
+.turn.user .attach-img { display:block; max-width:200px; max-height:200px; border-radius:8px; }
+.turn.user .attach-file {
+  display:inline-flex; align-items:center; gap:6px; color:var(--text); text-decoration:none;
+  background:var(--raise); border-radius:7px; padding:6px 9px; font-size:12px;
+}
 .turn.assistant { align-items: flex-start; }
 .avatar {
   width: 28px; height: 28px; border-radius: 9px; flex: 0 0 auto; display: grid;
@@ -186,8 +192,19 @@
 .typing::after { content: '…'; animation: pulse 1.2s infinite; }
 .turn.assistant.error .md { color: var(--danger); }
 
-/* ── композер ────────────────────────────────────────────────────────────── */
+/* ── композер и вложения ─────────────────────────────────────────────────── */
 .composer { flex: 0 0 auto; padding: 0 28px 18px; }
+.pending { max-width:900px; margin:0 auto 8px; display:flex; gap:8px; flex-wrap:wrap; }
+.pending[hidden] { display:none; }
+.pending .item {
+  position:relative; display:flex; align-items:center; gap:7px; max-width:240px;
+  background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:5px 8px;
+}
+.pending .item img { width:32px; height:32px; object-fit:cover; border-radius:5px; }
+.pending .item .name { color:var(--dim); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pending .item .remove { border:0; background:none; color:var(--dim); font-size:15px; padding:0 2px; cursor:pointer; }
+.pending .item .remove:hover { color:var(--danger); }
+.composer-box .attach { flex:0 0 auto; font-size:17px; padding:5px 3px; }
 .composer-box {
   max-width: 900px; margin: 0 auto; display: flex; gap: 10px; align-items: flex-end;
   background: var(--panel); border: 1px solid var(--line); border-radius: 13px;

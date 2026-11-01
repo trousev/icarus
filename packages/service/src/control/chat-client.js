@@ -254,6 +254,9 @@ let currentChat = null;
 let currentMessages = [];
 let streaming = false;
 let searchTimer = 0;
+let pending = [];
+const MAX_FILES = 8;
+const MAX_TOTAL_BYTES = 10 * 1024 * 1024;
 
 function setTitle(title) {
   el('chat-title').textContent = title || 'Новый чат';
@@ -345,6 +348,107 @@ function closeSettings() {
   history.replaceState(null, '', url);
 }
 
+function baseName(file) {
+  return String(file || '').split(/[\\/]/).pop() || 'файл';
+}
+
+function fileSizeText(bytes) {
+  if (bytes >= 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + ' МБ';
+  if (bytes >= 1024) return Math.round(bytes / 1024) + ' КБ';
+  return bytes + ' Б';
+}
+
+function renderPending() {
+  const box = el('chat-pending');
+  if (!pending.length) {
+    box.hidden = true;
+    box.innerHTML = '';
+    return;
+  }
+  box.hidden = false;
+  box.innerHTML = pending
+    .map(
+      (item, index) =>
+        '<div class="item">' +
+        (item.image ? '<img src="' + item.url + '" alt="">' : '') +
+        '<span class="name" title="' + esc(item.file.name + ' · ' + fileSizeText(item.file.size)) + '">' +
+        esc(item.file.name) +
+        '</span><button class="remove" data-index="' +
+        index +
+        '" aria-label="Убрать">×</button></div>',
+    )
+    .join('');
+  box.querySelectorAll('.remove').forEach((button) => {
+    button.onclick = () => {
+      const [removed] = pending.splice(Number(button.dataset.index), 1);
+      if (removed) URL.revokeObjectURL(removed.url);
+      renderPending();
+    };
+  });
+}
+
+function clearPending(revoke = true) {
+  if (revoke) for (const item of pending) URL.revokeObjectURL(item.url);
+  pending = [];
+  renderPending();
+}
+
+function addFiles(list) {
+  if (streaming || !cfg.enabled) return;
+  let total = pending.reduce((sum, item) => sum + item.file.size, 0);
+  for (const file of Array.from(list || [])) {
+    if (pending.length >= MAX_FILES) {
+      setWorking('не больше ' + MAX_FILES + ' вложений на сообщение');
+      break;
+    }
+    if (total + file.size > MAX_TOTAL_BYTES) {
+      setWorking('вложения больше ' + fileSizeText(MAX_TOTAL_BYTES) + ' — не отправлю');
+      break;
+    }
+    total += file.size;
+    pending.push({ file, url: URL.createObjectURL(file), image: file.type.startsWith('image/') });
+  }
+  if (pending.length) setWorking('');
+  renderPending();
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || '');
+      resolve(result.includes(',') ? result.slice(result.indexOf(',') + 1) : result);
+    };
+    reader.onerror = () => reject(reader.error || new Error('не прочитать файл'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function historyAttachments(attachments) {
+  if (!attachments || !attachments.length) return '';
+  return (
+    '<div class="attachments">' +
+    attachments
+      .map((item) => {
+        const src = imageSrc(item.path);
+        return item.image
+          ? '<a href="' + src + '" target="_blank" rel="noopener"><img class="attach-img" src="' + src + '" alt=""></a>'
+          : '<span class="attach-file">' + esc(baseName(item.path)) + '</span>';
+      })
+      .join('') +
+    '</div>'
+  );
+}
+
+function userHtml(message) {
+  return (
+    '<div class="turn user"><div class="bubble">' +
+    esc(message.text || '') +
+    historyAttachments(message.attachments) +
+    '</div></div>'
+  );
+}
+
 function renderHistory(messages) {
   currentMessages = messages;
   if (!messages.length) {
@@ -354,9 +458,7 @@ function renderHistory(messages) {
   showEmpty(false);
   el('chat-messages').innerHTML = messages
     .map((message) =>
-      message.role === 'user'
-        ? '<div class="turn user"><div class="bubble">' + esc(message.text) + '</div></div>'
-        : assistantHtml(message),
+      message.role === 'user' ? userHtml(message) : assistantHtml(message),
     )
     .join('');
   scrollToBottom(true);
@@ -413,12 +515,38 @@ function scrollToBottom(force = false) {
   }
 }
 
-function addUser(text) {
+function addUser(text, files = []) {
   const node = document.createElement('div');
   node.className = 'turn user';
   const bubble = document.createElement('div');
   bubble.className = 'bubble';
-  bubble.textContent = text;
+  if (text) bubble.append(document.createTextNode(text));
+  if (files.length) {
+    const box = document.createElement('div');
+    box.className = 'attachments';
+    for (const item of files) {
+      if (item.image) {
+        const link = document.createElement('a');
+        link.href = item.url;
+        link.target = '_blank';
+        link.rel = 'noopener';
+        const image = document.createElement('img');
+        image.className = 'attach-img';
+        image.src = item.url;
+        image.alt = item.file.name;
+        link.append(image);
+        box.append(link);
+      } else {
+        const link = document.createElement('a');
+        link.className = 'attach-file';
+        link.href = item.url;
+        link.download = item.file.name;
+        link.textContent = item.file.name;
+        box.append(link);
+      }
+    }
+    bubble.append(box);
+  }
   node.append(bubble);
   el('chat-messages').append(node);
   scrollToBottom(true);
@@ -513,26 +641,45 @@ async function sendText(forced) {
   if (streaming || !cfg.enabled) return;
   const input = el('chat-input');
   const text = String(forced ?? input.value).trim();
-  if (!text) return;
+  const files = pending.slice();
+  if (!text && files.length === 0) return;
   if (!currentId) {
     await newChat();
     if (!currentId) return;
+  }
+
+  let attachments = [];
+  if (files.length > 0) {
+    setWorking('готовлю вложения…');
+    try {
+      attachments = await Promise.all(
+        files.map(async (item) => ({
+          name: item.file.name,
+          type: item.file.type || 'application/octet-stream',
+          data: await fileToBase64(item.file),
+        })),
+      );
+    } catch (error) {
+      setWorking('не прочитать вложение: ' + error.message);
+      return;
+    }
   }
 
   streaming = true;
   el('chat-send').disabled = true;
   input.value = '';
   growInput();
+  clearPending(false);
   showEmpty(false);
-  addUser(text);
+  addUser(text, files);
   const box = addAssistant();
-  setWorking('Икар отвечает…');
+  setWorking(files.length ? 'отправляю вложения…' : 'Икар отвечает…');
 
   try {
     const response = await fetch('/panel/api/chat/send', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ chatId: currentId, text }),
+      body: JSON.stringify({ chatId: currentId, text, attachments }),
     });
     if (!response.ok) {
       const type = response.headers.get('content-type') || '';
@@ -617,6 +764,25 @@ document.addEventListener('keydown', (event) => {
 });
 el('chat-side').addEventListener('click', (event) => {
   if (event.target === el('chat-side')) closeSide();
+});
+el('chat-attach').onclick = () => el('chat-files').click();
+el('chat-files').addEventListener('change', (event) => {
+  addFiles(event.target.files);
+  event.target.value = '';
+});
+el('chat-input').addEventListener('paste', (event) => {
+  if (event.clipboardData && event.clipboardData.files && event.clipboardData.files.length) {
+    event.preventDefault();
+    addFiles(event.clipboardData.files);
+  }
+});
+el('chat-app').addEventListener('dragover', (event) => {
+  if (event.dataTransfer && Array.from(event.dataTransfer.types || []).includes('Files')) event.preventDefault();
+});
+el('chat-app').addEventListener('drop', (event) => {
+  if (!event.dataTransfer || !event.dataTransfer.files || !event.dataTransfer.files.length) return;
+  event.preventDefault();
+  addFiles(event.dataTransfer.files);
 });
 el('chat-input').addEventListener('input', growInput);
 el('chat-input').addEventListener('keydown', (event) => {

@@ -9,10 +9,11 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { findUser, userPaths, type IcarusConfig, type UserConfig } from '../config.ts';
+import { CONTAINER_INCOMING, findUser, userPaths, type IcarusConfig, type UserConfig } from '../config.ts';
 import { readJsonBody } from '../http/openai.ts';
 import { errorBody } from '../http/sse.ts';
 import { titleFromText } from '../http/title.ts';
+import { buildPrompt } from '../prompt.ts';
 import { sessionIdFor } from '../sessions/pi-session.ts';
 import type { SessionRegistry } from '../sessions/registry.ts';
 import { log } from '../log.ts';
@@ -26,12 +27,16 @@ export type ChatTraceStep = {
   result?: string;
 };
 
+/** Вложение в истории: путь внутри контейнера и признак «это картинка». */
+export type ChatAttachment = { path: string; image: boolean };
+
 export type ChatMessage = {
   role: 'user' | 'assistant';
   text: string;
   timestamp: string;
   thinking?: string;
   trace?: ChatTraceStep[];
+  attachments?: ChatAttachment[];
 };
 
 export type ChatSummary = {
@@ -112,6 +117,101 @@ export function createChat(config: IcarusConfig, user: UserConfig, now = new Dat
   chats.unshift(chat);
   writeChats(config, user, chats);
   return chat;
+}
+
+const IMAGE_MIME = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
+const MAX_ATTACHMENTS = 8;
+/** Декодированный предел: JSON с base64 должен влезать в readJsonBody (16 МБ). */
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+const PROMPT_FILES_MARKER = '\n\n[Пользователь приложил файлы, они уже лежат на диске:';
+
+export type UploadedAttachments = {
+  files: string[];
+  images: Array<{ data: string; mimeType: string }>;
+  names: string[];
+  paths: ChatAttachment[];
+};
+
+function emptyAttachments(): UploadedAttachments {
+  return { files: [], images: [], names: [], paths: [] };
+}
+
+function extensionForMime(mimeType: string): string {
+  const subtype = mimeType.split('/')[1]?.split(';')[0]?.replace(/[^a-z0-9]/gi, '') ?? '';
+  if (subtype === 'jpeg') return 'jpg';
+  return subtype || 'bin';
+}
+
+function safeAttachmentName(name: string): string {
+  return path
+    .basename(name)
+    .replace(/[^\p{L}\p{N}._-]/gu, '_')
+    .replace(/^[._]+/, '')
+    .slice(0, 64);
+}
+
+/**
+ * Вложения из браузера: base64 в JSON, потому что разбирать multipart в node:http
+ * без зависимости — лишний слой. Файлы ложим в incoming/ человека, картинки ещё и
+ * отдаём модели нативно; имя на диске своё, чтобы два «photo.jpg» не спорили.
+ */
+export function parseUploadAttachments(value: unknown, incomingDir: string): UploadedAttachments {
+  if (value === undefined) return emptyAttachments();
+  if (!Array.isArray(value)) throw new Error('attachments должен быть массивом');
+  if (value.length > MAX_ATTACHMENTS) throw new Error(`не больше ${MAX_ATTACHMENTS} вложений`);
+
+  const result = emptyAttachments();
+  let total = 0;
+  for (const raw of value) {
+    if (!raw || typeof raw !== 'object') throw new Error('вложение должно быть объектом');
+    const item = raw as Record<string, unknown>;
+    const original = typeof item.name === 'string' ? item.name : 'файл';
+    const mimeType = typeof item.type === 'string' && item.type ? item.type : 'application/octet-stream';
+    const encoded = typeof item.data === 'string' ? item.data : '';
+    const base64 = encoded.includes(',') ? encoded.slice(encoded.indexOf(',') + 1) : encoded;
+    if (!base64) throw new Error(`вложение «${original}» пустое`);
+    const bytes = Buffer.from(base64, 'base64');
+    if (bytes.length === 0) throw new Error(`вложение «${original}» не декодируется`);
+    total += bytes.length;
+    if (total > MAX_ATTACHMENT_BYTES) {
+      throw new Error(`вложения больше ${Math.round(MAX_ATTACHMENT_BYTES / 1024 / 1024)} МБ`);
+    }
+
+    const safe = safeAttachmentName(original) || 'file';
+    const name = path.extname(safe) ? safe : `${safe}.${extensionForMime(mimeType)}`;
+    const stored = `web-${Date.now()}-${crypto.randomBytes(3).toString('hex')}-${name}`;
+    fs.mkdirSync(incomingDir, { recursive: true });
+    fs.writeFileSync(path.join(incomingDir, stored), bytes);
+
+    const containerPath = `${CONTAINER_INCOMING}/${stored}`;
+    result.files.push(containerPath);
+    result.names.push(original || name);
+    const image = IMAGE_MIME.has(mimeType);
+    result.paths.push({ path: containerPath, image });
+    if (image) result.images.push({ data: base64, mimeType });
+  }
+  return result;
+}
+
+/** Разбирает след вложения в реплике pi: путь остаётся в prompt, а в чате — плашкой. */
+export function splitPromptAttachments(text: string): { text: string; attachments: ChatAttachment[] } {
+  const at = text.indexOf(PROMPT_FILES_MARKER);
+  if (at === -1) return { text, attachments: [] };
+  const tail = text.slice(at + PROMPT_FILES_MARKER.length);
+  const end = tail.lastIndexOf(']');
+  if (end === -1) return { text, attachments: [] };
+  const paths = tail
+    .slice(0, end)
+    .split('\n')
+    .map((line) => line.replace(/^-\s*/, '').trim())
+    .filter(Boolean);
+  return {
+    text: text.slice(0, at).trimEnd(),
+    attachments: paths.map((file) => ({
+      path: file,
+      image: /\.(?:png|jpe?g|gif|webp)$/i.test(file),
+    })),
+  };
 }
 
 function previewOf(text: string): string {
@@ -346,9 +446,17 @@ export function readHistory(config: IcarusConfig, user: UserConfig, chatId: stri
           : new Date().toISOString();
 
     if (role === 'user') {
-      const text = textOf(message.content).trim();
+      const raw = textOf(message.content).trim();
+      const parsed = splitPromptAttachments(raw);
       current = null;
-      if (text) messages.push({ role: 'user', text, timestamp });
+      if (raw) {
+        messages.push({
+          role: 'user',
+          text: parsed.text,
+          timestamp,
+          ...(parsed.attachments.length > 0 ? { attachments: parsed.attachments } : {}),
+        });
+      }
       continue;
     }
 
@@ -426,7 +534,9 @@ async function streamTurn(
   registry: SessionRegistry,
   chatId: string,
   text: string,
+  attachments: UploadedAttachments,
 ): Promise<void> {
+  const prompt = buildPrompt(text, attachments.files);
   if (!getChat(config, user, chatId)) {
     json(res, 404, errorBody('разговор не найден'));
     return;
@@ -522,14 +632,20 @@ async function streamTurn(
   });
 
   try {
-    await session.prompt(text);
+    await session.prompt(prompt, attachments.images);
     await settled;
     if (closed) return;
 
-    const chat = finishChat(config, user, chatId, text, answer);
+    const chat = finishChat(config, user, chatId, text || attachments.names.join(', '), answer);
     send({ type: 'done', chat, steps });
     res.end();
-    log.info('чат: ход завершён', { user: user.id, chatId, chars: answer.length, steps: steps.length });
+    log.info('чат: ход завершён', {
+      user: user.id,
+      chatId,
+      chars: answer.length,
+      steps: steps.length,
+      attachments: attachments.files.length,
+    });
   } catch (error) {
     log.error('чат: ход сорвался', { user: user.id, chatId, error: String(error) });
     if (!closed && !res.writableEnded) {
@@ -604,15 +720,26 @@ export async function handleChatApi(
       const body = await bodyOf(req);
       const chatId = chatIdOf(body.chatId);
       const text = typeof body.text === 'string' ? body.text.trim() : '';
-      if (!chatId || !text) {
-        json(res, 400, errorBody('нужны chatId и text'));
+      if (!chatId) {
+        json(res, 400, errorBody('нужен chatId'));
         return true;
       }
       if (text.length > 16_000) {
         json(res, 400, errorBody('реплика слишком длинная'));
         return true;
       }
-      await streamTurn(req, res, ctx.config, user, ctx.registry, chatId, text);
+      let attachments: UploadedAttachments;
+      try {
+        attachments = parseUploadAttachments(body.attachments, userPaths(ctx.config, user).incoming);
+      } catch (error) {
+        json(res, 400, errorBody(error instanceof Error ? error.message : String(error)));
+        return true;
+      }
+      if (!text && attachments.files.length === 0) {
+        json(res, 400, errorBody('нужны text или вложения'));
+        return true;
+      }
+      await streamTurn(req, res, ctx.config, user, ctx.registry, chatId, text, attachments);
       return true;
     }
 

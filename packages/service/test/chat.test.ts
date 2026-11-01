@@ -8,6 +8,8 @@ import { sessionIdFor } from '../src/sessions/pi-session.ts';
 import {
   chatImageFile,
   createChat,
+  parseUploadAttachments,
+  splitPromptAttachments,
   finishChat,
   listChats,
   readChats,
@@ -137,4 +139,41 @@ test('картинка из workspace отдаётся только из incomin
   assert.equal(chatImageFile(config, user, '/workspace/incoming/../../etc/passwd.png'), null);
   assert.equal(chatImageFile(config, user, '/workspace/icarus.md'), null);
   assert.equal(chatImageFile(config, user, '/workspace/incoming/нет-такой.png'), null);
+});
+
+test('вложения из браузера ложатся в incoming, картинки уходят и в files, и в images', () => {
+  const { config, user } = fixture();
+  const incoming = userPaths(config, user).incoming;
+  const uploaded = parseUploadAttachments(
+    [
+      { name: 'котик.png', type: 'image/png', data: Buffer.from('PNG').toString('base64') },
+      { name: 'план.txt', type: 'text/plain', data: Buffer.from('план').toString('base64') },
+    ],
+    incoming,
+  );
+
+  assert.equal(uploaded.files.length, 2);
+  assert.equal(uploaded.images.length, 1);
+  assert.equal(uploaded.images[0]?.mimeType, 'image/png');
+  assert.deepEqual(uploaded.names, ['котик.png', 'план.txt']);
+  assert.ok(uploaded.files[0]?.startsWith('/workspace/incoming/'));
+  for (const file of uploaded.files) {
+    assert.ok(fs.existsSync(path.join(incoming, path.basename(file))));
+  }
+  assert.deepEqual(
+    uploaded.paths.map((item) => item.image),
+    [true, false],
+  );
+  assert.throws(() => parseUploadAttachments([{ name: 'x', data: '' }], incoming), /пустое/);
+});
+
+test('след вложений в реплике разбирается обратно в плашки', () => {
+  const parsed = splitPromptAttachments(
+    'Смотри\n\n[Пользователь приложил файлы, они уже лежат на диске:\n- /workspace/incoming/a.png\n- /workspace/incoming/b.pdf]',
+  );
+  assert.equal(parsed.text, 'Смотри');
+  assert.deepEqual(parsed.attachments, [
+    { path: '/workspace/incoming/a.png', image: true },
+    { path: '/workspace/incoming/b.pdf', image: false },
+  ]);
 });
