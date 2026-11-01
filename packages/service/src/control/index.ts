@@ -1,13 +1,17 @@
-// Панель управления Icarus: HTTP-часть — тонкий JSON-слой над файлами и git.
+// Панель управления Icarus: чат и настройки — тонкий JSON-слой над сессиями pi,
+// файлами и git.
 //
 // Человека называет SSO-прокси (см. identity.ts), поэтому параметра user в запросах нет
 // и подменить его нельзя: чужую память через свою сессию не открыть.
 //
-// Разделы живут по своим адресам: /panel/memory — память, /panel/skills — скиллы,
-// /panel/maple — математика. Внутри памяти три области: личная, семейная и математика;
-// математика — не память в том же смысле: её файлы создаёт Maple, и панель показывает
-// их только для чтения (ни «забыть», ни откатов): журнал сессии — это код, из которого
-// сессия восстанавливается, и построчная правка его сломает.
+// Главный экран — /panel/chat: диалоги, лента и композер. Чат ходит в те же сессии
+// pi, что Telegram, только conversationId начинается с web-. Настройки
+// (/panel/memory, /panel/skills, /panel/maple) открываются панелью поверх чата.
+//
+// Внутри памяти три области: личная, семейная и математика; математика — не память
+// в том же смысле: её файлы создаёт Maple, и панель показывает их только для чтения
+// (ни «забыть», ни откатов): журнал сессии — это код, из которого сессия
+// восстанавливается, и построчная правка его сломает.
 //
 // Скиллы — третий вид раздела: их пишет человек, и правка тут не построчная, а целым
 // файлом (`SKILL.md`). Панель — автор скиллов, pi — их читатель: каталог скиллов
@@ -51,10 +55,15 @@ import {
   writeSkill,
 } from './skills.ts';
 import { panelHtml, type PanelPage, type PanelSession } from './ui.ts';
+import { chatPage } from './chat-ui.ts';
+import { handleChatApi } from './chat.ts';
+import type { SessionRegistry } from '../sessions/registry.ts';
 import { log as logger } from '../log.ts';
 
 export type PanelContext = {
   config: IcarusConfig;
+  /** Живые сессии pi: из них панель отправляет сообщения и читает историю. */
+  registry?: SessionRegistry;
   /**
    * Отметить, что медленные ресурсы человека (скиллы) поменялись: живая сессия pi
    * держит их в памяти с самого старта, поэтому следующий ход поднимает её заново.
@@ -234,11 +243,18 @@ export async function handlePanel(
   const { config } = ctx;
   const access = identifyPanelUser(req, config);
 
-  // Старый адрес панели: он и раньше вёл на память, и в закладках у людей он есть.
+  // Корень панели — чат: это теперь главный экран, а память и скиллы живут
+  // настройками. Старые ссылки на файл памяти по-прежнему ведут в память.
   if (url.pathname === '/panel' || url.pathname === '/panel/') {
     if (!access.ok) {
       res.writeHead(access.denial.status, { 'content-type': 'text/html; charset=utf-8' });
       res.end(panelHtml(access.denial));
+      return true;
+    }
+    const legacy = url.searchParams.has('scope') || url.searchParams.has('file') || url.searchParams.has('tab');
+    if (!legacy) {
+      res.writeHead(302, { location: '/panel/chat' });
+      res.end();
       return true;
     }
     const scope = parseScope(url.searchParams.get('scope'));
@@ -262,7 +278,14 @@ export async function handlePanel(
       return true;
     }
     const html = access.ok
-      ? await sectionPage(config, access.identity.userId, page, url, typeof ctx.draft === 'function')
+      ? await sectionPage(
+          config,
+          access.identity.userId,
+          page,
+          url,
+          typeof ctx.draft === 'function',
+          Boolean(ctx.registry),
+        )
       : panelHtml(access.denial);
     res.writeHead(access.ok ? 200 : access.denial.status, { 'content-type': 'text/html; charset=utf-8' });
     res.end(html);
@@ -277,8 +300,9 @@ export async function handlePanel(
   return false;
 }
 
-/** Раздел из адреса: /panel/memory, /panel/skills и /panel/maple. */
+/** Раздел из адреса: /panel/chat, /panel/memory, /panel/skills и /panel/maple. */
 function routePage(pathname: string): PanelPage | null {
+  if (pathname === '/panel/chat' || pathname === '/panel/chat/') return { section: 'chat' };
   const match = /^\/panel\/(memory|skills|maple)\/?$/.exec(pathname);
   return match ? { section: match[1] } : null;
 }
@@ -300,6 +324,7 @@ async function sectionPage(
   page: PanelPage,
   url: URL,
   draftSkills: boolean,
+  chatEnabled: boolean,
 ): Promise<string> {
   await prepare(config, userId);
   const session: PanelSession = {
@@ -311,6 +336,12 @@ async function sectionPage(
     storage: 'git · local',
     draftSkills,
   };
+  if (page.section === 'chat') {
+    return chatPage(session, {
+      chatId: url.searchParams.get('chat') ?? undefined,
+      enabled: chatEnabled,
+    });
+  }
   return panelHtml(session, {
     ...page,
     // Область — только у памяти: у скиллов и математики её нет, и тащить туда личную
@@ -321,6 +352,7 @@ async function sectionPage(
     // «заведи скилл» можно переслать, а «назад» возвращает к списку.
     fresh: url.searchParams.get('new') === '1',
     tab: url.searchParams.get('tab') === 'history' ? 'history' : 'notes',
+    embed: url.searchParams.get('embed') === '1',
   });
 }
 
@@ -345,6 +377,15 @@ async function handleApi(
   }
 
   const userId = access.identity.userId;
+
+  // Чат — отдельная ветка: у него свои сущности (диалоги и сессии pi), и общий
+  // разбор памяти тут только мешал бы. Тело POST он читает сам, поэтому уходим
+  // до общего readJsonBody ниже.
+  if (url.pathname === '/panel/api/chats' || url.pathname.startsWith('/panel/api/chat/')) {
+    await handleChatApi(req, res, url, { config, userId, registry: ctx.registry });
+    return;
+  }
+
   const route = routeApi(url.pathname);
   const name = route?.name ?? url.pathname.slice('/panel/api/'.length);
 

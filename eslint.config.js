@@ -38,6 +38,13 @@ export default tseslint.config(
     },
   },
   {
+    // Клиент чата исполняется в браузере: у него document, fetch и history вместо process.
+    files: ['packages/service/src/control/chat-client.js'],
+    languageOptions: {
+      globals: { ...globals.browser },
+    },
+  },
+  {
     files: ['**/*.ts'],
     languageOptions: {
       ecmaVersion: 2024,

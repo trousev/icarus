@@ -62,9 +62,22 @@ export default function (pi: ExtensionAPI) {
     };
     const skillsBlock = formatSkillsBlock(options.skills ?? [], options.selectedTools ?? []);
 
+    // Канал приезжает из сервиса переменной ICARUS_CHANNEL. В веб-чате картинку
+    // из workspace можно показать markdown-ом — в Telegram такая разметка не
+    // рендерится, поэтому учим только тот канал, где это правда работает.
+    const channelBlock =
+      process.env.ICARUS_CHANNEL === 'web'
+        ? [
+            '# Веб-чат',
+            '- Панель сама рисует картинки из markdown: `![что на ней](/workspace/incoming/файл.jpg)`.',
+            '  Отдельного инструмента для этого нет — достаточно такой ссылки.',
+            '- Если просят путь или адрес файла — напиши путь текстом, без картинки.',
+          ].join('\n')
+        : '';
+
     // TIME_INSTRUCTION — текст постоянный: сама дата в промпт не едет, иначе он менялся
     // бы от смены даты и рвал кэш. Свежее время приезжает меткой к реплике (см. clock.ts).
-    const systemPrompt = [persona, contextFiles, memoryBlock, skillsBlock, TIME_INSTRUCTION]
+    const systemPrompt = [persona, contextFiles, memoryBlock, skillsBlock, channelBlock, TIME_INSTRUCTION]
       .filter(Boolean)
       .join("\n\n---\n\n");
 

@@ -40,6 +40,8 @@ export type PanelPage = {
   /** Пустой редактор нового скилла: файла ещё нет, а страница уже есть. */
   fresh?: boolean;
   tab?: 'notes' | 'history';
+  /** Настройки внутри чата: без сайдбара панели, чтобы не дублировать навигацию. */
+  embed?: boolean;
 };
 
 const SCOPE_LABELS: Record<string, string> = {
@@ -71,7 +73,7 @@ export function panelHtml(view: PanelView, page: PanelPage = { section: 'memory'
 }
 
 /** Оболочка страницы: шапка документа и стили одни на всех. */
-function shell(body: string): string {
+export function shell(body: string): string {
   return `<!doctype html>
 <html lang="ru">
 <head>
@@ -88,6 +90,8 @@ function shell(body: string): string {
   body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 ui-sans-serif, system-ui, sans-serif; }
   button { font:inherit; cursor:pointer; }
   .app { display:grid; grid-template-columns:250px 1fr; min-height:100vh; }
+  /* Настройки в панели чата: сайдбар чата уже есть, второй не нужен. */
+  .app.embedded { grid-template-columns:1fr; }
 
   /* Сайдбар: слева разделы панели и подпись, чем эта панель работает. */
   aside { background:var(--side); border-right:1px solid var(--line); padding:18px 14px;
@@ -302,22 +306,23 @@ function sessionPage(session: PanelSession, page: PanelPage): string {
   // Область в ссылке несёт только память: у скиллов и математики своей области нет,
   // и `?scope=personal` в их адресе — это ровно та путаница, когда раздел показывал
   // личную память под своим заголовком.
-  const nav = session.sections
-    .map((item) => {
-      const href = `/panel/${item.id}${item.id === 'memory' ? `?scope=${scope}` : ''}`;
-      return (
-        `<a class="${item.id === page.section ? 'active' : ''}" href="${href}">` +
-        `${escapeHtml(item.label)}<em id="count-${item.id}"></em></a>`
-      );
-    })
-    .join('');
-
+  const nav =
+    '<a href="/panel/chat">Чат</a>' +
+    session.sections
+      .map((item) => {
+        const href = `/panel/${item.id}${item.id === 'memory' ? `?scope=${scope}` : ''}`;
+        return (
+          `<a class="${item.id === page.section ? 'active' : ''}" href="${href}">` +
+          `${escapeHtml(item.label)}<em id="count-${item.id}"></em></a>`
+        );
+      })
+      .join('');
   const areas = maple || skills
     ? ''
     : `<nav class="areas">${scopes
         .map(
           (name) =>
-            `<a class="area${name === scope ? ' active' : ''}" href="/panel/${page.section}?scope=${name}">` +
+            `<a class="area${name === scope ? ' active' : ''}" href="/panel/${page.section}?scope=${name}${page.embed ? '&embed=1' : ''}">` +
             `${escapeHtml(scopeLabel(session, name))}<em id="count-${name}"></em></a>`,
         )
         .join('')}</nav>`;
@@ -329,6 +334,7 @@ function sessionPage(session: PanelSession, page: PanelPage): string {
     file: page.file ?? null,
     fresh: Boolean(page.fresh),
     tab: page.tab === 'history' ? 'history' : 'notes',
+    embed: Boolean(page.embed),
     mode,
     scopes,
     // Есть ли кому написать скилл. Локальная панель поднимается без контейнера с
@@ -337,11 +343,13 @@ function sessionPage(session: PanelSession, page: PanelPage): string {
     labels: Object.fromEntries(scopes.map((name) => [name, scopeLabel(session, name)])),
   };
 
-  return shell(`<div class="app">
-<aside>
+  const embedded = Boolean(page.embed);
+  const sidebar = embedded
+    ? ''
+    : `<aside>
   <div class="brand">
     <div class="logo">I</div>
-    <div><b>Icarus</b><span>агент · память и скиллы</span></div>
+    <div><b>Icarus</b><span>агент · чат и настройки</span></div>
   </div>
   <div>
     <p class="nav-title">РАБОЧЕЕ ПРОСТРАНСТВО</p>
@@ -351,7 +359,10 @@ function sessionPage(session: PanelSession, page: PanelPage): string {
     <div><span>модель</span><span>${escapeHtml(session.model ?? '—')}</span></div>
     <div><span>хранилище</span><span>${escapeHtml(session.storage ?? 'git · local')}</span></div>
   </div>
-</aside>
+</aside>`;
+
+  return shell(`<div class="app${embedded ? ' embedded' : ''}">
+${sidebar}
 <div>
   <div class="top">
     <div class="crumbs">${breadcrumbs
@@ -452,6 +463,7 @@ function go(patch) {
   if (next.file) query.set('file', next.file);
   if (next.fresh) query.set('new', '1');
   if (next.file && next.tab === 'history') query.set('tab', 'history');
+  if (cfg.embed) query.set('embed', '1');
   const suffix = query.toString();
   location.href = '/panel/' + cfg.section + (suffix ? '?' + suffix : '');
 }
@@ -675,7 +687,7 @@ async function saveSkill(id) {
   // ним переехал каталог — перезагрузка вернула бы человека к старой ссылке.
   cfg.file = result.id;
   cfg.fresh = false;
-  history.replaceState(null, '', '/panel/skills?file=' + encodeURIComponent(result.id));
+  history.replaceState(null, '', '/panel/skills?file=' + encodeURIComponent(result.id) + (cfg.embed ? '&embed=1' : ''));
   await Promise.all([loadCounts(), loadSkills()]);
   await renderSkill();
   skillStatus(result.committed ? 'Сохранено · коммит ' + String(result.commit || '').slice(0, 7) : 'Сохранено, но коммит не вышел — загляни в историю');
@@ -977,7 +989,7 @@ if (el('new-skill')) el('new-skill').onclick = guard(() => go({ file: null, fres
 }
 
 /** Экранирование для недоверенных значений: имя человека из заголовка и тексты отказа. */
-function escapeHtml(value: string): string {
+export function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (char) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char] ?? char,
   );

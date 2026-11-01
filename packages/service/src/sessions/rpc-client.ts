@@ -8,7 +8,7 @@ import type { IcarusConfig } from '../config.ts';
 export type RpcEvent = { type: string } & Record<string, unknown>;
 type Pending = { resolve: (value: Record<string, unknown>) => void; reject: (error: Error) => void };
 /** Как запустить pi: в бою — docker exec, в тестах — любой процесс с JSONL на stdio. */
-export type Spawner = (container: string, args: string[]) => ChildProcess;
+export type Spawner = (container: string, args: string[], env?: Record<string, string>) => ChildProcess;
 
 export class RpcClient {
   private child: ChildProcess;
@@ -20,10 +20,17 @@ export class RpcClient {
   private closed = false;
   private container: string;
 
-  constructor(config: IcarusConfig, container: string, piArgs: string[], spawner?: Spawner) {
+  constructor(
+    config: IcarusConfig,
+    container: string,
+    piArgs: string[],
+    spawner?: Spawner,
+    env: Record<string, string> = {},
+  ) {
     this.container = container;
-    const launch: Spawner = spawner ?? ((name, args) => spawnDockerExec(config, name, args));
-    this.child = launch(container, ['pi', ...piArgs]);
+    const launch: Spawner =
+      spawner ?? ((name, args, extra) => spawnDockerExec(config, name, args, extra));
+    this.child = launch(container, ['pi', ...piArgs], env);
 
     this.child.stdout?.on('data', (chunk: Buffer) => this.consume(chunk.toString('utf8')));
     this.child.stderr?.on('data', (chunk: Buffer) => {

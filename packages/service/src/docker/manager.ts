@@ -184,8 +184,10 @@ export function spawnDockerExec(
   config: IcarusConfig,
   container: string,
   args: string[],
+  extraEnv: Record<string, string> = {},
 ): ChildProcess {
-  return spawn('docker', ['exec', '-i', container, ...args], {
+  const envArgs = Object.entries(extraEnv).flatMap(([key, value]) => ['-e', `${key}=${value}`]);
+  return spawn('docker', ['exec', '-i', ...envArgs, container, ...args], {
     env: dockerEnv(config),
     stdio: ['pipe', 'pipe', 'pipe'],
   });
