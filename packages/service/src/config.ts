@@ -43,7 +43,24 @@ export type McpServerConfig = {
    */
   headers?: Record<string, string>;
   lifecycle?: 'eager' | 'lazy';
+  /**
+   * Человеческое описание сервера для модели. В mcp.json не уезжает: из него
+   * собирается подсказка в AGENTS.md — зачем сервер нужен и когда его подключать
+   * (см. renderAgentsMd). Без описания модель видит только имя сервера.
+   */
+  description?: string;
 };
+
+/**
+ * Когда подключать MCP-сервер. По умолчанию — по требованию: ленивый сервер не
+ * держит свои инструменты в промпте каждого разговора. eager — осознанный выбор
+ * для серверов, которые нужны всегда.
+ */
+export const DEFAULT_MCP_LIFECYCLE: NonNullable<McpServerConfig['lifecycle']> = 'lazy';
+
+export function mcpLifecycle(server: McpServerConfig): NonNullable<McpServerConfig['lifecycle']> {
+  return server.lifecycle ?? DEFAULT_MCP_LIFECYCLE;
+}
 
 /** Человек: пока только id, всё остальное — общее (см. IcarusConfig). */
 export type UserConfig = { id: string };
@@ -435,6 +452,7 @@ function parseMcp(value: unknown, env: NodeJS.ProcessEnv): Record<string, McpSer
     }
     const command = optionalString(server.command, `${where}.command`);
     const url = optionalString(server.url, `${where}.url`);
+    const description = optionalString(server.description, `${where}.description`);
     const args = asArray(server.args, `${where}.args`).map((arg, index) =>
       requiredString(arg, `${where}.args[${index}]`),
     );
@@ -448,6 +466,7 @@ function parseMcp(value: unknown, env: NodeJS.ProcessEnv): Record<string, McpSer
         ? {}
         : { headers: stringMap(server.headers, `${where}.headers`, env) }),
       ...(lifecycle === undefined ? {} : { lifecycle }),
+      ...(description === undefined ? {} : { description }),
     };
   }
   return servers;

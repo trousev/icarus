@@ -116,6 +116,7 @@ models: [{ provider: deepinfra, id: flash, tier: fast }]
 mcp:
   homeassistant:
     url: http://10.0.0.16/api/mcp
+    description: Умный дом
     headers:
       Authorization: Bearer \${HOMEASSISTANT_TOKEN}
 users: [probe]
@@ -124,6 +125,7 @@ users: [probe]
 
   assert.equal(config.mcp.homeassistant?.url, 'http://10.0.0.16/api/mcp');
   assert.deepEqual(config.mcp.homeassistant?.headers, { Authorization: 'Bearer llat' });
+  assert.equal(config.mcp.homeassistant?.description, 'Умный дом');
   assert.equal(config.mcp.homeassistant?.transport, undefined, 'транспорт выведет mcp.json: url — это HTTP');
 });
 

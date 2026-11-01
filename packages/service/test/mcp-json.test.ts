@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { userPaths } from '../src/config.ts';
-import { prepareUser, renderMcpJson, renderSettingsJson } from '../src/workspace.ts';
+import { prepareUser, renderAgentsMd, renderMcpJson, renderSettingsJson } from '../src/workspace.ts';
 import { makeConfig, probe } from './fixtures.ts';
 
 test('HTTP-MCP с ключом уезжает в mcp.json вместе с заголовками', () => {
@@ -37,6 +37,22 @@ test('stdio-сервер остаётся stdio: url и заголовков у 
   assert.equal(json.mcpServers.echo?.transport, 'stdio');
   assert.equal(json.mcpServers.echo?.url, undefined);
   assert.equal(json.mcpServers.echo?.headers, undefined, 'пустые заголовки в файл не пишем');
+  assert.equal(json.mcpServers.echo?.lifecycle, 'lazy', 'без lifecycle сервер подключается по требованию');
+});
+
+test('description остаётся подсказкой для AGENTS.md, а не полем mcp.json', () => {
+  const config = makeConfig({
+    mcp: {
+      homeassistant: {
+        url: 'http://10.0.0.16/api/mcp',
+        description: 'Умный дом',
+      },
+    },
+  });
+
+  const json = JSON.parse(renderMcpJson(config)) as { mcpServers: Record<string, Record<string, unknown>> };
+  assert.equal(json.mcpServers.homeassistant?.description, undefined);
+  assert.equal(json.mcpServers.homeassistant?.lifecycle, 'lazy');
 });
 
 test('мост pi подключается только тогда, когда есть хоть один MCP-сервер', () => {
@@ -61,4 +77,35 @@ test('mcp.json пишется закрытым на чтение', () => {
   for (const name of ['mcp.json', 'auth.json']) {
     assert.equal(fs.statSync(path.join(piAgent, name)).mode & 0o777, 0o600, `${name}: права 600`);
   }
+});
+
+test('AGENTS.md зовёт подключать ленивый MCP только по теме', () => {
+  const md = renderAgentsMd(
+    makeConfig({
+      mcp: {
+        homeassistant: {
+          url: 'http://10.0.0.16/api/mcp',
+          description: 'Умный дом: свет, климат, сцены',
+        },
+      },
+    }),
+  );
+
+  assert.match(md, /MCP-инструменты по требованию/);
+  assert.match(md, /`homeassistant` — Умный дом: свет, климат, сцены/);
+  assert.match(md, /`mcp_connect`/);
+  assert.match(md, /`mcp_status`/);
+});
+
+test('AGENTS.md не зовёт подключать eager-сервер: его инструменты уже есть', () => {
+  const md = renderAgentsMd(
+    makeConfig({ mcp: { echo: { command: 'node', description: 'Эхо', lifecycle: 'eager' } } }),
+  );
+
+  assert.doesNotMatch(md, /MCP-инструменты по требованию/);
+  assert.doesNotMatch(md, /`echo`/);
+});
+
+test('без MCP в AGENTS.md нет секции про подключение', () => {
+  assert.doesNotMatch(renderAgentsMd(makeConfig()), /MCP-инструменты по требованию/);
 });
