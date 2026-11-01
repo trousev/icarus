@@ -70,11 +70,6 @@ if [ -f packages/service/.env ]; then
   warn 'packages/service/.env больше не читается: ключи берутся из .env в корне — старый можно удалить'
 fi
 
-if [ ! -f docker/librechat/.env ]; then
-  cp docker/librechat/.env.example docker/librechat/.env
-  warn 'создал docker/librechat/.env из примера (ключи стенда, в git не попадает)'
-fi
-
 # --- что дальше ---------------------------------------------------------------
 cat <<'EOF'
 
@@ -84,7 +79,5 @@ cat <<'EOF'
   ./script/server          собрать docker-compose.yml и поднять стек на :8081
                            (образ человека ./script/server соберёт сам)
   ./script/server -d       то же в фоне: переживёт терминал и перезагрузку
-  ./script/server --with-librechat
-                           то же вместе со стендом LibreChat на :3090
   ./script/server --down   погасить стек
 EOF

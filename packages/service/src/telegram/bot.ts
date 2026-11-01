@@ -10,7 +10,7 @@
 // процесс, своя история и свой /compact. Топики, заведённые человеком, бот узнаёт по
 // служебному сообщению forum_topic_created: списком топиков Bot API не делится.
 //
-// Вложения разбираем те же, что и вход LibreChat: картинки уезжают модели нативно
+// Вложения разбираем те же, что и HTTP-вход: картинки уезжают модели нативно
 // и ложатся в incoming/, голосовые — расшифровкой (см. attachments.ts, speech.ts).
 import { findTelegramUser, userPaths, type IcarusConfig, type UserConfig } from '../config.ts';
 import { log, redact } from '../log.ts';

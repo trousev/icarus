@@ -49,11 +49,11 @@ export type McpServerConfig = {
 export type UserConfig = { id: string };
 
 /**
- * Telegram-бот: второй вход к тому же Икару. Человека узнаём по username в
+ * Telegram-бот: основной вход к тому же Икару. Человека узнаём по username в
  * Telegram — он приезжает в каждом сообщении, — и по карте переводим в id
- * человека icarus: на проде это uid из LDAP, на стенде — username, ровно то, что
- * приезжает заголовком x-icarus-user-id. Так у бота нет своей
- * таблицы людей: заведён в `users` — значит, можешь и в Telegram.
+ * человека icarus: id — та же строка, что в `users` и в заголовке
+ * x-icarus-user-id. Так у бота нет своей таблицы людей: заведён в `users` —
+ * значит, можешь и в Telegram.
  */
 export type TelegramConfig = {
   token: string;

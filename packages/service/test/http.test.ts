@@ -149,7 +149,7 @@ test('размышления не смешиваются с ответом: од
     assert.equal(
       mixed.length,
       0,
-      'чанк с reasoning_content и content сразу — LibreChat рисует такое как plain text, а не как «мысли»',
+      'чанк с reasoning_content и content сразу — клиент рисует такое как plain text, а не как «мысли»',
     );
   });
 });
@@ -169,7 +169,7 @@ test('мысль и активность тула после начала отв
     assert.equal(
       deltas.filter((delta) => delta.reasoning_content && delta.content).length,
       0,
-      'чанк с reasoning_content и content сразу — LibreChat рисует такое как plain text, а не как «мысли»',
+      'чанк с reasoning_content и content сразу — клиент рисует такое как plain text, а не как «мысли»',
     );
 
     // В видимом ответе — только слова модели. Канал размышлений не «закрывается»
@@ -213,7 +213,7 @@ test('переключение на активность тула не рвёт 
     const sse = await (await sseRequest(base, {})).text();
     const content = deltasOf(sse).map((delta) => delta.content ?? '').join('');
 
-    // LibreChat заводит новую часть на каждое переключение канала и рисует её
+    // Клиент заводит новую часть на каждое переключение канала и рисует её
     // отдельным блоком. Слово, оборванное на тул, должно уехать в одну часть с
     // продолжением, иначе в чате появляется разрыв посреди слова.
     assert.equal(

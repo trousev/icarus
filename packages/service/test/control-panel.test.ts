@@ -12,15 +12,15 @@ function urlOf(input: string): string {
 }
 
 test('инструмент отдаёт адрес панели как есть', () => {
-  assert.equal(urlOf('https://memory.trousev.pro/'), 'https://memory.trousev.pro/');
+  assert.equal(urlOf('https://chat.trousev.pro/'), 'https://chat.trousev.pro/');
 
   // Хвостовые слэши не удваиваем: адрес приходит и с ними, и без.
-  assert.equal(urlOf('https://memory.trousev.pro'), 'https://memory.trousev.pro/');
+  assert.equal(urlOf('https://chat.trousev.pro'), 'https://chat.trousev.pro/');
   assert.equal(urlOf(' http://localhost:8081// '), 'http://localhost:8081/');
 });
 
 test('в адресе нет ни ключа, ни пропуска — пускать будет прокси', () => {
-  const url = new URL(urlOf('https://memory.trousev.pro/'));
+  const url = new URL(urlOf('https://chat.trousev.pro/'));
   assert.deepEqual([...url.searchParams.keys()], [], 'параметров доступа в ссылке быть не должно');
   assert.equal(url.pathname, '/', 'корень домена — это и есть панель');
 });
@@ -39,10 +39,10 @@ test('расширение регистрирует инструмент и в �
   assert.deepEqual(tools.map((tool) => tool.name), ['get_control_panel_link']);
 
   const saved = process.env.ICARUS_URL;
-  process.env.ICARUS_URL = 'https://memory.trousev.pro/';
+  process.env.ICARUS_URL = 'https://chat.trousev.pro/';
   try {
     const result = await tools[0].execute();
-    assert.match(result.content[0].text, /https:\/\/memory\.trousev\.pro\//);
+    assert.match(result.content[0].text, /https:\/\/chat\.trousev\.pro\//);
     assert.match(result.content[0].text, /только твою память/);
     assert.doesNotMatch(result.content[0].text, /\?t=/, 'пропусков в ссылке больше нет');
   } finally {

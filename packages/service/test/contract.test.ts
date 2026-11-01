@@ -1,4 +1,4 @@
-// Контракт формы ответа OpenAI: то, на что рассчитывает LibreChat.
+// Контракт формы ответа OpenAI: то, на что рассчитывает клиент.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { chunk, completion, completionId, DONE, errorBody, usageChunk } from '../src/http/sse.ts';

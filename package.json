@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Агент для семьи: живой разговор, память, руки — наружу OpenAI-совместимый эндпоинт для LibreChat",
+  "description": "Агент для семьи: живой разговор в Telegram, память, руки и OpenAI-совместимый эндпоинт",
   "license": "MIT",
   "packageManager": "pnpm@12.4.2",
   "engines": {

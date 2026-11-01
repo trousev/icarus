@@ -45,7 +45,7 @@ if (missing.length > 0) {
 }
 
 const registry = new SessionRegistry(config);
-// Telegram — второй вход к тому же Икару: тот же реестр сессий, та же память.
+// Telegram — основной вход к тому же Икару: тот же реестр сессий, та же память.
 // Не настроен (нет токена или маппинга) — бот просто не поднимается.
 const telegram = startTelegramBot(config, registry);
 const server = createServer(config, registry);

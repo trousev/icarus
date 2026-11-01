@@ -7,25 +7,22 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { parseEnv } from 'node:util';
+import { pathToFileURL } from 'node:url';
 import { DEFAULT_CONFIG_PATH, ENV_FILE, loadConfig, loadEnvFile, publicHost, REPO_ROOT, userContainer } from '../config.ts';
 import { prepareUser } from '../workspace.ts';
 import { COMPOSE_PROJECT, DEFAULT_SERVICE_IMAGE, renderCompose, type ComposeOptions } from './compose.ts';
 import { sourceRevision } from './revision.ts';
-
-const DEFAULT_LIBRECHAT_PORT = 3090;
 
 type CliArgs = {
   config: string;
   out: string;
   summary: string | null;
   serviceImage: string;
-  withLibrechat: boolean;
 };
 
 function usage(): string {
   return `compose-write [--config <путь>] [--out <путь>] [--summary <путь>]
-               [--service-image <образ>] [--with-librechat]`;
+               [--service-image <образ>]`;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -34,7 +31,6 @@ function parseArgs(argv: string[]): CliArgs {
     out: path.join(REPO_ROOT, 'docker-compose.yml'),
     summary: null,
     serviceImage: DEFAULT_SERVICE_IMAGE,
-    withLibrechat: false,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -57,9 +53,6 @@ function parseArgs(argv: string[]): CliArgs {
         break;
       case '--service-image':
         args.serviceImage = value();
-        break;
-      case '--with-librechat':
-        args.withLibrechat = true;
         break;
       case '-h':
       case '--help':
@@ -126,16 +119,6 @@ export function socketGroups(socketGid: number, ownGid: number, groupFile = '/et
   add(groupGid('docker', groupFile));
   return groups.map(String);
 }
-/** Порт стенда берём из его .env, чтобы он не разъезжался с librechat.yaml. */
-function librechatPort(dir: string): number {
-  try {
-    const parsed = parseEnv(fs.readFileSync(path.join(dir, '.env'), 'utf8'));
-    const port = Number(parsed.PORT);
-    return Number.isInteger(port) && port > 0 ? port : DEFAULT_LIBRECHAT_PORT;
-  } catch {
-    return DEFAULT_LIBRECHAT_PORT;
-  }
-}
 
 function main(): void {
   const args = parseArgs(process.argv.slice(2));
@@ -154,7 +137,6 @@ function main(): void {
     extraGroups = socketGroups(fs.statSync(docker.socketPath).gid, process.getgid?.() ?? 0);
   }
 
-  const librechatDir = path.join(REPO_ROOT, 'docker', 'librechat');
   const options: ComposeOptions = {
     repoRoot: REPO_ROOT,
     configPath: path.resolve(args.config),
@@ -169,7 +151,6 @@ function main(): void {
     // работать старый процесс (см. revision.ts).
     revision: sourceRevision(REPO_ROOT),
     ...(fs.existsSync(ENV_FILE) ? { envFile: ENV_FILE } : {}),
-    ...(args.withLibrechat ? { librechat: { dir: librechatDir, port: librechatPort(librechatDir) } } : {}),
   };
 
   const yaml = renderCompose(config, options);
@@ -187,18 +168,22 @@ function main(): void {
     ['host', panelHost],
     ['port', String(config.port)],
     ...config.users.map((user) => ['user', user.id, userContainer(config, user)]),
-    ...(options.librechat ? [['librechat', `http://localhost:${options.librechat.port}`]] : []),
   ];
   const summary = lines.map((fields) => fields.join('\t')).join('\n') + '\n';
   if (args.summary) fs.writeFileSync(args.summary, summary);
   else process.stdout.write(summary);
 
-  process.stderr.write(`собрал ${args.out}: сервис, людей ${config.users.length}${options.librechat ? ', стенд LibreChat' : ''}\n`);
+  process.stderr.write(`собрал ${args.out}: сервис, людей ${config.users.length}\n`);
 }
 
-try {
-  main();
-} catch (error) {
-  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-  process.exit(1);
+// Тесты импортируют socketGroups из этого файла, поэтому CLI запускаем только тогда,
+// когда файл — точка входа: иначе импорт писал бы docker-compose.yml и требовал config.yaml.
+const entry = process.argv[1];
+if (entry && import.meta.url === pathToFileURL(entry).href) {
+  try {
+    main();
+  } catch (error) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.exit(1);
+  }
 }

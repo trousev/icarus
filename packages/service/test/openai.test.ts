@@ -10,7 +10,7 @@ import { expandValue, loadConfig, userPaths, type IcarusConfig } from '../src/co
 
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 
-test('заголовки LibreChat задают пользователя и разговор', () => {
+test('заголовки клиента задают пользователя и разговор', () => {
   const req = {
     headers: { 'x-icarus-user-id': 'probe', 'x-icarus-conversation-id': 'conv-1' },
   } as any;
