@@ -55,6 +55,7 @@ test('description остаётся подсказкой для AGENTS.md, а н�
   assert.equal(json.mcpServers.homeassistant?.lifecycle, 'lazy');
 });
 
+// 1.8.0 — первая версия с mcp_connect: без него lazy-сервер из разговора не поднять.
 test('мост pi подключается только тогда, когда есть хоть один MCP-сервер', () => {
   const empty = JSON.parse(renderSettingsJson(makeConfig())) as { packages?: string[] };
   assert.equal(empty.packages, undefined);
@@ -62,7 +63,7 @@ test('мост pi подключается только тогда, когда �
   const withServer = JSON.parse(renderSettingsJson(makeConfig({ mcp: { echo: { command: 'node' } } }))) as {
     packages?: string[];
   };
-  assert.deepEqual(withServer.packages, ['npm:pi-mcp-extension@1.5.0']);
+  assert.deepEqual(withServer.packages, ['npm:pi-mcp-extension@1.8.0']);
 });
 
 // Ключ доступа к чужому серверу — такой же секрет, как ключ модели: файл лежит на
