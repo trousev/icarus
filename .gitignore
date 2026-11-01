@@ -19,16 +19,6 @@ build/
 runtime/
 data/
 
-# стенд LibreChat (M0)
-docker/librechat/.env
-docker/librechat/librechat.local.yaml
-docker/librechat/oidc-data/
-docker/librechat/probe-log.jsonl
-docker/librechat/logs/
-docker/librechat/uploads/
-docker/librechat/images/
-docker/librechat/data-node/
-
 # локальный конфиг сервиса (ключи — в .env, см. выше)
 config.yaml
 

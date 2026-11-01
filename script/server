@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Стек Icarus под docker compose.
 #
-# ./script/server собирает docker-compose.yml из config.yaml — сервис icarus, по контейнеру
-# на человека и, по флагу, стенд LibreChat — и поднимает всё через `docker compose up`.
+# ./script/server собирает docker-compose.yml из config.yaml — сервис icarus и по контейнеру
+# на человека — и поднимает всё через `docker compose up`.
 # По умолчанию up идёт на переднем плане: логи в консоли, Ctrl-C гасит стек. С `-d` стек
 # уходит в фон и живёт сам. Жизненным циклом владеет docker, а не сервис:
 # `restart: unless-stopped` возвращает контейнеры и после падения, и после перезагрузки
@@ -11,7 +11,6 @@
 #
 #   ./script/server                    собрать и поднять (логи в консоли)
 #   ./script/server -d                 то же в фоне
-#   ./script/server --with-librechat   вместе со стендом LibreChat
 #   ./script/server --build            пересобрать образы без кеша
 #   ./script/server --down             погасить стек
 #   ./script/server --config <путь>    свой config.yaml
@@ -23,7 +22,6 @@ cd "$ROOT"
 SERVICE_IMAGE="${ICARUS_SERVICE_IMAGE:-icarus-service:dev}"
 COMPOSE_FILE="$ROOT/docker-compose.yml"
 CONFIG="${ICARUS_CONFIG:-$ROOT/config.yaml}"
-WITH_LIBRECHAT=0
 DETACH=0
 DOWN=0
 BUILD=0
@@ -34,10 +32,9 @@ die() { printf '\033[31m[x]\033[0m %s\n' "$*" >&2; exit 1; }
 
 usage() {
   cat <<'EOF'
-./script/server [--with-librechat] [--config <путь>] [-d] [--build] [--down]
+./script/server [--config <путь>] [-d] [--build] [--down]
 
   -d, --detach       поднять в фоне (по умолчанию up идёт на переднем плане)
-  --with-librechat   поднять рядом стенд LibreChat (:3090)
   --config <путь>    конфиг сервиса (по умолчанию config.yaml в корне, ICARUS_CONFIG)
   --build            пересобрать образы без кеша (обычная сборка идёт всегда)
   --down             погасить стек и убрать контейнеры (память в томах остаётся)
@@ -47,7 +44,6 @@ EOF
 
 while [ $# -gt 0 ]; do
   case "$1" in
-  --with-librechat) WITH_LIBRECHAT=1 ;;
   --config)
     shift
     [ $# -gt 0 ] || die 'для --config нужен путь'
@@ -73,8 +69,7 @@ done
 command -v docker >/dev/null 2>&1 || die 'не нашёл docker'
 docker compose version >/dev/null 2>&1 || die 'не нашёл docker compose (плагин compose v2)'
 
-# Погасить стек можно и без валидного конфига: файл уже собран прошлым запуском,
-# а с флагом --with-librechat пересборка без флага оставила бы стенд висеть.
+# Погасить стек можно и без валидного конфига: файл уже собран прошлым запуском.
 if [ "$DOWN" = 1 ]; then
   [ -f "$COMPOSE_FILE" ] || die "нет $COMPOSE_FILE — стек не поднят"
   say 'гашу стек'
@@ -85,15 +80,6 @@ fi
 [ -d node_modules ] || die 'нет node_modules — сначала ./script/update'
 [ -f "$CONFIG" ] || die "нет конфига $CONFIG (./script/update создаёт его из config.example.yaml)"
 
-if [ "$WITH_LIBRECHAT" = 1 ]; then
-  # Каталоги стенда создаём заранее: иначе docker сделает их root-овыми.
-  if [ ! -f docker/librechat/.env ]; then
-    cp docker/librechat/.env.example docker/librechat/.env
-    warn 'создал docker/librechat/.env из примера'
-  fi
-  mkdir -p docker/librechat/logs docker/librechat/uploads docker/librechat/images
-fi
-
 # --- сборка docker-compose.yml ------------------------------------------------
 # Конфиг разбираем тем же загрузчиком, что и сервис: один формат — один парсер, и
 # опечатка всплывает здесь, а не посреди запуска. Заодно готовим каталоги людей,
@@ -103,7 +89,6 @@ summary="$(mktemp)"
 trap 'rm -f "$summary"' EXIT
 
 compose_args=(packages/service/src/docker/compose-write.ts --config "$CONFIG" --out "$COMPOSE_FILE" --summary "$summary" --service-image "$SERVICE_IMAGE")
-if [ "$WITH_LIBRECHAT" = 1 ]; then compose_args+=(--with-librechat); fi
 
 if ! log="$(node "${compose_args[@]}" 2>&1)"; then
   echo "[x] не удалось собрать docker-compose.yml из $CONFIG:" >&2
@@ -116,7 +101,6 @@ PROJECT='icarus'
 USER_IMAGE=''
 PANEL_HOST='localhost'
 PANEL_PORT='8081'
-LIBRECHAT_URL=''
 USER_CONTAINERS=()
 while IFS=$'\t' read -r key first second; do
   case "$key" in
@@ -126,15 +110,14 @@ while IFS=$'\t' read -r key first second; do
   host) PANEL_HOST="$first" ;;
   port) PANEL_PORT="$first" ;;
   user) USER_CONTAINERS+=("$second") ;;
-  librechat) LIBRECHAT_URL="$first" ;;
   esac
 done <"$summary"
 
 # --- порт панели: либо свободен, либо наш -------------------------------------
 # Публикация порта у docker молчаливая: если порт уже занят, контейнер поднимается
-# без сети и без публикации, а стенд (LibreChat и браузер) ходит в чужой сервис на
-# том же порту. Симптом — «Икар молчит», а причина снаружи: забытый dev-сервис из
-# прошлой сессии или чужой контейнер. Падаем здесь, пока это видно.
+# без сети и без публикации, а браузер ходит в чужой сервис на том же порту.
+# Симптом — «Икар молчит», а причина снаружи: забытый dev-сервис из прошлой сессии
+# или чужой контейнер. Падаем здесь, пока это видно.
 # Свой проект — не помеха: compose пересоздаст контейнер и порт освободится.
 if (exec 3<>"/dev/tcp/$PANEL_HOST/$PANEL_PORT") 2>/dev/null; then
   exec 3<&- 3>&-
@@ -200,11 +183,9 @@ fi
 # --- запуск -------------------------------------------------------------------
 echo
 echo "==> поднимаю стек"
-echo "    сервис:        http://$PANEL_HOST:$PANEL_PORT/v1"
-echo "    панель памяти: только по личной ссылке — её выдаёт Икар по просьбе"
-if [ -n "$LIBRECHAT_URL" ]; then
-  echo "    LibreChat:     $LIBRECHAT_URL"
-fi
+echo "    API:           http://$PANEL_HOST:$PANEL_PORT/v1"
+echo "    панель:        http://$PANEL_HOST:$PANEL_PORT/panel (вход — через SSO-прокси)"
+echo "    telegram:      бот поднимается сам, если в config есть telegram.mapping и токен в .env"
 
 if [ "$DETACH" = 1 ]; then
   docker compose -f "$COMPOSE_FILE" up -d --remove-orphans

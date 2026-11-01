@@ -1,15 +1,16 @@
-// Заголовок разговора. LibreChat генерирует его отдельным запросом
-// (`titleConvo: true` → `client.titleConvo` → `run.generateTitle`), и этот
-// запрос несёт ту же идентичность разговора, что и обычный ход.
+// Заголовок разговора — расширение поверх OpenAI: клиент просит его отдельным
+// запросом, и этот запрос несёт ту же идентичность разговора, что и обычный ход.
+// Так устроен заголовок LibreChat, которым мы пользовались раньше; контракт
+// оставлен, чтобы такие запросы не попадали в живую сессию pi.
 //
 // Пускать его в живую сессию pi нельзя: получится либо 409 (ход уже идёт —
-// при `titleTiming: immediate` запрос уходит параллельно основному), либо
+// клиент может отправить заголовок параллельно основному ходу), либо
 // лишний полный агентский прогон с мусором в истории и в памяти. Поэтому
-// такой запрос узнаётся по метке в `titlePrompt` (плюс отдельный `titleModel`)
+// такой запрос узнаётся по метке в промпте (плюс отдельная модель)
 // и обслуживается здесь же, локально и без сессии.
 import { normalizeContent, type IncomingMessage } from '../sessions/divergence.ts';
 
-/** Модель, которой LibreChat помечает запрос заголовка (`titleModel` в yaml). */
+/** Модель, которой клиент может пометить запрос заголовка: соглашение от LibreChat. */
 export const TITLE_MODEL_ID = 'icarus-title';
 
 /** Метка в начале `titlePrompt`: по ней запрос узнаётся, даже если модель не сменилась. */
@@ -61,7 +62,7 @@ export function isTitleRequest(model: unknown, messages: Array<IncomingMessage |
 
 /**
  * Достаём первую реплику пользователя из промпта заголовка.
- * LibreChat подставляет `{convo}` по шаблону `User: {input}\nAI: {output}`,
+ * Клиент подставляет `{convo}` по шаблону `User: {input}\nAI: {output}`,
  * поэтому берём всё между первым `User: ` и последним `\nAI:`.
  */
 export function conversationFromTitlePrompt(prompt: string): string {
@@ -125,7 +126,7 @@ export function titleFromText(text: string): string {
   return upFirst(cap(clean)) || FALLBACK;
 }
 
-/** Заголовок из промпта LibreChat: берём разговор и сжимаем его до заголовка. */
+/** Заголовок из промпта клиента: берём разговор и сжимаем его до заголовка. */
 export function titleFromPrompt(prompt: string): string {
   return titleFromText(conversationFromTitlePrompt(prompt));
 }
@@ -135,7 +136,7 @@ const MODEL_MAX_WORDS = 8;
 const MODEL_MAX_CHARS = 64;
 
 /**
- * Что спрашиваем у дешёвой модели. Свой промпт, а не промпт LibreChat: там разговор
+ * Что спрашиваем у дешёвой модели. Свой промпт, а не промпт клиента: там разговор
  * обёрнут в служебную рамку и обрывается на «AI: » — модели это мешает.
  */
 export function buildTitlePrompt(conversation: string): string {

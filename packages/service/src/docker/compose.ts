@@ -23,15 +23,6 @@ export const COMPOSE_PROJECT = 'icarus';
 export const SERVICE_NAME = 'icarus';
 /** Образ сервиса по умолчанию; собирается из docker/service/. */
 export const DEFAULT_SERVICE_IMAGE = 'icarus-service:dev';
-/** Контейнеры стенда LibreChat: имена не пересекаются с одиночным docker/librechat. */
-export const LIBRECHAT_CONTAINER = 'icarus-librechat';
-export const LIBRECHAT_MONGO_CONTAINER = 'icarus-librechat-mongo';
-
-export type LibrechatOptions = {
-  /** Каталог docker/librechat: оттуда берутся .env, librechat.yaml и данные стенда. */
-  dir: string;
-  port: number;
-};
 
 export type ComposeOptions = {
   /** Корень репозитория: монтируется в контейнер сервиса, чтобы код и расширения совпадали. */
@@ -58,8 +49,6 @@ export type ComposeOptions = {
    * поводом пересоздать контейнер, и старый процесс живёт со старым кодом в памяти.
    */
   revision: string;
-  /** Стенд LibreChat — по флагу --with-librechat. */
-  librechat?: LibrechatOptions;
 };
 
 type ComposeService = Record<string, unknown>;
@@ -133,7 +122,6 @@ function composeHeader(config: IcarusConfig, options: ComposeOptions): string {
     `# Сервис:   ${options.serviceImage ?? DEFAULT_SERVICE_IMAGE}`,
     `# Люди:     ${users}`,
     `# dataDir:  ${config.dataDir}`,
-    `# Стенд:    ${options.librechat ? `LibreChat на :${options.librechat.port}` : 'без LibreChat'}`,
     '#',
     '# Пересобрать после правки config.yaml: ./script/server',
     '# Погасить стек:                        ./script/server --down',
@@ -141,53 +129,10 @@ function composeHeader(config: IcarusConfig, options: ComposeOptions): string {
   ].join('\n');
 }
 
-function librechatServices(
-  options: LibrechatOptions,
-  network: string | null,
-): { services: Record<string, ComposeService>; volumes: Record<string, unknown> } {
-  const dir = options.dir;
-  const attach = network ? { networks: [network] } : {};
-  return {
-    services: {
-      librechat: {
-        image: 'registry.librechat.ai/danny-avila/librechat-dev:latest',
-        container_name: LIBRECHAT_CONTAINER,
-        restart: 'unless-stopped',
-        depends_on: [LIBRECHAT_MONGO_CONTAINER],
-        // icarus живёт в соседнем контейнере, а LibreChat ходит в него по host.docker.internal.
-        extra_hosts: ['host.docker.internal:host-gateway'],
-        environment: {
-          HOST: '0.0.0.0',
-          MONGO_URI: `mongodb://${LIBRECHAT_MONGO_CONTAINER}:27017/LibreChat`,
-        },
-        ports: [`${options.port}:${options.port}`],
-        volumes: [
-          bind(path.join(dir, '.env'), '/app/.env'),
-          bind(path.join(dir, 'librechat.yaml'), '/app/librechat.yaml'),
-          bind(path.join(dir, 'logs'), '/app/logs'),
-          bind(path.join(dir, 'uploads'), '/app/uploads'),
-          bind(path.join(dir, 'images'), '/app/client/public/images'),
-          'librechat-data:/app/data',
-        ],
-        ...attach,
-      },
-      [LIBRECHAT_MONGO_CONTAINER]: {
-        image: 'mongo:8.0.20',
-        container_name: LIBRECHAT_MONGO_CONTAINER,
-        restart: 'unless-stopped',
-        command: ['mongod', '--noauth'],
-        volumes: ['mongo-data:/data/db'],
-        ...attach,
-      },
-    },
-    volumes: { 'librechat-data': {}, 'mongo-data': {} },
-  };
-}
-
 /**
- * Собирает docker-compose.yml целиком: сервис, по контейнеру на человека и, если просили,
- * стенд LibreChat. Юзер-контейнеры получают те же имена, маунты, окружение и метки, что
- * раньше давал `docker run`, — сервис продолжает находить их по имени и отпечатку.
+ * Собирает docker-compose.yml целиком: сервис и по контейнеру на человека.
+ * Юзер-контейнеры получают те же имена, маунты, окружение и метки, что раньше
+ * давал `docker run`, — сервис продолжает находить их по имени и отпечатку.
  */
 export function renderCompose(config: IcarusConfig, options: ComposeOptions): string {
   const network = config.docker.network ?? null;
@@ -263,14 +208,9 @@ export function renderCompose(config: IcarusConfig, options: ComposeOptions): st
     ...attach,
   };
 
-  const librechat = options.librechat
-    ? librechatServices(options.librechat, network)
-    : { services: {}, volumes: {} };
-
   const document = {
     name: COMPOSE_PROJECT,
-    services: { [SERVICE_NAME]: service, ...userServices, ...librechat.services },
-    ...(Object.keys(librechat.volumes).length > 0 ? { volumes: librechat.volumes } : {}),
+    services: { [SERVICE_NAME]: service, ...userServices },
     // Сеть из конфига сервис не создаёт: она должна существовать, как и при `docker run --network`.
     ...(network ? { networks: { [network]: { external: true } } } : {}),
   };

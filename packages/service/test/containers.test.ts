@@ -200,17 +200,6 @@ test('стек: людей больше нет в конфиге — серви�
   assert.equal(compose.services['icarus-user-probe2'], undefined);
 });
 
-test('стек: стенд LibreChat появляется только по флагу', () => {
-  assert.equal(render().services.librechat, undefined);
-
-  const compose = render(config, { librechat: { dir: '/repo/docker/librechat', port: 3090 } });
-  assert.equal(compose.services.librechat.ports[0], '3090:3090');
-  assert.equal(compose.services.librechat.container_name, 'icarus-librechat');
-  assert.equal(compose.services.librechat.environment.MONGO_URI, 'mongodb://icarus-librechat-mongo:27017/LibreChat');
-  assert.ok(compose.services['icarus-librechat-mongo']);
-  assert.ok(compose.volumes['mongo-data']);
-});
-
 test('порт публикуется по адресу из конфига', () => {
   assert.equal(publishAddress('0.0.0.0', 8080), '8080:8080', 'слушаем везде — публикуем везде');
   assert.equal(publishAddress('127.0.0.1', 8080), '127.0.0.1:8080:8080');

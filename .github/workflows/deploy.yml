@@ -1,8 +1,7 @@
 name: Deploy
 
 # Прод — trousev.pro: чекаут в ~/deployments/icarus и стек docker compose, который
-# поднимает ./script/server -d. LibreChat рядом с ним деплоится отдельно, этот
-# workflow его не трогает. Любой push в main уезжает на прод; вручную — workflow_dispatch.
+# поднимает ./script/server -d. Любой push в main уезжает на прод; вручную — workflow_dispatch.
 on:
   push:
     branches: [main]
@@ -66,8 +65,8 @@ jobs:
           # Не задана — script/redeploy возьмёт свой дефолт (сейчас 1.1.1.1 8.8.8.8).
           # `none` в переменной убирает docker.dns из config.yaml.
           ICARUS_DNS: ${{ vars.ICARUS_DNS }}
-          # Внешний адрес панели для личных ссылок Икара. Не задана — прежнее значение
-          # в config.yaml остаётся, а без него ссылки поведут на localhost.
+          # Внешний адрес панели для личных ссылок Икара. Не задана — script/redeploy
+          # ставит https://chat.trousev.pro/ (панель переехала с memory.trousev.pro).
           ICARUS_URL: ${{ vars.ICARUS_URL }}
           # Кто из телеграма чей человек: пары «@username:человек» через запятую,
           # например «@trousev:trousev,@vita:vita» (значения — id из ICARUS_USERS). Из неё собирается

@@ -123,12 +123,12 @@ test('docker.dns приезжает из ICARUS_DNS, none убирает его,
 });
 
 test('url приезжает из ICARUS_URL и переживает деплой', () => {
-  const set = renderConfig(CUSTOM, { users: 'probe', url: 'https://memory.trousev.pro/' });
-  assert.equal(set.url, 'https://memory.trousev.pro/');
-  assert.equal(load(set.text).url, 'https://memory.trousev.pro/');
+  const set = renderConfig(CUSTOM, { users: 'probe', url: 'https://chat.trousev.pro/' });
+  assert.equal(set.url, 'https://chat.trousev.pro/');
+  assert.equal(load(set.text).url, 'https://chat.trousev.pro/');
 
   const kept = renderConfig(set.text, { users: 'probe' });
-  assert.equal(kept.url, 'https://memory.trousev.pro/', 'пустая переменная прежний адрес не трогает');
+  assert.equal(kept.url, 'https://chat.trousev.pro/', 'пустая переменная прежний адрес не трогает');
 
   const absent = renderConfig(CUSTOM, { users: 'probe' });
   assert.equal(absent.url, null, 'без url адрес считается незаданным');

@@ -20,7 +20,7 @@
 #
 # Переменные окружения приходят из workflow (секреты — из environment production):
 #   ICARUS_USERS      люди через пробел или запятую (variables.ICARUS_USERS)
-#   ICARUS_API_KEY    ключ, под которым LibreChat ходит в icarus
+#   ICARUS_API_KEY    ключ к OpenAI-совместимому эндпоинту (/v1)
 #   DEEPINFRA_API_KEY ключ провайдера из models (DeepInfra)
 #   TAVILY_API_KEY    ключ веб-поиска (Tavily): у DeepInfra серверного поиска нет
 #   ICARUS_PORT       порт сервиса (по умолчанию 8081 — как и локально; на прод-хосте
@@ -28,8 +28,8 @@
 #   ICARUS_DATA_DIR   каталог памяти (по умолчанию runtime/ внутри чекаута)
 #   ICARUS_DNS        DNS-серверы контейнеров (по умолчанию 1.1.1.1 8.8.8.8, см. ниже)
 #   ICARUS_URL        внешний адрес панели управления — его Икар называет человеку
-#                     в чате (на проде https://memory.trousev.pro/); пусто — прежнее
-#                     из config.yaml
+#                     в чате (по умолчанию https://chat.trousev.pro/); явно заданный
+#                     сильнее дефолта
 #   ICARUS_SESSION_IDLE_MINUTES  сколько минут тишины означают «разговор закончен»
 #                     (сжатие и закрытие сессии pi); по умолчанию 60 — час
 #   ICARUS_TELEGRAM_MAPPING  кто из телеграма чей человек, парами «@username:человек»
@@ -49,6 +49,10 @@ cd "$ROOT"
 
 PORT="${ICARUS_PORT:-8081}"
 DATA_DIR="${ICARUS_DATA_DIR:-$ROOT/runtime}"
+# Панель живёт на chat.trousev.pro (переехала с memory.trousev.pro). Адрес нужен
+# Икару, чтобы называть человеку ссылку: дефолт ставим здесь, а явный ICARUS_URL
+# из variables остаётся сильнее — им можно переопределить домен без правки кода.
+URL="${ICARUS_URL:-https://chat.trousev.pro/}"
 # Резолвер хоста контейнерам не друг: unbound там пускает только 10.0.0.0/8, а Docker'овский
 # резолвер, получив от него молчание, ~4 секунды ждёт таймаут и только потом уходит на
 # следующий сервер — каждый запрос pi к модели становился на эти секунды длиннее, поэтому
@@ -186,10 +190,11 @@ say "MAPLE_DIR=$MAPLE_DIR записан в .env"
 # Люди — из variables, ключ API — из секрета, DNS — из кода (ICARUS_DNS), маппинг
 # telegram — из variables.ICARUS_TELEGRAM_MAPPING; остальное в config.yaml не трогаем,
 # чтобы правки на хосте (модели, маунты, MCP) пережили деплой.
-# Пустой ICARUS_URL — это «не трогать»: адрес панели можно задать и в config.yaml.
+# Пустой ICARUS_URL — это дефолт из скрипта (chat.trousev.pro), а не «не трогать»:
+# после переезда старый адрес панели в конфиге оставаться не должен.
 say 'правлю config.yaml (люди, порт, dataDir, docker.dns, apiKey, url, telegram, час тишины)'
 ICARUS_PORT="$PORT" ICARUS_DATA_DIR="$DATA_DIR" ICARUS_DNS="$DNS" \
-  ICARUS_URL="${ICARUS_URL:-}" \
+  ICARUS_URL="$URL" \
   ICARUS_TELEGRAM_MAPPING="${ICARUS_TELEGRAM_MAPPING:-}" \
   ICARUS_SESSION_IDLE_MINUTES="${ICARUS_SESSION_IDLE_MINUTES:-60}" \
   node packages/service/src/docker/render-config.ts

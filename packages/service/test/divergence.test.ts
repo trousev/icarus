@@ -32,7 +32,7 @@ test('дробление ответа ассистента тулами — не
     { role: 'assistant', content: [{ type: 'toolCall', name: 'read' }] },
     { role: 'assistant', content: [{ type: 'text', text: 'Кофе без сахара.' }] },
   ];
-  // LibreChat склеил всё в одно сообщение
+  // Клиент склеил всё в одно сообщение
   const incoming = [
     { role: 'user', content: 'что я люблю пить?' },
     { role: 'assistant', content: 'Сейчас посмотрю.Кофе без сахара.' },

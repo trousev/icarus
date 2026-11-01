@@ -1,4 +1,4 @@
-// Заголовок разговора: LibreChat спрашивает его отдельным запросом, и этот
+// Заголовок разговора: клиент спрашивает его отдельным запросом, и этот
 // запрос не должен поднимать сессию pi. Проверяем разбор промпта, вызов дешёвой
 // модели, откат на эвристику и то, что сессия не трогается ни в одном случае.
 import test from 'node:test';
@@ -20,8 +20,8 @@ import { oneShotArgs } from '../src/sessions/one-shot.ts';
 
 const API_KEY = 'test-token';
 
-/** Промпт ровно в той форме, в какой его собирает LibreChat (`titlePrompt` из yaml). */
-function libreChatPrompt(input: string, output = ''): string {
+/** Промпт ровно в той форме, в какой его собирал LibreChat (`titlePrompt` из yaml). */
+function clientPrompt(input: string, output = ''): string {
   return `${TITLE_SENTINEL}
 Придумай короткий заголовок этого разговора: 3–6 слов, на языке разговора,
 без кавычек и без точки в конце. Верни только заголовок.
@@ -34,13 +34,13 @@ AI: ${output}`;
 test('запрос заголовка узнаётся по модели и по метке', () => {
   const plain = [{ role: 'user', content: 'привет' }];
   assert.equal(isTitleRequest(TITLE_MODEL_ID, plain), true);
-  assert.equal(isTitleRequest('icarus', [{ role: 'user', content: libreChatPrompt('привет') }]), true);
+  assert.equal(isTitleRequest('icarus', [{ role: 'user', content: clientPrompt('привет') }]), true);
   assert.equal(isTitleRequest('icarus', plain), false);
   assert.equal(isTitleRequest(undefined, []), false);
 });
 
-test('из промпта LibreChat достаётся первая реплика человека', () => {
-  const prompt = libreChatPrompt('Почему не стартует docker compose?');
+test('из промпта клиента достаётся первая реплика человека', () => {
+  const prompt = clientPrompt('Почему не стартует docker compose?');
   assert.equal(conversationFromTitlePrompt(prompt), 'Почему не стартует docker compose?');
 });
 
@@ -70,7 +70,7 @@ test('пустая реплика даёт понятный фолбэк', () =>
 });
 
 test('заголовок собирается из полного промпта', () => {
-  assert.equal(titleFromPrompt(libreChatPrompt('Почему не стартует docker compose')), 'Почему не стартует docker compose');
+  assert.equal(titleFromPrompt(clientPrompt('Почему не стартует docker compose')), 'Почему не стартует docker compose');
 });
 
 test('промпт для модели содержит разговор и не содержит служебной метки', () => {
@@ -143,7 +143,7 @@ async function askTitle(options: {
       body: JSON.stringify({
         model: TITLE_MODEL_ID,
         stream: false,
-        messages: [{ role: 'user', content: libreChatPrompt('Привет, Икар! Почему не стартует docker compose?') }],
+        messages: [{ role: 'user', content: clientPrompt('Привет, Икар! Почему не стартует docker compose?') }],
       }),
     });
     const payload = (await response.json()) as { choices: Array<{ message: { content: string } }> };
