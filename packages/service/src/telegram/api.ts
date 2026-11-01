@@ -122,6 +122,16 @@ export function landedInThread(sent: SentMessage, asked: number): boolean {
   return sent.is_topic_message === true;
 }
 
+/**
+ * Режим разметки. Telegram сам markdown не разбирает: без `parse_mode` человек видит
+ * звёздочки и решётки как есть. Нам нужен только HTML — разметку под него собирает
+ * format.ts, а MarkdownV2 требует экранировать полтора десятка знаков.
+ */
+export type ParseMode = 'HTML';
+
+/** Как отправлять текст: с разметкой или как есть. */
+export type SendOptions = { parseMode?: ParseMode };
+
 export const TELEGRAM_API_BASE = 'https://api.telegram.org';
 /** Сколько ждём ответ Bot API, если вызов не сказал иного. */
 export const TELEGRAM_TIMEOUT_MS = 30_000;
@@ -270,8 +280,9 @@ export class TelegramApi {
     text: string,
     threadId?: number | null,
     anchorMessageId?: number,
+    options: SendOptions = {},
   ): Promise<SentMessage> {
-    const params: Record<string, unknown> = { chat_id: chatId, text };
+    const params: Record<string, unknown> = { chat_id: chatId, text, ...parseModeParam(options) };
     if (threadId) params.message_thread_id = threadId;
 
     try {
@@ -291,15 +302,26 @@ export class TelegramApi {
       return this.call<SentMessage>('sendMessage', {
         chat_id: chatId,
         text,
+        ...parseModeParam(options),
         reply_parameters: { message_id: anchorMessageId },
       });
     }
   }
 
   /** Правка сообщения. «Не изменилось» — не ошибка: значит, показывать нечего. */
-  async editMessageText(chatId: number, messageId: number, text: string): Promise<void> {
+  async editMessageText(
+    chatId: number,
+    messageId: number,
+    text: string,
+    options: SendOptions = {},
+  ): Promise<void> {
     try {
-      await this.call('editMessageText', { chat_id: chatId, message_id: messageId, text });
+      await this.call('editMessageText', {
+        chat_id: chatId,
+        message_id: messageId,
+        text,
+        ...parseModeParam(options),
+      });
     } catch (error) {
       if (error instanceof TelegramError && /message is not modified/i.test(error.message)) return;
       throw error;
@@ -354,6 +376,11 @@ export function topicIconColor(name: string): number {
   let hash = 0;
   for (const char of name) hash = (hash * 31 + (char.codePointAt(0) ?? 0)) % 1_000_003;
   return TOPIC_ICON_COLORS[hash % TOPIC_ICON_COLORS.length];
+}
+
+/** Поле `parse_mode` для Bot API: без режима Telegram покажет разметку как текст. */
+function parseModeParam(options: SendOptions): Record<string, unknown> {
+  return options.parseMode ? { parse_mode: options.parseMode } : {};
 }
 
 /** Короткий человеческий текст ошибки для логов: без токена в пути запроса. */

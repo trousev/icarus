@@ -8,7 +8,8 @@
 // активное доводим до границы и заводим следующее. Так длинный ответ доезжает
 // целиком, а не обрывается на полуслове.
 import { log } from '../log.ts';
-import { describeTelegramError, type TelegramApi } from './api.ts';
+import { describeTelegramError, TelegramError, type SendOptions, type TelegramApi } from './api.ts';
+import { htmlToPlain, renderHtml } from './format.ts';
 
 /** Предел одного сообщения Telegram. */
 export const MESSAGE_LIMIT = 4096;
@@ -164,18 +165,37 @@ export class TelegramReply {
     await this.write(this.messageId, body);
   }
 
-  /** Пишет текст в активное сообщение, а если его ещё нет — заводит новое. */
+  /**
+   * Пишет текст в активное сообщение, а если его ещё нет — заводит новое.
+   *
+   * Модель отвечает markdown, а Telegram без `parse_mode` показывает его как есть:
+   * звёздочки, решётки, обратные кавычки. Разметку собираем сами (см. format.ts).
+   */
   private async write(messageId: number | null, text: string): Promise<void> {
     if (!text) return;
-    if (messageId === null) {
-      const sent = await this.api.sendMessage(this.chatId, text, this.threadId, this.anchorMessageId);
-      this.messageId = sent.message_id;
-    } else {
-      await this.api.editMessageText(this.chatId, messageId, text);
+    const html = renderHtml(text);
+    try {
+      await this.deliver(messageId, html, { parseMode: 'HTML' });
+    } catch (error) {
+      // Разметка не понравилась Telegram: ответ важнее курсива, поэтому повторяем
+      // тем же текстом без тегов — такой принимается всегда.
+      if (!isMarkupRejected(error)) throw error;
+      log.warn('телеграм: разметка не принята — отправляю без неё', { error: describeTelegramError(error) });
+      await this.deliver(messageId, htmlToPlain(html), {});
     }
     this.lastEdit = this.now();
     // Доехало: прошлые сбои больше не в счёт — человек видит ответ.
     this.failure = null;
+  }
+
+  /** Отправка или правка — ровно один вызов Bot API. */
+  private async deliver(messageId: number | null, text: string, options: SendOptions): Promise<void> {
+    if (messageId === null) {
+      const sent = await this.api.sendMessage(this.chatId, text, this.threadId, this.anchorMessageId, options);
+      this.messageId = sent.message_id;
+      return;
+    }
+    await this.api.editMessageText(this.chatId, messageId, text, options);
   }
 
   private schedule(): void {
@@ -219,4 +239,13 @@ export class TelegramReply {
     clearInterval(this.typing);
     this.typing = null;
   }
+}
+
+/**
+ * Telegram отверг разметку, а не сообщение: 400 и «can't parse entities» с
+ * вариантами. Так выглядит любой наш промах в HTML — лечится повтором без тегов.
+ */
+function isMarkupRejected(error: unknown): boolean {
+  if (!(error instanceof TelegramError)) return false;
+  return /can't parse entities|unsupported (?:start|end) tag|can't find end tag/i.test(error.message);
 }
