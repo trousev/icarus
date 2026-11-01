@@ -142,7 +142,10 @@ export function renderAuthJson(config: IcarusConfig): string {
 export function renderSettingsJson(config: IcarusConfig): string {
   const servers = Object.keys(config.mcp);
   const settings: Record<string, unknown> = {};
-  if (servers.length > 0) settings.packages = ['npm:pi-mcp-extension@1.5.0'];
+  // 1.8.0 — первая версия с mcp_connect/mcp_status. Без них lifecycle: lazy
+  // превращается в ловушку: инструменты сервера не активны, а подключить его
+  // из разговора нечем (в 1.5.0 был только ручной /mcp:start).
+  if (servers.length > 0) settings.packages = ['npm:pi-mcp-extension@1.8.0'];
   return JSON.stringify(settings, null, 2) + '\n';
 }
 
