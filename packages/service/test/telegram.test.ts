@@ -83,6 +83,24 @@ test('Bot API: ошибка приезжает с кодом и описание
   });
 });
 
+test('Bot API: режим разметки уезжает в запрос, без него — не уезжает', async () => {
+  const { calls, fetch } = fakeFetch([
+    { ok: true, result: { message_id: 1 } },
+    { ok: true, result: { message_id: 2 } },
+    { ok: true, result: true },
+  ]);
+  const api = new TelegramApi('TOKEN', { fetch, baseUrl: 'https://tg.test' });
+
+  await api.sendMessage(1, '<b>жирный</b>', null, undefined, { parseMode: 'HTML' });
+  await api.sendMessage(1, 'привет');
+  await api.editMessageText(1, 2, '<b>жирный</b>', { parseMode: 'HTML' });
+
+  assert.equal(calls[0]?.body.parse_mode, 'HTML');
+  // Сообщения служебок (приветствие, команды) — голый текст: разметку в них никто не чистил.
+  assert.equal(calls[1]?.body.parse_mode, undefined);
+  assert.equal(calls[2]?.body.parse_mode, 'HTML', 'правка тоже размеченная');
+});
+
 test('Bot API: 429 ждём и повторяем, а не теряем ответ', async () => {
   const { calls, fetch } = fakeFetch([
     { ok: false, error_code: 429, description: 'Too Many Requests', parameters: { retry_after: 2 } },
@@ -175,7 +193,14 @@ function fakeSession(steps: Step[] = ANSWER_STEPS) {
 /** Чат глазами Telegram: сообщения заводятся отправкой и меняются правками. */
 function fakeApi(files: Record<string, Buffer> = {}) {
   const state = {
-    messages: [] as Array<{ chatId: number; id: number; text: string; threadId: number | null }>,
+    messages: [] as Array<{
+      chatId: number;
+      id: number;
+      text: string;
+      threadId: number | null;
+      /** С какой разметкой сообщение легло в Telegram: null — как голый текст. */
+      parseMode: string | null;
+    }>,
     nextId: 1,
     typing: 0,
     /** Куда ушло последнее «печатает…»: в топике это должно быть то же место. */
@@ -191,21 +216,37 @@ function fakeApi(files: Record<string, Buffer> = {}) {
     renames: [] as Array<{ chatId: number; threadId: number; name: string }>,
     /** Telegram отбивает отправку в топик: так выглядит «ответ не доехал». */
     failTopics: false,
+    /** Telegram отбивает разметку: так выглядит наш промах в HTML. */
+    rejectMarkup: false,
+  };
+  /** Разметку Telegram разбирает до сохранения: отказал — значит, сообщения нет. */
+  const rejectMarkup = (parseMode?: string) => {
+    if (!state.rejectMarkup || !parseMode) return;
+    throw new TelegramError(`Bad Request: can't parse entities: Unsupported start tag "b" at byte offset 0`, 400);
   };
   const api = {
-    async sendMessage(chatId: number, text: string, threadId: number | null = null) {
+    async sendMessage(
+      chatId: number,
+      text: string,
+      threadId: number | null = null,
+      _anchor?: number,
+      options: { parseMode?: string } = {},
+    ) {
       if (state.failTopics && threadId !== null) {
         throw new TelegramError('Bad Request: message thread not found', 400);
       }
-      const message = { chatId, id: state.nextId, text, threadId };
+      rejectMarkup(options.parseMode);
+      const message = { chatId, id: state.nextId, text, threadId, parseMode: options.parseMode ?? null };
       state.nextId += 1;
       state.messages.push(message);
       return { message_id: message.id };
     },
-    async editMessageText(chatId: number, messageId: number, text: string) {
+    async editMessageText(chatId: number, messageId: number, text: string, options: { parseMode?: string } = {}) {
       const message = state.messages.find((item) => item.id === messageId && item.chatId === chatId);
       if (!message) throw new TelegramError('message to edit not found', 400);
+      rejectMarkup(options.parseMode);
       message.text = text;
+      message.parseMode = options.parseMode ?? null;
     },
     async sendChatAction(_chatId: number, _action = 'typing', threadId: number | null = null) {
       state.typing += 1;
@@ -828,6 +869,41 @@ test('точка разреза ищется во второй половине,
   const cut = splitPoint(text, 1000);
   assert.ok(cut > 500 && cut <= 1000, `cut=${cut}`);
   assert.equal(splitPoint('безграниц'.repeat(200), 100), 100, 'нет границ — режем по пределу');
+});
+
+test('ответ уезжает с HTML-разметкой: модель пишет markdown, человек видит жирный', async () => {
+  const { bot, state } = makeBot({
+    steps: [
+      {
+        type: 'message_update',
+        assistantMessageEvent: { type: 'text_delta', delta: '**Токены** в `client_uid`' },
+      },
+      { type: 'agent_settled' },
+    ],
+  });
+
+  await bot.handleUpdate(messageUpdate('как там токены?'));
+
+  const message = state.messages.find((item) => item.chatId === 42);
+  assert.equal(message?.parseMode, 'HTML', 'без parse_mode Telegram покажет звёздочки как есть');
+  assert.equal(message?.text, '<b>Токены</b> в <code>client_uid</code>');
+});
+
+test('Telegram не принял разметку — ответ доезжает, только без неё', async () => {
+  const { bot, state } = makeBot({
+    steps: [
+      { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: '**Токены** и `код`' } },
+      { type: 'agent_settled' },
+    ],
+  });
+  // Так Telegram отвечает, когда разметку не понял: наш промах не должен съесть ответ.
+  state.rejectMarkup = true;
+
+  await bot.handleUpdate(messageUpdate('как там токены?'));
+
+  const message = state.messages.find((item) => item.chatId === 42);
+  assert.equal(message?.text, 'Токены и код', 'разметка снята, текст остался');
+  assert.equal(message?.parseMode, null);
 });
 
 test('пустой ответ не оставляет висящее многоточие', async () => {
