@@ -151,3 +151,13 @@ test('отказ доступа объясняет причину и экран�
   assert.doesNotMatch(html, /<script>alert\(1\)<\/script>/);
   assert.doesNotMatch(html, /class="cols"/, 'пустой панели при отказе не показываем');
 });
+
+test('настройки внутри чата не показывают второй сайдбар и не сужаются', () => {
+  const html = panelHtml(SESSION, { section: 'memory', scope: 'personal', embed: true });
+  assert.doesNotMatch(html, /<aside>/, 'в чате уже есть свой сайдбар — второй не нужен');
+  assert.match(html, /class="app embedded"/);
+  assert.match(html, /id="q"/, 'поиск по настройкам остаётся');
+  assert.match(html, /id="content"/);
+  assert.match(html, /&embed=1/, 'переходы внутри настроек не теряют режим панели');
+  assert.match(html, /"embed":true/);
+});

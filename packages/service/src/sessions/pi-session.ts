@@ -91,7 +91,16 @@ export class PiSession {
     this.generation = generation;
     this.sessionId = sessionIdFor(user.id, conversationId);
 
-    this.client = new RpcClient(config, container, piArgsFor(model, this.sessionId));
+    // Канал нужен расширению-персоне: в веб-чате можно показать картинку
+    // markdown-ом, в Telegram — нельзя, и учить модель лишнему незачем.
+    const channel = conversationId.startsWith('web-')
+      ? 'web'
+      : conversationId.startsWith('telegram-')
+        ? 'telegram'
+        : 'api';
+    this.client = new RpcClient(config, container, piArgsFor(model, this.sessionId), undefined, {
+      ICARUS_CHANNEL: channel,
+    });
     this.detach = this.client.onEvent((event) => {
       // Во время сжатия сессия занята не ходом: `agent_settled` тут ни при чём,
       // иначе ход влез бы в сессию посреди переписывания контекста.

@@ -81,10 +81,19 @@ test('без заголовка прокси панель не пускает и
 
 test('человека называет заголовок: панель открывается со своим именем', async () => {
   await withServer(async (base) => {
-    // Старый адрес ведёт на память: он и раньше её открывал, и в закладках он есть.
+    // Корень панели — чат: это главный экран. Старые ссылки на файл памяти
+    // по-прежнему ведут в память.
     const root = await fetch(`${base}/panel`, { headers: asUser('probe'), redirect: 'manual' });
     assert.equal(root.status, 302);
-    assert.equal(root.headers.get('location'), '/panel/memory?scope=personal');
+    assert.equal(root.headers.get('location'), '/panel/chat');
+
+    const legacy = await fetch(`${base}/panel?file=identity.md`, { headers: asUser('probe'), redirect: 'manual' });
+    assert.equal(legacy.status, 302);
+    assert.equal(legacy.headers.get('location'), '/panel/memory?scope=personal&file=identity.md');
+
+    const chat = await fetch(`${base}/panel/chat`, { headers: asUser('probe') });
+    assert.equal(chat.status, 200);
+    assert.match(await chat.text(), /Чем займёмся\?/, 'корень — чат, а не настройки');
 
     const response = await fetch(`${base}/panel/memory?scope=personal`, { headers: asUser('probe') });
     assert.equal(response.status, 200);
