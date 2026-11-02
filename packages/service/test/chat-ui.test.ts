@@ -88,6 +88,10 @@ test('новый чат — черновик: сервер узнаёт о нё�
   assert.match(html, /el\('new-chat'\)\.onclick = startDraft/, 'клик по кнопке только открывает черновик');
   assert.match(html, /async function createChat/, 'создание вынесено в отдельную функцию');
   assert.doesNotMatch(html, /newChat\(/, 'мгновенного создания больше нет');
+  // Кнопка и черновик — одна и та же высота строки, иначе список прыгает.
+  assert.match(html, /--side-row: 58px/, 'высота строки задана один раз');
+  assert.match(html, /\.new-chat \{[\s\S]*?height: var\(--side-row\)/, 'кнопка высотой со строку списка');
+  assert.match(html, /\.draft-wrap \.chat-item \{[^}]*height: var\(--side-row\)/, 'черновик той же высоты');
 });
 
 test('над списком диалогов нет лишнего заголовка', () => {
