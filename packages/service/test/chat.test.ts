@@ -3,11 +3,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import type { AddressInfo } from 'node:net';
+import { createServer } from '../src/http/server.ts';
 import { userPaths } from '../src/config.ts';
 import { sessionIdFor } from '../src/sessions/pi-session.ts';
+import { rememberTelegramSession } from '../src/sessions/catalog.ts';
 import {
   chatImageFile,
   createChat,
+  isExternalChatId,
   parseUploadAttachments,
   splitPromptAttachments,
   finishChat,
@@ -17,7 +21,7 @@ import {
   traceDetail,
   traceLabel,
 } from '../src/control/chat.ts';
-import { makeConfig, probe } from './fixtures.ts';
+import { makeConfig, PANEL_USER_HEADER, probe } from './fixtures.ts';
 
 function fixture() {
   const config = makeConfig({ users: [probe('probe')] });
@@ -110,6 +114,125 @@ test('история берётся из файла сессии: текст и 
 test('неизвестный разговор не выдумывает историю', () => {
   const { config, user } = fixture();
   assert.equal(readHistory(config, user, 'web-нет'), null);
+  assert.equal(readHistory(config, user, 'session:нет-такой'), null);
+});
+
+/** Файл сессии pi: `<когда создан>_<id>.jsonl`, как его кладёт pi. */
+function putSessionFile(
+  config: ReturnType<typeof makeConfig>,
+  user: ReturnType<typeof probe>,
+  conversationId: string,
+  entries: unknown[],
+): { file: string; sessionId: string } {
+  const dir = userPaths(config, user).sessions;
+  fs.mkdirSync(dir, { recursive: true });
+  const sessionId = sessionIdFor(user.id, conversationId);
+  const file = path.join(dir, `2026-11-01T10-00-00-000Z_${sessionId}.jsonl`);
+  fs.writeFileSync(file, [JSON.stringify({ type: 'session', timestamp: '2026-11-01T10:00:00.000Z' }), ...entries.map((entry) => JSON.stringify(entry))].join('\n'));
+  return { file, sessionId };
+}
+
+function dialog(userText: string, assistantText: string, at = '2026-11-01T10:00:01.000Z'): unknown[] {
+  return [
+    { type: 'message', timestamp: at, message: { role: 'user', content: [{ type: 'text', text: userText }] } },
+    { type: 'message', timestamp: at, message: { role: 'assistant', content: [{ type: 'text', text: assistantText }] } },
+  ];
+}
+
+test('в списке диалогов видны Telegram-разговоры, и они только для чтения', () => {
+  const { config, user } = fixture();
+  const conversationId = 'telegram-4242';
+  const { sessionId } = putSessionFile(
+    config,
+    user,
+    conversationId,
+    dialog('Собери отчёт для мамы', 'Готово: отчёт лежит в incoming/otchet.md'),
+  );
+  rememberTelegramSession(config, user, conversationId, sessionId);
+
+  const chat = listChats(config, user).find((item) => item.id === `session:${sessionId}`);
+  assert.ok(chat, 'файл сессии Telegram попал в список');
+  assert.equal(chat.channel, 'telegram');
+  assert.equal(chat.readOnly, true);
+  assert.match(chat.title, /отчёт/);
+  assert.match(chat.preview, /Готово/);
+
+  const history = readHistory(config, user, chat.id);
+  assert.equal(history?.chat.readOnly, true);
+  assert.equal(history?.chat.channel, 'telegram');
+  assert.equal(history?.messages.length, 2);
+  assert.equal(history?.messages[0]?.text, 'Собери отчёт для мамы');
+  assert.equal(isExternalChatId(chat.id), true);
+  assert.equal(isExternalChatId('web-1'), false);
+});
+
+test('веб-разговор не дублируется в списке как внешняя сессия', () => {
+  const { config, user } = fixture();
+  const chat = createChat(config, user, new Date('2026-11-01T10:00:00.000Z'));
+  putSessionFile(config, user, chat.id, dialog('Построй план', 'Вот план'));
+
+  assert.deepEqual(
+    listChats(config, user).map((item) => item.id),
+    [chat.id],
+    'у веб-чата один и тот же файл сессии, и второй записи быть не должно',
+  );
+});
+
+test('старый файл без каталога всё равно виден, но без канала', () => {
+  const { config, user } = fixture();
+  const { sessionId } = putSessionFile(config, user, 'telegram-777', dialog('Старый разговор', 'Старый ответ'));
+
+  const [chat] = listChats(config, user);
+  assert.equal(chat?.id, `session:${sessionId}`);
+  assert.equal(chat?.channel, 'external');
+  assert.equal(chat?.readOnly, true, 'без каталога канал неизвестен — писать всё равно нельзя');
+  assert.match(chat?.title ?? '', /Старый разговор/);
+  assert.equal(readHistory(config, user, chat?.id ?? '')?.messages.length, 2);
+});
+
+test('пустой файл сессии не выдаётся за разговор', () => {
+  const { config, user } = fixture();
+  putSessionFile(config, user, 'telegram-99', []);
+  assert.equal(listChats(config, user).length, 0);
+});
+
+test('через API внешний разговор читается, но не пишется', async () => {
+  const { config, user } = fixture();
+  const conversationId = 'telegram-4242';
+  const { sessionId } = putSessionFile(config, user, conversationId, dialog('Покажи погоду', 'Солнечно'));
+  rememberTelegramSession(config, user, conversationId, sessionId);
+
+  const server = createServer(config, {} as never);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address() as AddressInfo;
+  const headers = { [PANEL_USER_HEADER]: 'probe', 'content-type': 'application/json' };
+  const externalId = `session:${sessionId}`;
+
+  try {
+    const base = `http://127.0.0.1:${port}`;
+    const listed = (await (await fetch(`${base}/panel/api/chats`, { headers })).json()) as {
+      chats: Array<{ id: string; readOnly?: boolean }>;
+    };
+    assert.equal(listed.chats.find((chat) => chat.id === externalId)?.readOnly, true);
+
+    const history = await fetch(`${base}/panel/api/chat/history?id=${encodeURIComponent(externalId)}`, { headers });
+    assert.equal(history.status, 200);
+
+    const send = await fetch(`${base}/panel/api/chat/send`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ chatId: externalId, text: 'продолжи' }),
+    });
+    assert.equal(send.status, 403, 'в Telegram-разговор из панели не записать');
+    const abort = await fetch(`${base}/panel/api/chat/abort`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ chatId: externalId }),
+    });
+    assert.equal(abort.status, 403);
+  } finally {
+    server.close();
+  }
 });
 
 test('шаги называют то, чем Икар занимался, а не сырое имя тула', () => {

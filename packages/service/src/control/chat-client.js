@@ -253,10 +253,54 @@ let currentId = cfg.chatId || null;
 let currentChat = null;
 let currentMessages = [];
 let streaming = false;
+/** Можно ли писать в открытый разговор: Telegram и API в панели только читаются. */
+let writable = Boolean(cfg.enabled);
 let searchTimer = 0;
 let pending = [];
 const MAX_FILES = 8;
 const MAX_TOTAL_BYTES = 10 * 1024 * 1024;
+
+/** Как назвать вход, из которого пришёл разговор. */
+function channelName(chat) {
+  if (!chat) return '';
+  if (chat.channel === 'telegram') return 'Telegram';
+  if (chat.channel === 'api') return 'API';
+  return '';
+}
+
+/** Короткая метка в списке диалогов: длинное «только чтение» съедает заголовок. */
+function channelTag(chat) {
+  if (!chat) return '';
+  if (chat.channel === 'telegram') return 'TG';
+  if (chat.channel === 'api') return 'API';
+  return chat.readOnly ? '🔒' : '';
+}
+
+/**
+ * Композер — по каналу разговора. Веб-чат пишется, Telegram и API читаются:
+ * сервер всё равно откажет, но обещать в поле ввода несуществующее нельзя.
+ */
+function setComposer(readOnly) {
+  const locked = Boolean(readOnly);
+  writable = Boolean(cfg.enabled) && !locked;
+  const label = channelName(currentChat);
+  el('chat-input').disabled = !writable;
+  el('chat-send').disabled = !writable;
+  el('chat-attach').disabled = !writable;
+  el('chat-input').placeholder = !cfg.enabled
+    ? 'Чат недоступен…'
+    : locked
+      ? 'Разговор только для чтения'
+      : 'Написать Icarus...';
+  el('chat-locked').hidden = !locked || !cfg.enabled;
+  el('chat-locked').textContent =
+    locked && cfg.enabled
+      ? 'Этот разговор начат в ' +
+        (label || 'другом входе') +
+        '. Здесь он только для чтения — продолжить можно там, где он начат.'
+      : '';
+  el('chat-status').textContent = !cfg.enabled ? 'Чат выключен' : locked ? 'Только чтение' : 'Агент активен';
+}
 
 function setTitle(title) {
   el('chat-title').textContent = title || 'Новый чат';
@@ -291,11 +335,14 @@ function renderChats() {
     html +=
       '<button class="chat-item' +
       (chat.id === currentId ? ' active' : '') +
+      (chat.readOnly ? ' read-only' : '') +
       '" data-id="' +
       esc(chat.id) +
       '"><div class="chat-item-top"><span class="chat-item-title">' +
       esc(chat.title) +
-      '</span><time class="chat-item-time">' +
+      '</span>' +
+      (channelTag(chat) ? '<span class="chat-item-tag">' + esc(channelTag(chat)) + '</span>' : '') +
+      '<time class="chat-item-time">' +
       esc(timeLabel(chat.updatedAt)) +
       '</time></div><div class="chat-item-preview">' +
       esc(cleanPreview(chat.preview || '')) +
@@ -394,7 +441,7 @@ function clearPending(revoke = true) {
 }
 
 function addFiles(list) {
-  if (streaming || !cfg.enabled) return;
+  if (streaming || !writable) return;
   let total = pending.reduce((sum, item) => sum + item.file.size, 0);
   for (const file of Array.from(list || [])) {
     if (pending.length >= MAX_FILES) {
@@ -470,10 +517,14 @@ async function selectChat(id) {
   currentId = id;
   history.replaceState(null, '', '/panel/chat?chat=' + encodeURIComponent(id));
   renderChats();
+  // Канал уже известен из списка: композер не должен на миг обещать запись.
+  setComposer(Boolean(chats.find((chat) => chat.id === id)?.readOnly));
   try {
     const data = await api('/panel/api/chat/history?id=' + encodeURIComponent(id));
     currentChat = data.chat;
     setTitle(currentChat.title);
+    setComposer(Boolean(currentChat.readOnly));
+    setWorking('');
     renderHistory(data.messages || []);
     closeMenu();
   } catch (error) {
@@ -498,6 +549,7 @@ async function newChat() {
     renderChats();
     history.replaceState(null, '', '/panel/chat?chat=' + encodeURIComponent(data.chat.id));
     setTitle('Новый чат');
+    setComposer(false);
     showEmpty(true);
     setWorking('');
     closeMenu();
@@ -623,6 +675,7 @@ function handleEvent(box, event) {
     if (event.chat) {
       currentChat = event.chat;
       setTitle(event.chat.title);
+      setComposer(false);
     }
     loadChats().catch(() => {});
     setWorking('');
@@ -638,7 +691,7 @@ function handleEvent(box, event) {
 }
 
 async function sendText(forced) {
-  if (streaming || !cfg.enabled) return;
+  if (streaming || !writable) return;
   const input = el('chat-input');
   const text = String(forced ?? input.value).trim();
   const files = pending.slice();
@@ -718,7 +771,7 @@ async function sendText(forced) {
     setWorking('');
   } finally {
     streaming = false;
-    el('chat-send').disabled = !cfg.enabled;
+    el('chat-send').disabled = !writable;
     box.typing.hidden = true;
     input.focus();
   }
@@ -814,10 +867,11 @@ document.querySelectorAll('.suggestions button').forEach((node) => {
   else if (chats.length) await selectChat(chats[0].id);
   else {
     setTitle('Новый чат');
+    setComposer(false);
     showEmpty(true);
   }
   if (requested) openSettings(requested);
-  if (cfg.enabled) el('chat-input').focus();
+  if (writable) el('chat-input').focus();
 })().catch((error) => {
   setWorking('чат не открылся: ' + error.message);
 });

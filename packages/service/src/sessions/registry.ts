@@ -5,6 +5,7 @@ import path from 'node:path';
 import { ensureContainerRunning } from '../docker/manager.ts';
 import { log, redact } from '../log.ts';
 import { COMPACT_TIMEOUT_MS, PiSession, sessionIdFor, type CompactResult, type PiCommand } from './pi-session.ts';
+import { rememberTelegramSession } from './catalog.ts';
 import { runOneShot, type OneShotOptions } from './one-shot.ts';
 import { userPaths, type IcarusConfig, type ModelConfig, type UserConfig } from '../config.ts';
 
@@ -221,6 +222,9 @@ export class SessionRegistry {
     const container = await this.ensureUserContainer(user);
     const session = this.createSession(this.config, user, conversationId, this.fastModel(), container, generation);
     this.sessions.set(key, session);
+    // Панель перечисляет и Telegram-разговоры: из имени файла сессии канал не
+    // восстановить, поэтому запоминаем пару «файл → разговор» рядом с сессиями.
+    rememberTelegramSession(this.config, user, conversationId, sessionIdFor(user.id, conversationId));
     return session;
   }
 

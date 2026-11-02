@@ -2,6 +2,7 @@
 // Процесс живёт внутри контейнера пользователя, общение — JSONL по stdio.
 import { createHash } from 'node:crypto';
 import { RpcClient, type RpcEvent } from './rpc-client.ts';
+import { channelForConversation } from './catalog.ts';
 import { log } from '../log.ts';
 import type { IcarusConfig, ModelConfig, UserConfig } from '../config.ts';
 
@@ -93,11 +94,7 @@ export class PiSession {
 
     // Канал нужен расширению-персоне: в веб-чате можно показать картинку
     // markdown-ом, в Telegram — нельзя, и учить модель лишнему незачем.
-    const channel = conversationId.startsWith('web-')
-      ? 'web'
-      : conversationId.startsWith('telegram-')
-        ? 'telegram'
-        : 'api';
+    const channel = channelForConversation(conversationId);
     this.client = new RpcClient(config, container, piArgsFor(model, this.sessionId), undefined, {
       ICARUS_CHANNEL: channel,
     });
