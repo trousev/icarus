@@ -276,7 +276,7 @@ test('через API внешний разговор читается, но не
 });
 
 test('шаги называют то, чем Икар занимался, а не сырое имя тула', () => {
-  assert.equal(traceLabel('bash', { command: 'cat /workspace/memory/identity.md' }), 'ПАМЯТЬ');
+  assert.equal(traceLabel('bash', { command: 'cat /workspace/.icarus/memory/identity.md' }), 'ПАМЯТЬ');
   assert.equal(traceLabel('bash', { command: 'ls /workspace' }), 'ТЕРМИНАЛ');
   assert.equal(traceLabel('mcp_connect', { name: 'homeassistant' }), 'MCP');
   assert.equal(traceLabel('mcp_homeassistant_llm__GetDateTime'), 'ДОМ');
@@ -292,16 +292,16 @@ test('картинка из workspace отдаётся только из incomin
   fs.writeFileSync(path.join(paths.incoming, 'kotic.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
   fs.writeFileSync(path.join(paths.maple, 'plot.gif'), Buffer.from('GIF89a'));
 
-  const incoming = chatImageFile(config, user, '/workspace/incoming/kotic.png');
+  const incoming = chatImageFile(config, user, '/workspace/.icarus/incoming/kotic.png');
   assert.equal(incoming?.type, 'image/png');
   assert.match(incoming?.file ?? '', /kotic\.png$/);
 
-  const maple = chatImageFile(config, user, '/workspace/maple/plot.gif');
+  const maple = chatImageFile(config, user, '/workspace/.icarus/maple/plot.gif');
   assert.equal(maple?.type, 'image/gif');
 
-  assert.equal(chatImageFile(config, user, '/workspace/incoming/../../etc/passwd.png'), null);
-  assert.equal(chatImageFile(config, user, '/workspace/icarus.md'), null);
-  assert.equal(chatImageFile(config, user, '/workspace/incoming/нет-такой.png'), null);
+  assert.equal(chatImageFile(config, user, '/workspace/.icarus/incoming/../../etc/passwd.png'), null);
+  assert.equal(chatImageFile(config, user, '/workspace/.icarus/icarus.md'), null);
+  assert.equal(chatImageFile(config, user, '/workspace/.icarus/incoming/нет-такой.png'), null);
 });
 
 test('вложения из браузера ложатся в incoming, картинки уходят и в files, и в images', () => {
@@ -319,7 +319,7 @@ test('вложения из браузера ложатся в incoming, кар�
   assert.equal(uploaded.images.length, 1);
   assert.equal(uploaded.images[0]?.mimeType, 'image/png');
   assert.deepEqual(uploaded.names, ['котик.png', 'план.txt']);
-  assert.ok(uploaded.files[0]?.startsWith('/workspace/incoming/'));
+  assert.ok(uploaded.files[0]?.startsWith('/workspace/.icarus/incoming/'));
   for (const file of uploaded.files) {
     assert.ok(fs.existsSync(path.join(incoming, path.basename(file))));
   }
@@ -332,11 +332,11 @@ test('вложения из браузера ложатся в incoming, кар�
 
 test('след вложений в реплике разбирается обратно в плашки', () => {
   const parsed = splitPromptAttachments(
-    'Смотри\n\n[Пользователь приложил файлы, они уже лежат на диске:\n- /workspace/incoming/a.png\n- /workspace/incoming/b.pdf]',
+    'Смотри\n\n[Пользователь приложил файлы, они уже лежат на диске:\n- /workspace/.icarus/incoming/a.png\n- /workspace/.icarus/incoming/b.pdf]',
   );
   assert.equal(parsed.text, 'Смотри');
   assert.deepEqual(parsed.attachments, [
-    { path: '/workspace/incoming/a.png', image: true },
-    { path: '/workspace/incoming/b.pdf', image: false },
+    { path: '/workspace/.icarus/incoming/a.png', image: true },
+    { path: '/workspace/.icarus/incoming/b.pdf', image: false },
   ]);
 });

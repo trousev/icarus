@@ -18,7 +18,7 @@
 |---|--------|---------|
 | 1 | Пользователи | 2–5 близких: изоляция настоящая, но без SaaS-обвязки |
 | 2 | Изоляция | Docker-контейнер на человека; люди перечислены в конфиге сервиса; контейнерами управляем программно |
-| 3 | Маунты | `memory/` (личное), `shared-memory/` (семейное), список репозиториев (`scratchpad` первым), `AGENTS.md` в корне |
+| 3 | Маунты | `memory/` (личное), `shared-memory/` (семейное), список репозиториев (`scratchpad` первым), `AGENTS.md` в служебном `.icarus/` |
 | 4 | Наполнение памяти | Гибрид: «запомни» — сразу; плюс фоновый экстрактор, прозрачно и с откатом |
 | 5 | Форма памяти | Полки по смыслу + журнал: `identity.md`, `people/`, `preferences.md`, `projects/`, `journal/YYYY-MM.md` |
 | 6 | Чтение памяти | Компактное ядро всегда в промпте; остальное — тулами поиска (ещё и защита prompt-кеша) |
@@ -60,12 +60,13 @@ icarus (docker, Node/TS) — тонкий фасад, без знания о в�
   │  stdio (JSONL)
   ▼
 Контейнер пользователя (node + pi + git + ripgrep)
-  /workspace/memory         ← bind: ~/icarus/<user>/memory   (git)
-  /workspace/shared-memory  ← bind: ~/icarus/shared          (git)
-  /workspace/maple          ← bind: ~/icarus/<user>/maple    (журналы и графики Maple)
-  /workspace/scratchpad     ← bind: ~/src/scratchpad         (позже, не в MVP)
-  /workspace/AGENTS.md      ← генерирует сервис: раскладка и правила
-  /workspace/icarus.md      ← системный промпт (руками)
+  /workspace/.icarus/memory         ← bind: ~/icarus/<user>/memory   (git)
+  /workspace/.icarus/shared-memory  ← bind: ~/icarus/shared          (git)
+  /workspace/.icarus/maple          ← bind: ~/icarus/<user>/maple    (журналы и графики Maple)
+  /workspace/.icarus/sessions       ← bind: ~/icarus/<user>/sessions (история разговоров)
+  /workspace/.icarus/AGENTS.md      ← генерирует сервис: раскладка и правила
+  /workspace/.icarus/icarus.md      ← системный промпт (руками)
+  /workspace/scratchpad             ← bind: ~/src/scratchpad         (свободное место)
   ~/.pi/agent/auth.json     ← ключ этого человека
   ~/.pi/agent/models.json   ← уровни моделей и thinking effort
   расширения pi: persona, memory-core, memory-extractor, escalation

@@ -2,7 +2,7 @@
 //
 // Крона в контейнере нет: pi-процесс живёт, пока идёт разговор, и гаснет по простою.
 // Поэтому уборку запускаем сами — по agent_settled, выждав затишье, и не чаще раза
-// в сутки. Отметка о прогоне лежит вне репозитория памяти (WORKSPACE/.sweep.json),
+// в сутки. Отметка о прогоне лежит вне репозитория памяти (.icarus/.sweep.json),
 // иначе `git add -A` экстрактора закоммитил бы и её.
 //
 // Сама логика — в lib/memory-sweep.ts; здесь только расписание, вызов дешёвой модели
@@ -23,10 +23,10 @@ import {
   writeSweepState,
 } from "./lib/memory-sweep.ts";
 
-const MEMORY = process.env.ICARUS_MEMORY_DIR ?? "/workspace/memory";
-const WORKSPACE = process.env.ICARUS_WORKSPACE ?? "/workspace";
+const ICARUS = process.env.ICARUS_HOME ?? "/workspace/.icarus";
+const MEMORY = process.env.ICARUS_MEMORY_DIR ?? `${ICARUS}/memory`;
 const AFTER_HOURS = sweepAfterHours(process.env.ICARUS_SWEEP_AFTER_HOURS);
-const STATE = sweepStatePath(WORKSPACE);
+const STATE = sweepStatePath(ICARUS);
 // Уборка идёт следом за разбором разговора: пусть сначала договорит экстрактор, иначе
 // два `git commit` в одной памяти столкнутся за index.lock.
 const QUIET_MS = Number(process.env.ICARUS_EXTRACT_AFTER_MS ?? 90_000) + 30_000;

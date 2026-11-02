@@ -3,7 +3,7 @@
 // отпечаток один на весь сервис: поменял образ или маунт — пересоздаются все
 // контейнеры, а не только тот, который первым попал под руку.
 import { createHash } from 'node:crypto';
-import { userContainer, type IcarusConfig, type UserConfig } from '../config.ts';
+import { CONTAINER_PATHS, userContainer, type IcarusConfig, type UserConfig } from '../config.ts';
 
 export const LABEL_MANAGED = 'icarus.managed';
 export const LABEL_USER = 'icarus.user';
@@ -28,6 +28,8 @@ export function containerEnv(config: IcarusConfig, user: UserConfig): Record<str
   return {
     ...modelTierEnv(config),
     ...config.env,
+    // Расширения читают этот путь сами, чтобы не хардкодить раскладку по второму разу.
+    ICARUS_HOME: CONTAINER_PATHS.home,
     ICARUS_USER_ID: user.id,
     ICARUS_URL: config.url,
   };
@@ -50,6 +52,10 @@ export function specFor(config: IcarusConfig, user: UserConfig): string {
     // пересоздаться, иначе они останутся примонтированными к старым каталогам, а сервис
     // будет писать в новые. Ровно на этом мы и споткнулись при переезде конфига.
     dataDir: config.dataDir,
+    // Раскладка внутри контейнера — тоже содержимое: переехали наши каталоги в
+    // /workspace/.icarus, и без этого поля старые контейнеры остались бы с прежними
+    // точками монтирования, а сервис писал бы человеку пути, которых там нет.
+    layout: CONTAINER_PATHS,
     mounts,
     env: Object.fromEntries(Object.entries(env).sort(([a], [b]) => a.localeCompare(b))),
   });

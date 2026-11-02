@@ -10,10 +10,14 @@ import { buildMemoryCore } from "./lib/memory-core.ts";
 import { formatSkillsBlock, type SkillEntry } from "./lib/skills-core.ts";
 import { TIME_INSTRUCTION } from "./lib/time-core.ts";
 
-const PERSONA = "/workspace/icarus.md";
-const DUMP = "/workspace/.prompt-dump.txt";
-const SHARED = "/workspace/shared-memory";
-const MEMORY = process.env.ICARUS_MEMORY_DIR ?? "/workspace/memory";
+// Служебный каталог Икара: память, вложения, сессии и промпты. Сам /workspace
+// оставлен человеку под свободную работу — наших файлов там больше нет.
+const ICARUS = process.env.ICARUS_HOME ?? "/workspace/.icarus";
+const PERSONA = `${ICARUS}/icarus.md`;
+const AGENTS = `${ICARUS}/AGENTS.md`;
+const DUMP = `${ICARUS}/.prompt-dump.txt`;
+const SHARED = `${ICARUS}/shared-memory`;
+const MEMORY = process.env.ICARUS_MEMORY_DIR ?? `${ICARUS}/memory`;
 
 function stripComments(markdown: string): string {
   // вырезаем все блоки комментариев в цикле: внутри комментария может встретиться
@@ -36,7 +40,19 @@ export default function (pi: ExtensionAPI) {
       /* оставляем заглушку */
     }
 
-    const contextFiles = (event.systemPromptOptions?.contextFiles ?? [])
+    // Карту окружения читаем сами: pi ищет AGENTS.md только вверх от рабочего
+    // каталога, а наш файл теперь лежит в служебном каталоге. Свой AGENTS.md
+    // человека в /workspace, если он появится, приедет из pi и встанет следом.
+    const ownContext = (event.systemPromptOptions?.contextFiles ?? []).filter(
+      (file: { path: string }) => file.path !== AGENTS,
+    );
+    let map = "";
+    try {
+      map = fs.readFileSync(AGENTS, "utf8").trim();
+    } catch {
+      /* нет карты — работаем без неё, персона всё равно есть */
+    }
+    const contextFiles = [...(map ? [{ path: AGENTS, content: map }] : []), ...ownContext]
       .map((file: { path: string; content: string }) => `# Контекст: ${file.path}\n\n${file.content}`)
       .join("\n\n---\n\n");
 
@@ -69,7 +85,7 @@ export default function (pi: ExtensionAPI) {
       process.env.ICARUS_CHANNEL === 'web'
         ? [
             '# Веб-чат',
-            '- Панель сама рисует картинки из markdown: `![что на ней](/workspace/incoming/файл.jpg)`.',
+            `- Панель сама рисует картинки из markdown: \`![что на ней](${ICARUS}/incoming/файл.jpg)\`.`,
             '  Отдельного инструмента для этого нет — достаточно такой ссылки.',
             '- Если просят путь или адрес файла — напиши путь текстом, без картинки.',
           ].join('\n')

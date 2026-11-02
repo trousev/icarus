@@ -42,16 +42,16 @@ test('вложение раскодируется в файл, а не теря�
   const { text, files } = extractLatestUserMessage(messages, dir);
   assert.equal(text, 'что на картинке?');
   assert.equal(files.length, 1);
-  assert.match(files[0], /^\/workspace\/incoming\/.+\.png$/);
+  assert.match(files[0], /^\/workspace\/\.icarus\/incoming\/.+\.png$/);
   const written = fs.readdirSync(dir);
   assert.equal(written.length, 1);
   assert.ok(fs.statSync(path.join(dir, written[0])).size > 0, 'файл не должен быть пустым');
 });
 
 test('упоминание вложений попадает в реплику', () => {
-  const prompt = buildPrompt('что тут?', ['/workspace/incoming/a.png']);
+  const prompt = buildPrompt('что тут?', ['/workspace/.icarus/incoming/a.png']);
   assert.match(prompt, /что тут\?/);
-  assert.match(prompt, /\/workspace\/incoming\/a\.png/);
+  assert.match(prompt, /\/workspace\/\.icarus\/incoming\/a\.png/);
 });
 
 test('подстановка ~ и переменных окружения', () => {
@@ -69,8 +69,8 @@ test('контейнер монтирует память, сессии и реп
     mounts: [{ host: '/host/scratchpad', container: '/workspace/scratchpad', mode: 'ro' as const }],
   } as unknown as IcarusConfig;
   const joined = userVolumes(config, { id: 'probe' }).join(' ');
-  assert.match(joined, /\/data\/users\/probe\/memory:\/workspace\/memory/);
-  assert.match(joined, /\/data\/users\/probe\/sessions:\/workspace\/\.sessions/);
+  assert.match(joined, /\/data\/users\/probe\/memory:\/workspace\/\.icarus\/memory/);
+  assert.match(joined, /\/data\/users\/probe\/sessions:\/workspace\/\.icarus\/sessions/);
   assert.match(joined, /\/host\/scratchpad:\/workspace\/scratchpad:ro/);
 });
 

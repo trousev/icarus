@@ -9,7 +9,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { CONTAINER_INCOMING, findUser, userPaths, type IcarusConfig, type UserConfig } from '../config.ts';
+import { CONTAINER_HOME, CONTAINER_INCOMING, findUser, userPaths, type IcarusConfig, type UserConfig } from '../config.ts';
 import { readJsonBody } from '../http/openai.ts';
 import { errorBody } from '../http/sse.ts';
 import { titleFromText } from '../http/title.ts';
@@ -276,7 +276,7 @@ export function splitPromptAttachments(text: string): { text: string; attachment
 
 function previewOf(text: string): string {
   // В превью не должно быть markdown-картинки: в списке диалогов она выглядит
-  // как «!\[котик](/workspace/...)». Сам путь оставляем: если человек спросил
+  // как «!\[котик](/workspace/.icarus/...)». Сам путь оставляем: если человек спросил
   // адрес файла, именно он и должен быть виден в строке превью.
   const plain = text
     .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
@@ -329,7 +329,10 @@ export function chatImageFile(
   let relative = raw.trim();
   if (!relative || relative.includes('\u0000')) return null;
   if (relative.startsWith('file://')) relative = relative.slice('file://'.length);
-  if (relative.startsWith('/workspace/')) relative = relative.slice('/workspace/'.length);
+  // Служебный каталог снимаем первым: после общего '/workspace/' от него осталось бы
+  // '.icarus/incoming/…', и ни incoming/, ни maple/ уже не совпали бы.
+  if (relative.startsWith(`${CONTAINER_HOME}/`)) relative = relative.slice(CONTAINER_HOME.length + 1);
+  else if (relative.startsWith('/workspace/')) relative = relative.slice('/workspace/'.length);
   else if (relative.startsWith('workspace/')) relative = relative.slice('workspace/'.length);
   else if (relative.startsWith('/')) relative = relative.slice(1);
 

@@ -147,7 +147,7 @@ export class SessionRegistry {
   /**
    * Отмечает, что ресурсы человека поменялись. Живые сессии не трогаем: идущий ход
    * нужно доиграть, а следующая сессия этого разговора поднимется уже заново (см.
-   * acquire). История при этом не теряется — она лежит в /workspace/.sessions.
+   * acquire). История при этом не теряется — она лежит в /workspace/.icarus/sessions.
    */
   bumpResources(userId: string): number {
     const next = this.generation(userId) + 1;
@@ -328,7 +328,7 @@ export class SessionRegistry {
    * файл сессии в архив: без этого pi открыл бы прошлую историю. Живой процесс гасим:
    * он держит разговор в памяти и всё равно дописывал бы старый файл.
    *
-   * Память тут ни при чём: она лежит в /workspace/memory и `/clear` её не трогает.
+   * Память тут ни при чём: она лежит в /workspace/.icarus/memory и `/clear` её не трогает.
    */
   async clear(user: UserConfig, conversationId: string): Promise<ClearOutcome> {
     const key = `${user.id}:${conversationId}`;

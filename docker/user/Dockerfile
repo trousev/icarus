@@ -21,7 +21,9 @@ RUN npm install -g --ignore-scripts "@earendil-works/pi-coding-agent@${PI_VERSIO
 
 # В образе node:24-slim уже есть пользователь node с uid/gid 1000 — переиспользуем его,
 # чтобы файлы примонтированной памяти не становились root-овыми на хосте.
-RUN mkdir -p /home/node/.pi/agent /workspace \
+# .icarus — служебный каталог: туда сервис монтирует память, сессии и промпты.
+# Сам /workspace остаётся свободным местом человека, поэтому заводим только его.
+RUN mkdir -p /home/node/.pi/agent /workspace/.icarus \
     && chown -R node:node /home/node /workspace
 
 USER node

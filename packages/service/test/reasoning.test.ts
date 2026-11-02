@@ -4,11 +4,11 @@ import assert from 'node:assert/strict';
 import { phraseForToolEnd, phraseForToolStart, subagentStatus } from '../src/reasoning.ts';
 
 test('чтение файла', () => {
-  assert.equal(phraseForToolStart('read', { path: '/workspace/memory/identity.md' }), 'читаю memory/identity.md');
+  assert.equal(phraseForToolStart('read', { path: '/workspace/.icarus/memory/identity.md' }), 'читаю memory/identity.md');
 });
 
 test('правка файла', () => {
-  assert.equal(phraseForToolStart('edit', { path: '/workspace/memory/preferences.md' }), 'правлю memory/preferences.md');
+  assert.equal(phraseForToolStart('edit', { path: '/workspace/.icarus/memory/preferences.md' }), 'правлю memory/preferences.md');
 });
 
 test('команда обрезается', () => {

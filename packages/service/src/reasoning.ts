@@ -2,10 +2,13 @@
 // чтобы в чате было видно, что Икар делает руками, а не только его ответ.
 
 const WORKSPACE = '/workspace/';
+/** Служебный каталог: в чате его префикс только мешает, «memory/identity.md» понятнее. */
+const HOME = '/workspace/.icarus/';
 
 function shortPath(value: unknown): string {
   const text = typeof value === 'string' ? value : '';
   if (!text) return 'файл';
+  if (text.startsWith(HOME)) return text.slice(HOME.length);
   return text.startsWith(WORKSPACE) ? text.slice(WORKSPACE.length) : text;
 }
 

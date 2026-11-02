@@ -4,7 +4,7 @@ import { RpcClient, type RpcEvent, type Spawner } from './rpc-client.ts';
 import { channelForConversation, sessionIdFor } from './identity.ts';
 import { refreshChatTitle } from './chats.ts';
 import { log } from '../log.ts';
-import type { IcarusConfig, ModelConfig, UserConfig } from '../config.ts';
+import { CONTAINER_PATHS, type IcarusConfig, type ModelConfig, type UserConfig } from '../config.ts';
 
 /** Реэкспорт для тех, кто по-прежнему ищет id сессии рядом с PiSession. */
 export { sessionIdFor };
@@ -14,7 +14,7 @@ export function piArgsFor(model: ModelConfig, sessionId: string): string[] {
     '--mode',
     'rpc',
     '--session-dir',
-    '/workspace/.sessions',
+    CONTAINER_PATHS.sessions,
     '--session-id',
     sessionId,
     '--model',

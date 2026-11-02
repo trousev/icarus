@@ -50,7 +50,7 @@ test('MAPLE.md монтируется в контейнер только при 
     makeConfig({ mcp: { maple: { command: 'node', args: ['x.mjs'] } } }),
     probe(),
   ).join('\n');
-  assert.match(withMaple, /MAPLE\.md:\/workspace\/MAPLE\.md:ro/);
+  assert.match(withMaple, /MAPLE\.md:\/workspace\/\.icarus\/MAPLE\.md:ro/);
 });
 
 test('обычные разделы инструкции не задеты', () => {
@@ -62,19 +62,19 @@ test('обычные разделы инструкции не задеты', () 
 
 test('каталог математики монтируется постоянно и виден в раскладке', () => {
   const nobody = renderAgentsMd(makeConfig());
-  assert.doesNotMatch(nobody, /workspace\/maple/, 'без Maple каталога математики нет');
+  assert.doesNotMatch(nobody, /workspace\/\.icarus\/maple/, 'без Maple каталога математики нет');
 
   const md = renderAgentsMd(makeConfig({ mcp: { maple: { command: 'node' } } }));
-  assert.match(md, /`\/workspace\/maple\/`/, 'агент должен знать, где лежат расчёты');
+  assert.match(md, /`\/workspace\/\.icarus\/maple\/`/, 'агент должен знать, где лежат расчёты');
 
   // Каталог берётся из dataDir человека, а не из временного каталога контейнера:
   // иначе расчёт не переживёт пересоздание контейнера.
   const volumes = userVolumes(makeConfig({ mcp: { maple: { command: 'node' } } }), probe()).join('\n');
-  assert.match(volumes, /maple:\/workspace\/maple/);
-  assert.doesNotMatch(volumes, /\/workspace\/maple:ro/, 'математику Maple пишет сам, только ro её сломает');
+  assert.match(volumes, /maple:\/workspace\/\.icarus\/maple/);
+  assert.doesNotMatch(volumes, /\/workspace\/\.icarus\/maple:ro/, 'математику Maple пишет сам, только ro её сломает');
 
   const without = userVolumes(makeConfig(), probe()).join('\n');
-  assert.doesNotMatch(without, /workspace\/maple/);
+  assert.doesNotMatch(without, /workspace\/\.icarus\/maple/);
 });
 
 test('старые журналы Maple из pi-agent переезжают в постоянный каталог', () => {

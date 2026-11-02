@@ -701,11 +701,33 @@ export function findTelegramUser(config: IcarusConfig, username: string | undefi
 }
 
 /**
+ * Служебный каталог Икара внутри контейнера. Здесь всё «про Икара»: память,
+ * вложения, сессии, персона и карта окружения. Сам `/workspace` при этом остаётся
+ * пустым и свободным: это место человека, куда агент может класть что угодно,
+ * ничего не задевая. Один список на весь код — чтобы точка монтирования и путь,
+ * который уезжает в промпт, не разъезжались.
+ */
+export const CONTAINER_HOME = '/workspace/.icarus';
+
+/** Пути внутри контейнера: только то, что мы монтируем сами (см. userVolumes). */
+export const CONTAINER_PATHS = {
+  home: CONTAINER_HOME,
+  memory: `${CONTAINER_HOME}/memory`,
+  maple: `${CONTAINER_HOME}/maple`,
+  incoming: `${CONTAINER_HOME}/incoming`,
+  sessions: `${CONTAINER_HOME}/sessions`,
+  sharedMemory: `${CONTAINER_HOME}/shared-memory`,
+  agentsMd: `${CONTAINER_HOME}/AGENTS.md`,
+  icarusMd: `${CONTAINER_HOME}/icarus.md`,
+  mapleMd: `${CONTAINER_HOME}/MAPLE.md`,
+} as const;
+
+/**
  * Куда контейнер человека видит каталог вложений (см. userVolumes в compose.ts).
  * Путь нужен и сервису: вложение он кладёт на хост, а в реплику отдаёт уже этот
  * адрес — иначе pi искал бы файл мимо.
  */
-export const CONTAINER_INCOMING = '/workspace/incoming';
+export const CONTAINER_INCOMING = CONTAINER_PATHS.incoming;
 
 /** Пути на хосте, которые сервис готовит и монтирует пользователю. */
 export function userPaths(config: IcarusConfig, user: UserConfig) {

@@ -559,7 +559,7 @@ test('фото уезжает в pi нативно, а сам файл ложи�
   assert.deepEqual(session.images[0]?.map((image) => image.mimeType), ['image/jpeg']);
   assert.equal(session.images[0]?.[0]?.data, JPEG.toString('base64'), 'модель видит сами байты, а не путь');
   assert.match(session.prompts[0] ?? '', /что на фото\?/);
-  assert.match(session.prompts[0] ?? '', /\/workspace\/incoming\/telegram-42-10\.jpg/);
+  assert.match(session.prompts[0] ?? '', /\/workspace\/\.icarus\/incoming\/telegram-42-10\.jpg/);
 
   const saved = fs.readdirSync(userPaths(config, probe()).incoming);
   assert.deepEqual(saved, ['telegram-42-10.jpg']);
@@ -590,7 +590,7 @@ test('фото без подписи всё равно доезжает — с �
 
   assert.equal(session.prompts.length, 1);
   assert.doesNotMatch(session.prompts[0] ?? '', /^\s*$/, 'реплика не пустая: в ней есть путь к файлу');
-  assert.match(session.prompts[0] ?? '', /\/workspace\/incoming\/telegram-42-10\.jpg/);
+  assert.match(session.prompts[0] ?? '', /\/workspace\/\.icarus\/incoming\/telegram-42-10\.jpg/);
   assert.equal(session.images[0]?.length, 1, 'картинка при этом уехала');
 });
 

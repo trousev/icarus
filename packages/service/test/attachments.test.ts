@@ -63,7 +63,7 @@ test('фото: берём самый крупный кадр и отдаём б
 
   assert.equal(incoming.text, 'что тут?', 'подпись — это текст реплики');
   assert.deepEqual(incoming.images, [
-    { data: JPEG.toString('base64'), mimeType: 'image/jpeg', file: '/workspace/incoming/telegram-1-5.jpg' },
+    { data: JPEG.toString('base64'), mimeType: 'image/jpeg', file: '/workspace/.icarus/incoming/telegram-1-5.jpg' },
   ]);
   assert.deepEqual(fs.readFileSync(path.join(dir, 'telegram-1-5.jpg')), JPEG);
 });
@@ -79,7 +79,7 @@ test('документ-картинка сохраняется под своим
   );
 
   assert.equal(incoming.images[0]?.mimeType, 'image/png');
-  assert.equal(incoming.images[0]?.file, '/workspace/incoming/telegram-1-5-скриншот.png');
+  assert.equal(incoming.images[0]?.file, '/workspace/.icarus/incoming/telegram-1-5-скриншот.png');
 });
 
 test('голосовое отдаётся байтами: расшифровка — не его забота', async () => {

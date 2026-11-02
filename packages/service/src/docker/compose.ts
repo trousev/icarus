@@ -14,7 +14,7 @@
 // можно проверять тестами, а решения о запуске остаются в script/server.
 import path from 'node:path';
 import { stringify as stringifyYaml } from 'yaml';
-import { CONTAINER_INCOMING, userContainer, userPaths, type IcarusConfig, type UserConfig } from '../config.ts';
+import { CONTAINER_PATHS, userContainer, userPaths, type IcarusConfig, type UserConfig } from '../config.ts';
 import { containerEnv, LABEL_MANAGED, LABEL_SPEC, LABEL_USER, specFor } from './spec.ts';
 
 /** Имя compose-проекта: по этой метке compose отличает свои контейнеры от чужих. */
@@ -63,23 +63,29 @@ function bind(source: string, target: string, mode?: 'ro'): string {
   return `${source}:${target}${mode === 'ro' ? ':ro' : ''}`;
 }
 
-/** Тома контейнера человека: личные каталоги, персона и общие маунты из конфига. */
+/**
+ * Тома контейнера человека: личные каталоги, персона и общие маунты из конфига.
+ *
+ * Всё наше лежит в /workspace/.icarus, а сам /workspace остаётся человеку: каталог
+ * в образе, ничем не занятый, — место, где агент может свободно работать и творить,
+ * не задевая память, сессии и промпты.
+ */
 export function userVolumes(config: IcarusConfig, user: UserConfig): string[] {
   const paths = userPaths(config, user);
   return [
-    bind(paths.memory, '/workspace/memory'),
+    bind(paths.memory, CONTAINER_PATHS.memory),
     // Математика — персистентно и рядом с памятью: журналы сессий Maple и графики
     // не должны умирать вместе с MCP-мостом pi или пересозданием контейнера.
-    ...(config.mcp?.maple ? [bind(paths.maple, '/workspace/maple')] : []),
-    bind(paths.incoming, CONTAINER_INCOMING),
-    bind(paths.sessions, '/workspace/.sessions'),
-    bind(paths.sharedMemory, '/workspace/shared-memory'),
+    ...(config.mcp?.maple ? [bind(paths.maple, CONTAINER_PATHS.maple)] : []),
+    bind(paths.incoming, CONTAINER_PATHS.incoming),
+    bind(paths.sessions, CONTAINER_PATHS.sessions),
+    bind(paths.sharedMemory, CONTAINER_PATHS.sharedMemory),
     bind(paths.piAgent, '/home/node/.pi/agent'),
-    bind(paths.agentsMd, '/workspace/AGENTS.md', 'ro'),
-    bind(paths.icarusMd, '/workspace/icarus.md', 'ro'),
+    bind(paths.agentsMd, CONTAINER_PATHS.agentsMd, 'ro'),
+    bind(paths.icarusMd, CONTAINER_PATHS.icarusMd, 'ro'),
     // Инструкция по Maple монтируется только когда сервер настроен: пустой файл
     // или каталог на его месте только путали бы агента.
-    ...(config.mcp?.maple ? [bind(paths.mapleMd, '/workspace/MAPLE.md', 'ro')] : []),
+    ...(config.mcp?.maple ? [bind(paths.mapleMd, CONTAINER_PATHS.mapleMd, 'ro')] : []),
     ...config.mounts.map((mount) => bind(mount.host, mount.container, mount.mode === 'ro' ? 'ro' : undefined)),
   ];
 }
