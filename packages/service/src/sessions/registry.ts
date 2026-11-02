@@ -5,7 +5,8 @@ import path from 'node:path';
 import { ensureContainerRunning } from '../docker/manager.ts';
 import { log, redact } from '../log.ts';
 import { COMPACT_TIMEOUT_MS, PiSession, sessionIdFor, type CompactResult, type PiCommand } from './pi-session.ts';
-import { rememberTelegramSession } from './catalog.ts';
+import { ensureChat } from './chats.ts';
+import { channelForConversation } from './identity.ts';
 import { runOneShot, type OneShotOptions } from './one-shot.ts';
 import { userPaths, type IcarusConfig, type ModelConfig, type UserConfig } from '../config.ts';
 
@@ -222,9 +223,15 @@ export class SessionRegistry {
     const container = await this.ensureUserContainer(user);
     const session = this.createSession(this.config, user, conversationId, this.fastModel(), container, generation);
     this.sessions.set(key, session);
-    // Панель перечисляет и Telegram-разговоры: из имени файла сессии канал не
-    // восстановить, поэтому запоминаем пару «файл → разговор» рядом с сессиями.
-    rememberTelegramSession(this.config, user, conversationId, sessionIdFor(user.id, conversationId));
+    // Разговор поднялся — значит, он существует. Реестр ведёт все каналы сразу:
+    // панель показывает Telegram и API рядом с веб-чатами, ничего не сканируя.
+    try {
+      ensureChat(this.config, user, conversationId, channelForConversation(conversationId));
+    } catch (error) {
+      // Реестр — удобство панели, а не условие разговора: его сбой не должен
+      // оставить человека без ответа.
+      log.warn('не записался реестр разговоров', { user: user.id, error: String(error) });
+    }
     return session;
   }
 

@@ -57,7 +57,7 @@ export function chatPage(session: PanelSession, options: ChatPageOptions): strin
     <header class="chat-top">
       <button class="icon-btn menu-btn" id="toggle-side" aria-label="Меню">☰</button>
       <div class="chat-crumbs">Icarus / <b id="chat-title">Новый чат</b></div>
-      <label class="chat-search"><span>⌕</span><input id="chat-search" placeholder="Поиск по диалогам" autocomplete="off"></label>
+      <label class="chat-search"><span>⌕</span><input id="chat-search" placeholder="Поиск по названиям" autocomplete="off"></label>
       <div class="top-status"><i></i><span id="chat-status">Агент активен</span></div>
     </header>
 

@@ -23,7 +23,7 @@ test('чат — это лента с композером и диалогами
   assert.match(html, /id="chat-input"/);
   assert.match(html, /id="chat-files"/, 'файл можно приложить');
   assert.match(html, /id="chat-attach"/, 'кнопка приложения');
-  assert.match(html, /Поиск по диалогам/);
+  assert.match(html, /Поиск по названиям/);
   assert.match(html, /id="chat-list"/);
   assert.match(html, /id="chat-locked"/, 'у внешнего разговора есть плашка «только для чтения»');
   assert.match(html, /id="chat-status"/, 'статус сверху говорит, можно ли писать');

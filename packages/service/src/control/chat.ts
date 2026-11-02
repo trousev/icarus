@@ -2,9 +2,9 @@
 //
 // Разговор здесь — тот же, что у Telegram: (человек, conversationId) → сессия pi.
 // Поэтому веб-чат не заводит второй агент, а просто даёт ещё один вход к тому же
-// контейнеру и той же памяти. Метаданные диалога (заголовок, превью, время) лежат
-// отдельным chats.json рядом с сессиями: pi про них ничего не знает, а читать
-// заголовок из первого сообщения на каждый список — лишний обход файлов.
+// контейнеру и той же памяти. chats.json хранит только метаданные разговора;
+// превью и время последнего сообщения читаются из файла сессии — и только для
+// той страницы списка, которую панель показала.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -14,10 +14,22 @@ import { readJsonBody } from '../http/openai.ts';
 import { errorBody } from '../http/sse.ts';
 import { titleFromText } from '../http/title.ts';
 import { buildPrompt } from '../prompt.ts';
-import { sessionIdFor } from '../sessions/pi-session.ts';
-import { channelForConversation, readSessionCatalog, type ChatChannel } from '../sessions/catalog.ts';
+import { type ChatChannel } from '../sessions/identity.ts';
+import {
+  NEW_CHAT_PREVIEW,
+  createChatRecord,
+  findChatRecord,
+  isGenericTitle,
+  readChats,
+  sessionIdOf,
+  updateChatTitles,
+  type ChatRecord,
+} from '../sessions/chats.ts';
+import { discoverSessionFiles, sessionFileForId, textOfContent as textOf, type FileSession } from '../sessions/files.ts';
 import type { SessionRegistry } from '../sessions/registry.ts';
 import { log } from '../log.ts';
+
+export { readChats };
 
 export type ChatTraceStep = {
   id: string;
@@ -43,18 +55,20 @@ export type ChatMessage = {
 export type ChatSummary = {
   id: string;
   title: string;
+  /** Последний ответ (или реплика человека) из файла сессии. */
   preview: string;
   createdAt: string;
+  /** Время последнего сообщения из файла; у пустого разговора — createdAt. */
   updatedAt: string;
-  /**
-   * Откуда разговор и можно ли в него писать. Веб-чат — `web` и пишется, всё
-   * остальное (Telegram, OpenAI-клиент, старые файлы) — только для чтения.
-   */
-  channel?: ChatChannel;
-  readOnly?: boolean;
+  channel: ChatChannel;
+  /** Писать можно только в веб-чат: Telegram и API панель показывает, но не ведёт. */
+  readOnly: boolean;
 };
 
 export type ChatHistory = { chat: ChatSummary; messages: ChatMessage[] };
+
+/** Страница списка: курсор — это смещение, чтобы не тащить в браузер весь реестр. */
+export type ChatPage = { chats: ChatSummary[]; nextCursor: string | null; total: number };
 
 export type ChatApiContext = {
   config: IcarusConfig;
@@ -63,74 +77,27 @@ export type ChatApiContext = {
   registry?: SessionRegistry;
 };
 
-const NEW_CHAT = 'Новый чат';
 const PREVIEW_CHARS = 110;
+const DEFAULT_PAGE_SIZE = 30;
+const MAX_PAGE_SIZE = 100;
 
-function chatsFile(config: IcarusConfig, user: UserConfig): string {
-  return path.join(userPaths(config, user).root, 'chats.json');
+/** Сколько разговоров отдать за раз: клиент догружает следующую страницу скроллом. */
+export function pageLimit(value: unknown): number {
+  const parsed = typeof value === 'string' ? Number(value) : typeof value === 'number' ? value : NaN;
+  if (!Number.isFinite(parsed)) return DEFAULT_PAGE_SIZE;
+  return Math.min(MAX_PAGE_SIZE, Math.max(1, Math.trunc(parsed)));
 }
 
-function isSummary(value: unknown): value is ChatSummary {
-  if (!value || typeof value !== 'object') return false;
-  const item = value as Record<string, unknown>;
-  return ['id', 'title', 'preview', 'createdAt', 'updatedAt'].every((key) => typeof item[key] === 'string');
+/** Курсор — смещение в уже отсортированном списке; отрицательное и мусор — начало. */
+function pageOffset(cursor: unknown): number {
+  const parsed = typeof cursor === 'string' ? Number(cursor) : NaN;
+  if (!Number.isFinite(parsed) || parsed < 0) return 0;
+  return Math.trunc(parsed);
 }
 
-/** Список диалогов читается целиком: их десятки, а не миллионы. */
-export function readChats(config: IcarusConfig, user: UserConfig): ChatSummary[] {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(chatsFile(config, user), 'utf8')) as { chats?: unknown };
-    return Array.isArray(parsed.chats) ? parsed.chats.filter(isSummary) : [];
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-      log.warn('не читается список чатов', { user: user.id, error: String(error) });
-    }
-    return [];
-  }
-}
-
-/** Пишем через временный файл: падение посреди записи не должно съесть весь список. */
-function writeChats(config: IcarusConfig, user: UserConfig, chats: ChatSummary[]): void {
-  const file = chatsFile(config, user);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, `${JSON.stringify({ chats }, null, 2)}\n`, { mode: 0o600 });
-  fs.chmodSync(tmp, 0o600);
-  fs.renameSync(tmp, file);
-}
-
-/** Веб-разговор: единственный канал, в который панель пишет сама. */
-function asWeb(chat: ChatSummary): ChatSummary {
-  return { ...chat, channel: 'web', readOnly: false };
-}
-
-export function listChats(config: IcarusConfig, user: UserConfig, query = ''): ChatSummary[] {
-  const needle = query.trim().toLocaleLowerCase('ru');
-  const web = readChats(config, user).map(asWeb);
-  const external = listExternalSessions(config, user, new Set(web.map((chat) => sessionIdFor(user.id, chat.id))));
-  return [...web, ...external]
-    .filter((chat) => !needle || `${chat.title}\n${chat.preview}`.toLocaleLowerCase('ru').includes(needle))
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-}
-
-export function getChat(config: IcarusConfig, user: UserConfig, id: string): ChatSummary | null {
-  return readChats(config, user).find((chat) => chat.id === id) ?? null;
-}
-
+/** Новый веб-чат; остальные каналы появляются в реестре сами при первом ходе. */
 export function createChat(config: IcarusConfig, user: UserConfig, now = new Date()): ChatSummary {
-  const stamp = now.toISOString();
-  const id = `web-${now.getTime().toString(36)}-${crypto.randomBytes(3).toString('hex')}`;
-  const chat: ChatSummary = {
-    id,
-    title: NEW_CHAT,
-    preview: 'Расскажи, что нужно сделать.',
-    createdAt: stamp,
-    updatedAt: stamp,
-  };
-  const chats = readChats(config, user);
-  chats.unshift(chat);
-  writeChats(config, user, chats);
-  return chat;
+  return summaryOf(createChatRecord(config, user, now), null);
 }
 
 const IMAGE_MIME = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
@@ -241,29 +208,23 @@ function previewOf(text: string): string {
 }
 
 /**
- * Закрывает ход: первый вопрос становится заголовком, последний ответ — превью.
- * Вызывается после agent_settled; ошибки записи не должны отменять сам ответ.
+ * Закрывает ход веб-чата: первая реплика становится заголовком. Превью и время
+ * в реестре не хранятся — их посчитает файл сессии, когда список покажет чат.
  */
 export function finishChat(
   config: IcarusConfig,
   user: UserConfig,
   id: string,
   userText: string,
-  assistantText: string,
-): ChatSummary | null {
-  const chats = readChats(config, user);
-  const chat = chats.find((item) => item.id === id);
-  if (!chat) return null;
+): ChatRecord | null {
+  const chat = findChatRecord(config, user, id);
+  if (!chat || !isGenericTitle(chat)) return chat;
 
-  if (!chat.title || chat.title === NEW_CHAT) {
-    const generated = titleFromText(userText);
-    chat.title = generated.length >= 47 ? `${generated.slice(0, 46).trimEnd()}…` : generated || NEW_CHAT;
-  }
-  if (assistantText.trim()) chat.preview = previewOf(assistantText);
-  else if (userText.trim()) chat.preview = previewOf(userText);
-  chat.updatedAt = new Date().toISOString();
-  writeChats(config, user, chats);
-  return chat;
+  const generated = titleFromText(userText);
+  if (!generated) return chat;
+  const title = generated.length >= 47 ? `${generated.slice(0, 46).trimEnd()}…` : generated;
+  updateChatTitles(config, user, new Map([[chat.id, title]]));
+  return { ...chat, title };
 }
 
 const IMAGE_TYPES: Record<string, string> = {
@@ -307,84 +268,6 @@ export function chatImageFile(
   const type = IMAGE_TYPES[path.extname(full).toLowerCase()];
   if (!type || !fs.existsSync(full) || !fs.statSync(full).isFile()) return null;
   return { file: full, type };
-}
-
-/** Файл сессии pi для этого разговора: pi дописывает `<время>_<id>.jsonl`. */
-export function sessionFile(config: IcarusConfig, user: UserConfig, chatId: string): string | null {
-  return sessionFileForId(userPaths(config, user).sessions, sessionIdFor(user.id, chatId));
-}
-
-/** Самый свежий файл сессии с таким id: после /clear в каталоге лежит уже новый. */
-function sessionFileForId(dir: string, sessionId: string): string | null {
-  let names: string[];
-  try {
-    names = fs.readdirSync(dir);
-  } catch {
-    return null;
-  }
-  const matches = names.filter((name) => name === `${sessionId}.jsonl` || name.endsWith(`_${sessionId}.jsonl`));
-  if (matches.length === 0) return null;
-  return matches
-    .map((name) => path.join(dir, name))
-    .sort((a, b) => fs.statSync(a).mtimeMs - fs.statSync(b).mtimeMs)
-    .at(-1) ?? null;
-}
-
-/**
- * id внешнего разговора в адресах панели. Файл сессии — единственный источник
- * правды о таких разговорах, а id сессии неизменен, пока жив разговор. Префикс
- * заодно говорит API, что сюда писать нельзя.
- */
-const EXTERNAL_ID_PREFIX = 'session:';
-
-export function isExternalChatId(chatId: string): boolean {
-  return chatId.startsWith(EXTERNAL_ID_PREFIX);
-}
-
-function externalChatId(sessionId: string): string {
-  return `${EXTERNAL_ID_PREFIX}${sessionId}`;
-}
-
-type FileSession = { sessionId: string; file: string; mtimeMs: number; size: number };
-
-function sessionIdFromFileName(name: string): string | null {
-  if (!name.endsWith('.jsonl')) return null;
-  const base = name.slice(0, -'.jsonl'.length);
-  const at = base.lastIndexOf('_');
-  const id = at === -1 ? base : base.slice(at + 1);
-  return id || null;
-}
-
-/**
- * Все файлы сессий человека по одному на разговор: если у одного id несколько
- * файлов (например, старый еще не убран в archive/), оставляем самый свежий.
- */
-function discoverSessionFiles(dir: string): FileSession[] {
-  let entries: fs.Dirent[];
-  try {
-    entries = fs.readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return [];
-  }
-
-  const found = new Map<string, FileSession>();
-  for (const entry of entries) {
-    if (!entry.isFile()) continue;
-    const sessionId = sessionIdFromFileName(entry.name);
-    if (!sessionId) continue;
-    const file = path.join(dir, entry.name);
-    let stat: fs.Stats;
-    try {
-      stat = fs.statSync(file);
-    } catch {
-      continue;
-    }
-    const previous = found.get(sessionId);
-    if (!previous || stat.mtimeMs > previous.mtimeMs) {
-      found.set(sessionId, { sessionId, file, mtimeMs: stat.mtimeMs, size: stat.size });
-    }
-  }
-  return [...found.values()];
 }
 
 type SessionDigest = {
@@ -474,86 +357,101 @@ function digestSessionFile(session: FileSession): SessionDigest | null {
   return digest;
 }
 
-function channelTitle(channel: ChatChannel): string {
-  switch (channel) {
-    case 'telegram':
-      return 'Разговор в Telegram';
-    case 'api':
-      return 'Разговор через API';
-    default:
-      return 'Старый разговор';
-  }
-}
-
-/** Внешний разговор по id файла: канал ищем в каталоге, остальное — в самом файле. */
-function externalChat(config: IcarusConfig, user: UserConfig, id: string): ChatSummary | null {
-  const sessionId = id.slice(EXTERNAL_ID_PREFIX.length);
-  if (!sessionId) return null;
-  const file = sessionFileForId(userPaths(config, user).sessions, sessionId);
-  if (!file) return null;
-  let stat: fs.Stats;
-  try {
-    stat = fs.statSync(file);
-  } catch {
-    return null;
-  }
-  const session: FileSession = { sessionId, file, mtimeMs: stat.mtimeMs, size: stat.size };
-  const digest = digestSessionFile(session);
-  if (!digest) return null;
-
-  const conversationId = readSessionCatalog(config, user).find((entry) => entry.sessionId === sessionId)?.conversationId;
-  const channel: ChatChannel = conversationId ? channelForConversation(conversationId) : 'external';
-  return {
-    id,
-    title: digest.title || channelTitle(channel),
-    preview: digest.preview,
-    createdAt: digest.createdAt,
-    updatedAt: digest.updatedAt,
-    channel,
-    readOnly: true,
-  };
-}
-
-/** Все разговоры человека, начатые не в панели: Telegram, API и старые файлы. */
-function listExternalSessions(config: IcarusConfig, user: UserConfig, webSessionIds: Set<string>): ChatSummary[] {
-  const catalog = new Map(readSessionCatalog(config, user).map((entry) => [entry.sessionId, entry.conversationId]));
-  const chats: ChatSummary[] = [];
-  const sessions = discoverSessionFiles(userPaths(config, user).sessions);
-
-  for (const session of sessions) {
-    if (webSessionIds.has(session.sessionId)) continue;
-    const digest = digestSessionFile(session);
-    if (!digest) continue;
-    const conversationId = catalog.get(session.sessionId);
-    const channel: ChatChannel = conversationId ? channelForConversation(conversationId) : 'external';
-    chats.push({
-      id: externalChatId(session.sessionId),
-      title: digest.title || channelTitle(channel),
-      preview: digest.preview,
-      createdAt: digest.createdAt,
-      updatedAt: digest.updatedAt,
-      channel,
-      readOnly: true,
-    });
-  }
-
-  // Кэш не должен переживать файлы: сессии архивируются и удаляются, а сервис
-  // живёт неделями.
-  const live = new Set(sessions.map((session) => session.file));
+/** Кэш не должен переживать файлы: сессии архивируются и удаляются, а сервис живёт неделями. */
+function pruneDigestCache(live: Set<string>): void {
+  if (digestCache.size <= live.size) return;
   for (const key of digestCache.keys()) {
     if (!live.has(key)) digestCache.delete(key);
   }
-  return chats;
 }
 
-function textOf(content: unknown): string {
-  if (typeof content === 'string') return content;
-  if (!Array.isArray(content)) return '';
-  return content
-    .filter((part): part is { type?: string; text?: string } => Boolean(part) && typeof part === 'object')
-    .filter((part) => part.type === 'text' && typeof part.text === 'string')
-    .map((part) => part.text ?? '')
-    .join('\n');
+/** Сводка для браузера: метаданные из реестра, превью и время — из файла сессии. */
+function summaryOf(chat: ChatRecord, digest: SessionDigest | null): ChatSummary {
+  return {
+    id: chat.id,
+    title: digest?.title && isGenericTitle(chat) ? digest.title : chat.title,
+    preview: digest?.preview || (chat.channel === 'web' ? NEW_CHAT_PREVIEW : ''),
+    createdAt: chat.createdAt,
+    updatedAt: digest?.updatedAt || chat.createdAt,
+    channel: chat.channel,
+    readOnly: chat.channel !== 'web',
+  };
+}
+
+/** Находит файл сессии для записи реестра: список и история ходят разными путями. */
+function sessionForChat(config: IcarusConfig, user: UserConfig, chat: ChatRecord): FileSession | null {
+  const sessionId = sessionIdOf(chat, user);
+  const file = sessionFileForId(userPaths(config, user).sessions, sessionId);
+  if (!file) return null;
+  try {
+    const stat = fs.statSync(file);
+    return { sessionId, file, mtimeMs: stat.mtimeMs, size: stat.size };
+  } catch {
+    return null;
+  }
+}
+
+type RankedChat = { chat: ChatRecord; session?: FileSession; sort: number };
+
+/**
+ * Страница списка. Сортировка — по mtime файла сессии: это дешёвый stat, а не
+ * чтение истории; превью и точное время читаются только для показанной страницы.
+ */
+export function listChatPage(
+  config: IcarusConfig,
+  user: UserConfig,
+  query = '',
+  limit: unknown = DEFAULT_PAGE_SIZE,
+  cursor?: string | null,
+): ChatPage {
+  const needle = query.trim().toLocaleLowerCase('ru');
+  const records = readChats(config, user).filter(
+    (chat) => !needle || `${chat.title}\n${chat.conversationId ?? ''}`.toLocaleLowerCase('ru').includes(needle),
+  );
+
+  const sessions = discoverSessionFiles(userPaths(config, user).sessions);
+  const bySession = new Map(sessions.map((session) => [session.sessionId, session]));
+  const ranked: RankedChat[] = records
+    .map((chat) => {
+      const session = bySession.get(sessionIdOf(chat, user));
+      return {
+        chat,
+        ...(session ? { session } : {}),
+        sort: session?.mtimeMs ?? (Date.parse(chat.createdAt) || 0),
+      };
+    })
+    .sort((a, b) => b.sort - a.sort || b.chat.createdAt.localeCompare(a.chat.createdAt));
+
+  const offset = pageOffset(cursor);
+  const size = pageLimit(limit);
+  const page = ranked.slice(offset, offset + size);
+  const titles = new Map<string, string>();
+  const chats = page.map((item) => {
+    const digest = item.session ? digestSessionFile(item.session) : null;
+    if (digest?.title && isGenericTitle(item.chat)) titles.set(item.chat.id, digest.title);
+    return summaryOf(item.chat, digest);
+  });
+  if (titles.size > 0) updateChatTitles(config, user, titles);
+  pruneDigestCache(new Set(sessions.map((session) => session.file)));
+
+  return {
+    chats,
+    nextCursor: offset + page.length < ranked.length ? String(offset + page.length) : null,
+    total: ranked.length,
+  };
+}
+
+/** Превью после хода: файл только что дописан, а ответ у нас уже в руках. */
+export function summaryAfterTurn(chat: ChatRecord, userText: string, assistantText: string): ChatSummary {
+  return {
+    id: chat.id,
+    title: chat.title,
+    preview: previewOf(assistantText || userText) || NEW_CHAT_PREVIEW,
+    createdAt: chat.createdAt,
+    updatedAt: new Date().toISOString(),
+    channel: chat.channel,
+    readOnly: chat.channel !== 'web',
+  };
 }
 
 function resultText(result: unknown): string {
@@ -728,26 +626,51 @@ function readMessages(file: string, user: UserConfig, chatId: string): ChatMessa
   return messages;
 }
 
+/** Заголовок из реплики: та же длина и хвост, что у finishChat. */
+function titleFromUserText(text: string): string {
+  const generated = titleFromText(text);
+  return generated.length >= 47 ? `${generated.slice(0, 46).trimEnd()}…` : generated;
+}
+
 /**
  * История разговора из файла сессии pi. Показываем только диалог: текст человека и
  * ответы Икара, а вызовы инструментов собираем в трассировку — так в чате видно,
  * что агент делал руками, но сырые результаты не засоряют ответ.
  *
- * Веб-разговор панель берёт по своему id, внешний (Telegram, API, старый файл) —
- * по id сессии: в него панель не пишет, поэтому и разговор ищется прямо по файлу.
+ * Разговор ищем в общем реестре: веб-чат по своему id, Telegram и API — по
+ * conversationId или старому `session:<id>`. Превью и время берём из уже
+ * разобранных сообщений, чтобы не читать файл второй раз.
  */
 export function readHistory(config: IcarusConfig, user: UserConfig, chatId: string): ChatHistory | null {
-  if (isExternalChatId(chatId)) {
-    const chat = externalChat(config, user, chatId);
-    if (!chat) return null;
-    const file = sessionFileForId(userPaths(config, user).sessions, chatId.slice(EXTERNAL_ID_PREFIX.length));
-    return { chat, messages: file ? readMessages(file, user, chatId) : [] };
+  const chat = findChatRecord(config, user, chatId);
+  if (!chat) return null;
+
+  const session = sessionForChat(config, user, chat);
+  const messages = session ? readMessages(session.file, user, chat.id) : [];
+  const firstUser = messages.find((message) => message.role === 'user' && message.text.trim())?.text ?? '';
+  if (firstUser && isGenericTitle(chat)) {
+    const clean = firstUser.replace(/^\[(?:голосовое|voice)[^\]]*\]\s*/i, '');
+    const title = titleFromUserText(clean);
+    if (title) {
+      updateChatTitles(config, user, new Map([[chat.id, title]]));
+      chat.title = title;
+    }
   }
 
-  const chat = getChat(config, user, chatId);
-  if (!chat) return null;
-  const file = sessionFile(config, user, chatId);
-  return { chat: asWeb(chat), messages: file ? readMessages(file, user, chatId) : [] };
+  const lastAssistant = [...messages].reverse().find((message) => message.role === 'assistant' && message.text.trim());
+  const last = messages.at(-1);
+  return {
+    chat: {
+      id: chat.id,
+      title: chat.title,
+      preview: previewOf(lastAssistant?.text ?? firstUser) || (chat.channel === 'web' ? NEW_CHAT_PREVIEW : ''),
+      createdAt: chat.createdAt,
+      updatedAt: last?.timestamp || chat.createdAt,
+      channel: chat.channel,
+      readOnly: chat.channel !== 'web',
+    },
+    messages,
+  };
 }
 
 function json(res: ServerResponse, status: number, payload: unknown): void {
@@ -783,8 +706,14 @@ async function streamTurn(
   attachments: UploadedAttachments,
 ): Promise<void> {
   const prompt = buildPrompt(text, attachments.files);
-  if (!getChat(config, user, chatId)) {
+  const chat = findChatRecord(config, user, chatId);
+  if (!chat) {
     json(res, 404, errorBody('разговор не найден'));
+    return;
+  }
+  // В Telegram и API панель не пишет: их можно только смотреть.
+  if (chat.channel !== 'web') {
+    json(res, 403, errorBody('разговор начат не в панели: здесь он только для чтения', 'permission_error'));
     return;
   }
 
@@ -882,8 +811,10 @@ async function streamTurn(
     await settled;
     if (closed) return;
 
-    const chat = finishChat(config, user, chatId, text || attachments.names.join(', '), answer);
-    send({ type: 'done', chat, steps });
+    const userText = text || attachments.names.join(', ');
+    const record = finishChat(config, user, chatId, userText);
+    const summary = record ? summaryAfterTurn(record, userText, answer) : null;
+    send({ type: 'done', chat: summary, steps });
     res.end();
     log.info('чат: ход завершён', {
       user: user.id,
@@ -920,7 +851,14 @@ export async function handleChatApi(
 
   try {
     if (pathname === '/panel/api/chats' && req.method === 'GET') {
-      json(res, 200, { chats: listChats(ctx.config, user, url.searchParams.get('q') ?? '') });
+      const page = listChatPage(
+        ctx.config,
+        user,
+        url.searchParams.get('q') ?? '',
+        url.searchParams.get('limit'),
+        url.searchParams.get('cursor'),
+      );
+      json(res, 200, page);
       return true;
     }
 
@@ -975,7 +913,12 @@ export async function handleChatApi(
       }
       // Telegram и API-разговоры панель показывает, но не продолжает: писать в
       // чужой вход отсюда — значит незаметно подменить канал разговора.
-      if (isExternalChatId(chatId)) {
+      const chat = findChatRecord(ctx.config, user, chatId);
+      if (!chat) {
+        json(res, 404, errorBody('разговор не найден'));
+        return true;
+      }
+      if (chat.channel !== 'web') {
         json(res, 403, errorBody('разговор начат не в панели: здесь он только для чтения', 'permission_error'));
         return true;
       }
@@ -994,18 +937,23 @@ export async function handleChatApi(
         json(res, 400, errorBody('нужны text или вложения'));
         return true;
       }
-      await streamTurn(req, res, ctx.config, user, ctx.registry, chatId, text, attachments);
+      await streamTurn(req, res, ctx.config, user, ctx.registry, chat.id, text, attachments);
       return true;
     }
 
     if (pathname === '/panel/api/chat/abort' && req.method === 'POST') {
       const body = await bodyOf(req);
       const chatId = chatIdOf(body.chatId);
-      if (isExternalChatId(chatId)) {
+      const chat = chatId ? findChatRecord(ctx.config, user, chatId) : null;
+      if (!chat) {
+        json(res, 404, errorBody('разговор не найден'));
+        return true;
+      }
+      if (chat.channel !== 'web') {
         json(res, 403, errorBody('разговор начат не в панели: здесь он только для чтения', 'permission_error'));
         return true;
       }
-      const session = chatId ? ctx.registry.get(user.id, chatId) : undefined;
+      const session = ctx.registry.get(user.id, chat.id);
       const ok = session ? await session.abort() : false;
       json(res, 200, { ok });
       return true;

@@ -16,6 +16,7 @@
 import { DEFAULT_CONFIG_PATH, findUser, loadConfig, loadEnvFile, type IcarusConfig } from './config.ts';
 import { log } from './log.ts';
 import { prepareUser } from './workspace.ts';
+import { backfillChats } from './sessions/chats.ts';
 import { SessionRegistry } from './sessions/registry.ts';
 import { createServer } from './http/server.ts';
 
@@ -64,7 +65,10 @@ config.panel.devUser = user.id;
 config.host = '127.0.0.1';
 config.port = args.port ?? DEFAULT_PORT;
 
-for (const person of config.users) prepareUser(config, person);
+for (const person of config.users) {
+  prepareUser(config, person);
+  backfillChats(config, person);
+}
 log.info('локальная панель: данные и git готовы', { dataDir: config.dataDir, user: user.id });
 
 // Чат поднимает настоящий реестр сессий: если стек уже работает, панель говорит

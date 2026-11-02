@@ -1,17 +1,13 @@
 // Одна живая сессия pi = один разговор в чате.
 // Процесс живёт внутри контейнера пользователя, общение — JSONL по stdio.
-import { createHash } from 'node:crypto';
 import { RpcClient, type RpcEvent } from './rpc-client.ts';
-import { channelForConversation } from './catalog.ts';
+import { channelForConversation, sessionIdFor } from './identity.ts';
+import { refreshChatTitle } from './chats.ts';
 import { log } from '../log.ts';
 import type { IcarusConfig, ModelConfig, UserConfig } from '../config.ts';
 
-/** Детерминированный UUID из ключа разговора: pi ждёт валидный id сессии. */
-export function sessionIdFor(userId: string, conversationId: string): string {
-  const hex = createHash('sha1').update(`${userId}:${conversationId}`).digest('hex').slice(0, 32);
-  const parts = [hex.slice(0, 8), hex.slice(8, 12), `5${hex.slice(13, 16)}`, `a${hex.slice(17, 20)}`, hex.slice(20, 32)];
-  return parts.join('-');
-}
+/** Реэкспорт для тех, кто по-прежнему ищет id сессии рядом с PiSession. */
+export { sessionIdFor };
 
 export function piArgsFor(model: ModelConfig, sessionId: string): string[] {
   return [
@@ -71,6 +67,7 @@ export class PiSession {
 
   readonly user: UserConfig;
   readonly conversationId: string;
+  private config: IcarusConfig;
   private client: RpcClient;
   private listeners = new Set<(event: RpcEvent) => void>();
   private detach: () => void;
@@ -87,6 +84,7 @@ export class PiSession {
   ) {
     this.user = user;
     this.conversationId = conversationId;
+    this.config = config;
     this.key = `${user.id}:${conversationId}`;
     this.container = container;
     this.generation = generation;
@@ -101,7 +99,15 @@ export class PiSession {
     this.detach = this.client.onEvent((event) => {
       // Во время сжатия сессия занята не ходом: `agent_settled` тут ни при чём,
       // иначе ход влез бы в сессию посреди переписывания контекста.
-      if (event.type === 'agent_settled' && !this.compactingTask) this.busy = false;
+      if (event.type === 'agent_settled' && !this.compactingTask) {
+        this.busy = false;
+        // У веб-чата заголовок ставит finishChat по тексту реплики. У Telegram
+        // и API такого места нет — берём кусок первой реплики из файла сессии,
+        // когда ход уже дописан, и не задерживаем ответ человеку.
+        if (!this.conversationId.startsWith('web-')) {
+          queueMicrotask(() => refreshChatTitle(this.config, this.user, this.conversationId));
+        }
+      }
       if (event.type === 'agent_end') this.turns += 1;
       this.lastUsed = Date.now();
       for (const listener of this.listeners) listener(event);
