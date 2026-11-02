@@ -1,5 +1,9 @@
 // Клиент чата: без сборки и зависимостей. Сервер отдаёт каркас, список диалогов и
 // историю — этот файл только рисует их и читает NDJSON-поток ответа.
+//
+// Разметка живёт в chat-markdown.js и подключается раньше: это обычные глобальные
+// функции, а не импорт — сборки в панели нет.
+/* global markdown, linkify, imageSrc */
 const cfg = window.__CHAT_CFG__;
 
 const el = (id) => document.getElementById(id);
@@ -36,146 +40,6 @@ async function api(path, options = {}) {
     throw new Error(message);
   }
   return response.json();
-}
-
-/* ── markdown ────────────────────────────────────────────────────────────────
-   Без библиотек: сначала экранируем HTML, потом включаем обратно только те
-   конструкции, которые реально нужны в ответах. Сырой HTML от модели не проходит. */
-function escCode(text) {
-  return esc(text);
-}
-
-/** Локальную картинку отдаёт сервер; внешнюю браузер грузит сам. */
-function imageSrc(raw) {
-  const value = String(raw ?? '').trim();
-  if (/^(https?:|data:|\/panel\/api\/)/i.test(value)) return value;
-  return '/panel/api/chat/image?path=' + encodeURIComponent(value);
-}
-
-function inline(raw) {
-  const safe = esc(raw);
-  return safe
-    .replace(
-      /!\[([^\]]*)\]\(([^)\s]+)\)/g,
-      (_, alt, src) => '<img class="md-image" src="' + imageSrc(src) + '" alt="' + alt + '">',
-    )
-    .replace(/`([^`\n]+)`/g, '<code>$1</code>')
-    .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>')
-    .replace(/~~([^~\n]+)~~/g, '<del>$1</del>')
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
-}
-
-function markdown(text) {
-  const lines = String(text ?? '').replace(/\r\n?/g, '\n').split('\n');
-  const out = [];
-  let para = [];
-  let list = null;
-  let quote = [];
-  let code = null;
-
-  const flushPara = () => {
-    if (para.length) {
-      out.push('<p>' + para.map(inline).join('<br>') + '</p>');
-      para = [];
-    }
-  };
-  const flushList = () => {
-    if (list) {
-      out.push('</' + list + '>');
-      list = null;
-    }
-  };
-  const flushQuote = () => {
-    if (quote.length) {
-      out.push('<blockquote>' + quote.map(inline).join('<br>') + '</blockquote>');
-      quote = [];
-    }
-  };
-  const flushAll = () => {
-    flushPara();
-    flushList();
-    flushQuote();
-  };
-
-  for (const line of lines) {
-    if (code !== null) {
-      if (/^```/.test(line)) {
-        out.push('<pre><code>' + escCode(code.join('\n')) + '</code></pre>');
-        code = null;
-      } else {
-        code.push(line);
-      }
-      continue;
-    }
-    if (/^```/.test(line)) {
-      flushAll();
-      code = [];
-      continue;
-    }
-    if (!line.trim()) {
-      flushAll();
-      continue;
-    }
-    if (/^\s*(?:---+|\*\*\*+|___+)\s*$/.test(line)) {
-      flushAll();
-      out.push('<hr>');
-      continue;
-    }
-
-    const heading = /^(#{1,3})\s+(.*)$/.exec(line);
-    if (heading) {
-      flushAll();
-      const level = heading[1].length + 2;
-      out.push('<h' + level + '>' + inline(heading[2]) + '</h' + level + '>');
-      continue;
-    }
-
-    const blockquote = /^>\s?(.*)$/.exec(line);
-    if (blockquote) {
-      flushPara();
-      flushList();
-      quote.push(blockquote[1]);
-      continue;
-    }
-
-    const task = /^[-*+]\s+\[([ xX])\]\s+(.*)$/.exec(line);
-    const bullet = task ? null : /^[-*+]\s+(.*)$/.exec(line);
-    if (task || bullet) {
-      flushPara();
-      flushQuote();
-      if (list !== 'ul') {
-        flushList();
-        out.push('<ul>');
-        list = 'ul';
-      }
-      const text = task ? task[2] : bullet[1];
-      const mark = task ? (task[1].toLowerCase() === 'x' ? '☑ ' : '☐ ') : '';
-      out.push('<li' + (task ? ' class="task"' : '') + '>' + mark + inline(text) + '</li>');
-      continue;
-    }
-
-    const numbered = /^\d+\.\s+(.*)$/.exec(line);
-    if (numbered) {
-      flushPara();
-      flushQuote();
-      if (list !== 'ol') {
-        flushList();
-        out.push('<ol>');
-        list = 'ol';
-      }
-      out.push('<li>' + inline(numbered[1]) + '</li>');
-      continue;
-    }
-
-    flushList();
-    flushQuote();
-    para.push(line);
-  }
-
-  if (code !== null) out.push('<pre><code>' + escCode(code.join('\n')) + '</code></pre>');
-  flushAll();
-  return out.join('') || '<p></p>';
 }
 
 /* ── даты и диалоги ───────────────────────────────────────────────────────── */
@@ -635,7 +499,7 @@ function historyAttachments(attachments) {
 function userHtml(message) {
   return (
     '<div class="turn user"><div class="bubble">' +
-    esc(message.text || '') +
+    linkify(message.text || '') +
     historyAttachments(message.attachments) +
     '</div></div>'
   );

@@ -86,6 +86,51 @@ test('цитата, черта и ссылка', () => {
 test('опасные схемы ссылок не становятся ссылками', () => {
   assert.equal(renderHtml('[жми](javascript:alert(1))'), '[жми](javascript:alert(1))');
   assert.equal(renderHtml('[жми](data:text/html,привет)'), '[жми](data:text/html,привет)');
+  assert.equal(renderHtml('javascript:alert(1)'), 'javascript:alert(1)');
+});
+
+test('голый адрес в тексте — тоже ссылка, а не строчка текста', () => {
+  assert.equal(
+    renderHtml('Радиатор: https://www.amazon.co.uk/dp/B0CFXY26H1 — €27.58'),
+    'Радиатор: <a href="https://www.amazon.co.uk/dp/B0CFXY26H1">https://www.amazon.co.uk/dp/B0CFXY26H1</a> — €27.58',
+  );
+  assert.equal(
+    renderHtml('**https://t.me/** и ещё https://x.com'),
+    '<b><a href="https://t.me/">https://t.me/</a></b> и ещё <a href="https://x.com">https://x.com</a>',
+  );
+  // Вопросительный знак и амперсанд — часть адреса, и в HTML их надо экранировать.
+  assert.equal(
+    renderHtml('https://x.com/search?q=a&b=2'),
+    '<a href="https://x.com/search?q=a&amp;b=2">https://x.com/search?q=a&amp;b=2</a>',
+  );
+  assertBalanced(renderHtml('**https://t.me/**'));
+});
+
+test('пунктуация вокруг адреса — не часть адреса', () => {
+  assert.equal(
+    renderHtml('смотри (https://x.com/a_(b)).'),
+    'смотри (<a href="https://x.com/a_(b)">https://x.com/a_(b)</a>).',
+  );
+  assert.equal(
+    renderHtml('<https://x.com>'),
+    '&lt;<a href="https://x.com">https://x.com</a>&gt;',
+  );
+  assert.equal(renderHtml('конец https://x.com.'), 'конец <a href="https://x.com">https://x.com</a>.');
+});
+
+test('адрес в коде и в подписи ссылки не линкуется второй раз', () => {
+  assert.equal(renderHtml('`https://x.com`'), '<code>https://x.com</code>');
+  assert.equal(renderHtml('```\nhttps://x.com\n```'), '<pre>https://x.com</pre>');
+  // Подпись ссылки — готовый `<a>`: вложенную ссылку Telegram не примет.
+  assert.equal(
+    renderHtml('[https://x.com](https://y.com)'),
+    '<a href="https://y.com">https://x.com</a>',
+  );
+});
+
+test('адрес не начинается посреди слова', () => {
+  assert.equal(renderHtml('текстhttps://x.com'), 'текстhttps://x.com');
+  assert.equal(renderHtml('поле field_https://x.com'), 'поле field_https://x.com');
 });
 
 test('таблица — выровненный моноширинный блок', () => {

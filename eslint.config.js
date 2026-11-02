@@ -39,8 +39,11 @@ export default tseslint.config(
   },
   {
     // Клиент чата исполняется в браузере: у него document, fetch и history вместо process.
-    files: ['packages/service/src/control/chat-client.js'],
+    // Оба файла — классические script'ы, которые страница вставляет подряд: функции
+    // разметки становятся глобальными, поэтому здесь script, а не module.
+    files: ['packages/service/src/control/chat-client.js', 'packages/service/src/control/chat-markdown.js'],
     languageOptions: {
+      sourceType: 'script',
       globals: { ...globals.browser },
     },
   },

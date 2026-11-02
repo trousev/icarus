@@ -32,6 +32,11 @@ test('чат — это лента с композером и диалогами
   assert.match(html, /id="settings-pane"/, 'настройки открываются поверх чата, не уводя со страницы');
   assert.match(html, /\/panel\/api\/chat\/image/, 'локальные картинки отдаёт сервер');
   assert.match(html, /md-image/, 'markdown-картинки рисуются');
+  // Разметка подключается раньше клиента: `markdown` — обычная глобальная функция.
+  const rendererAt = html.indexOf('function imageSrc');
+  const clientAt = html.indexOf('function assistantHtml');
+  assert.ok(rendererAt > 0 && rendererAt < clientAt, 'markdown едет в страницу до чата');
+  assert.match(html, /noopener noreferrer/, 'внешние ссылки открываются в новой вкладке');
   assert.match(html, /"chatId":"web-1"/);
   assert.match(html, /"enabled":true/);
   assert.doesNotMatch(html, /демо-режим/i, 'чат настоящий, без имитации');
