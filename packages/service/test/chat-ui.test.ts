@@ -40,7 +40,20 @@ test('клик по пустому месту сайдбара не сворач
   // Отступы вокруг «ДИАЛОГИ» — просто фон: панель сворачивает только крестик,
   // иначе любая мимоходная клика по сайдбару закрывает его.
   assert.doesNotMatch(html, /el\('chat-side'\)\.addEventListener/, 'сайдбар не ловит клики фоном');
-  assert.match(html, /el\('close-side'\)\.onclick = closeSide/, 'крестик по-прежнему закрывает меню');
+  assert.match(html, /el\('close-side'\)\.onclick = closeMenu/, 'крестик по-прежнему закрывает меню');
+});
+
+test('свернуть панель можно только на мелких экранах', () => {
+  const html = chatPage(SESSION, { enabled: true });
+  // На широком экране колонка диалогов всегда на месте: ни ☰, ни ×, ни режима
+  // «свёрнуто», иначе панель безвозвратно пропадает.
+  assert.doesNotMatch(html, /side-collapsed/, 'на широком экране нет сворачивания');
+  assert.match(html, /\.side-close \{ display: none;/, 'крестик скрыт по умолчанию');
+  assert.match(
+    html,
+    /@media \(max-width: 900px\)[\s\S]*?\.menu-btn, \.side-close \{ display: inline-block; \}/,
+    'на узком экране ☰ и × снова видны',
+  );
 });
 
 test('над списком диалогов — только заголовок, без счётчика', () => {
