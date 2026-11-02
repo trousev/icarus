@@ -322,12 +322,14 @@ function makeBot(
     topics?: boolean;
     /** Сколько живёт «свежий топик» (первое сообщение заведённого из ленты топика). */
     freshTopicWindowMs?: number;
+    /** Своя сессия: тесту про прерывание нужен долгий ход, а не мгновенный. */
+    session?: ReturnType<typeof fakeSession>;
   } = {},
 ) {
   const config =
     options.config ??
     makeConfig({ telegram: { token: 'bot-token', mapping: { trousev: 'probe' } } });
-  const session = fakeSession(options.steps ?? ANSWER_STEPS);
+  const session = options.session ?? fakeSession(options.steps ?? ANSWER_STEPS);
   const calls: Array<{ command: string; user: string; conversationId: string; args?: string }> = [];
   const record = (command: string, user: { id: string }, conversationId: string, args?: string) => {
     calls.push({ command, user: user.id, conversationId, ...(args ? { args } : {}) });
@@ -341,6 +343,12 @@ function makeBot(
     abort: async (user: { id: string }, conversationId: string) => {
       record('stop', user, conversationId);
       return options.stop ?? { status: 'stopped' };
+    },
+    interrupt: async (user: { id: string }, conversationId: string) => {
+      record('interrupt', user, conversationId);
+      const stop = (session as { interrupt?: () => Promise<boolean> }).interrupt;
+      if (stop) await stop.call(session);
+      return { status: 'stopped' };
     },
     stats: async (user: { id: string }, conversationId: string) => {
       record('stats', user, conversationId);
@@ -1209,4 +1217,57 @@ test('/start при включённых топиках рассказывает
   await bot.handleUpdate(messageUpdate('/start'));
 
   assert.match(chatText(state, 42), /\/topic — завести отдельный разговор/);
+});
+
+test('реплика поверх идущего хода прерывает его и становится новым ходом', async () => {
+  const listeners = new Set<(event: Record<string, unknown>) => void>();
+  let release: () => void = () => {};
+
+  const session = Object.assign(fakeSession([]), {
+    interrupts: 0,
+    async interrupt(): Promise<boolean> {
+      session.interrupts += 1;
+      session.busy = false;
+      release();
+      return true;
+    },
+  });
+  session.onEvent = (listener) => {
+    listeners.add(listener);
+    return () => listeners.delete(listener);
+  };
+  // Первый ход висит, пока его не прервут: ровно как настоящий, который держит
+  // субагентов. Второй отвечает сразу.
+  session.prompt = async (text) => {
+    session.prompts.push(text);
+    session.busy = true;
+    if (session.prompts.length === 1) await new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    session.busy = false;
+    for (const listener of listeners) {
+      listener({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'готово' } });
+      listener({ type: 'agent_settled' });
+    }
+  };
+
+  const { bot, calls } = makeBot({ session });
+  const first = bot.enqueue(messageUpdate('первое'));
+  for (let i = 0; i < 100 && session.prompts.length === 0; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.deepEqual(session.prompts, ['первое'], 'первый ход должен начаться');
+
+  // Второе сообщение — скилл с аргументами: для бота это не команда, а реплика,
+  // и она тоже должна прервать ход, а не встать за ним.
+  const second = bot.enqueue(messageUpdate('/skill:demo второе'));
+  await Promise.all([first, second]);
+
+  assert.equal(session.interrupts, 1, 'идущий ход прерывается, а не дожидается очереди');
+  assert.equal(session.prompts.length, 2);
+  assert.match(session.prompts[1] ?? '', /\/skill:demo второе/);
+  assert.ok(
+    calls.some((call) => call.command === 'interrupt'),
+    'прерывание идёт через реестр, а не мимо него',
+  );
 });

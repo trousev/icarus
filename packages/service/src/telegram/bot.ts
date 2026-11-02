@@ -15,7 +15,7 @@
 import { findTelegramUser, userPaths, type IcarusConfig, type UserConfig } from '../config.ts';
 import { log, redact } from '../log.ts';
 import { buildPrompt } from '../prompt.ts';
-import { phraseForToolStart, phraseForToolEnd } from '../reasoning.ts';
+import { phraseForToolStart, phraseForToolEnd, subagentStatus } from '../reasoning.ts';
 import { speechTranscriber, type Transcriber } from '../speech.ts';
 import type {
   AbortOutcome,
@@ -498,6 +498,12 @@ export class TelegramBot {
   private offset: number | undefined;
   /** Очередь по чату и топику: два сообщения подряд не должны спорить за одну сессию. */
   private queue = new KeyedQueue();
+  /**
+   * Идущие ходы по чату и топику. Нужны, чтобы новое сообщение могло прервать
+   * текущий ход сразу, а не ждать своей очереди: в Telegram человеку никто не
+   * мешает писать поверх, и ждать пять минут ответа субагентов он не станет.
+   */
+  private turns = new Map<string, { interrupt: () => Promise<void> }>();
   /** Что знаем о топиках: Bot API списка не отдаёт, копим увиденное (см. TopicsCache). */
   private topics = new TopicsCache();
   /** Threaded Mode у бота: null — ещё не спрашивали (getMe не ответил). */
@@ -681,8 +687,30 @@ export class TelegramBot {
     const thread = message ? this.resolveThread(message) : { threadId: null, fresh: false, implicit: false };
     const key = message ? `${message.chat.id}:${thread.threadId ?? 0}` : 'unknown';
     const text = message?.text ?? message?.caption ?? '';
+    const command = parseCommand(text);
     const task = (): Promise<void> => this.handleUpdate(update, thread);
-    const settled = parseCommand(text)?.name === 'stop' ? task() : this.queue.add(key, task);
+
+    // Реплика поверх идущего хода — это не «пусть подождёт»: Икар в этот момент
+    // может держать два десятка субагентов, и человек ждёт их молча. Прерываем
+    // сразу; сама реплика встанет в очередь и начнёт новый ход, когда прошлый
+    // действительно встанет (см. runTurn).
+    //
+    // Команды бота (/stats, /compact) ход не трогают: они для того и сделаны, чтобы
+    // не тратить токены. А вот скилл или промпт-шаблон (`/skill:... текст`) — это
+    // обычная реплика для pi, и она прерывает.
+    const botCommand = command !== null && BOT_COMMANDS.has(command.name);
+    const startsTurn = !botCommand && (command === null || command.args !== '');
+    if (startsTurn) {
+      const running = this.turns.get(key);
+      if (running) {
+        log.info('телеграм: новое сообщение прерывает текущий ход', { key });
+        void running.interrupt().catch((error) => {
+          log.warn('телеграм: прервать ход не вышло', { error: describeTelegramError(error) });
+        });
+      }
+    }
+
+    const settled = command?.name === 'stop' ? task() : this.queue.add(key, task);
     void settled.catch((error) => log.error('телеграм: сообщение сорвалось', { error: describeTelegramError(error) }));
     return settled;
   }
@@ -885,20 +913,43 @@ export class TelegramBot {
       text = spoken;
     }
 
+    // Ход отмечаем до поднятия сессии: контейнер и pi стартуют секунды, и сообщение,
+    // пришедшее в это время, должно прервать ещё не начавшийся ход, а не встать за
+    // ним в очередь на пять минут.
+    const turnKey = `${message.chat.id}:${route.threadId ?? 0}`;
+    const turn = {
+      interrupt: async (): Promise<void> => {
+        await this.registry.interrupt(user, conversationId);
+      },
+    };
+    this.turns.set(turnKey, turn);
+    const dropTurn = (): void => {
+      if (this.turns.get(turnKey) === turn) this.turns.delete(turnKey);
+    };
+
     let session: PiSession;
     try {
       session = await this.registry.acquire(user, conversationId);
     } catch (error) {
       log.error('телеграм: сессия не поднялась', { user: user.id, error: redact(String(error)) });
+      dropTurn();
       reply.push(`Не смог начать: ${error instanceof Error ? error.message : String(error)}`);
       await reply.finish();
       return;
     }
 
-    if (session.busy) {
+    // Сжатие прерывать нечем: это не ход, а переписывание контекста. Здесь честно
+    // просим подождать. Всё остальное — гонка с прерыванием из enqueue: ход уже
+    // останавливают, просто `agent_settled` ещё не приехал.
+    if (session.compacting) {
+      dropTurn();
       reply.push(BUSY);
       await reply.finish();
       return;
+    }
+    if (session.busy) {
+      log.info('телеграм: жду, пока встанет прошлый ход', { user: user.id, conversation: conversationId });
+      await session.interrupt();
     }
 
     let settle: () => void = () => {};
@@ -916,6 +967,13 @@ export class TelegramBot {
         case 'tool_execution_start': {
           const phrase = phraseForToolStart(String(event.toolName), (event.args ?? {}) as Record<string, unknown>);
           if (phrase) reply.setStatus(`⚙ ${phrase}`);
+          break;
+        }
+        case 'tool_execution_update': {
+          // У субагентов прогресс содержательный: кто бежит, кто в очереди.
+          const partial = event.partialResult as { details?: unknown } | undefined;
+          const line = subagentStatus(partial?.details);
+          if (line) reply.setStatus(`⚙ ${line}`);
           break;
         }
         case 'tool_execution_end': {
@@ -951,6 +1009,7 @@ export class TelegramBot {
       log.error('телеграм: ход сорвался', { user: user.id, error: redact(String(error)) });
       reply.push(`⚠️ Ход сорвался: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
+      dropTurn();
       unsubscribe();
       await reply.finish();
       await this.reportUndelivered(message, route, reply);

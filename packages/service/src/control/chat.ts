@@ -31,6 +31,19 @@ import { log } from '../log.ts';
 
 export { readChats };
 
+/** Один субагент в трассировке: кто, что делает и чем кончил. */
+export type ChatSubagentStep = {
+  agent: string;
+  task: string;
+  /** queued | running | ok | error | aborted | skipped — как в инструменте. */
+  status: string;
+  /** Чем занят прямо сейчас, пока жив: «web_search: amazon.ie». */
+  activity?: string;
+  /** Сколько уже работает или работал: панель считает по нему секунды. */
+  startedAt?: number;
+  ms?: number;
+  error?: string;
+};
 export type ChatTraceStep = {
   id: string;
   tool: string;
@@ -38,7 +51,54 @@ export type ChatTraceStep = {
   detail: string;
   status: 'running' | 'ok' | 'error';
   result?: string;
+  /** Только у шага subagent: список детей и их состояние. */
+  subagents?: ChatSubagentStep[];
 };
+
+/** Сколько символов задания видно в панели: целиком оно занимает пол-экрана. */
+const SUBAGENT_TASK_CHARS = 160;
+
+/**
+ * Субагенты из деталей инструмента. Детали приходят дважды — в прогрессе и в итоге,
+ * форма одна, поэтому и разбор один. Мусор в деталях не должен ронять ход: не
+ * разобрали — просто не показываем.
+ */
+export function subagentsOf(value: unknown): ChatSubagentStep[] {
+  if (!Array.isArray(value)) return [];
+  const states: ChatSubagentStep[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue;
+    const state = item as Record<string, unknown>;
+    if (typeof state.agent !== 'string' || typeof state.task !== 'string') continue;
+    states.push({
+      agent: state.agent,
+      task: clip(state.task, SUBAGENT_TASK_CHARS),
+      status: typeof state.status === 'string' ? state.status : 'queued',
+      ...(typeof state.activity === 'string' && state.activity ? { activity: clip(state.activity, 120) } : {}),
+      ...(typeof state.startedAt === 'number' ? { startedAt: state.startedAt } : {}),
+      ...(typeof state.ms === 'number' ? { ms: state.ms } : {}),
+      ...(typeof state.error === 'string' && state.error ? { error: clip(state.error, 200) } : {}),
+    });
+  }
+  return states;
+}
+
+/** Задачи из аргументов вызова: пока прогресса нет, список уже можно показать. */
+function queuedSubagents(args: Record<string, unknown>): ChatSubagentStep[] {
+  const tasks = Array.isArray(args.tasks) ? args.tasks : [];
+  const states: ChatSubagentStep[] = [];
+  for (const item of tasks) {
+    if (!item || typeof item !== 'object') continue;
+    const task = item as Record<string, unknown>;
+    if (typeof task.agent !== 'string') continue;
+    states.push({
+      agent: task.agent,
+      task: clip(String(task.task ?? ''), SUBAGENT_TASK_CHARS),
+      status: 'queued',
+    });
+  }
+  return states;
+}
 
 /** Вложение в истории: путь внутри контейнера и признак «это картинка». */
 export type ChatAttachment = { path: string; image: boolean };
@@ -483,6 +543,7 @@ export function traceLabel(tool: string, args: Record<string, unknown> = {}): st
   if (tool === 'read' || tool === 'grep' || tool === 'find' || tool === 'ls') {
     return /memory/i.test(text) ? 'ПАМЯТЬ' : 'ЧТЕНИЕ';
   }
+  if (tool === 'subagent') return 'СУБАГЕНТЫ';
   if (tool === 'write' || tool === 'edit') return 'ПРАВКА';
   if (tool === 'now') return 'ВРЕМЯ';
   if (tool === 'get_control_panel_link') return 'ПАНЕЛЬ';
@@ -492,6 +553,16 @@ export function traceLabel(tool: string, args: Record<string, unknown> = {}): st
 /** Строка под ярлыком: команда, путь, запрос или имя MCP-сервера. */
 export function traceDetail(tool: string, args: Record<string, unknown> = {}): string {
   const first = (value: unknown): string => (typeof value === 'string' ? value.split('\n')[0] ?? '' : '');
+  if (tool === 'subagent') {
+    const tasks = Array.isArray(args.tasks) ? args.tasks : [];
+    const agents = tasks
+      .map((item) => (item && typeof item === 'object' ? (item as Record<string, unknown>).agent : undefined))
+      .filter((name): name is string => typeof name === 'string');
+    if (tasks.length === 0) return 'задачи не переданы';
+    const counted = [...new Set(agents)];
+    const word = tasks.length === 1 ? 'задача' : tasks.length < 5 ? 'задачи' : 'задач';
+    return clip(`${tasks.length} ${word} · ${counted.join(', ')}`, 140);
+  }
   const direct =
     first(args.path) ||
     first(args.file) ||
@@ -514,7 +585,18 @@ export function traceDetail(tool: string, args: Record<string, unknown> = {}): s
 }
 
 function stepFor(tool: string, args: Record<string, unknown>, id: string): ChatTraceStep {
-  return { id, tool, label: traceLabel(tool, args), detail: traceDetail(tool, args), status: 'running' };
+  const step: ChatTraceStep = {
+    id,
+    tool,
+    label: traceLabel(tool, args),
+    detail: traceDetail(tool, args),
+    status: 'running',
+  };
+  if (tool === 'subagent') {
+    const queued = queuedSubagents(args);
+    if (queued.length > 0) step.subagents = queued;
+  }
+  return step;
 }
 
 /** Разбор файла сессии в ленту. Общий для веб-чата и для внешних разговоров. */
@@ -599,6 +681,12 @@ function readMessages(file: string, user: UserConfig, chatId: string): ChatMessa
       step.status = message.isError === true ? 'error' : 'ok';
       const result = clip(resultText(message.content), 500);
       if (result) step.result = result;
+      // pi кладёт детали инструмента в тот же toolResult: по ним история знает,
+      // чем кончил каждый субагент, а не только «сколько их было».
+      const details = message.details as Record<string, unknown> | undefined;
+      const states = subagentsOf(details?.subagents);
+      if (states.length > 0) step.subagents = states;
+      else if (step.subagents) delete step.subagents;
     }
   }
 
@@ -756,6 +844,19 @@ async function streamTurn(
         send({ type: 'step', step });
         break;
       }
+      case 'tool_execution_update': {
+        const id = String(event.toolCallId ?? '');
+        const step = byId.get(id);
+        if (!step) break;
+        const partial = event.partialResult as { content?: unknown; details?: unknown } | undefined;
+        const details = partial?.details as Record<string, unknown> | undefined;
+        const states = subagentsOf(details?.subagents);
+        if (states.length > 0) step.subagents = states;
+        const text = clip(resultText(partial?.content), 300);
+        if (text) step.result = text;
+        send({ type: 'step-update', id, step: { ...step } });
+        break;
+      }
       case 'tool_execution_end': {
         const id = String(event.toolCallId ?? '');
         const step = byId.get(id);
@@ -763,7 +864,12 @@ async function streamTurn(
         step.status = event.isError === true ? 'error' : 'ok';
         const result = clip(resultText(event.result), 500);
         if (result) step.result = result;
-        send({ type: 'step-end', id, status: step.status, result: step.result });
+        const details = (event.result as { details?: unknown } | undefined)?.details as
+          | Record<string, unknown>
+          | undefined;
+        const states = subagentsOf(details?.subagents);
+        if (states.length > 0) step.subagents = states;
+        send({ type: 'step-end', id, status: step.status, result: step.result, subagents: step.subagents });
         break;
       }
       case 'extension_error':

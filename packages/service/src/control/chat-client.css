@@ -207,6 +207,24 @@
 .trace-step.error .trace-dot { background: var(--danger); }
 @keyframes pulse { 50% { opacity: .25; } }
 
+/* Субагенты под шагом: строка на ребёнка, как в трассировке, но с заданием. */
+.trace-step.has-subs { flex-wrap: wrap; }
+.sub-list { flex: 1 0 100%; margin: 3px 0 5px 96px; display: flex; flex-direction: column; gap: 3px; }
+.sub-step { display: flex; gap: 8px; align-items: baseline; font-size: 11.5px; color: var(--dim); }
+.sub-mark { width: 10px; flex: 0 0 auto; text-align: center; color: var(--dim); }
+.sub-step.running .sub-mark { color: var(--accent); animation: pulse 1.2s infinite; }
+.sub-step.ok .sub-mark { color: #4ade80; }
+.sub-step.error .sub-mark, .sub-step.aborted .sub-mark { color: var(--danger); }
+.sub-step.ok .sub-note { color: var(--dim); }
+.sub-step.error .sub-note { color: var(--danger); }
+.sub-agent { flex: 0 0 auto; color: var(--text); font: 10px/1.5 ui-monospace, monospace; letter-spacing: .04em; }
+.sub-task { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sub-note { flex: 0 0 auto; max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .85; }
+@media (max-width: 900px) {
+  .sub-list { margin-left: 0; }
+  .sub-note { max-width: 60%; }
+}
+
 .md { font-size: 14px; line-height: 1.65; word-break: break-word; }
 .md > *:first-child { margin-top: 0; }
 .md > *:last-child { margin-bottom: 0; }
@@ -262,6 +280,16 @@
   display: grid; place-items: center;
 }
 .send:disabled { opacity: .45; cursor: default; }
+/* Пока идёт ответ, на месте «отправить» стоит «стоп»: ход можно остановить
+   в середине, вместе с работающими субагентами. */
+.stop {
+  width: 36px; height: 36px; flex: 0 0 auto; border-radius: 9px; border: 0;
+  background: rgba(239, 68, 68, .18); color: #f87171; font-size: 13px; line-height: 1;
+  display: grid; place-items: center;
+}
+.stop:hover { background: rgba(239, 68, 68, .28); }
+.stop:disabled { opacity: .45; cursor: default; }
+.stop[hidden], .send[hidden] { display: none; }
 .composer-foot {
   max-width: 900px; margin: 7px auto 0; display: flex; justify-content: space-between;
   gap: 12px; color: var(--dim); font-size: 11px; min-height: 16px;
