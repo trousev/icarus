@@ -1,0 +1,79 @@
+/* Раздел MCP: карточки серверов. Стили отдельные, чтобы не тащить их в ui.ts —
+   там живёт память и скиллы, и общий CSS уже большой. */
+.mcp-list { display:flex; flex-direction:column; gap:12px; max-width:900px; }
+.mcp-card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px 18px; }
+.mcp-card.off { opacity:.72; }
+.mcp-card-head { display:flex; gap:16px; align-items:flex-start; justify-content:space-between; }
+.mcp-card h3 { margin:0 0 4px; font-size:17px; }
+.mcp-desc { color:var(--dim); margin:0 0 10px; max-width:640px; }
+.mcp-meta { display:flex; gap:10px; flex-wrap:wrap; align-items:center; color:var(--dim); font-size:12px; }
+.mcp-meta code { font-family:ui-monospace, monospace; background:var(--raise); border-radius:6px; padding:2px 7px; color:var(--text); }
+.mcp-target { font-family:ui-monospace, monospace; color:var(--dim); overflow-wrap:anywhere; }
+.badges { display:flex; gap:6px; flex-wrap:wrap; margin:8px 0 0; }
+.badge { font-size:10px; letter-spacing:.08em; border:1px solid var(--line); border-radius:999px;
+         padding:2px 8px; color:var(--dim); background:var(--bg); }
+.badge.on { color:#4ade80; border-color:#2b4a36; }
+.badge.off { color:var(--danger); border-color:#4a2b33; }
+.badge.shared { color:var(--accent); border-color:var(--accent-soft); }
+.badge.global { color:#e0af68; border-color:#4a3d2b; }
+.badge.wait { color:#e0af68; border-color:#4a3d2b; }
+.mcp-auth { margin-top:10px; font-size:12px; color:var(--dim); }
+.mcp-auth.bad { color:var(--danger); }
+.mcp-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:14px; }
+.mcp-actions button { background:var(--raise); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:6px 12px; }
+.mcp-actions button:hover { border-color:var(--accent); }
+.mcp-actions button.primary { background:var(--accent); border-color:var(--accent); color:#0f1116; font-weight:500; }
+.mcp-actions button.danger { color:var(--danger); }
+.mcp-actions button.danger:hover { border-color:var(--danger); }
+.mcp-result { margin-top:12px; padding:10px 12px; background:var(--bg); border:1px solid var(--line);
+              border-radius:9px; font:12px/1.6 ui-monospace, monospace; color:var(--dim); white-space:pre-wrap; }
+.mcp-result.bad { color:var(--danger); }
+.mcp-empty { color:var(--dim); padding:18px; border:1px dashed var(--line); border-radius:12px; }
+
+/* Переключатель: включён / выключен — главное действие карточки. */
+.switch { position:relative; display:inline-flex; flex:0 0 auto; }
+.switch input { position:absolute; opacity:0; width:0; height:0; }
+.switch span { width:42px; height:24px; border-radius:999px; background:var(--raise); border:1px solid var(--line);
+               display:block; transition:background .15s, border-color .15s; cursor:pointer; }
+.switch span::after { content:''; display:block; width:18px; height:18px; border-radius:50%; background:var(--dim);
+                      margin:2px; transition:transform .15s, background .15s; }
+.switch input:checked + span { background:var(--accent-soft); border-color:var(--accent); }
+.switch input:checked + span::after { transform:translateX(18px); background:var(--accent); }
+.switch input:focus-visible + span { outline:2px solid var(--accent); outline-offset:2px; }
+
+/* Форма: тот же язык, что у скиллов, но полей больше. */
+.mcp-form { display:flex; flex-direction:column; gap:0; }
+.mcp-form .field { padding-bottom:12px; }
+.mcp-form .field label { display:block; }
+.mcp-form .field input[type=text], .mcp-form .field input[type=password],
+.mcp-form .field select, .mcp-form .field textarea {
+  background:var(--bg); border:1px solid var(--line); border-radius:9px; color:var(--text);
+  font:inherit; padding:9px 11px; width:100%;
+}
+.mcp-form .field textarea { resize:vertical; font:12px/1.6 ui-monospace, monospace; min-height:72px; }
+.mcp-form .field select { cursor:pointer; }
+.mcp-form .field input:focus, .mcp-form .field select:focus, .mcp-form .field textarea:focus {
+  outline:none; border-color:var(--accent);
+}
+.mcp-form .two { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.mcp-form .two .field { min-width:0; }
+.mcp-form details { border:1px solid var(--line); border-radius:9px; padding:10px 12px; margin:0 0 12px; }
+.mcp-form summary { color:var(--dim); cursor:pointer; font-size:12px; }
+.mcp-form .check { padding:4px 0 14px; }
+.mcp-form .hint { padding-bottom:12px; }
+.mcp-form .hint[hidden], .mcp-form .field[hidden] { display:none; }
+.mcp-dialog { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:18px;
+              width:min(680px, calc(100% - 32px)); max-height:calc(100vh - 60px); overflow:auto;
+              box-shadow:0 12px 40px rgba(0,0,0,.5); }
+.mcp-dialog h2 { margin:0 0 6px; font-size:20px; }
+.mcp-dialog .about { margin:0 0 16px; }
+.mcp-dialog .row { display:flex; gap:8px; justify-content:flex-end; }
+.mcp-dialog .row button { background:var(--raise); color:var(--text); border:1px solid var(--line);
+                          border-radius:8px; padding:7px 14px; }
+.mcp-dialog .row button.primary { background:var(--accent); border-color:var(--accent); color:#0f1116; font-weight:500; }
+.mcp-error { color:var(--danger); font-size:13px; padding:0 0 12px; }
+.mcp-notice { padding:11px 14px; border-radius:10px; margin:0 0 16px; max-width:900px;
+              border:1px solid #2b4a36; background:#14231a; color:#9be9b0; }
+.mcp-notice.bad { border-color:#4a2b33; background:#241418; color:#f7a2b0; }
+.mcp-intro { color:var(--dim); max-width:720px; margin:0 0 18px; }
+.mcp-intro b { color:var(--text); font-weight:500; }

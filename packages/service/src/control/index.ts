@@ -6,7 +6,8 @@
 //
 // Главный экран — /panel/chat: диалоги, лента и композер. Чат ходит в те же сессии
 // pi, что Telegram, только conversationId начинается с web-. Настройки
-// (/panel/memory, /panel/skills, /panel/maple) открываются панелью поверх чата.
+// (/panel/memory, /panel/skills, /panel/mcp, /panel/maple) открываются панелью
+// поверх чата.
 //
 // Внутри памяти три области: личная, семейная и математика; математика — не память
 // в том же смысле: её файлы создаёт Maple, и панель показывает их только для чтения
@@ -56,6 +57,9 @@ import {
 } from './skills.ts';
 import { panelHtml, type PanelPage, type PanelSession } from './ui.ts';
 import { chatPage } from './chat-ui.ts';
+import { handleMcpApi, handleMcpPublic } from './mcp.ts';
+import { mcpPage } from './mcp-ui.ts';
+import { countVisible } from '../mcp/registry.ts';
 import { handleChatApi } from './chat.ts';
 import type { SessionRegistry } from '../sessions/registry.ts';
 import { log as logger } from '../log.ts';
@@ -82,6 +86,7 @@ export type PanelContext = {
 export const SECTIONS: { id: string; label: string }[] = [
   { id: 'memory', label: 'Память' },
   { id: 'skills', label: 'Скиллы' },
+  { id: 'mcp', label: 'MCP' },
   { id: 'maple', label: 'Математика' },
 ];
 
@@ -230,6 +235,12 @@ function countsFor(config: IcarusConfig, userId: string): Record<string, number>
     // это один скилл, и число рядом с разделом должно значить именно это.
     skills: listSkills(paths.skills).length,
   };
+  try {
+    counts.mcp = countVisible(config, userId);
+  } catch (error) {
+    // Сломанное хранилище MCP не должно ронять счётчики всей панели.
+    logger.warn('MCP: счётчик не собрался', { user: userId, error: String(error) });
+  }
   if (config.mcp?.maple) counts.maple = countFiles(paths.maple, mapleExtensions);
   return counts;
 }
@@ -241,6 +252,13 @@ export async function handlePanel(
   ctx: PanelContext,
 ): Promise<boolean> {
   const { config } = ctx;
+
+  // Публичные маршруты MCP: их зовёт authorization server и браузер после
+  // редиректа, а не панель с заголовком SSO. В callback человека связывает state.
+  if (url.pathname.startsWith('/panel/mcp/oauth/')) {
+    if (await handleMcpPublic(req, res, url, ctx)) return true;
+  }
+
   const access = identifyPanelUser(req, config);
 
   // Корень панели — чат: это теперь главный экран, а память и скиллы живут
@@ -292,6 +310,11 @@ export async function handlePanel(
     return true;
   }
 
+  if (url.pathname === '/panel/mcp' || url.pathname.startsWith('/panel/mcp/')) {
+    await handleApi(req, res, url, ctx, access);
+    return true;
+  }
+
   if (url.pathname.startsWith('/panel/api/') || routeApi(url.pathname)) {
     await handleApi(req, res, url, ctx, access);
     return true;
@@ -300,10 +323,10 @@ export async function handlePanel(
   return false;
 }
 
-/** Раздел из адреса: /panel/chat, /panel/memory, /panel/skills и /panel/maple. */
+/** Раздел из адреса: /panel/chat, /panel/memory, /panel/skills, /panel/mcp и /panel/maple. */
 function routePage(pathname: string): PanelPage | null {
   if (pathname === '/panel/chat' || pathname === '/panel/chat/') return { section: 'chat' };
-  const match = /^\/panel\/(memory|skills|maple)\/?$/.exec(pathname);
+  const match = /^\/panel\/(memory|skills|maple|mcp)\/?$/.exec(pathname);
   return match ? { section: match[1] } : null;
 }
 
@@ -342,6 +365,9 @@ async function sectionPage(
       enabled: chatEnabled,
     });
   }
+  if (page.section === 'mcp') {
+    return mcpPage(session, { embed: url.searchParams.get('embed') === '1' });
+  }
   return panelHtml(session, {
     ...page,
     // Область — только у памяти: у скиллов и математики её нет, и тащить туда личную
@@ -377,6 +403,13 @@ async function handleApi(
   }
 
   const userId = access.identity.userId;
+
+  // MCP — отдельный раздел со своими маршрутами; в общий разбор областей он не
+  // заходит, иначе «файлы» памяти попытались бы открыть MCP-сервер.
+  if (url.pathname.startsWith('/panel/mcp/')) {
+    await handleMcpApi(req, res, url, ctx, userId);
+    return;
+  }
 
   // Чат — отдельная ветка: у него свои сущности (диалоги и сессии pi), и общий
   // разбор памяти тут только мешал бы. Тело POST он читает сам, поэтому уходим

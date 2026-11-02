@@ -38,10 +38,14 @@ export default tseslint.config(
     },
   },
   {
-    // Клиент чата исполняется в браузере: у него document, fetch и history вместо process.
-    // Оба файла — классические script'ы, которые страница вставляет подряд: функции
-    // разметки становятся глобальными, поэтому здесь script, а не module.
-    files: ['packages/service/src/control/chat-client.js', 'packages/service/src/control/chat-markdown.js'],
+    // Клиенты чата и MCP исполняются в браузере: у них document, fetch и history
+    // вместо process. Это классические script'ы, которые страница вставляет
+    // подряд, поэтому здесь script, а не module.
+    files: [
+      'packages/service/src/control/chat-client.js',
+      'packages/service/src/control/chat-markdown.js',
+      'packages/service/src/control/mcp-client.js',
+    ],
     languageOptions: {
       sourceType: 'script',
       globals: { ...globals.browser },

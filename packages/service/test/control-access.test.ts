@@ -216,6 +216,7 @@ test('панель показывает только память своего �
       [
         { id: 'memory', label: 'Память' },
         { id: 'skills', label: 'Скиллы' },
+        { id: 'mcp', label: 'MCP' },
         { id: 'maple', label: 'Математика' },
       ],
       'разделы панели приходят из сервиса',
@@ -246,7 +247,11 @@ test('без Maple раздела математики нет и в адресе
       const state = (await (await api(base, 'probe', 'state')).json()) as {
         sections: Array<{ id: string }>;
       };
-      assert.deepEqual(state.sections.map((section) => section.id), ['memory', 'skills'], 'математики нет в разделах');
+      assert.deepEqual(
+        state.sections.map((section) => section.id),
+        ['memory', 'skills', 'mcp'],
+        'математики нет в разделах, MCP остаётся',
+      );
 
       // Ссылка на выключенный раздел осталась у людей в закладках: страница не
       // должна открываться пустой, у которой каждый запрос — отказ.
