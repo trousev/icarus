@@ -42,7 +42,7 @@
 .new-chat span { font-size: 18px; line-height: 1; margin-top: -1px; }
 .new-chat:hover { filter: brightness(1.06); }
 
-.dialogs-head, .side-title {
+.side-title {
   color: var(--dim); font-size: 10px; letter-spacing: .14em;
   margin: 0 8px 5px;
 }

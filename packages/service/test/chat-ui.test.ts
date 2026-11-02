@@ -68,10 +68,11 @@ test('скролл в списке диалогов — тонкий и в ст�
   assert.match(html, /\.chat-scroll::-webkit-scrollbar \{ width: 8px; \}/, 'ленту не трогаем');
 });
 
-test('над списком диалогов — только заголовок, без счётчика', () => {
+test('над списком диалогов нет лишнего заголовка', () => {
   const html = chatPage(SESSION, { enabled: true });
-  assert.match(html, /class="dialogs-head">ДИАЛОГИ</, 'заголовок остался');
-  assert.doesNotMatch(html, /chat-count/, 'цифра после «ДИАЛОГИ» не нужна');
+  // «Новый чат» и сразу разговоры: подпись «ДИАЛОГИ» дублировала очевидное.
+  assert.doesNotMatch(html, /dialogs-head/, 'заголовок убран, список начинается сразу');
+  assert.doesNotMatch(html, /chat-count/, 'счётчика тоже нет');
 });
 
 test('без pi композер честно выключен', () => {
