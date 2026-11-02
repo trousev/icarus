@@ -3,6 +3,9 @@
 .chat-app {
   /* Ширину колонки задаёт клиент: тянется за правую границу и запоминается. */
   --side-w: 278px;
+  /* Высота строки сайдбара: кнопка «Новый чат» и черновик совпадают, чтобы
+     список не прыгал, когда кнопка превращается в строку. */
+  --side-row: 58px;
   display: grid;
   grid-template-columns: var(--side-w) minmax(0, 1fr);
   height: 100vh;
@@ -53,14 +56,16 @@
 
 .new-chat {
   width: 100%; border: 1px solid var(--accent); background: var(--accent);
-  color: #0f1116; font-weight: 600; border-radius: 9px; padding: 11px 14px;
+  color: #0f1116; font-weight: 600; border-radius: 9px; padding: 0 14px;
+  height: var(--side-row);
   display: flex; align-items: center; justify-content: center; gap: 8px;
-  margin-bottom: 12px;
 }
 .new-chat span { font-size: 18px; line-height: 1; margin-top: -1px; }
 .new-chat:hover { filter: brightness(1.06); }
 /* Черновик встаёт на место кнопки и по ширине совпадает со строками списка. */
 .new-chat[hidden], .draft-wrap[hidden] { display: none; }
+/* Ровно та же высота, что у кнопки: замена не сдвигает список ни на пиксель. */
+.draft-wrap .chat-item { display: block; height: var(--side-row); margin: 0; }
 
 .side-title {
   color: var(--dim); font-size: 10px; letter-spacing: .14em;
