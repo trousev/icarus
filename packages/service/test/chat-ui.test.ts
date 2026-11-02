@@ -58,6 +58,16 @@ test('свернуть панель можно только на мелких э
   );
 });
 
+test('скролл в списке диалогов — тонкий и в стык с правой границей', () => {
+  const html = chatPage(SESSION, { enabled: true });
+  // Список выезжает в padding панели: полоса касается её границы, а не висит
+  // в воздухе, поэтому и толщину можно позволить вдвое меньше.
+  assert.match(html, /\.chat-list \{[\s\S]*?margin-right: -12px/, 'полоса прижата к границе панели');
+  assert.match(html, /\.chat-list \{[\s\S]*?scrollbar-gutter: stable/, 'место под полосу не прыгает');
+  assert.match(html, /\.chat-list::-webkit-scrollbar \{ width: 4px; \}/, 'в списке полоса 4px, а не 8px');
+  assert.match(html, /\.chat-scroll::-webkit-scrollbar \{ width: 8px; \}/, 'ленту не трогаем');
+});
+
 test('над списком диалогов — только заголовок, без счётчика', () => {
   const html = chatPage(SESSION, { enabled: true });
   assert.match(html, /class="dialogs-head">ДИАЛОГИ</, 'заголовок остался');
