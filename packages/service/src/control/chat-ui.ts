@@ -50,6 +50,10 @@ export function chatPage(session: PanelSession, options: ChatPageOptions): strin
       <div><span>модель</span><span>${escapeHtml(session.model ?? '—')}</span></div>
       <div><span>хранилище</span><span>${escapeHtml(session.storage ?? 'git · local')}</span></div>
     </div>
+
+    <div class="side-resizer" id="side-resizer" role="separator" aria-orientation="vertical"
+         aria-label="Ширина панели" aria-valuemin="220" aria-valuemax="560" aria-valuenow="278"
+         tabindex="0"></div>
   </aside>
 
   <main class="chat-main">

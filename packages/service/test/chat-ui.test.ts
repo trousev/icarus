@@ -68,6 +68,17 @@ test('скролл в списке диалогов — тонкий и в ст�
   assert.match(html, /\.chat-scroll::-webkit-scrollbar \{ width: 8px; \}/, 'ленту не трогаем');
 });
 
+test('ширина сайдбара тянется и запоминается', () => {
+  const html = chatPage(SESSION, { enabled: true });
+  // Ручка на правой границе: колонка следует за --side-w, настройки открываются
+  // от её края, на узком экране ручки нет.
+  assert.match(html, /id="side-resizer"/, 'у границы есть ручка');
+  assert.match(html, /grid-template-columns: var\(--side-w\) minmax\(0, 1fr\)/, 'колонка следует за шириной');
+  assert.match(html, /left: var\(--side-w\)/, 'настройки открываются от края панели');
+  assert.match(html, /localStorage\.setItem\(SIDE_WIDTH_KEY/, 'ширина переживает перезагрузку');
+  assert.match(html, /\.side-resizer \{ display: none; \}/, 'на узком экране ручки нет');
+});
+
 test('над списком диалогов нет лишнего заголовка', () => {
   const html = chatPage(SESSION, { enabled: true });
   // «Новый чат» и сразу разговоры: подпись «ДИАЛОГИ» дублировала очевидное.
