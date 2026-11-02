@@ -251,8 +251,11 @@ function assistantHtml(message) {
 let chats = [];
 let currentId = cfg.chatId || null;
 let currentChat = null;
-let currentMessages = [];
 let streaming = false;
+/** Черновик нового чата: на сервере его ещё нет, пока не ушло первое сообщение. */
+let draft = false;
+/** Поколение загрузки истории: ответ, пришедший после смены чата, уже не нужен. */
+let historyToken = 0;
 /** Можно ли писать в открытый разговор: Telegram и API в панели только читаются. */
 let writable = Boolean(cfg.enabled);
 /** Список диалогов листается страницами: курсор приносит следующую. */
@@ -326,7 +329,12 @@ function renderChats() {
   const top = box.scrollTop;
   if (!chats.length) {
     const query = el('chat-search').value.trim();
-    box.innerHTML = '<p class="side-empty">' + (query ? 'Ничего не найдено.' : 'Пока пусто. Начни новый чат.') + '</p>';
+    if (query) {
+      box.innerHTML = '<p class="side-empty">Ничего не найдено.</p>';
+    } else {
+      // В черновике подсказка «начни новый чат» лишняя: он уже начат.
+      box.innerHTML = draft ? '' : '<p class="side-empty">Пока пусто. Начни новый чат.</p>';
+    }
     return;
   }
   let group = '';
@@ -560,7 +568,6 @@ function userHtml(message) {
 }
 
 function renderHistory(messages) {
-  currentMessages = messages;
   if (!messages.length) {
     showEmpty(true);
     return;
@@ -577,6 +584,8 @@ function renderHistory(messages) {
 async function selectChat(id) {
   if (!id || streaming) return;
   closeSettings();
+  endDraft();
+  const token = ++historyToken;
   currentId = id;
   history.replaceState(null, '', '/panel/chat?chat=' + encodeURIComponent(id));
   renderChats();
@@ -584,6 +593,7 @@ async function selectChat(id) {
   setComposer(Boolean(chats.find((chat) => chat.id === id)?.readOnly));
   try {
     const data = await api('/panel/api/chat/history?id=' + encodeURIComponent(id));
+    if (token !== historyToken) return;
     currentChat = data.chat;
     currentId = data.chat.id;
     history.replaceState(null, '', '/panel/chat?chat=' + encodeURIComponent(currentId));
@@ -597,37 +607,61 @@ async function selectChat(id) {
     renderHistory(data.messages || []);
     closeMenu();
   } catch (error) {
+    if (token !== historyToken) return;
     setWorking('не удалось открыть разговор: ' + error.message);
   }
 }
 
-async function newChat() {
+/* ── новый чат ──────────────────────────────────────────────────────────────
+   Клик по «Новый чат» не заводит разговор на сервере: кнопка превращается в
+   строку черновика, а настоящий чат появляется только с первым сообщением. */
+function setDraft(on) {
+  draft = on;
+  el('new-chat').hidden = on;
+  el('draft-wrap').hidden = !on;
+  if (on) el('draft-time').textContent = timeLabel(new Date().toISOString());
+}
+
+function endDraft() {
+  if (draft) setDraft(false);
+}
+
+/** Создаёт разговор на сервере — ровно в момент отправки первой реплики. */
+async function createChat() {
+  const data = await api('/panel/api/chats', { method: 'POST', body: '{}' });
+  historyToken += 1;
+  currentId = data.chat.id;
+  currentChat = data.chat;
+  setDraft(false);
+  // rememberChat сам убирает дубликат и двигает разговор наверх, не сбрасывая
+  // уже догруженные страницы списка.
+  rememberChat(data.chat);
+  el('chat-list').scrollTop = 0;
+  history.replaceState(null, '', '/panel/chat?chat=' + encodeURIComponent(currentId));
+  setComposer(false);
+  return data.chat;
+}
+
+function startDraft() {
   if (streaming) return;
-  closeSettings();
-  if (currentId && currentMessages.length === 0 && currentChat && currentChat.title === 'Новый чат') {
+  if (draft) {
     el('chat-input').focus();
     closeMenu();
     return;
   }
-  try {
-    const data = await api('/panel/api/chats', { method: 'POST', body: '{}' });
-    currentId = data.chat.id;
-    currentChat = data.chat;
-    currentMessages = [];
-    chats = chats.filter((chat) => chat.id !== data.chat.id);
-    chats.unshift(data.chat);
-    renderChats();
-    el('chat-list').scrollTop = 0;
-    history.replaceState(null, '', '/panel/chat?chat=' + encodeURIComponent(data.chat.id));
-    setTitle('Новый чат');
-    setComposer(false);
-    showEmpty(true);
-    setWorking('');
-    closeMenu();
-    el('chat-input').focus();
-  } catch (error) {
-    setWorking('не удалось создать чат: ' + error.message);
-  }
+  closeSettings();
+  historyToken += 1;
+  currentId = null;
+  currentChat = null;
+  setDraft(true);
+  setComposer(false);
+  setTitle('Новый чат');
+  showEmpty(true);
+  setWorking('');
+  renderChats();
+  history.replaceState(null, '', '/panel/chat?new=1');
+  closeMenu();
+  el('chat-input').focus();
 }
 
 /* ── живой ответ ──────────────────────────────────────────────────────────── */
@@ -771,8 +805,12 @@ async function sendText(forced) {
   const files = pending.slice();
   if (!text && files.length === 0) return;
   if (!currentId) {
-    await newChat();
-    if (!currentId) return;
+    try {
+      await createChat();
+    } catch (error) {
+      setWorking('не удалось создать чат: ' + error.message);
+      return;
+    }
   }
 
   let attachments = [];
@@ -864,9 +902,8 @@ function closeMenu() {
   el('chat-app').classList.remove('side-open');
 }
 
-el('new-chat').onclick = () => {
-  newChat().catch(() => {});
-};
+el('new-chat').onclick = startDraft;
+el('draft-item').onclick = () => el('chat-input').focus();
 el('toggle-side').onclick = () => {
   if (window.matchMedia('(max-width: 900px)').matches) el('chat-app').classList.toggle('side-open');
 };
@@ -1020,17 +1057,13 @@ document.querySelectorAll('.suggestions button').forEach((node) => {
 });
 
 (async () => {
-  const requested = new URLSearchParams(window.location.search).get('settings');
+  const params = new URLSearchParams(window.location.search);
   await loadState();
   await loadChats(true);
   if (currentId) await selectChat(currentId);
-  else if (chats.length) await selectChat(chats[0].id);
-  else {
-    setTitle('Новый чат');
-    setComposer(false);
-    showEmpty(true);
-  }
-  if (requested) openSettings(requested);
+  else if (params.get('new') || !chats.length) startDraft();
+  else await selectChat(chats[0].id);
+  if (params.get('settings')) openSettings(params.get('settings'));
   if (writable) el('chat-input').focus();
 })().catch((error) => {
   setWorking('чат не открылся: ' + error.message);
