@@ -37,6 +37,16 @@ export function chatPage(session: PanelSession, options: ChatPageOptions): strin
 
     <button class="new-chat" id="new-chat"><span>+</span> Новый чат</button>
 
+    <!-- Черновик занимает место кнопки: разговор создаётся только с первым
+         сообщением, а до тех пор это просто строка списка «Новый чат». -->
+    <div class="draft-wrap" id="draft-wrap" hidden>
+      <button class="chat-item active" id="draft-item" type="button">
+        <div class="chat-item-top"><span class="chat-item-title">Новый чат</span>
+          <time class="chat-item-time" id="draft-time"></time></div>
+        <div class="chat-item-preview">Расскажи, что нужно сделать.</div>
+      </button>
+    </div>
+
     <div class="chat-list" id="chat-list"><p class="side-empty">Пока пусто. Начни новый чат.</p></div>
 
     <div class="side-settings">
