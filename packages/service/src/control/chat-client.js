@@ -809,6 +809,93 @@ el('settings-close').onclick = closeSettings;
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && !el('settings-pane').hidden) closeSettings();
 });
+
+/* ── ширина панели ────────────────────────────────────────────────────────── */
+/* На широком экране колонку диалогов можно тянуть за правую границу. Ширина
+   живёт в localStorage: иначе её пришлось бы подгонять в каждом заходе. */
+const SIDE_WIDTH_KEY = 'icarus.side-width';
+const SIDE_WIDTH_DEFAULT = 278;
+const SIDE_WIDTH_MIN = 220;
+const SIDE_WIDTH_MAX = 560;
+
+const isNarrow = () => window.matchMedia('(max-width: 900px)').matches;
+
+/** Потолок зависит от окна: панель не должна съесть чат целиком. */
+function sideWidthLimit() {
+  return Math.max(SIDE_WIDTH_MIN, Math.min(SIDE_WIDTH_MAX, window.innerWidth - 420));
+}
+
+function storedSideWidth() {
+  try {
+    const stored = Number(localStorage.getItem(SIDE_WIDTH_KEY));
+    return Number.isFinite(stored) && stored > 0 ? stored : SIDE_WIDTH_DEFAULT;
+  } catch {
+    return SIDE_WIDTH_DEFAULT;
+  }
+}
+
+function applySideWidth(width) {
+  const next = Math.round(Math.max(SIDE_WIDTH_MIN, Math.min(sideWidthLimit(), width)));
+  el('chat-app').style.setProperty('--side-w', next + 'px');
+  const handle = el('side-resizer');
+  handle.setAttribute('aria-valuemax', String(Math.round(sideWidthLimit())));
+  handle.setAttribute('aria-valuenow', String(next));
+  return next;
+}
+
+function saveSideWidth(width) {
+  try {
+    localStorage.setItem(SIDE_WIDTH_KEY, String(width));
+  } catch {
+    /* приватный режим — ширина просто не запомнится */
+  }
+}
+
+applySideWidth(storedSideWidth());
+
+const sideHandle = el('side-resizer');
+let sideDrag = null;
+
+sideHandle.addEventListener('pointerdown', (event) => {
+  if (event.button !== 0 || isNarrow()) return;
+  sideDrag = { x: event.clientX, width: el('chat-side').getBoundingClientRect().width };
+  sideHandle.setPointerCapture(event.pointerId);
+  el('chat-app').classList.add('resizing');
+  event.preventDefault();
+});
+
+sideHandle.addEventListener('pointermove', (event) => {
+  if (!sideDrag) return;
+  applySideWidth(sideDrag.width + event.clientX - sideDrag.x);
+});
+
+function endSideDrag(event) {
+  if (!sideDrag) return;
+  sideDrag = null;
+  el('chat-app').classList.remove('resizing');
+  if (sideHandle.hasPointerCapture(event.pointerId)) sideHandle.releasePointerCapture(event.pointerId);
+  saveSideWidth(Math.round(el('chat-side').getBoundingClientRect().width));
+}
+
+sideHandle.addEventListener('pointerup', endSideDrag);
+sideHandle.addEventListener('pointercancel', endSideDrag);
+
+/* Клавиатура: ←/→ двигают ширину, Home возвращает исходную. */
+sideHandle.addEventListener('keydown', (event) => {
+  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Home') return;
+  event.preventDefault();
+  const current = el('chat-side').getBoundingClientRect().width;
+  const next = event.key === 'Home'
+    ? SIDE_WIDTH_DEFAULT
+    : current + (event.key === 'ArrowRight' ? 16 : -16);
+  saveSideWidth(applySideWidth(next));
+});
+
+/* Окно сузили — подрезаем сохранённую ширину, чтобы чат не пропал. */
+window.addEventListener('resize', () => {
+  if (!sideDrag && !isNarrow()) applySideWidth(storedSideWidth());
+});
+
 el('chat-attach').onclick = () => el('chat-files').click();
 el('chat-files').addEventListener('change', (event) => {
   addFiles(event.target.files);
