@@ -33,7 +33,14 @@ test('шаг субагентов подписан по-человечески: 
 test('детали субагентов разбираются аккуратно: мусор отбрасывается, поля обрезаются', () => {
   const states = subagentsOf([
     { index: 0, agent: 'scout', task: 'x'.repeat(400), status: 'ok', ms: 1200 },
-    { agent: 'researcher', task: 'искать', status: 'running', activity: 'web_search: amazon.ie', startedAt: 1 },
+    {
+      agent: 'researcher',
+      task: 'искать',
+      status: 'running',
+      activity: 'web_search: amazon.ie',
+      startedAt: 1,
+      actions: ['read: SKILL.md', 'web_search: amazon.ie', 42, ''],
+    },
     { agent: 42 },
     null,
     'строка',
@@ -41,6 +48,7 @@ test('детали субагентов разбираются аккуратн�
   assert.equal(states.length, 2);
   assert.equal(states[0]?.task.length, 160, 'длинное задание обрезается');
   assert.equal(states[1]?.activity, 'web_search: amazon.ie');
+  assert.deepEqual(states[1]?.actions, ['read: SKILL.md', 'web_search: amazon.ie'], 'мусор в шагах отбрасывается');
   assert.deepEqual(subagentsOf(undefined), []);
   assert.deepEqual(subagentsOf({ subagents: [] }), []);
 });
@@ -162,7 +170,14 @@ test('живой поток: прогресс детей приезжает об
         content: [{ type: 'text', text: 'Субагенты: 0 из 2, 1 работает' }],
         details: {
           subagents: [
-            { index: 0, agent: 'scout', task: TASKS[0]?.task, status: 'running', activity: 'web_search: amazon.ie' },
+            {
+              index: 0,
+              agent: 'scout',
+              task: TASKS[0]?.task,
+              status: 'running',
+              activity: 'web_search: amazon.ie',
+              actions: ['read: memory/identity.md', 'web_search: amazon.ie'],
+            },
             { index: 1, agent: 'researcher', task: TASKS[1]?.task, status: 'queued' },
           ],
         },
@@ -228,12 +243,15 @@ test('живой поток: прогресс детей приезжает об
 
     const updates = lines.filter((event) => event.type === 'step-update');
     assert.ok(updates.length >= 1, 'прогресс обязан приехать до конца');
-    const live = (updates[0]?.step as { subagents?: Array<{ status: string; activity?: string }> }).subagents ?? [];
+    const live =
+      (updates[0]?.step as { subagents?: Array<{ status: string; activity?: string; actions?: string[] }> })
+        .subagents ?? [];
     assert.deepEqual(
       live.map((sub) => sub.status),
       ['running', 'queued'],
     );
     assert.equal(live[0]?.activity, 'web_search: amazon.ie');
+    assert.deepEqual(live[0]?.actions, ['read: memory/identity.md', 'web_search: amazon.ie']);
 
     const end = lines.find((event) => event.type === 'step-end');
     const final = (end?.subagents as Array<{ status: string }> | undefined) ?? [];

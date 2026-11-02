@@ -39,6 +39,8 @@ export type ChatSubagentStep = {
   status: string;
   /** Чем занят прямо сейчас, пока жив: «web_search: amazon.ie». */
   activity?: string;
+  /** Куда ребёнок уже ходил: последние шаги для вложенного списка в панели. */
+  actions?: string[];
   /** Сколько уже работает или работал: панель считает по нему секунды. */
   startedAt?: number;
   ms?: number;
@@ -57,6 +59,8 @@ export type ChatTraceStep = {
 
 /** Сколько символов задания видно в панели: целиком оно занимает пол-экрана. */
 const SUBAGENT_TASK_CHARS = 160;
+/** Шагов ребёнка показываем не больше десяти: это подсказка, а не отчёт. */
+const SUBAGENT_ACTION_LIMIT = 10;
 
 /**
  * Субагенты из деталей инструмента. Детали приходят дважды — в прогрессе и в итоге,
@@ -70,10 +74,17 @@ export function subagentsOf(value: unknown): ChatSubagentStep[] {
     if (!item || typeof item !== 'object') continue;
     const state = item as Record<string, unknown>;
     if (typeof state.agent !== 'string' || typeof state.task !== 'string') continue;
+    const actions = Array.isArray(state.actions)
+      ? state.actions
+          .filter((action): action is string => typeof action === 'string' && action.trim() !== '')
+          .slice(-SUBAGENT_ACTION_LIMIT)
+          .map((action) => clip(action, SUBAGENT_TASK_CHARS))
+      : [];
     states.push({
       agent: state.agent,
       task: clip(state.task, SUBAGENT_TASK_CHARS),
       status: typeof state.status === 'string' ? state.status : 'queued',
+      ...(actions.length > 0 ? { actions } : {}),
       ...(typeof state.activity === 'string' && state.activity ? { activity: clip(state.activity, 120) } : {}),
       ...(typeof state.startedAt === 'number' ? { startedAt: state.startedAt } : {}),
       ...(typeof state.ms === 'number' ? { ms: state.ms } : {}),

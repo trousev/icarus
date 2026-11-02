@@ -21,10 +21,12 @@ import register, {
   buildChildArgs,
   extensionFilesOf,
   isSubagentProcess,
+  rememberAction,
   renderProgress,
   renderReport,
   resolveLimits,
   runPool,
+  snapshot,
   type SubagentState,
 } from '../../extensions/subagent.ts';
 
@@ -430,4 +432,31 @@ test('в процессе-ребёнке расширение молчит', () 
     if (saved === undefined) delete process.env[DEPTH_ENV];
     else process.env[DEPTH_ENV] = saved;
   }
+});
+
+test('шаги ребёнка копятся без повторов и не растут бесконечно', () => {
+  const actions: string[] = [];
+  rememberAction(actions, 'web_search: amazon.ie');
+  rememberAction(actions, 'web_search: amazon.ie');
+  assert.deepEqual(actions, ['web_search: amazon.ie'], 'один и тот же шаг подряд не дублируется');
+  rememberAction(actions, '   ');
+  assert.deepEqual(actions, ['web_search: amazon.ie'], 'пустой шаг не копится');
+
+  for (let index = 0; index < 20; index += 1) rememberAction(actions, `read: файл-${index}`);
+  assert.equal(actions.length, 10, 'в списке только последние десять шагов');
+  assert.equal(actions[actions.length - 1], 'read: файл-19');
+});
+
+test('снимок деталей не раздувается шагами: длинные строки обрезаются', () => {
+  const states = [
+    {
+      index: 0,
+      agent: 'researcher',
+      task: 'искать',
+      status: 'running' as const,
+      actions: ['x'.repeat(500)],
+    },
+  ];
+  const [state] = snapshot(states);
+  assert.equal(state?.actions?.[0]?.length, 161, 'строка шага обрезана до 160 знаков плюс многоточие');
 });

@@ -217,11 +217,11 @@ function seconds(ms) {
  * Живой список субагентов под шагом: кто работает, кто в очереди и кто уже кончил.
  * Данные приходят от инструмента (details.subagents) — здесь только рисование.
  */
-function subagentsHtml(step) {
+function subagentsHtml(step, opened) {
   const list = step.subagents;
   if (!list || !list.length) return '';
   const items = list
-    .map((sub) => {
+    .map((sub, index) => {
       const status = String(sub.status || 'queued');
       const note =
         status === 'running'
@@ -229,10 +229,30 @@ function subagentsHtml(step) {
           : status === 'ok' || status === 'error' || status === 'aborted'
             ? sub.error || (sub.ms ? seconds(sub.ms) : 'готово')
             : 'ждёт очереди';
+      const actions = Array.isArray(sub.actions) ? sub.actions : [];
+      const key = (step.id || 'step') + ':' + index;
+      // Действия ребёнка — вложенный список: по умолчанию свёрнут, чтобы длинная
+      // трассировка не съедала ответ; раскрытое состояние переживает перерисовку.
+      const details =
+        actions.length > 0
+          ? '<details class="sub-actions" data-sub="' +
+            esc(key) +
+            '"' +
+            (opened && opened.has(key) ? ' open' : '') +
+            '><summary>' +
+            actions.length +
+            ' ' +
+            plural(actions.length, 'действие', 'действия', 'действий') +
+            '</summary><div class="sub-action-list">' +
+            actions
+              .map((action) => '<div class="sub-action" title="' + esc(action) + '">' + esc(action) + '</div>')
+              .join('') +
+            '</div></details>'
+          : '';
       return (
         '<div class="sub-step ' +
         esc(status) +
-        '"><span class="sub-mark">' +
+        '"><div class="sub-row"><span class="sub-mark">' +
         esc(SUB_MARK[status] || '·') +
         '</span><span class="sub-agent">' +
         esc(sub.agent) +
@@ -242,14 +262,16 @@ function subagentsHtml(step) {
         esc(sub.task) +
         '</span><span class="sub-note">' +
         esc(note) +
-        '</span></div>'
+        '</span></div>' +
+        details +
+        '</div>'
       );
     })
     .join('');
   return '<div class="sub-list">' + items + '</div>';
 }
 
-function traceHtml(steps) {
+function traceHtml(steps, opened) {
   if (!steps || !steps.length) return '';
   const items = steps
     .map(
@@ -264,7 +286,7 @@ function traceHtml(steps) {
         '</span><span class="trace-detail">' +
         esc(step.detail || step.tool || '') +
         '</span><span class="trace-dot"></span>' +
-        subagentsHtml(step) +
+        subagentsHtml(step, opened) +
         '</div>',
     )
     .join('');
@@ -780,10 +802,13 @@ function addAssistant() {
 }
 
 function renderLive(box) {
-  const details = box.trace.querySelector('details');
+  const details = box.trace.querySelector('details.trace');
   if (details) box.traceOpen = details.open;
-  box.trace.innerHTML = traceHtml(box.steps);
-  const next = box.trace.querySelector('details');
+  // Раскрытые списки действий детей тоже должны пережить перерисовку.
+  const opened = new Set();
+  box.trace.querySelectorAll('details.sub-actions[open]').forEach((node) => opened.add(node.dataset.sub));
+  box.trace.innerHTML = traceHtml(box.steps, opened);
+  const next = box.trace.querySelector('details.trace');
   if (next) next.open = box.traceOpen;
   box.md.innerHTML = markdown(box.text);
   box.typing.hidden = Boolean(box.text) || !streaming;
@@ -810,9 +835,21 @@ function handleEvent(box, event) {
     const index = box.steps.findIndex((item) => item.id === event.id);
     if (index !== -1) box.steps[index] = event.step;
     renderLive(box);
-    const running = ((event.step && event.step.subagents) || []).filter((sub) => sub.status === 'running');
+    const subs = (event.step && event.step.subagents) || [];
+    const running = subs.filter((sub) => sub.status === 'running');
     if (running.length) {
-      setWorking('⚙ ' + running.map((sub) => sub.agent + ': ' + (sub.activity || 'работает')).join(' · '));
+      // Внизу — только счёт: сами шаги детей живут в их собственном списке.
+      const done = subs.filter((sub) => sub.status === 'ok').length;
+      setWorking(
+        '⚙ субагенты: ' +
+          done +
+          ' из ' +
+          subs.length +
+          ', ' +
+          running.length +
+          ' ' +
+          plural(running.length, 'работает', 'работают', 'работают'),
+      );
     }
     return;
   }
