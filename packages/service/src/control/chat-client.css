@@ -22,7 +22,9 @@
 .brand-text { min-width: 0; }
 .brand-text b { display: block; font-size: 15px; line-height: 1.25; }
 .brand-text span { display: block; color: var(--dim); font-size: 11px; white-space: nowrap; }
-.side-close { margin-left: auto; color: var(--dim); }
+/* Панель сворачивается только на мелких экранах, где она всплывает поверх чата:
+   на широком экране колонка диалогов всегда на месте, крестик там не нужен. */
+.side-close { display: none; margin-left: auto; color: var(--dim); }
 .side-close:hover { color: var(--text); }
 
 .icon-btn {
@@ -87,10 +89,6 @@
 
 /* ── основная колонка ────────────────────────────────────────────────────── */
 .chat-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-/* Свёрнутый сайдбар: на широком экране X убирает колонку, ☰ возвращает. */
-.chat-app.side-collapsed { grid-template-columns: 0 minmax(0, 1fr); }
-.chat-app.side-collapsed .chat-side { display: none; }
-.chat-app.side-collapsed .menu-btn { display: inline-block; }
 .chat-top {
   display: flex; align-items: center; gap: 14px;
   border-bottom: 1px solid var(--line); padding: 14px 22px; flex: 0 0 auto;
@@ -252,7 +250,6 @@
 .settings-tabs button.active { background: var(--accent-soft); color: var(--accent); }
 #settings-close { margin-left: auto; }
 .settings-frame { flex: 1; width: 100%; border: 0; background: var(--bg); }
-.chat-app.side-collapsed .settings-pane { left: 0; }
 
 /* ── адаптив ─────────────────────────────────────────────────────────────── */
 @media (max-width: 900px) {
@@ -264,7 +261,7 @@
     box-shadow: 20px 0 50px rgba(0, 0, 0, .35);
   }
   .chat-app.side-open .chat-side { transform: none; }
-  .menu-btn { display: inline-block; }
+  .menu-btn, .side-close { display: inline-block; }
   .chat-search { width: min(230px, 40vw); }
   .chat-top { padding: 12px 14px; }
   .chat-scroll { padding: 18px 14px 8px; }

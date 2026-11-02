@@ -730,24 +730,19 @@ function growInput() {
   input.style.height = Math.min(input.scrollHeight, 200) + 'px';
 }
 
+/* Меню — всплывающее и только на мелких экранах: на широком колонка диалогов
+   всегда на месте, поэтому сворачивать и разворачивать её нечем и незачем. */
 function closeMenu() {
   el('chat-app').classList.remove('side-open');
-}
-
-function closeSide() {
-  closeMenu();
-  if (!window.matchMedia('(max-width: 900px)').matches) el('chat-app').classList.add('side-collapsed');
 }
 
 el('new-chat').onclick = () => {
   newChat().catch(() => {});
 };
 el('toggle-side').onclick = () => {
-  const app = el('chat-app');
-  if (window.matchMedia('(max-width: 900px)').matches) app.classList.toggle('side-open');
-  else app.classList.toggle('side-collapsed');
+  if (window.matchMedia('(max-width: 900px)').matches) el('chat-app').classList.toggle('side-open');
 };
-el('close-side').onclick = closeSide;
+el('close-side').onclick = closeMenu;
 document.querySelectorAll('[data-settings]').forEach((link) => {
   link.onclick = (event) => {
     event.preventDefault();
