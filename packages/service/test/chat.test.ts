@@ -1,4 +1,4 @@
-// Чат панели: список диалогов, история из сессии pi и подписи шагов трассировки.
+// Чат панели: реестр разговоров, страницы списка, история и подписи шагов.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -7,17 +7,16 @@ import type { AddressInfo } from 'node:net';
 import { createServer } from '../src/http/server.ts';
 import { userPaths } from '../src/config.ts';
 import { sessionIdFor } from '../src/sessions/pi-session.ts';
-import { rememberTelegramSession } from '../src/sessions/catalog.ts';
+import { ensureChat } from '../src/sessions/chats.ts';
 import {
   chatImageFile,
   createChat,
-  isExternalChatId,
-  parseUploadAttachments,
-  splitPromptAttachments,
   finishChat,
-  listChats,
+  listChatPage,
+  parseUploadAttachments,
   readChats,
   readHistory,
+  splitPromptAttachments,
   traceDetail,
   traceLabel,
 } from '../src/control/chat.ts';
@@ -29,106 +28,20 @@ function fixture() {
   return { config, user };
 }
 
-test('новый чат попадает в список и ищется по заголовку и превью', () => {
-  const { config, user } = fixture();
-  const chat = createChat(config, user, new Date('2026-11-01T10:00:00.000Z'));
-
-  assert.equal(chat.title, 'Новый чат');
-  assert.equal(readChats(config, user).length, 1);
-  assert.deepEqual(listChats(config, user).map((item) => item.id), [chat.id]);
-
-  finishChat(config, user, chat.id, 'Собери план на четверг', 'Вот план: встреча в 10:00.');
-  const [found] = listChats(config, user, 'план');
-  assert.equal(found?.title, 'Собери план на четверг');
-  assert.match(found?.preview ?? '', /10:00/);
-
-  finishChat(
-    config,
-    user,
-    chat.id,
-    'Покажи кота',
-    'Держи кота. ![котик](/workspace/incoming/kotic.jpg) Рыжий.',
-  );
-  const withImage = listChats(config, user, 'кота')[0];
-  assert.doesNotMatch(withImage?.preview ?? '', /!\[|\/workspace\//, 'в превью нет markdown и путей');
-  assert.equal(listChats(config, user, 'нет-такого-слова').length, 0);
-});
-
-test('история берётся из файла сессии: текст и трассировка, без сырых результатов', () => {
-  const { config, user } = fixture();
-  const chat = createChat(config, user, new Date('2026-11-01T10:00:00.000Z'));
-  const sessionId = sessionIdFor(user.id, chat.id);
-  const dir = userPaths(config, user).sessions;
-  fs.mkdirSync(dir, { recursive: true });
-  const file = path.join(dir, `2026-11-01T10-00-00-000Z_${sessionId}.jsonl`);
-  fs.writeFileSync(
-    file,
-    [
-      JSON.stringify({ type: 'session', timestamp: '2026-11-01T10:00:00.000Z' }),
-      JSON.stringify({
-        type: 'message',
-        timestamp: '2026-11-01T10:00:01.000Z',
-        message: { role: 'user', content: 'Построй план' },
-      }),
-      JSON.stringify({
-        type: 'message',
-        timestamp: '2026-11-01T10:00:02.000Z',
-        message: {
-          role: 'assistant',
-          content: [
-            { type: 'text', text: 'Сначала посмотрю память.' },
-            { type: 'toolCall', id: 'tool-1', name: 'read', arguments: { path: 'memory/identity.md' } },
-          ],
-        },
-      }),
-      JSON.stringify({
-        type: 'message',
-        timestamp: '2026-11-01T10:00:03.000Z',
-        message: {
-          role: 'toolResult',
-          toolCallId: 'tool-1',
-          toolName: 'read',
-          isError: false,
-          content: [{ type: 'text', text: '# Кто\n- Живёт в Москве' }],
-        },
-      }),
-      JSON.stringify({
-        type: 'message',
-        timestamp: '2026-11-01T10:00:04.000Z',
-        message: { role: 'assistant', content: [{ type: 'text', text: 'Готово.' }] },
-      }),
-    ].join('\n'),
-  );
-
-  const history = readHistory(config, user, chat.id);
-  assert.equal(history?.messages.length, 2);
-  assert.equal(history?.messages[0].role, 'user');
-  assert.equal(history?.messages[1].role, 'assistant');
-  assert.match(history?.messages[1].text ?? '', /Сначала посмотрю память[\s\S]*Готово/);
-  const [step] = history?.messages[1].trace ?? [];
-  assert.equal(step.label, 'ПАМЯТЬ');
-  assert.equal(step.status, 'ok');
-  assert.match(step.result ?? '', /Москве/);
-});
-
-test('неизвестный разговор не выдумывает историю', () => {
-  const { config, user } = fixture();
-  assert.equal(readHistory(config, user, 'web-нет'), null);
-  assert.equal(readHistory(config, user, 'session:нет-такой'), null);
-});
-
 /** Файл сессии pi: `<когда создан>_<id>.jsonl`, как его кладёт pi. */
 function putSessionFile(
   config: ReturnType<typeof makeConfig>,
   user: ReturnType<typeof probe>,
   conversationId: string,
   entries: unknown[],
+  createdAt = '2026-11-01T10-00-00-000Z',
 ): { file: string; sessionId: string } {
   const dir = userPaths(config, user).sessions;
   fs.mkdirSync(dir, { recursive: true });
   const sessionId = sessionIdFor(user.id, conversationId);
-  const file = path.join(dir, `2026-11-01T10-00-00-000Z_${sessionId}.jsonl`);
-  fs.writeFileSync(file, [JSON.stringify({ type: 'session', timestamp: '2026-11-01T10:00:00.000Z' }), ...entries.map((entry) => JSON.stringify(entry))].join('\n'));
+  const file = path.join(dir, `${createdAt}_${sessionId}.jsonl`);
+  const header = { type: 'session', timestamp: createdAt.replace(/T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z$/, 'T$1:$2:$3.$4Z') };
+  fs.writeFileSync(file, [header, ...entries].map((entry) => JSON.stringify(entry)).join('\n'));
   return { file, sessionId };
 }
 
@@ -139,7 +52,96 @@ function dialog(userText: string, assistantText: string, at = '2026-11-01T10:00:
   ];
 }
 
-test('в списке диалогов видны Telegram-разговоры, и они только для чтения', () => {
+test('в chats.json только метаданные: id, title, createdAt, channel и conversationId', () => {
+  const { config, user } = fixture();
+  const chat = createChat(config, user, new Date('2026-11-01T10:00:00.000Z'));
+
+  assert.deepEqual(readChats(config, user), [
+    {
+      id: chat.id,
+      title: 'Новый чат',
+      createdAt: '2026-11-01T10:00:00.000Z',
+      channel: 'web',
+      conversationId: chat.id,
+    },
+  ]);
+  assert.equal('preview' in (readChats(config, user)[0] as object), false);
+  assert.equal('updatedAt' in (readChats(config, user)[0] as object), false);
+
+  const page = listChatPage(config, user);
+  assert.equal(page.chats[0]?.preview, 'Расскажи, что нужно сделать.');
+  assert.equal(page.chats[0]?.updatedAt, '2026-11-01T10:00:00.000Z');
+  assert.equal(page.chats[0]?.readOnly, false);
+});
+
+test('ход веб-чата: заголовок из первой реплики, превью и время из файла сессии', () => {
+  const { config, user } = fixture();
+  const chat = createChat(config, user, new Date('2026-11-01T10:00:00.000Z'));
+  putSessionFile(config, user, chat.id, dialog('Собери план на четверг', 'Вот план: встреча в 10:00.'));
+
+  finishChat(config, user, chat.id, 'Собери план на четверг');
+  finishChat(config, user, chat.id, 'Покажи кота'); // второй ход заголовок не переписывает
+
+  const [found] = listChatPage(config, user, 'план').chats;
+  assert.equal(found?.title, 'Собери план на четверг');
+  assert.match(found?.preview ?? '', /10:00/);
+  assert.equal(found?.updatedAt, '2026-11-01T10:00:01.000Z');
+  assert.equal(listChatPage(config, user, 'нет-такого-слова').chats.length, 0);
+});
+
+test('история берётся из файла сессии: текст и трассировка, без сырых результатов', () => {
+  const { config, user } = fixture();
+  const chat = createChat(config, user, new Date('2026-11-01T10:00:00.000Z'));
+  putSessionFile(config, user, chat.id, [
+    { type: 'message', timestamp: '2026-11-01T10:00:01.000Z', message: { role: 'user', content: 'Построй план' } },
+    {
+      type: 'message',
+      timestamp: '2026-11-01T10:00:02.000Z',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'Сначала посмотрю память.' },
+          { type: 'toolCall', id: 'tool-1', name: 'read', arguments: { path: 'memory/identity.md' } },
+        ],
+      },
+    },
+    {
+      type: 'message',
+      timestamp: '2026-11-01T10:00:03.000Z',
+      message: {
+        role: 'toolResult',
+        toolCallId: 'tool-1',
+        toolName: 'read',
+        isError: false,
+        content: [{ type: 'text', text: '# Кто\n- Живёт в Москве' }],
+      },
+    },
+    {
+      type: 'message',
+      timestamp: '2026-11-01T10:00:04.000Z',
+      message: { role: 'assistant', content: [{ type: 'text', text: 'Готово.' }] },
+    },
+  ]);
+
+  const history = readHistory(config, user, chat.id);
+  assert.equal(history?.messages.length, 2);
+  assert.equal(history?.messages[0].role, 'user');
+  assert.equal(history?.messages[1].role, 'assistant');
+  assert.match(history?.messages[1].text ?? '', /Сначала посмотрю память[\s\S]*Готово/);
+  const [step] = history?.messages[1].trace ?? [];
+  assert.equal(step.label, 'ПАМЯТЬ');
+  assert.equal(step.status, 'ok');
+  assert.match(step.result ?? '', /Москве/);
+  assert.equal(history?.chat.title, 'Построй план', 'заголовок в реестре обновился из файла');
+});
+
+test('неизвестный разговор не выдумывает историю', () => {
+  const { config, user } = fixture();
+  assert.equal(readHistory(config, user, 'web-нет'), null);
+  assert.equal(readHistory(config, user, 'session:нет-такой'), null);
+});
+
+test('Telegram-разговор в реестре, в списке и только для чтения', () => {
   const { config, user } = fixture();
   const conversationId = 'telegram-4242';
   const { sessionId } = putSessionFile(
@@ -148,88 +150,126 @@ test('в списке диалогов видны Telegram-разговоры, �
     conversationId,
     dialog('Собери отчёт для мамы', 'Готово: отчёт лежит в incoming/otchet.md'),
   );
-  rememberTelegramSession(config, user, conversationId, sessionId);
+  ensureChat(config, user, conversationId, 'telegram');
 
-  const chat = listChats(config, user).find((item) => item.id === `session:${sessionId}`);
-  assert.ok(chat, 'файл сессии Telegram попал в список');
-  assert.equal(chat.channel, 'telegram');
-  assert.equal(chat.readOnly, true);
-  assert.match(chat.title, /отчёт/);
-  assert.match(chat.preview, /Готово/);
+  const [chat] = listChatPage(config, user).chats;
+  assert.equal(chat?.id, conversationId);
+  assert.equal(chat?.channel, 'telegram');
+  assert.equal(chat?.readOnly, true);
+  assert.match(chat?.title ?? '', /отчёт/);
+  assert.match(chat?.preview ?? '', /Готово/);
+  assert.equal(readChats(config, user)[0]?.title, chat?.title, 'заголовок сохранился в реестре');
 
-  const history = readHistory(config, user, chat.id);
+  const history = readHistory(config, user, chat?.id ?? '');
   assert.equal(history?.chat.readOnly, true);
   assert.equal(history?.chat.channel, 'telegram');
   assert.equal(history?.messages.length, 2);
   assert.equal(history?.messages[0]?.text, 'Собери отчёт для мамы');
-  assert.equal(isExternalChatId(chat.id), true);
-  assert.equal(isExternalChatId('web-1'), false);
+
+  // Старая ссылка `session:<id>` ведёт к той же записи.
+  const legacy = readHistory(config, user, `session:${sessionId}`);
+  assert.equal(legacy?.chat.id, conversationId);
 });
 
-test('веб-разговор не дублируется в списке как внешняя сессия', () => {
+test('список сортируется по createdAt, а не по времени файла сессии', () => {
   const { config, user } = fixture();
-  const chat = createChat(config, user, new Date('2026-11-01T10:00:00.000Z'));
-  putSessionFile(config, user, chat.id, dialog('Построй план', 'Вот план'));
+  const older = createChat(config, user, new Date('2026-01-01T10:00:00.000Z'));
+  const newer = createChat(config, user, new Date('2026-02-01T10:00:00.000Z'));
+  const { file: olderFile } = putSessionFile(
+    config,
+    user,
+    older.id,
+    dialog('Старый разговор', 'Старый ответ'),
+    '2026-01-01T10-00-00-000Z',
+  );
+  putSessionFile(config, user, newer.id, dialog('Новый разговор', 'Новый ответ'), '2026-02-01T10-00-00-000Z');
+
+  // Файл старого чата трогали позже — на порядок это влиять не должно.
+  fs.utimesSync(olderFile, new Date('2026-03-01T10:00:00.000Z'), new Date('2026-03-01T10:00:00.000Z'));
 
   assert.deepEqual(
-    listChats(config, user).map((item) => item.id),
-    [chat.id],
-    'у веб-чата один и тот же файл сессии, и второй записи быть не должно',
+    listChatPage(config, user).chats.map((chat) => chat.id),
+    [newer.id, older.id],
   );
 });
 
-test('старый файл без каталога всё равно виден, но без канала', () => {
+test('список листается страницами, следующая догружается по курсору', () => {
   const { config, user } = fixture();
-  const { sessionId } = putSessionFile(config, user, 'telegram-777', dialog('Старый разговор', 'Старый ответ'));
+  const created = [];
+  for (let index = 1; index <= 5; index += 1) {
+    const day = String(index).padStart(2, '0');
+    const chat = createChat(config, user, new Date(`2026-11-${day}T10:00:00.000Z`));
+    const { file } = putSessionFile(
+      config,
+      user,
+      chat.id,
+      dialog(`Тема ${index}`, `Ответ ${index}`),
+      `2026-11-${day}T10-00-00-000Z`,
+    );
+    fs.utimesSync(file, new Date(`2026-11-${day}T10:00:00.000Z`), new Date(`2026-11-${day}T10:00:00.000Z`));
+    finishChat(config, user, chat.id, `Тема ${index}`);
+    created.push(chat);
+  }
 
-  const [chat] = listChats(config, user);
-  assert.equal(chat?.id, `session:${sessionId}`);
-  assert.equal(chat?.channel, 'external');
-  assert.equal(chat?.readOnly, true, 'без каталога канал неизвестен — писать всё равно нельзя');
-  assert.match(chat?.title ?? '', /Старый разговор/);
-  assert.equal(readHistory(config, user, chat?.id ?? '')?.messages.length, 2);
-});
+  const first = listChatPage(config, user, '', 2);
+  assert.equal(first.chats.length, 2);
+  assert.equal(first.total, 5);
+  assert.equal(first.nextCursor, '2');
+  assert.deepEqual(first.chats.map((chat) => chat.title), ['Тема 5', 'Тема 4']);
 
-test('пустой файл сессии не выдаётся за разговор', () => {
-  const { config, user } = fixture();
-  putSessionFile(config, user, 'telegram-99', []);
-  assert.equal(listChats(config, user).length, 0);
+  const second = listChatPage(config, user, '', 2, first.nextCursor);
+  assert.deepEqual(second.chats.map((chat) => chat.title), ['Тема 3', 'Тема 2']);
+  assert.equal(second.nextCursor, '4');
+
+  const third = listChatPage(config, user, '', 2, second.nextCursor);
+  assert.deepEqual(third.chats.map((chat) => chat.title), ['Тема 1']);
+  assert.equal(third.nextCursor, null);
+
+  const search = listChatPage(config, user, 'Тема 3', 2);
+  assert.equal(search.total, 1);
+  assert.deepEqual(search.chats.map((chat) => chat.id), [created[2]?.id]);
 });
 
 test('через API внешний разговор читается, но не пишется', async () => {
   const { config, user } = fixture();
   const conversationId = 'telegram-4242';
   const { sessionId } = putSessionFile(config, user, conversationId, dialog('Покажи погоду', 'Солнечно'));
-  rememberTelegramSession(config, user, conversationId, sessionId);
+  ensureChat(config, user, conversationId, 'telegram');
 
   const server = createServer(config, {} as never);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address() as AddressInfo;
   const headers = { [PANEL_USER_HEADER]: 'probe', 'content-type': 'application/json' };
-  const externalId = `session:${sessionId}`;
 
   try {
     const base = `http://127.0.0.1:${port}`;
     const listed = (await (await fetch(`${base}/panel/api/chats`, { headers })).json()) as {
       chats: Array<{ id: string; readOnly?: boolean }>;
+      nextCursor: string | null;
+      total: number;
     };
-    assert.equal(listed.chats.find((chat) => chat.id === externalId)?.readOnly, true);
+    assert.equal(listed.chats.find((chat) => chat.id === conversationId)?.readOnly, true);
+    assert.equal(listed.nextCursor, null);
+    assert.equal(listed.total, 1);
 
-    const history = await fetch(`${base}/panel/api/chat/history?id=${encodeURIComponent(externalId)}`, { headers });
+    const history = await fetch(`${base}/panel/api/chat/history?id=${encodeURIComponent(conversationId)}`, { headers });
     assert.equal(history.status, 200);
 
     const send = await fetch(`${base}/panel/api/chat/send`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ chatId: externalId, text: 'продолжи' }),
+      body: JSON.stringify({ chatId: conversationId, text: 'продолжи' }),
     });
     assert.equal(send.status, 403, 'в Telegram-разговор из панели не записать');
     const abort = await fetch(`${base}/panel/api/chat/abort`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ chatId: externalId }),
+      body: JSON.stringify({ chatId: conversationId }),
     });
     assert.equal(abort.status, 403);
+
+    const legacy = await fetch(`${base}/panel/api/chat/history?id=${encodeURIComponent(`session:${sessionId}`)}`, { headers });
+    assert.equal(legacy.status, 200, 'старая ссылка на файл сессии продолжает открываться');
   } finally {
     server.close();
   }

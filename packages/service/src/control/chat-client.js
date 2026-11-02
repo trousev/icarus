@@ -255,8 +255,13 @@ let currentMessages = [];
 let streaming = false;
 /** Можно ли писать в открытый разговор: Telegram и API в панели только читаются. */
 let writable = Boolean(cfg.enabled);
+/** Список диалогов листается страницами: курсор приносит следующую. */
+let nextCursor = null;
+let loadingChats = false;
+let loadGeneration = 0;
 let searchTimer = 0;
 let pending = [];
+const CHAT_PAGE_SIZE = 30;
 const MAX_FILES = 8;
 const MAX_TOTAL_BYTES = 10 * 1024 * 1024;
 
@@ -318,14 +323,16 @@ function showEmpty(show) {
 
 function renderChats() {
   const box = el('chat-list');
+  const top = box.scrollTop;
   if (!chats.length) {
-    box.innerHTML = '<p class="side-empty">Пока пусто. Начни новый чат.</p>';
+    const query = el('chat-search').value.trim();
+    box.innerHTML = '<p class="side-empty">' + (query ? 'Ничего не найдено.' : 'Пока пусто. Начни новый чат.') + '</p>';
     return;
   }
   let group = '';
   let html = '';
   for (const chat of chats) {
-    const label = groupLabel(chat.updatedAt);
+    const label = groupLabel(chat.createdAt);
     if (label !== group) {
       if (group) html += '</div>';
       group = label;
@@ -342,21 +349,78 @@ function renderChats() {
       '</span>' +
       (channelTag(chat) ? '<span class="chat-item-tag">' + esc(channelTag(chat)) + '</span>' : '') +
       '<time class="chat-item-time">' +
-      esc(timeLabel(chat.updatedAt)) +
+      esc(timeLabel(chat.createdAt)) +
       '</time></div><div class="chat-item-preview">' +
       esc(cleanPreview(chat.preview || '')) +
       '</div></button>';
   }
   if (group) html += '</div>';
   box.innerHTML = html;
+  box.scrollTop = top;
   box.querySelectorAll('.chat-item').forEach((node) => {
     node.onclick = () => selectChat(node.dataset.id);
   });
 }
 
-async function loadChats(query = el('chat-search').value.trim()) {
-  const data = await api('/panel/api/chats' + (query ? '?q=' + encodeURIComponent(query) : ''));
-  chats = data.chats || [];
+/**
+ * Страница списка. reset — новый поиск или первый вход; иначе догружаем
+ * следующую страницу и дописываем её к уже показанным диалогам.
+ */
+async function loadChats(reset = true) {
+  if (!reset && (loadingChats || !nextCursor)) return;
+  const generation = ++loadGeneration;
+  const query = el('chat-search').value.trim();
+  if (reset) {
+    chats = [];
+    nextCursor = null;
+  }
+
+  loadingChats = true;
+  try {
+    const params = new URLSearchParams({ limit: String(CHAT_PAGE_SIZE) });
+    if (query) params.set('q', query);
+    if (!reset && nextCursor) params.set('cursor', nextCursor);
+    const data = await api('/panel/api/chats?' + params.toString());
+    if (generation !== loadGeneration) return;
+
+    const incoming = data.chats || [];
+    if (reset) chats = incoming;
+    else {
+      // Пока листали, наверху мог появиться новый разговор: страницы сдвинулись,
+      // и одна и та же запись пришла бы дважды.
+      const seen = new Set(chats.map((chat) => chat.id));
+      chats = chats.concat(incoming.filter((chat) => !seen.has(chat.id)));
+    }
+    nextCursor = data.nextCursor || null;
+    renderChats();
+    if (reset) el('chat-list').scrollTop = 0;
+  } finally {
+    if (generation === loadGeneration) {
+      loadingChats = false;
+      maybeLoadMore();
+    }
+  }
+}
+
+/** Первая страница не заполнила сайдбар — скролла не будет, догружаем сами. */
+function maybeLoadMore() {
+  const box = el('chat-list');
+  if (!nextCursor || loadingChats || box.clientHeight === 0) return;
+  if (box.scrollHeight <= box.clientHeight + 24) {
+    loadChats(false).catch((error) => setWorking('не удалось догрузить диалоги: ' + error.message));
+  }
+}
+
+/** Ход закончился: двигаем свой диалог наверх, не сбрасывая уже загруженные страницы. */
+function rememberChat(chat, liveText) {
+  if (!chat) return;
+  const merged = {
+    ...chat,
+    preview: cleanPreview(chat.preview || liveText || ''),
+    updatedAt: chat.updatedAt || new Date().toISOString(),
+  };
+  chats = chats.filter((item) => item.id !== merged.id);
+  chats.unshift(merged);
   renderChats();
 }
 
@@ -521,6 +585,12 @@ async function selectChat(id) {
   try {
     const data = await api('/panel/api/chat/history?id=' + encodeURIComponent(id));
     currentChat = data.chat;
+    currentId = data.chat.id;
+    history.replaceState(null, '', '/panel/chat?chat=' + encodeURIComponent(currentId));
+    if (!chats.some((chat) => chat.id === currentId)) {
+      chats.unshift(data.chat);
+    }
+    renderChats();
     setTitle(currentChat.title);
     setComposer(Boolean(currentChat.readOnly));
     setWorking('');
@@ -544,8 +614,10 @@ async function newChat() {
     currentId = data.chat.id;
     currentChat = data.chat;
     currentMessages = [];
+    chats = chats.filter((chat) => chat.id !== data.chat.id);
     chats.unshift(data.chat);
     renderChats();
+    el('chat-list').scrollTop = 0;
     history.replaceState(null, '', '/panel/chat?chat=' + encodeURIComponent(data.chat.id));
     setTitle('Новый чат');
     setComposer(false);
@@ -673,10 +745,13 @@ function handleEvent(box, event) {
     box.typing.hidden = true;
     if (event.chat) {
       currentChat = event.chat;
+      currentId = event.chat.id;
       setTitle(event.chat.title);
       setComposer(false);
+      rememberChat(event.chat, box.text);
+    } else {
+      loadChats(true).catch(() => {});
     }
-    loadChats().catch(() => {});
     setWorking('');
     return;
   }
@@ -928,8 +1003,15 @@ el('chat-send').onclick = () => {
 el('chat-search').addEventListener('input', () => {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(() => {
-    loadChats().catch((error) => setWorking('поиск не сработал: ' + error.message));
+    loadChats(true).catch((error) => setWorking('поиск не сработал: ' + error.message));
   }, 180);
+});
+el('chat-list').addEventListener('scroll', () => {
+  if (!nextCursor || loadingChats) return;
+  const box = el('chat-list');
+  if (box.scrollTop + box.clientHeight >= box.scrollHeight - 120) {
+    loadChats(false).catch((error) => setWorking('не удалось догрузить диалоги: ' + error.message));
+  }
 });
 document.querySelectorAll('.suggestions button').forEach((node) => {
   node.onclick = () => {
@@ -940,7 +1022,7 @@ document.querySelectorAll('.suggestions button').forEach((node) => {
 (async () => {
   const requested = new URLSearchParams(window.location.search).get('settings');
   await loadState();
-  await loadChats();
+  await loadChats(true);
   if (currentId) await selectChat(currentId);
   else if (chats.length) await selectChat(chats[0].id);
   else {

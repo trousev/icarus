@@ -2,6 +2,7 @@
 import { DEFAULT_CONFIG_PATH, loadConfig, loadEnvFile } from './config.ts';
 import { log } from './log.ts';
 import { prepareUser } from './workspace.ts';
+import { backfillChats } from './sessions/chats.ts';
 import { reapStalePi, waitForContainers } from './docker/manager.ts';
 import { SessionRegistry } from './sessions/registry.ts';
 import { startTelegramBot } from './telegram/bot.ts';
@@ -30,6 +31,9 @@ if (config.panel.devUser !== undefined) {
 
 for (const user of config.users) {
   prepareUser(config, user);
+  // Один проход по файлам сессий: всё, что уже начато, попадает в chats.json.
+  // Дальше панель читает только маленький реестр, а не всю историю.
+  backfillChats(config, user);
 }
 
 // Контейнерами владеет docker compose (см. docker/compose.ts): сервис их не создаёт,
