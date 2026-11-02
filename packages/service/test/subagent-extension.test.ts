@@ -67,7 +67,10 @@ if (log) {
 const sleep = Number(process.env.FAKE_PI_SLEEP_MS || 0);
 const code = Number(process.env.FAKE_PI_FAIL || 0);
 const text = process.env.FAKE_PI_TEXT || 'нашёл то, что просили';
-console.log(JSON.stringify({ type: 'tool_execution_start', toolName: 'web_search', args: { query: 'amazon.ie' } }));
+const actions = Number(process.env.FAKE_PI_ACTIONS || 1);
+for (let index = 0; index < actions; index += 1) {
+  console.log(JSON.stringify({ type: 'tool_execution_start', toolName: 'web_search', args: { query: 'q' + index } }));
+}
 console.log(JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text }], stopReason: 'stop' } }));
 setTimeout(() => {
   if (log) fs.appendFileSync(log, JSON.stringify({ event: 'end' }) + '\\n');
@@ -436,15 +439,33 @@ test('в процессе-ребёнке расширение молчит', () 
 
 test('шаги ребёнка копятся без повторов и не растут бесконечно', () => {
   const actions: string[] = [];
-  rememberAction(actions, 'web_search: amazon.ie');
-  rememberAction(actions, 'web_search: amazon.ie');
+  assert.equal(rememberAction(actions, 'web_search: amazon.ie'), true);
+  assert.equal(rememberAction(actions, 'web_search: amazon.ie'), false, 'повтор подряд новым шагом не считается');
   assert.deepEqual(actions, ['web_search: amazon.ie'], 'один и тот же шаг подряд не дублируется');
-  rememberAction(actions, '   ');
-  assert.deepEqual(actions, ['web_search: amazon.ie'], 'пустой шаг не копится');
+  assert.equal(rememberAction(actions, '   '), false, 'пустой шаг не копится');
+  assert.deepEqual(actions, ['web_search: amazon.ie'], 'пустой шаг в список не попал');
 
   for (let index = 0; index < 20; index += 1) rememberAction(actions, `read: файл-${index}`);
   assert.equal(actions.length, 10, 'в списке только последние десять шагов');
   assert.equal(actions[actions.length - 1], 'read: файл-19');
+});
+
+test('общее число шагов честное, даже когда в списке только последние десять', async () => {
+  const fake = fakePi();
+  await withEnv({ ICARUS_SUBAGENT_PI: fake.file, FAKE_PI_LOG: fake.log, FAKE_PI_ACTIONS: '12' }, async () => {
+    const tool = loadTool();
+    const result = await tool.execute(
+      'call-actions',
+      { tasks: [{ agent: 'scout', task: 'много ходить' }] },
+      undefined,
+      undefined,
+      { cwd: os.tmpdir(), model: { provider: 'p', id: 'm' } },
+    );
+    const states = result.details.subagents as SubagentState[];
+    assert.equal(states[0]?.actionsTotal, 12, 'всего шагов двенадцать');
+    assert.equal(states[0]?.actions?.length, 10, 'а в списке — последние десять');
+    assert.match(states[0]?.actions?.[0] ?? '', /q2/, 'список начинается с третьего шага');
+  });
 });
 
 test('снимок деталей не раздувается шагами: длинные строки обрезаются', () => {

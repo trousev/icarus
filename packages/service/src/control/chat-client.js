@@ -230,6 +230,12 @@ function subagentsHtml(step, opened) {
             ? sub.error || (sub.ms ? seconds(sub.ms) : 'готово')
             : 'ждёт очереди';
       const actions = Array.isArray(sub.actions) ? sub.actions : [];
+      // Всего шагов может быть больше, чем помещается в список: не врём числом.
+      const total = Number.isFinite(sub.actionsTotal) && sub.actionsTotal > 0 ? sub.actionsTotal : actions.length;
+      const label =
+        total > actions.length
+          ? total + ' ' + plural(total, 'действие', 'действия', 'действий') + ' · последние ' + actions.length
+          : actions.length + ' ' + plural(actions.length, 'действие', 'действия', 'действий');
       const key = (step.id || 'step') + ':' + index;
       // Действия ребёнка — вложенный список: по умолчанию свёрнут, чтобы длинная
       // трассировка не съедала ответ; раскрытое состояние переживает перерисовку.
@@ -240,9 +246,7 @@ function subagentsHtml(step, opened) {
             '"' +
             (opened && opened.has(key) ? ' open' : '') +
             '><summary>' +
-            actions.length +
-            ' ' +
-            plural(actions.length, 'действие', 'действия', 'действий') +
+            esc(label) +
             '</summary><div class="sub-action-list">' +
             actions
               .map((action) => '<div class="sub-action" title="' + esc(action) + '">' + esc(action) + '</div>')
