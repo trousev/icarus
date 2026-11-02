@@ -204,7 +204,12 @@
 .pending .item .name { color:var(--dim); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .pending .item .remove { border:0; background:none; color:var(--dim); font-size:15px; padding:0 2px; cursor:pointer; }
 .pending .item .remove:hover { color:var(--danger); }
-.composer-box .attach { flex:0 0 auto; font-size:17px; padding:5px 3px; }
+.composer-box .attach {
+  flex:0 0 auto; width:36px; height:36px; padding:0; display:grid; place-items:center;
+  border-radius:9px; color:var(--dim);
+}
+.composer-box .attach:hover { background:var(--raise); color:var(--text); }
+.composer-box .attach svg { display:block; }
 .composer-box {
   max-width: 900px; margin: 0 auto; display: flex; gap: 10px; align-items: flex-end;
   background: var(--panel); border: 1px solid var(--line); border-radius: 13px;
