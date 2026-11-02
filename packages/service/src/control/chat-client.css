@@ -59,6 +59,8 @@
 }
 .new-chat span { font-size: 18px; line-height: 1; margin-top: -1px; }
 .new-chat:hover { filter: brightness(1.06); }
+/* Черновик встаёт на место кнопки и по ширине совпадает со строками списка. */
+.new-chat[hidden], .draft-wrap[hidden] { display: none; }
 
 .side-title {
   color: var(--dim); font-size: 10px; letter-spacing: .14em;

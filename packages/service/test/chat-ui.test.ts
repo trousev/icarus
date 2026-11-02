@@ -79,6 +79,17 @@ test('ширина сайдбара тянется и запоминается',
   assert.match(html, /\.side-resizer \{ display: none; \}/, 'на узком экране ручки нет');
 });
 
+test('новый чат — черновик: сервер узнаёт о нём с первым сообщением', () => {
+  const html = chatPage(SESSION, { enabled: true });
+  // Кнопка превращается в строку списка, а POST /chats уходит из createChat —
+  // то есть ровно перед отправкой первой реплики, а не по клику.
+  assert.match(html, /id="draft-wrap" hidden/, 'черновик спрятан до клика');
+  assert.match(html, /id="draft-item"/, 'у черновика своя строка в списке');
+  assert.match(html, /el\('new-chat'\)\.onclick = startDraft/, 'клик по кнопке только открывает черновик');
+  assert.match(html, /async function createChat/, 'создание вынесено в отдельную функцию');
+  assert.doesNotMatch(html, /newChat\(/, 'мгновенного создания больше нет');
+});
+
 test('над списком диалогов нет лишнего заголовка', () => {
   const html = chatPage(SESSION, { enabled: true });
   // «Новый чат» и сразу разговоры: подпись «ДИАЛОГИ» дублировала очевидное.
