@@ -317,7 +317,6 @@ function showEmpty(show) {
 }
 
 function renderChats() {
-  el('chat-count').textContent = String(chats.length);
   const box = el('chat-list');
   if (!chats.length) {
     box.innerHTML = '<p class="side-empty">Пока пусто. Начни новый чат.</p>';
@@ -814,9 +813,6 @@ document.querySelectorAll('[data-settings-tab]').forEach((button) => {
 el('settings-close').onclick = closeSettings;
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && !el('settings-pane').hidden) closeSettings();
-});
-el('chat-side').addEventListener('click', (event) => {
-  if (event.target === el('chat-side')) closeSide();
 });
 el('chat-attach').onclick = () => el('chat-files').click();
 el('chat-files').addEventListener('change', (event) => {
