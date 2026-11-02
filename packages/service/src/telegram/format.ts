@@ -280,7 +280,7 @@ function splitRow(line: string): string[] {
 }
 
 /** Разметка в строке: код, ссылки, жирный, курсив, зачёркнутый, спойлер. */
-function inline(text: string): string {
+function inline(text: string, links = true): string {
   let out = '';
   let index = 0;
 
@@ -304,7 +304,9 @@ function inline(text: string): string {
       }
     }
 
-    if (char === '[') {
+    // Внутри подписи ссылки вторую ссылку не открываем: вложенные `<a>` Telegram
+    // не принимает и отвергает разметку целиком.
+    if (links && char === '[') {
       const link = linkAt(text, index);
       if (link) {
         out += link.html;
@@ -313,7 +315,16 @@ function inline(text: string): string {
       }
     }
 
-    const emphasis = emphasisAt(text, index);
+    if (links) {
+      const link = urlAt(text, index);
+      if (link) {
+        out += link.html;
+        index = link.next;
+        continue;
+      }
+    }
+
+    const emphasis = emphasisAt(text, index, links);
     if (emphasis) {
       out += emphasis.html;
       index = emphasis.next;
@@ -338,11 +349,58 @@ function linkAt(text: string, index: number): { html: string; next: number } | n
   if (!/^(?:https?:\/\/|tg:\/\/|mailto:)/i.test(url)) return null;
 
   const href = escapeHtml(url).replace(/"/g, '&quot;');
-  return { html: `<a href="${href}">${inline(text.slice(index + 1, label))}</a>`, next: end + 1 };
+  return { html: `<a href="${href}">${inline(text.slice(index + 1, label), false)}</a>`, next: end + 1 };
+}
+
+/** Что можно поставить в конец адреса, но что адресу не принадлежит. */
+const URL_TAIL = /[?!.,:*_~]/;
+/** Парная скобка: закрывающая остаётся в адресе, только если открывающая тоже есть. */
+const URL_BRACKETS: Record<string, string> = { ')': '(', ']': '[', '}': '{' };
+
+/**
+ * Голый адрес в тексте: `https://…` — это ссылка, даже если модель забыла про
+ * `[текст](…)`. Без этого человек видит адрес, по которому нельзя кликнуть.
+ */
+function urlAt(text: string, index: number): { html: string; next: number } | null {
+  if (!/^https?:\/\//i.test(text.slice(index, index + 8))) return null;
+  // Внутри слова (`foohttps://…`, `field_https://…`) адрес не начинается.
+  const before = text[index - 1];
+  if (before !== undefined && /[\p{L}\p{N}_]/u.test(before)) return null;
+
+  const match = /^https?:\/\/[^\s<>"]+/i.exec(text.slice(index));
+  if (!match) return null;
+
+  const url = trimUrl(match[0]);
+  if (url.length <= 'https://'.length) return null;
+
+  const href = escapeHtml(url).replace(/"/g, '&quot;');
+  return { html: `<a href="${href}">${escapeHtml(url)}</a>`, next: index + url.length };
+}
+
+/** Хвостовая пунктуация и лишние скобки — не часть ссылки: `см. https://x.com.` */
+function trimUrl(raw: string): string {
+  let url = raw;
+  for (;;) {
+    const last = url.slice(-1);
+    if (last && URL_TAIL.test(last)) {
+      url = url.slice(0, -1);
+      continue;
+    }
+    const opener = URL_BRACKETS[last];
+    if (opener && countChar(url, last) > countChar(url, opener)) {
+      url = url.slice(0, -1);
+      continue;
+    }
+    return url;
+  }
+}
+
+function countChar(text: string, char: string): number {
+  return text.split(char).length - 1;
 }
 
 /** Пара маркеров вокруг текста — если она в этой строке закрыта. */
-function emphasisAt(text: string, index: number): { html: string; next: number } | null {
+function emphasisAt(text: string, index: number, links: boolean): { html: string; next: number } | null {
   for (const { marker, open, close } of EMPHASIS) {
     if (!text.startsWith(marker, index)) continue;
     // `**` разбирается раньше `*`: одиночный маркер не должен открывать половину пары.
@@ -351,7 +409,10 @@ function emphasisAt(text: string, index: number): { html: string; next: number }
 
     const end = findClose(text, index + marker.length, marker);
     if (end === -1) continue;
-    return { html: `${open}${inline(text.slice(index + marker.length, end))}${close}`, next: end + marker.length };
+    return {
+      html: `${open}${inline(text.slice(index + marker.length, end), links)}${close}`,
+      next: end + marker.length,
+    };
   }
   return null;
 }

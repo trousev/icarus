@@ -6,6 +6,9 @@ import fs from 'node:fs';
 import { escapeHtml, shell, type PanelSession } from './ui.ts';
 
 const CLIENT_CSS = fs.readFileSync(new URL('./chat-client.css', import.meta.url), 'utf8');
+// Разметку держим отдельным файлом: её разбирает тест, а клиенту она нужна раньше
+// самого чата — функции разметки подключаются как обычные глобальные.
+const CLIENT_MD = fs.readFileSync(new URL('./chat-markdown.js', import.meta.url), 'utf8');
 const CLIENT_JS = fs.readFileSync(new URL('./chat-client.js', import.meta.url), 'utf8');
 
 export type ChatPageOptions = {
@@ -120,5 +123,6 @@ export function chatPage(session: PanelSession, options: ChatPageOptions): strin
   </section>
 </div>
 <script>window.__CHAT_CFG__ = ${json};</script>
+<script>${CLIENT_MD}</script>
 <script>${CLIENT_JS}</script>`);
 }
