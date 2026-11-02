@@ -269,6 +269,53 @@ function readLegacyIndex(config: IcarusConfig, user: UserConfig): LegacyIndex {
 }
 
 /**
+ * Перед первой миграцией сохраняем старый chats.json: в нём preview/updatedAt и
+ * нет channel. Если файл битый — откладываем его в сторону, а не затираем:
+ * реестр восстановим из сессий, а содержимое останется для разбора.
+ */
+function backupLegacyChats(config: IcarusConfig, user: UserConfig): void {
+  const file = chatsFile(config, user);
+  let raw: string;
+  try {
+    raw = fs.readFileSync(file, 'utf8');
+  } catch {
+    return;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    const broken = `${file}.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+    fs.renameSync(file, broken);
+    log.warn('битый chats.json отложен в сторону', { user: user.id, file: broken });
+    return;
+  }
+
+  const chats = (parsed as { chats?: unknown }).chats;
+  if (!Array.isArray(chats)) {
+    const broken = `${file}.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+    fs.renameSync(file, broken);
+    log.warn('chats.json без массива chats отложен в сторону', { user: user.id, file: broken });
+    return;
+  }
+
+  const legacy = chats.some(
+    (item) =>
+      Boolean(item) &&
+      typeof item === 'object' &&
+      (!('channel' in (item as object)) || 'preview' in (item as object) || 'updatedAt' in (item as object)),
+  );
+  if (!legacy) return;
+
+  const backup = path.join(userPaths(config, user).root, 'chats.json.bak');
+  if (fs.existsSync(backup)) return;
+  fs.copyFileSync(file, backup);
+  fs.chmodSync(backup, 0o600);
+  log.info('старый chats.json сохранён перед миграцией', { user: user.id, backup });
+}
+
+/**
  * Разовый проход по файлам сессий при старте: всё, что уже лежит на диске,
  * должно попасть в реестр. Полных чтений тут нет — только имена и mtime;
  * заголовки доезжают, когда разговор впервые показывается или получает ход.
@@ -278,6 +325,7 @@ function readLegacyIndex(config: IcarusConfig, user: UserConfig): LegacyIndex {
  */
 export function backfillChats(config: IcarusConfig, user: UserConfig): void {
   try {
+    backupLegacyChats(config, user);
     const chats = readChats(config, user);
     const legacy = readLegacyIndex(config, user);
     const sessions = discoverSessionFiles(userPaths(config, user).sessions);

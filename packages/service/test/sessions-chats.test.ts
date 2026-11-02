@@ -96,6 +96,7 @@ test('backfill переносит session-index в chats.json, добавляе�
   const legacy = byId(chats, `session:${unknown.sessionId}`);
   assert.equal(legacy?.channel, 'telegram', 'без каталога считаем Telegram: API в бою не используется');
   assert.equal(legacy?.conversationId, undefined);
+  assert.equal(legacy?.createdAt, '2026-11-01T10:00:00.000Z', 'createdAt берём из имени файла');
 
   assert.equal(fs.existsSync(path.join(userPaths(config, user).root, 'session-index.json')), false);
 
@@ -177,4 +178,41 @@ test('реестр пишет Telegram-разговор в chats.json, когд�
   } finally {
     registry.dispose();
   }
+});
+
+test('перед миграцией старый chats.json сохраняется как .bak', () => {
+  const { config, user } = fixture();
+  const root = userPaths(config, user).root;
+  const legacy = {
+    chats: [
+      {
+        id: 'web-old',
+        title: 'Старый разговор',
+        preview: 'превью',
+        createdAt: '2026-10-01T10:00:00.000Z',
+        updatedAt: '2026-10-02T10:00:00.000Z',
+      },
+    ],
+  };
+  fs.writeFileSync(path.join(root, 'chats.json'), JSON.stringify(legacy));
+
+  backfillChats(config, user);
+
+  const backup = JSON.parse(fs.readFileSync(path.join(root, 'chats.json.bak'), 'utf8')) as typeof legacy;
+  assert.equal(backup.chats[0]?.preview, 'превью', 'старый файл цел');
+  const migrated = readChats(config, user);
+  assert.equal(migrated[0]?.channel, 'web');
+  assert.deepEqual(Object.keys(migrated[0] ?? {}).sort(), ['channel', 'conversationId', 'createdAt', 'id', 'title']);
+});
+
+test('битый chats.json откладывается в сторону, а не затирается', () => {
+  const { config, user } = fixture();
+  const root = userPaths(config, user).root;
+  fs.writeFileSync(path.join(root, 'chats.json'), '{"chats": [это не json');
+
+  backfillChats(config, user);
+
+  const broken = fs.readdirSync(root).filter((name) => name.startsWith('chats.json.corrupt-'));
+  assert.equal(broken.length, 1, 'битый файл сохранён для разбора');
+  assert.ok(fs.existsSync(path.join(root, 'chats.json')), 'реестр собран заново');
 });

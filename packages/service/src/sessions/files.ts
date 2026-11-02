@@ -54,6 +54,40 @@ export function discoverSessionFiles(dir: string): FileSession[] {
   return [...found.values()];
 }
 
+/**
+ * Файлы только для перечисленных разговоров: список листается страницами, и
+ * stat-ить весь каталог ради тридцати видимых чатов незачем. Имена читаем все
+ * (это дешёвый readdir), stat — только совпавшие.
+ */
+export function sessionFilesFor(dir: string, sessionIds: Set<string>): Map<string, FileSession> {
+  const found = new Map<string, FileSession>();
+  if (sessionIds.size === 0) return found;
+
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return found;
+  }
+
+  for (const name of names) {
+    const sessionId = sessionIdFromFileName(name);
+    if (!sessionId || !sessionIds.has(sessionId)) continue;
+    const file = path.join(dir, name);
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(file);
+    } catch {
+      continue;
+    }
+    const previous = found.get(sessionId);
+    if (!previous || stat.mtimeMs > previous.mtimeMs) {
+      found.set(sessionId, { sessionId, file, mtimeMs: stat.mtimeMs, size: stat.size });
+    }
+  }
+  return found;
+}
+
 /** Самый свежий файл с таким id: после /clear в каталоге лежит уже новый. */
 export function sessionFileForId(dir: string, sessionId: string): string | null {
   let names: string[];

@@ -25,7 +25,7 @@ import {
   updateChatTitles,
   type ChatRecord,
 } from '../sessions/chats.ts';
-import { discoverSessionFiles, sessionFileForId, textOfContent as textOf, type FileSession } from '../sessions/files.ts';
+import { sessionFileForId, sessionFilesFor, textOfContent as textOf, type FileSession } from '../sessions/files.ts';
 import type { SessionRegistry } from '../sessions/registry.ts';
 import { log } from '../log.ts';
 
@@ -357,14 +357,6 @@ function digestSessionFile(session: FileSession): SessionDigest | null {
   return digest;
 }
 
-/** Кэш не должен переживать файлы: сессии архивируются и удаляются, а сервис живёт неделями. */
-function pruneDigestCache(live: Set<string>): void {
-  if (digestCache.size <= live.size) return;
-  for (const key of digestCache.keys()) {
-    if (!live.has(key)) digestCache.delete(key);
-  }
-}
-
 /** Сводка для браузера: метаданные из реестра, превью и время — из файла сессии. */
 function summaryOf(chat: ChatRecord, digest: SessionDigest | null): ChatSummary {
   return {
@@ -391,11 +383,10 @@ function sessionForChat(config: IcarusConfig, user: UserConfig, chat: ChatRecord
   }
 }
 
-type RankedChat = { chat: ChatRecord; session?: FileSession; sort: number };
-
 /**
- * Страница списка. Сортировка — по mtime файла сессии: это дешёвый stat, а не
- * чтение истории; превью и точное время читаются только для показанной страницы.
+ * Страница списка. Сортируем по createdAt — время создания не меняется, поэтому
+ * страницы не прыгают от нового сообщения. Превью и время последнего сообщения
+ * читаются только для показанной страницы; stat — тоже только для неё.
  */
 export function listChatPage(
   config: IcarusConfig,
@@ -405,39 +396,30 @@ export function listChatPage(
   cursor?: string | null,
 ): ChatPage {
   const needle = query.trim().toLocaleLowerCase('ru');
-  const records = readChats(config, user).filter(
-    (chat) => !needle || `${chat.title}\n${chat.conversationId ?? ''}`.toLocaleLowerCase('ru').includes(needle),
-  );
-
-  const sessions = discoverSessionFiles(userPaths(config, user).sessions);
-  const bySession = new Map(sessions.map((session) => [session.sessionId, session]));
-  const ranked: RankedChat[] = records
-    .map((chat) => {
-      const session = bySession.get(sessionIdOf(chat, user));
-      return {
-        chat,
-        ...(session ? { session } : {}),
-        sort: session?.mtimeMs ?? (Date.parse(chat.createdAt) || 0),
-      };
-    })
-    .sort((a, b) => b.sort - a.sort || b.chat.createdAt.localeCompare(a.chat.createdAt));
+  const records = readChats(config, user)
+    .filter(
+      (chat) => !needle || `${chat.title}\n${chat.conversationId ?? ''}`.toLocaleLowerCase('ru').includes(needle),
+    )
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
 
   const offset = pageOffset(cursor);
   const size = pageLimit(limit);
-  const page = ranked.slice(offset, offset + size);
+  const page = records.slice(offset, offset + size);
+  const wanted = new Set(page.map((chat) => sessionIdOf(chat, user)));
+  const sessions = sessionFilesFor(userPaths(config, user).sessions, wanted);
   const titles = new Map<string, string>();
-  const chats = page.map((item) => {
-    const digest = item.session ? digestSessionFile(item.session) : null;
-    if (digest?.title && isGenericTitle(item.chat)) titles.set(item.chat.id, digest.title);
-    return summaryOf(item.chat, digest);
+  const chats = page.map((chat) => {
+    const session = sessions.get(sessionIdOf(chat, user));
+    const digest = session ? digestSessionFile(session) : null;
+    if (digest?.title && isGenericTitle(chat)) titles.set(chat.id, digest.title);
+    return summaryOf(chat, digest);
   });
   if (titles.size > 0) updateChatTitles(config, user, titles);
-  pruneDigestCache(new Set(sessions.map((session) => session.file)));
 
   return {
     chats,
-    nextCursor: offset + page.length < ranked.length ? String(offset + page.length) : null,
-    total: ranked.length,
+    nextCursor: offset + page.length < records.length ? String(offset + page.length) : null,
+    total: records.length,
   };
 }
 

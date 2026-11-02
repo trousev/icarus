@@ -332,7 +332,7 @@ function renderChats() {
   let group = '';
   let html = '';
   for (const chat of chats) {
-    const label = groupLabel(chat.updatedAt);
+    const label = groupLabel(chat.createdAt);
     if (label !== group) {
       if (group) html += '</div>';
       group = label;
@@ -349,7 +349,7 @@ function renderChats() {
       '</span>' +
       (channelTag(chat) ? '<span class="chat-item-tag">' + esc(channelTag(chat)) + '</span>' : '') +
       '<time class="chat-item-time">' +
-      esc(timeLabel(chat.updatedAt)) +
+      esc(timeLabel(chat.createdAt)) +
       '</time></div><div class="chat-item-preview">' +
       esc(cleanPreview(chat.preview || '')) +
       '</div></button>';

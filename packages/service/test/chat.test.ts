@@ -171,6 +171,28 @@ test('Telegram-разговор в реестре, в списке и тольк
   assert.equal(legacy?.chat.id, conversationId);
 });
 
+test('список сортируется по createdAt, а не по времени файла сессии', () => {
+  const { config, user } = fixture();
+  const older = createChat(config, user, new Date('2026-01-01T10:00:00.000Z'));
+  const newer = createChat(config, user, new Date('2026-02-01T10:00:00.000Z'));
+  const { file: olderFile } = putSessionFile(
+    config,
+    user,
+    older.id,
+    dialog('Старый разговор', 'Старый ответ'),
+    '2026-01-01T10-00-00-000Z',
+  );
+  putSessionFile(config, user, newer.id, dialog('Новый разговор', 'Новый ответ'), '2026-02-01T10-00-00-000Z');
+
+  // Файл старого чата трогали позже — на порядок это влиять не должно.
+  fs.utimesSync(olderFile, new Date('2026-03-01T10:00:00.000Z'), new Date('2026-03-01T10:00:00.000Z'));
+
+  assert.deepEqual(
+    listChatPage(config, user).chats.map((chat) => chat.id),
+    [newer.id, older.id],
+  );
+});
+
 test('список листается страницами, следующая догружается по курсору', () => {
   const { config, user } = fixture();
   const created = [];
