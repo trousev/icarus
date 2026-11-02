@@ -69,6 +69,13 @@
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .chat-item-time { flex: 0 0 auto; color: var(--dim); font-size: 10px; }
+/* Канал разговора: Telegram и API панель показывает, но продолжать их нельзя. */
+.chat-item-tag {
+  flex: 0 0 auto; color: var(--dim); font-size: 9px; letter-spacing: .04em;
+  text-transform: uppercase; border: 1px solid var(--line); border-radius: 5px;
+  padding: 1px 4px;
+}
+.chat-item.read-only .chat-item-title { color: var(--dim); }
 .chat-item-preview {
   color: var(--dim); font-size: 12px; margin-top: 2px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -230,6 +237,13 @@
   gap: 12px; color: var(--dim); font-size: 11px; min-height: 16px;
 }
 #chat-working { color: var(--dim); }
+/* Внешний разговор: композер выключен, но лента и трассировка читаются как обычно. */
+.composer-locked {
+  max-width: 900px; margin: 0 auto 8px; padding: 9px 12px;
+  border: 1px solid var(--line); border-radius: 9px; background: var(--panel);
+  color: var(--dim); font-size: 12px;
+}
+.composer-locked[hidden] { display: none; }
 
 /* ── настройки поверх чата ───────────────────────────────────────────────── */
 /* Настройки не уводят со страницы: диалоги остаются слева, а панель занимает

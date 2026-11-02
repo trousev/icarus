@@ -58,7 +58,7 @@ export function chatPage(session: PanelSession, options: ChatPageOptions): strin
       <button class="icon-btn menu-btn" id="toggle-side" aria-label="Меню">☰</button>
       <div class="chat-crumbs">Icarus / <b id="chat-title">Новый чат</b></div>
       <label class="chat-search"><span>⌕</span><input id="chat-search" placeholder="Поиск по диалогам" autocomplete="off"></label>
-      <div class="top-status"><i></i>Агент активен</div>
+      <div class="top-status"><i></i><span id="chat-status">Агент активен</span></div>
     </header>
 
     <section class="chat-scroll" id="chat-scroll">
@@ -79,6 +79,7 @@ export function chatPage(session: PanelSession, options: ChatPageOptions): strin
 
     <div class="composer">
       <div class="pending" id="chat-pending" hidden></div>
+      <div class="composer-locked" id="chat-locked" hidden></div>
       <div class="composer-box">
         <button class="icon-btn attach" id="chat-attach" aria-label="Приложить файл" title="Приложить файл"${options.enabled ? '' : ' disabled'}><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
         <input id="chat-files" type="file" multiple hidden>
