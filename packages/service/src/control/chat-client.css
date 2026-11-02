@@ -210,7 +210,8 @@
 /* Субагенты под шагом: строка на ребёнка, как в трассировке, но с заданием. */
 .trace-step.has-subs { flex-wrap: wrap; }
 .sub-list { flex: 1 0 100%; margin: 3px 0 5px 96px; display: flex; flex-direction: column; gap: 3px; }
-.sub-step { display: flex; gap: 8px; align-items: baseline; font-size: 11.5px; color: var(--dim); }
+.sub-step { font-size: 11.5px; color: var(--dim); }
+.sub-row { display: flex; gap: 8px; align-items: baseline; }
 .sub-mark { width: 10px; flex: 0 0 auto; text-align: center; color: var(--dim); }
 .sub-step.running .sub-mark { color: var(--accent); animation: pulse 1.2s infinite; }
 .sub-step.ok .sub-mark { color: #4ade80; }
@@ -220,6 +221,20 @@
 .sub-agent { flex: 0 0 auto; color: var(--text); font: 10px/1.5 ui-monospace, monospace; letter-spacing: .04em; }
 .sub-task { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sub-note { flex: 0 0 auto; max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .85; }
+/* Действия ребёнка: свёрнутый список под его строкой. */
+.sub-actions { margin: 1px 0 3px 18px; }
+.sub-actions summary {
+  cursor: pointer; color: var(--dim); font-size: 10.5px; list-style: none;
+  padding: 1px 0; opacity: .8; user-select: none;
+}
+.sub-actions summary::-webkit-details-marker { display: none; }
+.sub-actions summary::before { content: '▸'; display: inline-block; margin-right: 6px; transition: transform .15s; }
+.sub-actions[open] summary::before { transform: rotate(90deg); }
+.sub-action-list { margin: 2px 0 2px 2px; padding-left: 10px; border-left: 1px solid var(--line); }
+.sub-action {
+  font: 10.5px/1.6 ui-monospace, monospace; color: var(--dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 @media (max-width: 900px) {
   .sub-list { margin-left: 0; }
   .sub-note { max-width: 60%; }

@@ -123,4 +123,6 @@ test('субагенты в чате видны живым списком, а н
   assert.match(html, /function subagentsHtml/, 'список детей рисуется отдельно');
   assert.match(html, /step-update/, 'клиент понимает обновления шага');
   assert.match(html, /\.sub-step\.running/, 'у работающего ребёнка свой вид');
+  assert.match(html, /details class="sub-actions"/, 'шаги ребёнка — вложенный раскрывающийся список');
+  assert.match(html, /data-sub=/, 'раскрытое состояние привязано к конкретному ребёнку');
 });

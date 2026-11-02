@@ -50,6 +50,14 @@ export const DEFAULT_BUDGET_MS = 900_000;
 const OUTPUT_LIMIT = 3000;
 /** Как часто двигаем прогресс: чаще — только зря дёргать UI и телеграм. */
 const PROGRESS_INTERVAL_MS = 700;
+/**
+ * Сколько шагов ребёнка помним для вложенного списка в панели. Список — не отчёт:
+ * по нему видно, куда ребёнок ходил, а не весь его путь; десять последних хватает,
+ * и детали прогресса не растут с каждой страницей.
+ */
+const ACTION_LIMIT = 10;
+/** Длинный запрос или URL в строке действия не должен растягивать детали. */
+const ACTION_CHARS = 160;
 
 /** Модель для задачи: дешёвая или та, что получше. Уровни раздаёт сервис. */
 export type SubagentTier = "fast" | "strong";
@@ -161,6 +169,12 @@ export type SubagentState = {
   status: SubagentStatus;
   /** Чем занят прямо сейчас: «web_search: amazon.co.uk». Только у работающих. */
   activity?: string;
+  /**
+   * Последние шаги ребёнка («web_search: amazon.ie», «read: SKILL.md»…). Панель
+   * рисует их вложенным списком под самим субагентом: раскрыл — видно, куда он
+   * ходил; закрыл — не мешает читать ответ.
+   */
+  actions?: string[];
   startedAt?: number;
   ms?: number;
   output?: string;
@@ -258,6 +272,14 @@ function piInvocation(env: NodeJS.ProcessEnv = process.env): { command: string; 
   const name = path.basename(process.execPath).toLowerCase();
   if (!/^(node|bun)(\.exe)?$/.test(name)) return { command: process.execPath, args: [] };
   return { command: "pi", args: [] };
+}
+
+/** Копит шаги ребёнка для вложенного списка: без повторов и не длиннее предела. */
+export function rememberAction(actions: string[], action: string): void {
+  const text = action.trim();
+  if (!text || actions[actions.length - 1] === text) return;
+  actions.push(text);
+  if (actions.length > ACTION_LIMIT) actions.splice(0, actions.length - ACTION_LIMIT);
 }
 
 /** Строка «чем занят» из аргументов инструмента: первое осмысленное поле. */
@@ -548,6 +570,9 @@ export function snapshot(states: SubagentState[]): SubagentState[] {
     task: clip(state.task, 400) ?? '',
     ...(state.output === undefined ? {} : { output: clip(state.output, 400) }),
     ...(state.error === undefined ? {} : { error: clip(state.error, 400) }),
+    ...(state.actions === undefined
+      ? {}
+      : { actions: state.actions.slice(-ACTION_LIMIT).map((action) => clip(action, ACTION_CHARS) ?? '') }),
   }));
 }
 
@@ -688,6 +713,7 @@ export default function (pi: ExtensionAPI) {
             extensionFiles: extensionFilesOf(spec),
             onActivity: (activity) => {
               state.activity = activity;
+              rememberAction((state.actions ??= []), activity);
               pushProgress();
             },
           });
