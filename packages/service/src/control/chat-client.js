@@ -206,6 +206,49 @@ function groupLabel(iso) {
   return 'Раньше';
 }
 
+const SUB_MARK = { queued: '·', running: '◐', ok: '✓', error: '✕', aborted: '■', skipped: '–' };
+
+function seconds(ms) {
+  const value = Math.max(0, Number(ms) || 0) / 1000;
+  return value < 10 ? value.toFixed(1) + ' с' : Math.round(value) + ' с';
+}
+
+/**
+ * Живой список субагентов под шагом: кто работает, кто в очереди и кто уже кончил.
+ * Данные приходят от инструмента (details.subagents) — здесь только рисование.
+ */
+function subagentsHtml(step) {
+  const list = step.subagents;
+  if (!list || !list.length) return '';
+  const items = list
+    .map((sub) => {
+      const status = String(sub.status || 'queued');
+      const note =
+        status === 'running'
+          ? sub.activity || 'работает'
+          : status === 'ok' || status === 'error' || status === 'aborted'
+            ? sub.error || (sub.ms ? seconds(sub.ms) : 'готово')
+            : 'ждёт очереди';
+      return (
+        '<div class="sub-step ' +
+        esc(status) +
+        '"><span class="sub-mark">' +
+        esc(SUB_MARK[status] || '·') +
+        '</span><span class="sub-agent">' +
+        esc(sub.agent) +
+        '</span><span class="sub-task" title="' +
+        esc(sub.task) +
+        '">' +
+        esc(sub.task) +
+        '</span><span class="sub-note">' +
+        esc(note) +
+        '</span></div>'
+      );
+    })
+    .join('');
+  return '<div class="sub-list">' + items + '</div>';
+}
+
 function traceHtml(steps) {
   if (!steps || !steps.length) return '';
   const items = steps
@@ -213,13 +256,16 @@ function traceHtml(steps) {
       (step) =>
         '<div class="trace-step ' +
         esc(step.status || 'ok') +
+        (step.subagents && step.subagents.length ? ' has-subs' : '') +
         '" title="' +
         esc(step.result || '') +
         '"><span class="trace-label">' +
         esc(step.label) +
         '</span><span class="trace-detail">' +
         esc(step.detail || step.tool || '') +
-        '</span><span class="trace-dot"></span></div>',
+        '</span><span class="trace-dot"></span>' +
+        subagentsHtml(step) +
+        '</div>',
     )
     .join('');
   const word = plural(steps.length, 'шаг', 'шага', 'шагов');
@@ -253,6 +299,8 @@ let currentId = cfg.chatId || null;
 let currentChat = null;
 let currentMessages = [];
 let streaming = false;
+/** Нажал ли человек «стоп» в этом ходе: по флагу понятно, чем кончился ответ. */
+let stoppedByUser = false;
 /** Можно ли писать в открытый разговор: Telegram и API в панели только читаются. */
 let writable = Boolean(cfg.enabled);
 /** Список диалогов листается страницами: курсор приносит следующую. */
@@ -724,11 +772,22 @@ function handleEvent(box, event) {
     setWorking((event.step.label || 'Икар') + ': ' + (event.step.detail || 'работает…'));
     return;
   }
+  if (event.type === 'step-update') {
+    const index = box.steps.findIndex((item) => item.id === event.id);
+    if (index !== -1) box.steps[index] = event.step;
+    renderLive(box);
+    const running = ((event.step && event.step.subagents) || []).filter((sub) => sub.status === 'running');
+    if (running.length) {
+      setWorking('⚙ ' + running.map((sub) => sub.agent + ': ' + (sub.activity || 'работает')).join(' · '));
+    }
+    return;
+  }
   if (event.type === 'step-end') {
     const step = box.steps.find((item) => item.id === event.id);
     if (step) {
       step.status = event.status;
       step.result = event.result;
+      if (event.subagents) step.subagents = event.subagents;
       renderLive(box);
     }
     return;
@@ -752,7 +811,7 @@ function handleEvent(box, event) {
     } else {
       loadChats(true).catch(() => {});
     }
-    setWorking('');
+    setWorking(stoppedByUser ? 'остановил — можно писать дальше' : '');
     return;
   }
   if (event.type === 'error') {
@@ -792,8 +851,7 @@ async function sendText(forced) {
     }
   }
 
-  streaming = true;
-  el('chat-send').disabled = true;
+  setStreaming(true);
   input.value = '';
   growInput();
   clearPending(false);
@@ -844,10 +902,38 @@ async function sendText(forced) {
     box.typing.hidden = true;
     setWorking('');
   } finally {
-    streaming = false;
-    el('chat-send').disabled = !writable;
+    setStreaming(false);
     box.typing.hidden = true;
     input.focus();
+  }
+}
+
+/**
+ * Пока идёт ответ, на месте «отправить» стоит «стоп»: остановить ход можно и в
+ * середине — вместе с субагентами, которые в этот момент работают.
+ */
+function setStreaming(on) {
+  streaming = Boolean(on);
+  el('chat-stop').hidden = !on;
+  el('chat-stop').disabled = false;
+  el('chat-send').hidden = Boolean(on);
+  el('chat-send').disabled = on || !writable;
+  if (!on) stoppedByUser = false;
+}
+
+async function stopStream() {
+  if (!streaming || !currentId) return;
+  el('chat-stop').disabled = true;
+  setWorking('останавливаю…');
+  try {
+    const result = await api('/panel/api/chat/abort', {
+      method: 'POST',
+      body: JSON.stringify({ chatId: currentId }),
+    });
+    stoppedByUser = Boolean(result.ok);
+    if (stoppedByUser) setWorking('остановил — можно писать дальше');
+  } catch (error) {
+    setWorking('остановить не вышло: ' + error.message);
   }
 }
 
@@ -999,6 +1085,9 @@ el('chat-input').addEventListener('keydown', (event) => {
 });
 el('chat-send').onclick = () => {
   sendText().catch(() => {});
+};
+el('chat-stop').onclick = () => {
+  stopStream().catch(() => {});
 };
 el('chat-search').addEventListener('input', () => {
   clearTimeout(searchTimer);

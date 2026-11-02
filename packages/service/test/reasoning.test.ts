@@ -1,7 +1,7 @@
 // Активность тулов превращается в человеческие фразы для reasoning_content.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { phraseForToolEnd, phraseForToolStart } from '../src/reasoning.ts';
+import { phraseForToolEnd, phraseForToolStart, subagentStatus } from '../src/reasoning.ts';
 
 test('чтение файла', () => {
   assert.equal(phraseForToolStart('read', { path: '/workspace/memory/identity.md' }), 'читаю memory/identity.md');
@@ -24,4 +24,23 @@ test('неизвестный тул не молчит', () => {
 test('итог различает успех и ошибку', () => {
   assert.equal(phraseForToolEnd('write', false), 'записал');
   assert.match(phraseForToolEnd('write', true), /не получилось/);
+});
+
+test('субагенты: в статусе видно, сколько задач и кто из детей чем занят', () => {
+  assert.match(String(phraseForToolStart('subagent', { tasks: [{}, {}, {}] })), /субагентам: 3/);
+  assert.equal(phraseForToolEnd('subagent', false), 'субагенты закончили');
+
+  const details = {
+    subagents: [
+      { agent: 'scout', status: 'ok', ms: 1200 },
+      { agent: 'researcher', status: 'running', activity: 'web_search: amazon.ie' },
+      { agent: 'worker', status: 'queued' },
+    ],
+  };
+  const line = subagentStatus(details);
+  assert.match(line ?? '', /агенты 1\/3/);
+  assert.match(line ?? '', /researcher: web_search: amazon\.ie/);
+
+  assert.equal(subagentStatus(undefined), null);
+  assert.equal(subagentStatus({ subagents: [{ agent: 'scout', status: 'ok' }] }), 'агенты 1/1');
 });
