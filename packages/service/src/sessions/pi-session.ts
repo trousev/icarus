@@ -1,6 +1,6 @@
 // Одна живая сессия pi = один разговор в чате.
 // Процесс живёт внутри контейнера пользователя, общение — JSONL по stdio.
-import { RpcClient, type RpcEvent } from './rpc-client.ts';
+import { RpcClient, type RpcEvent, type Spawner } from './rpc-client.ts';
 import { channelForConversation, sessionIdFor } from './identity.ts';
 import { refreshChatTitle } from './chats.ts';
 import { log } from '../log.ts';
@@ -22,6 +22,24 @@ export function piArgsFor(model: ModelConfig, sessionId: string): string[] {
     '--thinking',
     model.thinking ?? 'off',
   ];
+}
+
+/**
+ * Модели по уровням — в окружение контейнера: расширение субагентов берёт оттуда
+ * подсказку, какой моделью вести ребёнка. Уровни живут в конфиге, и дублировать их
+ * в env вручную незачем: здесь они всегда совпадают с тем, что раздаёт эскалация.
+ */
+export function modelEnv(config: IcarusConfig): Record<string, string> {
+  const env: Record<string, string> = {};
+  const pick = (tier: 'fast' | 'strong'): string | null => {
+    const model = config.models.find((item) => item.tier === tier);
+    return model ? `${model.provider}/${model.id}` : null;
+  };
+  const fast = pick('fast');
+  if (fast) env.ICARUS_MODEL_FAST = fast;
+  const strong = pick('strong');
+  if (strong) env.ICARUS_MODEL_STRONG = strong;
+  return env;
 }
 
 /**
@@ -81,6 +99,8 @@ export class PiSession {
     model: ModelConfig,
     container: string,
     generation = 0,
+    /** Чем запускать pi: в тестах — заглушкой, в бою — docker exec (см. RpcClient). */
+    spawner?: Spawner,
   ) {
     this.user = user;
     this.conversationId = conversationId;
@@ -93,8 +113,9 @@ export class PiSession {
     // Канал нужен расширению-персоне: в веб-чате можно показать картинку
     // markdown-ом, в Telegram — нельзя, и учить модель лишнему незачем.
     const channel = channelForConversation(conversationId);
-    this.client = new RpcClient(config, container, piArgsFor(model, this.sessionId), undefined, {
+    this.client = new RpcClient(config, container, piArgsFor(model, this.sessionId), spawner, {
       ICARUS_CHANNEL: channel,
+      ...modelEnv(config),
     });
     this.detach = this.client.onEvent((event) => {
       // Во время сжатия сессия занята не ходом: `agent_settled` тут ни при чём,
@@ -226,6 +247,52 @@ export class PiSession {
       return false;
     } finally {
       this.busy = false;
+    }
+  }
+
+  /**
+   * Прерывание хода вместе с очередью: человек написал новое, пока Икар работал.
+   *
+   * `abort` в pi не выбрасывает отложенные сообщения — он их доигрывает, поэтому
+   * очередь чистим до прерывания. И ждём `agent_settled`, а не просто ответ на
+   * команду: только к этому моменту ход действительно встал, инструменты (и дети
+   * субагентов) погашены, и в сессию можно писать следующую реплику.
+   */
+  async interrupt(timeoutMs = 20_000): Promise<boolean> {
+    if (!this.client.alive) return false;
+    try {
+      await this.client.request({ type: 'clear_queue' }, 5_000);
+    } catch {
+      // Старый pi такой команды не знает: обойдёмся тем, что есть.
+    }
+
+    let off = (): void => {};
+    const settled = new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        off();
+        resolve();
+      }, timeoutMs);
+      timer.unref?.();
+      off = this.onEvent((event) => {
+        if (event.type !== 'agent_settled') return;
+        clearTimeout(timer);
+        off();
+        resolve();
+      });
+    });
+
+    try {
+      await this.client.request({ type: 'abort' }, 20_000);
+      this.busy = false;
+      log.info('ход прерван новым сообщением', { user: this.user.id, conversation: this.conversationId });
+      await settled;
+      return true;
+    } catch (error) {
+      log.warn('прерывание не подтвердилось', { error: String(error) });
+      this.busy = false;
+      return false;
+    } finally {
+      off();
     }
   }
 

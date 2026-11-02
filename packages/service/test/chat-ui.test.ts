@@ -99,3 +99,17 @@ test('страница чата не тянет внешних файлов и �
   assert.doesNotMatch(html, /<link[^>]+stylesheet/i);
   assert.doesNotMatch(html, /Bearer |authorization/i, 'доступ решает SSO-прокси');
 });
+
+test('ответ можно остановить на середине: кнопка «стоп» на месте «отправить»', () => {
+  const html = chatPage(SESSION, { chatId: 'web-1', enabled: true });
+  assert.match(html, /id="chat-stop"/, 'в композере есть кнопка остановки');
+  assert.match(html, /\/panel\/api\/chat\/abort/, 'она ходит в abort, а не просто прячется');
+  assert.match(html, /function setStreaming/, 'показ кнопки переключается вместе с потоком');
+});
+
+test('субагенты в чате видны живым списком, а не одной строкой', () => {
+  const html = chatPage(SESSION, { enabled: true });
+  assert.match(html, /function subagentsHtml/, 'список детей рисуется отдельно');
+  assert.match(html, /step-update/, 'клиент понимает обновления шага');
+  assert.match(html, /\.sub-step\.running/, 'у работающего ребёнка свой вид');
+});

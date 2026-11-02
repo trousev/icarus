@@ -61,6 +61,10 @@ test('люди, порт и ключ приезжают из окружения,
     ICARUS_EXTRACT_AFTER_MS: '20000',
     ICARUS_EXTRACT_MODEL: 'deepinfra/deepseek-ai/DeepSeek-V4.1-Flash',
     TZ: 'Europe/Dublin',
+    ICARUS_SUBAGENT_CONCURRENCY: '4',
+    ICARUS_SUBAGENT_MAX_TASKS: '40',
+    ICARUS_SUBAGENT_TASK_TIMEOUT_MS: '300000',
+    ICARUS_SUBAGENT_BUDGET_MS: '900000',
   });
   assert.deepEqual(config.mcp.echo?.args, ['/opt/icarus/mcp/echo-server.mjs']);
 });

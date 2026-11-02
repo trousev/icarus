@@ -269,6 +269,20 @@ export class SessionRegistry {
   }
 
   /**
+   * Прерывание под новую реплику: человек написал, пока Икар ещё работал (в Telegram
+   * ему никто не мешает это сделать). Отличие от `/stop` только в том, кто просил:
+   * здесь — следующее сообщение, и прерывание ждёт, пока ход действительно встанет,
+   * чтобы новая реплика не влезла в занятую сессию.
+   */
+  async interrupt(user: UserConfig, conversationId: string): Promise<AbortOutcome> {
+    const session = this.sessions.get(`${user.id}:${conversationId}`);
+    if (!session || !session.alive) return { status: 'no-session' };
+    if (!session.busy && !session.compacting) return { status: 'idle' };
+    const stopped = await session.interrupt();
+    return stopped ? { status: 'stopped' } : { status: 'failed', error: 'pi не подтвердил прерывание' };
+  }
+
+  /**
    * Цифры разговора: токены, деньги, занятый контекст. Сессию при необходимости
    * поднимаем: файл разговора на месте, pi продолжит его — и цифры будут те же,
    * что человек видел до затишья.
