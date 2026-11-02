@@ -40,6 +40,7 @@ test('детали субагентов разбираются аккуратн�
       activity: 'web_search: amazon.ie',
       startedAt: 1,
       actions: ['read: SKILL.md', 'web_search: amazon.ie', 42, ''],
+      actionsTotal: 53,
     },
     { agent: 42 },
     null,
@@ -49,6 +50,7 @@ test('детали субагентов разбираются аккуратн�
   assert.equal(states[0]?.task.length, 160, 'длинное задание обрезается');
   assert.equal(states[1]?.activity, 'web_search: amazon.ie');
   assert.deepEqual(states[1]?.actions, ['read: SKILL.md', 'web_search: amazon.ie'], 'мусор в шагах отбрасывается');
+  assert.equal(states[1]?.actionsTotal, 53, 'общее число шагов не теряется');
   assert.deepEqual(subagentsOf(undefined), []);
   assert.deepEqual(subagentsOf({ subagents: [] }), []);
 });

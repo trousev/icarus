@@ -175,6 +175,11 @@ export type SubagentState = {
    * ходил; закрыл — не мешает читать ответ.
    */
   actions?: string[];
+  /**
+   * Сколько шагов было всего. Список хранит только последние, и без этого числа
+   * панель писала бы «10 действий», хотя ребёнок сходил пятьдесят раз.
+   */
+  actionsTotal?: number;
   startedAt?: number;
   ms?: number;
   output?: string;
@@ -274,12 +279,17 @@ function piInvocation(env: NodeJS.ProcessEnv = process.env): { command: string; 
   return { command: "pi", args: [] };
 }
 
-/** Копит шаги ребёнка для вложенного списка: без повторов и не длиннее предела. */
-export function rememberAction(actions: string[], action: string): void {
+/**
+ * Копит шаги ребёнка для вложенного списка: без повторов и не длиннее предела.
+ * Возвращает, был ли это новый шаг: по нему считается общее число действий, даже
+ * когда в списке остались только последние.
+ */
+export function rememberAction(actions: string[], action: string): boolean {
   const text = action.trim();
-  if (!text || actions[actions.length - 1] === text) return;
+  if (!text || actions[actions.length - 1] === text) return false;
   actions.push(text);
   if (actions.length > ACTION_LIMIT) actions.splice(0, actions.length - ACTION_LIMIT);
+  return true;
 }
 
 /** Строка «чем занят» из аргументов инструмента: первое осмысленное поле. */
@@ -713,7 +723,9 @@ export default function (pi: ExtensionAPI) {
             extensionFiles: extensionFilesOf(spec),
             onActivity: (activity) => {
               state.activity = activity;
-              rememberAction((state.actions ??= []), activity);
+              if (rememberAction((state.actions ??= []), activity)) {
+                state.actionsTotal = (state.actionsTotal ?? 0) + 1;
+              }
               pushProgress();
             },
           });

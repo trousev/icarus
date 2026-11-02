@@ -41,6 +41,8 @@ export type ChatSubagentStep = {
   activity?: string;
   /** Куда ребёнок уже ходил: последние шаги для вложенного списка в панели. */
   actions?: string[];
+  /** Сколько шагов было всего: список хранит только последние. */
+  actionsTotal?: number;
   /** Сколько уже работает или работал: панель считает по нему секунды. */
   startedAt?: number;
   ms?: number;
@@ -85,6 +87,11 @@ export function subagentsOf(value: unknown): ChatSubagentStep[] {
       task: clip(state.task, SUBAGENT_TASK_CHARS),
       status: typeof state.status === 'string' ? state.status : 'queued',
       ...(actions.length > 0 ? { actions } : {}),
+      ...(Number.isFinite(Number(state.actionsTotal)) && Number(state.actionsTotal) > 0
+        ? { actionsTotal: Math.floor(Number(state.actionsTotal)) }
+        : actions.length > 0
+          ? { actionsTotal: actions.length }
+          : {}),
       ...(typeof state.activity === 'string' && state.activity ? { activity: clip(state.activity, 120) } : {}),
       ...(typeof state.startedAt === 'number' ? { startedAt: state.startedAt } : {}),
       ...(typeof state.ms === 'number' ? { ms: state.ms } : {}),
