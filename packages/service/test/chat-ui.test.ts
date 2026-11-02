@@ -35,6 +35,20 @@ test('чат — это лента с композером и диалогами
   assert.doesNotMatch(html, /демо-режим/i, 'чат настоящий, без имитации');
 });
 
+test('клик по пустому месту сайдбара не сворачивает колонку диалогов', () => {
+  const html = chatPage(SESSION, { enabled: true });
+  // Отступы вокруг «ДИАЛОГИ» — просто фон: панель сворачивает только крестик,
+  // иначе любая мимоходная клика по сайдбару закрывает его.
+  assert.doesNotMatch(html, /el\('chat-side'\)\.addEventListener/, 'сайдбар не ловит клики фоном');
+  assert.match(html, /el\('close-side'\)\.onclick = closeSide/, 'крестик по-прежнему закрывает меню');
+});
+
+test('над списком диалогов — только заголовок, без счётчика', () => {
+  const html = chatPage(SESSION, { enabled: true });
+  assert.match(html, /class="dialogs-head">ДИАЛОГИ</, 'заголовок остался');
+  assert.doesNotMatch(html, /chat-count/, 'цифра после «ДИАЛОГИ» не нужна');
+});
+
 test('без pi композер честно выключен', () => {
   const html = chatPage(SESSION, { enabled: false });
   assert.match(html, /id="chat-input"[^>]*disabled/);
