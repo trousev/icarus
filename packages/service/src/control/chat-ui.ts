@@ -37,7 +37,6 @@ export function chatPage(session: PanelSession, options: ChatPageOptions): strin
 
     <button class="new-chat" id="new-chat"><span>+</span> Новый чат</button>
 
-    <div class="dialogs-head">ДИАЛОГИ</div>
     <div class="chat-list" id="chat-list"><p class="side-empty">Пока пусто. Начни новый чат.</p></div>
 
     <div class="side-settings">
