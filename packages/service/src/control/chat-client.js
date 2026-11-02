@@ -375,6 +375,7 @@ async function loadState() {
     const state = await api('/panel/api/state');
     el('count-memory').textContent = String((state.counts || {}).personal ?? 0);
     el('count-skills').textContent = String((state.counts || {}).skills ?? 0);
+    el('count-mcp').textContent = String((state.counts || {}).mcp ?? 0);
     const maple = state.sections && state.sections.some((section) => section.id === 'maple');
     el('maple-link').hidden = !maple;
     el('settings-maple').hidden = !maple;

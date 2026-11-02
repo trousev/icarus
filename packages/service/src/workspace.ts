@@ -13,8 +13,10 @@ import {
   userPaths,
   userContainer,
   type IcarusConfig,
+  type McpServerConfig,
   type UserConfig,
 } from './config.ts';
+import { effectiveServers, readStore, storePaths } from './mcp/registry.ts';
 
 const EXTENSIONS_DIR = path.join(REPO_ROOT, 'packages', 'extensions');
 
@@ -49,8 +51,8 @@ export function ensureDirs(config: IcarusConfig, user: UserConfig): void {
  * нет, а mcp_connect сам по себе никто не позовёт. Описание сервера (description)
  * говорит, когда он нужен, — это и есть дешёвый триггер вместо отдельного скилла.
  */
-function renderMcpOnDemand(config: IcarusConfig): string {
-  const lazy = Object.entries(config.mcp).filter(([, server]) => mcpLifecycle(server) === 'lazy');
+function renderMcpOnDemand(servers: Record<string, McpServerConfig>): string {
+  const lazy = Object.entries(servers).filter(([, server]) => mcpLifecycle(server) === 'lazy');
   if (lazy.length === 0) return '';
 
   const bullets = lazy.map(([name, server]) => {
@@ -69,14 +71,23 @@ ${bullets.join('\n')}
 `;
 }
 
-/** Карта окружения: то, что агент читает как AGENTS.md. */
-export function renderAgentsMd(config: IcarusConfig): string {
+/**
+ * Карта окружения: то, что агент читает как AGENTS.md.
+ *
+ * Серверы приходят снаружи: у каждого человека свой набор — общие из config.yaml
+ * плюс его включённые пользовательские. Выключенные сюда не попадают вовсе, иначе
+ * модель звала бы `mcp_connect` на сервер, которого у неё нет.
+ */
+export function renderAgentsMd(
+  config: IcarusConfig,
+  servers: Record<string, McpServerConfig> = config.mcp,
+): string {
   const rows = [
     '| `/workspace/memory/` | **личная память** этого человека | читай смело, пиши когда просят запомнить |',
     '| `/workspace/shared-memory/` | **семейная память**, общая для всех | писать **только по явной просьбе** |',
     '| `/workspace/incoming/` | вложения из чата | разбирай сам: прочитай, посмотри, разложи |',
     '| `/workspace/icarus.md` | твой системный промпт | не редактируй |',
-    ...(config.mcp?.maple
+    ...(servers.maple
       ? [
           '| `/workspace/maple/` | **математика**: журналы и файлы расчётов Maple | читай и считай через Maple, руками файлы не правь |',
         ]
@@ -92,7 +103,10 @@ export function renderAgentsMd(config: IcarusConfig): string {
   // Детали про Maple живут в отдельном MAPLE.md и читаются по требованию.
   // В основную память кладём только указатель: иначе инструкция про символьный
   // счёт висит в каждом разговоре, включая те, где математики нет вовсе.
-  const maple = config.mcp?.maple
+  // Математика — только если сервер включён у ЭТОГО человека: общий Maple можно
+  // выключить себе переключателем, и тогда инструкция «считай через Maple» была бы
+  // ложью — инструментов-то нет.
+  const maple = servers.maple
     ? `
 ## Если нужна математика
 
@@ -101,7 +115,7 @@ export function renderAgentsMd(config: IcarusConfig): string {
 `
     : '';
 
-  const mcp = renderMcpOnDemand(config);
+  const mcp = renderMcpOnDemand(servers);
 
   return `# Где ты находишься
 
@@ -138,9 +152,12 @@ export function renderAuthJson(config: IcarusConfig): string {
   return JSON.stringify(Object.fromEntries(entries), null, 2) + '\n';
 }
 
-/** Пакеты pi: подключаем MCP-мост только если в конфиге есть MCP-серверы. */
-export function renderSettingsJson(config: IcarusConfig): string {
-  const servers = Object.keys(config.mcp);
+/** Пакеты pi: подключаем MCP-мост только если у человека есть хоть один сервер. */
+export function renderSettingsJson(
+  config: IcarusConfig,
+  mcpServers: Record<string, McpServerConfig> = config.mcp,
+): string {
+  const servers = Object.keys(mcpServers);
   const settings: Record<string, unknown> = {};
   // 1.8.0 — первая версия с mcp_connect/mcp_status. Без них lifecycle: lazy
   // превращается в ловушку: инструменты сервера не активны, а подключить его
@@ -155,9 +172,12 @@ export function renderSettingsJson(config: IcarusConfig): string {
  * Заголовки HTTP-серверов едут сюда как есть, вместе с ключом доступа: файл лежит
  * рядом с auth.json, поэтому пишется закрытым на чтение (см. prepareUser).
  */
-export function renderMcpJson(config: IcarusConfig): string {
+export function renderMcpJson(
+  config: IcarusConfig,
+  mcpServers: Record<string, McpServerConfig> = config.mcp,
+): string {
   const servers = Object.fromEntries(
-    Object.entries(config.mcp).map(([name, server]) => [
+    Object.entries(mcpServers).map(([name, server]) => [
       name,
       {
         transport: server.transport ?? (server.url ? 'streamable-http' : 'stdio'),
@@ -256,23 +276,41 @@ export function prepareUser(config: IcarusConfig, user: UserConfig) {
   ensureDirs(config, user);
   const paths = userPaths(config, user);
 
+  // Пользовательские MCP: включённые и готовые серверы добавляются к общим.
+  // Хранилище может быть сломано (правили руками, кончилось место) — тогда
+  // человек остаётся с серверами из config.yaml, а не без разговора вовсе.
+  let mcpServers: Record<string, McpServerConfig> = config.mcp;
+  try {
+    fs.mkdirSync(storePaths(config).dir, { recursive: true, mode: 0o700 });
+    const merged = effectiveServers(config, readStore(config), user.id);
+    mcpServers = merged.servers;
+    if (merged.skipped.length > 0) {
+      log.debug('MCP: серверы пропущены при сборке окружения', { user: user.id, servers: merged.skipped });
+    }
+  } catch (error) {
+    log.warn('MCP: хранилище не прочиталось — остаются только общие серверы', {
+      user: user.id,
+      error: String(error),
+    });
+  }
+
   if (config.mcp?.maple) {
     const moved = migrateLegacyMaple(path.join(paths.piAgent, 'maple-mcp'), paths.maple);
     if (moved > 0) log.info('расчёты Maple перенесены в постоянный каталог', { user: user.id, files: moved });
   }
 
-  writeFileSafe(paths.agentsMd, renderAgentsMd(config));
+  writeFileSafe(paths.agentsMd, renderAgentsMd(config, mcpServers));
 
   const authPath = path.join(paths.piAgent, 'auth.json');
   writeFileSafe(authPath, renderAuthJson(config), 0o600);
   fs.chmodSync(authPath, 0o600);
 
-  writeFileSafe(path.join(paths.piAgent, 'settings.json'), renderSettingsJson(config));
+  writeFileSafe(path.join(paths.piAgent, 'settings.json'), renderSettingsJson(config, mcpServers));
 
   // mcp.json может везти ключ доступа к MCP-серверу, поэтому права те же, что у
   // auth.json: ключ модели и ключ к чужому сервису одинаково не для чужих глаз.
   const mcpPath = path.join(paths.piAgent, 'mcp.json');
-  writeFileSafe(mcpPath, renderMcpJson(config), 0o600);
+  writeFileSafe(mcpPath, renderMcpJson(config, mcpServers), 0o600);
   fs.chmodSync(mcpPath, 0o600);
 
   // models.json — описание кастомных провайдеров (DeepInfra): без него pi не найдёт
@@ -291,6 +329,9 @@ export function prepareUser(config: IcarusConfig, user: UserConfig) {
 
   // Инструкция по Maple — отдельным файлом, читается по требованию. Нет сервера —
   // файла быть не должно: иначе агент обещает то, чего у него нет.
+  // Файл кладём всегда, когда Maple настроен в стеке: он может быть источником
+  // bind-mount'а, и удалять его из-под контейнера нельзя. Выключенный себе Maple
+  // просто не упоминается в AGENTS.md — модель не знает, что его читать.
   if (config.mcp?.maple) {
     const mapleSource = path.join(REPO_ROOT, 'MAPLE.md');
     if (fs.existsSync(mapleSource)) {

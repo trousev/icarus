@@ -64,6 +64,10 @@ if (!user) {
 config.panel.devUser = user.id;
 config.host = '127.0.0.1';
 config.port = args.port ?? DEFAULT_PORT;
+// Локальная панель живёт не на том порту, что боевой сервис. OAuth-callback и
+// CIMD строятся из url, поэтому здесь он обязан указывать на этот порт, иначе
+// браузер после входа уедет на 8081 — в чужой (или никакой) сервис.
+config.url = `http://${config.host}:${config.port}`;
 
 for (const person of config.users) {
   prepareUser(config, person);

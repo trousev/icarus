@@ -56,6 +56,7 @@ export function chatPage(session: PanelSession, options: ChatPageOptions): strin
       <p class="side-title">НАСТРОЙКИ</p>
       <a class="side-link" href="/panel/memory" data-settings="memory"><span>Память</span><em id="count-memory">…</em></a>
       <a class="side-link" href="/panel/skills" data-settings="skills"><span>Скиллы</span><em id="count-skills">…</em></a>
+      <a class="side-link" href="/panel/mcp" data-settings="mcp"><span>MCP</span><em id="count-mcp">…</em></a>
       <a class="side-link" href="/panel/maple" id="maple-link" data-settings="maple" hidden><span>Математика</span><em id="count-maple">…</em></a>
     </div>
 
@@ -115,6 +116,7 @@ export function chatPage(session: PanelSession, options: ChatPageOptions): strin
       <div class="settings-tabs">
         <button data-settings-tab="memory" class="active">Память</button>
         <button data-settings-tab="skills">Скиллы</button>
+        <button data-settings-tab="mcp">MCP</button>
         <button data-settings-tab="maple" id="settings-maple" hidden>Математика</button>
       </div>
       <button class="icon-btn" id="settings-close" aria-label="Закрыть настройки">×</button>

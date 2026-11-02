@@ -9,6 +9,8 @@ import { ensureChat } from './chats.ts';
 import { channelForConversation } from './identity.ts';
 import { runOneShot, type OneShotOptions } from './one-shot.ts';
 import { userPaths, type IcarusConfig, type ModelConfig, type UserConfig } from '../config.ts';
+import { refreshUserMcpTokens } from '../mcp/refresh.ts';
+import { prepareUser } from '../workspace.ts';
 
 /** Как реестр создаёт сессии и поднимает контейнеры: в тестах это заглушки. */
 export type SessionFactory = (
@@ -221,6 +223,16 @@ export class SessionRegistry {
     if (existing) this.sessions.delete(key);
 
     const container = await this.ensureUserContainer(user);
+    // OAuth-токены живут час, а сессия — дольше. Обновляем их до того, как pi
+    // прочитает mcp.json: иначе первый же вызов сервера упрётся в 401, и чинить
+    // это человеку придётся в панели. Ошибка обновления не отменяет разговор:
+    // сервер просто не попадёт в окружение, а панель покажет причину.
+    try {
+      await refreshUserMcpTokens(this.config, user);
+      prepareUser(this.config, user);
+    } catch (error) {
+      log.warn('MCP: окружение перед сессией не обновилось', { user: user.id, error: String(error) });
+    }
     const session = this.createSession(this.config, user, conversationId, this.fastModel(), container, generation);
     this.sessions.set(key, session);
     // Разговор поднялся — значит, он существует. Реестр ведёт все каналы сразу:
