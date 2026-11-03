@@ -49,6 +49,11 @@ export type McpOAuthCredentials = {
   clientId?: string;
   clientSecret?: string;
   tokenEndpointAuthMethod?: 'none' | 'client_secret_post' | 'client_secret_basic';
+  /**
+   * Ключ локального прокси сервиса. По нему pi ходит в /mcp-proxy/<ключ>, а
+   * сервис подставляет свежий Bearer на каждом запросе. В mcp.json токена нет.
+   */
+  proxyKey?: string;
   authorizedAt?: string;
   /** Последняя ошибка обновления/авторизации — человеку в панели, не модели. */
   error?: string;
@@ -624,12 +629,30 @@ export function countVisible(config: IcarusConfig, userId: string): number {
  * поэтому «выключен» честно значит «не замусоривает контекст», а не «подключён, но
  * спрятан в UI».
  */
+export type EffectiveServersOptions = {
+  /** База прокси; null — не проксировать (тесты и прямая проверка токена). */
+  proxyBase?: string | null;
+};
+
+/**
+ * Куда pi ходит за OAuth-MCP. По умолчанию — сервис по имени контейнера:
+ * пользовательские контейнеры и icarus живут в одной сети compose. Для запуска
+ * без compose (или с другим именем) адрес перекрывается ICARUS_MCP_PROXY_BASE.
+ */
+export function mcpProxyBase(config: IcarusConfig): string {
+  const override = process.env.ICARUS_MCP_PROXY_BASE?.trim();
+  const base = override && override !== '' ? override : `http://icarus:${config.port}`;
+  return `${base.replace(/\/+$/, '')}/mcp-proxy`;
+}
+
 export function effectiveServers(
   config: IcarusConfig,
   store: McpStore,
   userId: string,
   now = Date.now(),
+  options: EffectiveServersOptions = {},
 ): { servers: Record<string, McpServerConfig>; skipped: string[] } {
+  const proxyBase = options.proxyBase === undefined ? mcpProxyBase(config) : options.proxyBase;
   const servers: Record<string, McpServerConfig> = {};
   const skipped: string[] = [];
   for (const [id, server] of Object.entries(config.mcp ?? {})) {
@@ -648,24 +671,47 @@ export function effectiveServers(
       skipped.push(server.id);
       continue;
     }
-    servers[server.id] = toPiConfig(server, store.credentials[userId]?.[server.id]);
+    servers[server.id] = toPiConfig(
+      server,
+      store.credentials[userId]?.[server.id],
+      proxyBase ?? undefined,
+    );
   }
   return { servers, skipped };
 }
 
-/** Превращает описание панели в то, что читает pi-mcp-extension. */
-export function toPiConfig(server: UserMcpServer, credentials: McpCredentials | undefined): McpServerConfig {
+/**
+ * Превращает описание панели в то, что читает pi-mcp-extension.
+ *
+ * OAuth-сервер с proxyKey уезжает в mcp.json ссылкой на наш /mcp-proxy: токен
+ * там не лежит и не протухает вместе с живым разговором. Без proxyBase (панель,
+ * проверка, тесты) остаётся прямой адрес с Authorization — так проще отладить.
+ */
+export function toPiConfig(
+  server: UserMcpServer,
+  credentials: McpCredentials | undefined,
+  proxyBase?: string,
+): McpServerConfig {
   const headers: Record<string, string> =
     server.transport === 'stdio' ? {} : { ...(server.headers ?? {}), ...(credentials?.headers ?? {}) };
-  if (server.transport !== 'stdio' && server.auth === 'oauth' && credentials?.oauth?.accessToken) {
+  const proxyKey = credentials?.oauth?.proxyKey;
+  const viaProxy =
+    server.transport !== 'stdio' && server.auth === 'oauth' && server.url !== undefined && proxyKey !== undefined && proxyBase !== undefined;
+  if (viaProxy) {
+    // Секрет не должен уехать в прокси как обычный заголовок: его подставит сервис.
+    for (const key of Object.keys(headers)) {
+      if (key.toLowerCase() === 'authorization') delete headers[key];
+    }
+  } else if (server.transport !== 'stdio' && server.auth === 'oauth' && credentials?.oauth?.accessToken) {
     headers.Authorization = `Bearer ${credentials.oauth.accessToken}`;
   }
+  const endpoint = viaProxy ? `${proxyBase.replace(/\/+$/, '')}/${proxyKey}` : server.url;
   const env: Record<string, string> =
     server.transport === 'stdio' ? { ...(server.env ?? {}), ...(credentials?.env ?? {}) } : {};
   const description = [server.name, server.description].filter(Boolean).join(': ');
   return {
     transport: server.transport,
-    ...(server.url === undefined ? {} : { url: server.url }),
+    ...(endpoint === undefined ? {} : { url: endpoint }),
     ...(server.command === undefined ? {} : { command: server.command }),
     ...(server.args === undefined ? {} : { args: server.args }),
     ...(Object.keys(headers).length === 0 ? {} : { headers }),
@@ -860,6 +906,44 @@ export function getCredentials(config: IcarusConfig, userId: string, id: string)
   return readStore(config).credentials[userId]?.[id];
 }
 
+/**
+ * Достраивает proxyKey старым OAuth-записям. Без него mcp.json пошёл бы с
+ * вклеенным Bearer, который через пять минут протух бы прямо в живом треде.
+ */
+export function ensureOAuthProxyKeys(config: IcarusConfig, userId: string): string[] {
+  const store = readStore(config);
+  const changed: string[] = [];
+  for (const server of Object.values(store.servers)) {
+    if (server.auth !== 'oauth' || !server.url) continue;
+    if (server.owner !== userId && !server.shared) continue;
+    const oauth = store.credentials[userId]?.[server.id]?.oauth;
+    if (!oauth || oauth.proxyKey || (!oauth.accessToken && !oauth.refreshToken)) continue;
+    oauth.proxyKey = randomBytes(24).toString('base64url');
+    changed.push(server.id);
+  }
+  if (changed.length > 0) writeStore(config, store);
+  return changed;
+}
+
+/** Находит, чей это ключ, — единственное, что знает прокси о запросе. */
+export function findOAuthByProxyKey(
+  config: IcarusConfig,
+  key: string,
+): { userId: string; server: UserMcpServer } | null {
+  const store = readStore(config);
+  for (const [userId, servers] of Object.entries(store.credentials)) {
+    for (const [serverId, credentials] of Object.entries(servers)) {
+      if (!credentials || typeof credentials !== 'object') continue;
+      if (credentials.oauth?.proxyKey !== key) continue;
+      const server = store.servers[serverId];
+      if (!server || server.auth !== 'oauth' || !server.url) continue;
+      if (server.owner !== userId && !server.shared) continue;
+      return { userId, server };
+    }
+  }
+  return null;
+}
+
 /** Полная запись для редактора: описание плюс имена секретов, но не их значения. */
 export function editorOf(
   config: IcarusConfig,
@@ -889,7 +973,15 @@ export function editorOf(
     server,
     credentialHeaders: Object.keys(credentials?.headers ?? {}),
     credentialEnv: Object.keys(credentials?.env ?? {}),
-    oauth: credentials?.oauth ? { ...credentials.oauth, accessToken: credentials.oauth.accessToken ? '•••' : undefined, refreshToken: credentials.oauth.refreshToken ? '•••' : undefined, clientSecret: credentials.oauth.clientSecret ? '•••' : undefined } : null,
+    oauth: credentials?.oauth
+      ? {
+          ...credentials.oauth,
+          accessToken: credentials.oauth.accessToken ? '•••' : undefined,
+          refreshToken: credentials.oauth.refreshToken ? '•••' : undefined,
+          clientSecret: credentials.oauth.clientSecret ? '•••' : undefined,
+          proxyKey: undefined,
+        }
+      : null,
     global: false,
   };
 }

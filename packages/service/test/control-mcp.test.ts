@@ -12,6 +12,7 @@ import type { AddressInfo } from 'node:net';
 import { createServer } from '../src/http/server.ts';
 import { userPaths } from '../src/config.ts';
 import { prepareUser } from '../src/workspace.ts';
+import { effectiveServers, readStore } from '../src/mcp/registry.ts';
 import { makeConfig, PANEL_USER_HEADER, probe } from './fixtures.ts';
 
 const USERS = [probe('probe'), probe('probe2')];
@@ -264,8 +265,18 @@ test('OAuth целиком: старт, callback, токен в mcp.json', async
       assert.equal(form.get('resource'), `${asBase}/mcp`);
       assert.ok((form.get('code_verifier') ?? '').length >= 43, 'PKCE-verifier уехал на token endpoint');
 
-      const server = piMcp(config, 'probe').mcpServers[created.server.id] as { headers?: Record<string, string> };
-      assert.equal(server.headers?.Authorization, 'Bearer access-oauth', 'OAuth-токен стал обычным заголовком');
+      const entry = piMcp(config, 'probe').mcpServers[created.server.id] as {
+        url?: string;
+        headers?: Record<string, string>;
+      };
+      assert.match(entry.url ?? '', /^http:\/\/icarus:\d+\/mcp-proxy\//, 'OAuth-MCP идёт через локальный прокси');
+      assert.equal(entry.headers?.Authorization, undefined, 'токен в mcp.json не уезжает');
+
+      // Прямой вид остаётся для панели и проверки: там Authorization нужен.
+      const direct = effectiveServers(config, readStore(config), 'probe', Date.now(), { proxyBase: null }).servers[
+        created.server.id
+      ];
+      assert.equal(direct?.headers?.Authorization, 'Bearer access-oauth');
 
       const listed = (await (await api(base, 'probe', 'servers')).json()) as {
         servers: Array<{ id: string; authState: string }>;
