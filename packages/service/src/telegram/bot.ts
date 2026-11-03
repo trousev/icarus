@@ -16,6 +16,7 @@ import { findTelegramUser, userPaths, type IcarusConfig, type UserConfig } from 
 import { log, redact } from '../log.ts';
 import { buildPrompt } from '../prompt.ts';
 import { phraseForToolStart, phraseForToolEnd, subagentStatus } from '../reasoning.ts';
+import { mcpReauthNotice } from '../mcp/reauth.ts';
 import { speechTranscriber, type Transcriber } from '../speech.ts';
 import type {
   AbortOutcome,
@@ -957,6 +958,9 @@ export class TelegramBot {
       settle = resolve;
     });
 
+    const toolArgs = new Map<string, Record<string, unknown>>();
+    const reauth = new Map<string, { name: string; url: string }>();
+
     const unsubscribe = session.onEvent((event) => {
       switch (event.type) {
         case 'message_update': {
@@ -965,7 +969,9 @@ export class TelegramBot {
           break;
         }
         case 'tool_execution_start': {
-          const phrase = phraseForToolStart(String(event.toolName), (event.args ?? {}) as Record<string, unknown>);
+          const args = (event.args ?? {}) as Record<string, unknown>;
+          toolArgs.set(String(event.toolCallId ?? ''), args);
+          const phrase = phraseForToolStart(String(event.toolName), args);
           if (phrase) reply.setStatus(`⚙ ${phrase}`);
           break;
         }
@@ -977,7 +983,20 @@ export class TelegramBot {
           break;
         }
         case 'tool_execution_end': {
-          reply.setStatus(`⚙ ${phraseForToolEnd(String(event.toolName), Boolean(event.isError))}`);
+          const tool = String(event.toolName);
+          const id = String(event.toolCallId ?? '');
+          const notice = mcpReauthNotice({
+            config: this.config,
+            userId: user.id,
+            toolName: tool,
+            args: toolArgs.get(id) ?? {},
+            isError: Boolean(event.isError),
+            result: event.result,
+          });
+          if (notice && !reauth.has(notice.server)) {
+            reauth.set(notice.server, { name: notice.name, url: notice.url });
+          }
+          reply.setStatus(`⚙ ${phraseForToolEnd(tool, Boolean(event.isError))}`);
           break;
         }
         case 'agent_settled': {
@@ -1009,6 +1028,11 @@ export class TelegramBot {
       log.error('телеграм: ход сорвался', { user: user.id, error: redact(String(error)) });
       reply.push(`⚠️ Ход сорвался: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
+      // Ссылку на повторный вход даём после ответа модели: она не должна
+      // выглядеть частью её текста, но обязана быть в том же сообщении.
+      for (const item of reauth.values()) {
+        reply.push(`\n\n🔑 Доступ к MCP «${item.name}» истёк. Переподключить: ${item.url}`);
+      }
       dropTurn();
       unsubscribe();
       await reply.finish();

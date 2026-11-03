@@ -16,6 +16,7 @@ import type { IcarusConfig } from '../config.ts';
 import { log, redact } from '../log.ts';
 import { findOAuthByProxyKey } from './registry.ts';
 import { freshOAuthForServer } from './refresh.ts';
+import { mcpReauthUrl } from './reauth.ts';
 
 const PREFIX = '/mcp-proxy/';
 const MAX_BODY_BYTES = 32 * 1024 * 1024;
@@ -41,13 +42,36 @@ class ProxyError extends Error {
   }
 }
 
-function jsonError(res: ServerResponse, status: number, error: string, description: string): void {
+function jsonError(
+  res: ServerResponse,
+  status: number,
+  error: string,
+  description: string,
+  reauthUrl?: string,
+): void {
   if (res.headersSent) {
     res.destroy();
     return;
   }
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
-  res.end(JSON.stringify({ error, error_description: description }));
+  res.end(JSON.stringify({ error, error_description: description, ...(reauthUrl ? { reauth_url: reauthUrl } : {}) }));
+}
+
+/** Тело ответа для человеческой ошибки: не тянем в память мегабайты. */
+async function responseText(upstream: IncomingMessage, limit = 2000): Promise<string> {
+  let text = '';
+  try {
+    for await (const chunk of upstream) {
+      text += Buffer.isBuffer(chunk) ? chunk.toString('utf8') : Buffer.from(chunk as Uint8Array).toString('utf8');
+      if (text.length >= limit) {
+        upstream.destroy();
+        break;
+      }
+    }
+  } catch {
+    // тело могло оборваться — для сообщения хватит того, что успели
+  }
+  return text.slice(0, limit);
 }
 
 async function readBody(req: IncomingMessage): Promise<Buffer> {
@@ -179,7 +203,7 @@ export async function handleMcpProxy(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     log.warn('MCP proxy: нет свежего токена', { user: found.userId, server: server.id, error: redact(message) });
-    jsonError(res, 401, 'invalid_token', message);
+    jsonError(res, 401, 'invalid_token', message, mcpReauthUrl(config, server.id));
     return;
   }
 
@@ -225,9 +249,22 @@ export async function handleMcpProxy(
           server: server.id,
           error: redact(message),
         });
-        jsonError(res, 401, 'invalid_token', message);
+        jsonError(res, 401, 'invalid_token', message, mcpReauthUrl(config, server.id));
         return;
       }
+    }
+    // Повтор не помог — тоже отдаём нашу ошибку со ссылкой, а не сырое тело
+    // сервера: человеку нужен вход, а не текст про bearer token.
+    if (upstream.statusCode === 401) {
+      const detail = await responseText(upstream);
+      jsonError(
+        res,
+        401,
+        'invalid_token',
+        detail.trim() || 'MCP не принял токен — нужен повторный вход',
+        mcpReauthUrl(config, server.id),
+      );
+      return;
     }
     pipeResponse(res, upstream);
   } catch (error) {

@@ -155,6 +155,18 @@
     return node;
   }
 
+  // Ссылка из чата/Telegram: ?server=<id> — подсветить карточку, к которой
+  // человеку идти за «Переподключить».
+  function focusRequestedServer() {
+    const id = new URLSearchParams(location.search).get('server');
+    if (!id) return;
+    const safe = id.replace(/["\\]/g, '');
+    const node = document.querySelector('.mcp-card[data-id="' + safe + '"]');
+    if (!node) return;
+    node.classList.add('focus');
+    node.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+
   async function load() {
     const box = el('mcp-list');
     try {
@@ -169,6 +181,7 @@
         return;
       }
       for (const server of data.servers) box.append(card(server));
+      focusRequestedServer();
     } catch (error) {
       box.innerHTML = '<p class="mcp-empty">Не удалось прочитать список: ' + esc(error.message) + '</p>';
     }

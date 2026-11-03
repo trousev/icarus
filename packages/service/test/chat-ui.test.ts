@@ -106,6 +106,13 @@ test('над списком диалогов нет лишнего заголо�
   assert.doesNotMatch(html, /chat-count/, 'счётчика тоже нет');
 });
 
+test('клиентский скрипт чата компилируется', () => {
+  const html = chatPage(SESSION, { enabled: true });
+  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1] ?? '');
+  assert.ok(scripts.length >= 2);
+  for (const script of scripts) assert.doesNotThrow(() => new Function(script));
+});
+
 test('без pi композер честно выключен', () => {
   const html = chatPage(SESSION, { enabled: false });
   assert.match(html, /id="chat-input"[^>]*disabled/);

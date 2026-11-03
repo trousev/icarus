@@ -246,6 +246,11 @@
 }
 
 .md { font-size: 14px; line-height: 1.65; word-break: break-word; }
+/* Ошибка авторизации MCP: не часть ответа модели, а действие человека. */
+.reauth-card { margin: 10px 0 0; padding: 10px 12px; border: 1px solid #4a3d2b; border-radius: 10px;
+               background: #241f14; color: var(--text); font-size: 13px; }
+.reauth-card a { color: var(--accent); text-decoration: none; }
+.reauth-card a:hover { text-decoration: underline; }
 .md > *:first-child { margin-top: 0; }
 .md > *:last-child { margin-bottom: 0; }
 .md p { margin: 0 0 10px; }

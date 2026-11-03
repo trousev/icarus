@@ -3,6 +3,7 @@
 .mcp-list { display:flex; flex-direction:column; gap:12px; max-width:900px; }
 .mcp-card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px 18px; }
 .mcp-card.off { opacity:.72; }
+.mcp-card.focus { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
 .mcp-card-head { display:flex; gap:16px; align-items:flex-start; justify-content:space-between; }
 .mcp-card h3 { margin:0 0 4px; font-size:17px; }
 .mcp-desc { color:var(--dim); margin:0 0 10px; max-width:640px; }

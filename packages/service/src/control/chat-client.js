@@ -736,6 +736,22 @@ function handleEvent(box, event) {
     setWorking(event.message || '');
     return;
   }
+  if (event.type === 'reauth') {
+    if (!event.url) return;
+    const card = document.createElement('div');
+    card.className = 'reauth-card';
+    const text = document.createElement('span');
+    text.textContent = 'Доступ к MCP «' + (event.server || 'MCP') + '» истёк. ';
+    const link = document.createElement('a');
+    link.href = String(event.url);
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.textContent = 'Переподключить';
+    card.append(text, link);
+    box.turn.querySelector('.assistant-body')?.append(card);
+    scrollToBottom();
+    return;
+  }
   if (event.type === 'done') {
     if (!box.text && !box.steps.length) {
       box.text = '(ответ пустой)';

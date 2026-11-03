@@ -160,6 +160,33 @@ test('старым OAuth-записям достраивается ключ пр
   assert.equal(json.mcpServers[server.id]?.headers?.Authorization, undefined);
 });
 
+test('протухший OAuth с ключом прокси остаётся в mcp.json: прокси обновит или даст ссылку', () => {
+  const config = configWith();
+  const server = createServer(config, 'probe', {
+    name: 'Протухший',
+    transport: 'streamable-http',
+    url: 'https://mcp.example.com/mcp',
+    auth: 'oauth',
+  });
+  saveCredentials(config, 'probe', server.id, { headers: {} });
+  saveOAuthCredentials(config, 'probe', server.id, {
+    accessToken: 'old',
+    refreshToken: 'refresh-1',
+    expiresAt: Date.now() - 1000,
+    proxyKey: 'k'.repeat(32),
+  });
+
+  const view = listVisible(config, readStore(config), 'probe').servers[0];
+  assert.equal(view?.ready, true, 'сервер не выпадает из окружения');
+  assert.equal(view?.authState, 'expired');
+
+  prepareUser(config, probe());
+  const json = JSON.parse(
+    fs.readFileSync(path.join(userPaths(config, probe()).piAgent, 'mcp.json'), 'utf8'),
+  ) as { mcpServers: Record<string, { url?: string }> };
+  assert.match(json.mcpServers[server.id]?.url ?? '', /\/mcp-proxy\//);
+});
+
 test('смена адреса сбрасывает чужие ключи: они относятся к другому серверу', () => {
   const config = configWith();
   const server = createServer(config, 'probe', {
