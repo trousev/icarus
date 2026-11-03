@@ -11,8 +11,10 @@ import { fileURLToPath } from 'node:url';
 import { parseEnv } from 'node:util';
 import { parse as parseYaml } from 'yaml';
 import { log } from './log.ts';
+import { isLanguage, type Language } from './profile.ts';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+
 /** Корень репозитория: в нём лежат config.yaml, .env, icarus.md и расширения. */
 export const REPO_ROOT = path.resolve(HERE, '../../..');
 export const DEFAULT_CONFIG_PATH = path.join(REPO_ROOT, 'config.yaml');
@@ -129,6 +131,11 @@ export type IcarusConfig = {
   url: string;
   dataDir: string;
   sessionIdleMinutes: number;
+  /**
+   * Язык ответов по умолчанию: русский или английский. Человек может перекрыть его
+   * себе в панели (раздел «Пользователь»), а это — умолчание для тех, кто не выбирал.
+   */
+  userLanguage?: Language;
   docker: DockerConfig;
   /** Панель управления: заголовок прокси и (для локального запуска) человек без SSO. */
   panel: PanelConfig;
@@ -461,7 +468,20 @@ function parseMcp(value: unknown, env: NodeJS.ProcessEnv): Record<string, McpSer
 }
 
 /** id идёт в имя контейнера и в путь на диске — держим его предсказуемым. */
-const USER_ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;function parseUsers(value: unknown): UserConfig[] {
+const USER_ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
+
+/**
+ * Язык ответов по умолчанию. Опечатка здесь — не повод не подняться: неизвестный
+ * язык игнорируется с записью в лог, а человек получит встроенный русский.
+ */
+function parseLanguage(value: unknown): Language | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (isLanguage(value)) return value;
+  log.warn('userLanguage в конфиге непонятен — беру русский', { value: String(value) });
+  return undefined;
+}
+
+function parseUsers(value: unknown): UserConfig[] {
   const users = asArray(value, 'users').map((item, index) => {
     if (typeof item !== 'string') {
       throw new Error(`users[${index}]: человек — это просто его id строкой, например "- probe"`);
@@ -665,7 +685,7 @@ export function loadConfig(file: string, env: NodeJS.ProcessEnv = process.env): 
     url: expandValue(optionalString(raw.url, 'url') ?? `http://${publicHost(host)}:${port}`, env),
     dataDir: expandValue(optionalString(raw.dataDir, 'dataDir') ?? '~/icarus', env),
     sessionIdleMinutes: numberOr(raw.sessionIdleMinutes, 'sessionIdleMinutes', 60),
-    panel: parsePanel(raw.panel, users),
+    ...(parseLanguage(raw.userLanguage) === undefined ? {} : { userLanguage: parseLanguage(raw.userLanguage) }),    panel: parsePanel(raw.panel, users),
     docker: {
       image: optionalString(dockerRaw.image, 'docker.image') ?? 'icarus-user:dev',
       ...(network === undefined ? {} : { network }),

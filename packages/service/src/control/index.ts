@@ -27,6 +27,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import fs from 'node:fs';
 import { handleWorkspacesApi } from './workspaces.ts';
 import { findUser, userPaths, type IcarusConfig } from '../config.ts';
+import { LANGUAGE_LABELS, LANGUAGES, languageOf, writeProfile, type Language } from '../profile.ts';
 import { readJsonBody } from '../http/openai.ts';
 import { errorBody } from '../http/sse.ts';
 import {
@@ -89,11 +90,15 @@ export const SECTIONS: { id: string; label: string }[] = [
   { id: 'skills', label: 'Скиллы' },
   { id: 'mcp', label: 'MCP' },
   { id: 'maple', label: 'Математика' },
+  // «Пользователь» — единственный раздел про самого человека, а не про то, что
+  // лежит у него на диске. Поэтому и стоит он последним: остальное — содержимое,
+  // а это настройка.
+  { id: 'profile', label: 'Пользователь' },
 ];
 
-type Scope = 'personal' | 'shared' | 'skills' | 'maple';
+type Scope = 'personal' | 'shared' | 'skills' | 'maple' | 'profile';
 /** Режим раздела: memory правится построчно, skills — целым файлом, maple — только смотрится. */
-export type ScopeMode = 'memory' | 'skills' | 'maple';
+export type ScopeMode = 'memory' | 'skills' | 'maple' | 'profile';
 
 /** Заголовки областей: их рисует панель, и держать их в браузере незачем. */
 const SCOPE_LABELS: Record<string, string> = {
@@ -106,6 +111,59 @@ const SCOPE_LABELS: Record<string, string> = {
 function json(res: ServerResponse, status: number, payload: unknown): void {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(payload));
+}
+
+/**
+ * Раздел «Пользователь»: сейчас в нём одна настройка — язык ответов.
+ *
+ * GET отдаёт текущий язык и список доступных, POST его меняет. Файл профиля лежит
+ * рядом с памятью человека, поэтому язык переживает и перезапуск сервиса, и
+ * пересоздание контейнера. Живую сессию он не рвёт: pi читает AGENTS.md при старте,
+ * поэтому следующая реплика поднимает её заново — тем же механизмом, что и скиллы.
+ */
+async function handleProfileApi(
+  req: IncomingMessage,
+  res: ServerResponse,
+  config: IcarusConfig,
+  userId: string,
+): Promise<void> {
+  const user = findUser(config, userId);
+  if (!user) {
+    json(res, 404, errorBody(`пользователь ${userId} не заведён`));
+    return;
+  }
+
+  if (req.method === 'GET') {
+    json(res, 200, {
+      user: userId,
+      language: languageOf(config, user),
+      languages: LANGUAGES,
+      labels: LANGUAGE_LABELS,
+    });
+    return;
+  }
+
+  if (req.method !== 'POST') {
+    json(res, 405, errorBody(`профиль не умеет ${req.method}`, 'invalid_request_error'));
+    return;
+  }
+
+  let body: Record<string, unknown>;
+  try {
+    body = (await readJsonBody(req)) as Record<string, unknown>;
+  } catch (error) {
+    json(res, 400, errorBody(`не разобрал тело запроса: ${String(error)}`, 'invalid_request_error'));
+    return;
+  }
+
+  const language = body.language;
+  if (typeof language !== 'string' || !(LANGUAGES as readonly string[]).includes(language)) {
+    json(res, 400, errorBody(`язык «${String(language)}» не поддерживается: ${LANGUAGES.join(', ')}`, 'invalid_request_error'));
+    return;
+  }
+
+  writeProfile(config, user, { language: language as Language });
+  json(res, 200, { user: userId, language });
 }
 
 /**
@@ -169,6 +227,9 @@ function parseScope(raw: unknown): 'personal' | 'shared' {
 function modeFor(scope: Scope): ScopeMode {
   if (scope === 'maple') return 'maple';
   if (scope === 'skills') return 'skills';
+  // Профиль — не файлы, а форма настроек: у него свой рендер и свои маршруты,
+  // и в общий разбор «файлов памяти» он не заходит.
+  if (scope === 'profile') return 'profile';
   return 'memory';
 }
 
@@ -183,6 +244,7 @@ function modeFor(scope: Scope): ScopeMode {
 function scopeFor(section: string | undefined, raw: unknown): Scope {
   if (section === 'maple') return 'maple';
   if (section === 'skills') return 'skills';
+  if (section === 'profile') return 'profile';
   if (section === 'memory') return parseScope(raw);
   const legacy = raw === 'shared' || raw === 'maple' ? raw : 'personal';
   return legacy;
@@ -196,8 +258,17 @@ function resolveScope(config: IcarusConfig, userId: string, scope: Scope) {
   if (scope === 'shared') return { root: paths.sharedMemory, allowed: memoryExtensions };
   if (scope === 'maple') return { root: paths.maple, allowed: mapleExtensions };
   if (scope === 'skills') return { root: paths.skills, allowed: skillExtensions };
+  // Профиль — один файл, и живёт он на уровень выше памяти. Корнем отдаём каталог
+  // человека: списком файлов его никто не ходит, а «есть ли файл» — вопрос к нему же.
+  if (scope === 'profile') return { root: paths.icarus, allowed: NO_FILES };
   return { root: paths.memory, allowed: memoryExtensions };
 }
+
+/**
+ * Разделы, у которых файлов нет вовсе: список файлов у них запрашивать нечего.
+ * Пустой набор вместо `[]` — потому что ниже его сравнивают как множество.
+ */
+const NO_FILES: ReadonlySet<string> = new Set();
 
 /** Какие области есть у человека и что в них можно делать. */
 function scopesFor(): Record<string, ScopeMode> {
@@ -316,6 +387,13 @@ export async function handlePanel(
     return true;
   }
 
+  // Профиль — та же история, что у MCP: страница и её API живут под одним разделом,
+  // поэтому API уходит по своему префиксу, а не делит адрес со страницей.
+  if (url.pathname === '/panel/profile/api' || url.pathname.startsWith('/panel/profile/api/')) {
+    await handleApi(req, res, url, ctx, access);
+    return true;
+  }
+
   if (url.pathname.startsWith('/panel/api/') || routeApi(url.pathname)) {
     await handleApi(req, res, url, ctx, access);
     return true;
@@ -324,10 +402,10 @@ export async function handlePanel(
   return false;
 }
 
-/** Раздел из адреса: /panel/chat, /panel/memory, /panel/skills, /panel/mcp и /panel/maple. */
+/** Раздел из адреса: /panel/chat, /panel/memory, /panel/skills, /panel/mcp, /panel/maple и /panel/profile. */
 function routePage(pathname: string): PanelPage | null {
   if (pathname === '/panel/chat' || pathname === '/panel/chat/') return { section: 'chat' };
-  const match = /^\/panel\/(memory|skills|maple|mcp)\/?$/.exec(pathname);
+  const match = /^\/panel\/(memory|skills|maple|mcp|profile)\/?$/.exec(pathname);
   return match ? { section: match[1] } : null;
 }
 
@@ -351,6 +429,7 @@ async function sectionPage(
   chatEnabled: boolean,
 ): Promise<string> {
   await prepare(config, userId);
+  const user = findUser(config, userId);
   const session: PanelSession = {
     user: userId,
     sections: sectionsFor(config),
@@ -359,6 +438,9 @@ async function sectionPage(
     model: config.models[0]?.id ?? '—',
     storage: 'git · local',
     draftSkills,
+    // Язык ответов: панель показывает его в разделе «Пользователь» и подсвечивает
+    // выбранный. Он же уезжает в AGENTS.md человека (см. workspace.ts).
+    ...(user ? { language: languageOf(config, user) } : {}),
   };
   if (page.section === 'chat') {
     return chatPage(session, {
@@ -426,6 +508,15 @@ async function handleApi(
     return;
   }
 
+  // «Пользователь» — настройка, а не файлы: маршрут живёт до общего разбора области,
+  // иначе запрос на сохранение языка попал бы в «память» и искал бы в ней файл
+  // `profile`. Имя настройки стоит сразу за `api`, а не после имени раздела.
+  if (url.pathname === '/panel/profile/api' || url.pathname.startsWith('/panel/profile/api/')) {
+    await prepare(config, userId);
+    await handleProfileApi(req, res, config, userId);
+    return;
+  }
+
   const route = routeApi(url.pathname);
   const name = route?.name ?? url.pathname.slice('/panel/api/'.length);
 
@@ -444,6 +535,9 @@ async function handleApi(
       modes: scopes,
       labels: SCOPE_LABELS,
       counts: countsFor(config, userId),
+      language: languageOf(config, user),
+      languages: LANGUAGES,
+      languageLabels: LANGUAGE_LABELS,
     });
     return;
   }
