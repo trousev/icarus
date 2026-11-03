@@ -66,12 +66,10 @@ test('контейнер монтирует память, сессии и реп
     dataDir: '/data',
     docker: { image: 'icarus-user:dev', prefix: 'icarus-user', socket: null },
     models: [{ provider: 'deepinfra', id: 'deepseek-ai/DeepSeek-V4.1-Flash', tier: 'fast' as const }],
-    mounts: [{ host: '/host/scratchpad', container: '/workspace/scratchpad', mode: 'ro' as const }],
   } as unknown as IcarusConfig;
   const joined = userVolumes(config, { id: 'probe' }).join(' ');
   assert.match(joined, /\/data\/users\/probe\/workspaces:\/workspaces/);
   assert.match(joined, /\/data\/users\/probe\/workspaces\/private:\/workspaces\/private:ro/);
-  assert.match(joined, /\/host\/scratchpad:\/workspace\/scratchpad:ro/);
 });
 
 test('пути пользователя выводятся из dataDir', () => {

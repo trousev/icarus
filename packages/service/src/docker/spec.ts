@@ -37,9 +37,6 @@ export function containerEnv(config: IcarusConfig, user: UserConfig): Record<str
 
 /** Всё, что влияет на содержимое контейнера, но не является секретом. */
 export function specFor(config: IcarusConfig, user: UserConfig): string {
-  const mounts = [...config.mounts]
-    .map((mount) => `${mount.host}:${mount.container}:${mount.mode ?? 'rw'}`)
-    .sort();
   const env = containerEnv(config, user);
   const payload = JSON.stringify({
     image: config.docker.image,
@@ -56,7 +53,8 @@ export function specFor(config: IcarusConfig, user: UserConfig): string {
     // /workspace/.icarus, и без этого поля старые контейнеры остались бы с прежними
     // точками монтирования, а сервис писал бы человеку пути, которых там нет.
     layout: CONTAINER_PATHS,
-    mounts,
+    // Maple — единственное внешнее дерево в контейнере; его путь тоже часть содержимого.
+    mapleDir: config.mapleDir ?? null,
     env: Object.fromEntries(Object.entries(env).sort(([a], [b]) => a.localeCompare(b))),
   });
   return createHash('sha1').update(payload).digest('hex').slice(0, 16);

@@ -26,8 +26,6 @@ export type ModelConfig = {
   tier?: 'fast' | 'strong' | 'vision';
 };
 
-export type MountConfig = { host: string; container: string; mode?: 'ro' | 'rw' };
-
 /** Описание MCP-сервера: формат тот же, что читает pi-mcp-extension. */
 export type McpServerConfig = {
   transport?: 'stdio' | 'streamable-http' | 'sse';
@@ -140,8 +138,11 @@ export type IcarusConfig = {
   auth: Record<string, string>;
   /** Переменные окружения контейнера: ими настраиваются наши расширения. */
   env: Record<string, string>;
-  /** Дополнительные каталоги с хоста — одинаковые для всех. */
-  mounts: MountConfig[];
+  /**
+   * Каталог установки Maple, если сервер включён: он монтируется в контейнер тем же
+   * путём, что и на хосте (launcher ищет свои библиотеки по записанному внутри пути).
+   */
+  mapleDir?: string;
   /** MCP-серверы: то, чем Икар обрастает без правки кода. */
   mcp: Record<string, McpServerConfig>;
   /** Telegram-бот: null — выключен (нет токена или некому отвечать). */
@@ -362,7 +363,24 @@ function parseAuth(value: unknown, env: NodeJS.ProcessEnv, models: ModelConfig[]
   return { ...detectAuth(models, env), ...explicit };
 }
 
-const TIERS: Array<NonNullable<ModelConfig['tier']>> = ['fast', 'strong', 'vision'];function parseModels(value: unknown): ModelConfig[] {
+const TIERS: Array<NonNullable<ModelConfig['tier']>> = ['fast', 'strong', 'vision'];/**
+ * Каталог Maple: монтируется сам, отдельным маунтом в конфиге его больше не задают.
+ * Пусто или относительно — ошибка: путь должен быть один и тот же внутри и снаружи.
+ */
+function resolveMapleDir(
+  mcp: Record<string, McpServerConfig>,
+  env: NodeJS.ProcessEnv,
+): string | undefined {
+  if (!mcp.maple) return undefined;
+  const dir = (env.MAPLE_DIR ?? '').trim();
+  if (dir === '') {
+    throw new Error('MAPLE_DIR: не задан, а mcp.maple включён — положи путь в .env или выключи сервер');
+  }
+  if (!path.isAbsolute(dir)) throw new Error(`MAPLE_DIR: «${dir}» — нужен абсолютный путь`);
+  return dir;
+}
+
+function parseModels(value: unknown): ModelConfig[] {
   const models = asArray(value, 'models').map((item, index) => {
     const where = `models[${index}]`;
     const model = asRecord(item, where);
@@ -382,36 +400,6 @@ const TIERS: Array<NonNullable<ModelConfig['tier']>> = ['fast', 'strong', 'visio
   return models;
 }
 
-function parseMounts(value: unknown, env: NodeJS.ProcessEnv): MountConfig[] {
-  return asArray(value, 'mounts').map((item, index) => {
-    const where = `mounts[${index}]`;
-    const mount = asRecord(item, where);
-    const mode = optionalString(mount.mode, `${where}.mode`);
-    if (mode !== undefined && mode !== 'ro' && mode !== 'rw') {
-      throw new Error(`${where}.mode: «${mode}» — ожидалось ro или rw`);
-    }
-    // Обе стороны маунта раскрываются одинаково: путь установки (например MAPLE_DIR)
-    // задаётся одной переменной в .env, и хост с контейнером не разъезжаются.
-    const host = expandValue(requiredString(mount.host, `${where}.host`), env).trim();
-    const container = expandValue(requiredString(mount.container, `${where}.container`), env).trim();
-    // Пустая сторона маунта — это почти всегда неподставившаяся переменная
-    // (${MAPLE_DIR} без MAPLE_DIR, например пустая vars.MAPLE_DIR из CI). Docker
-    // ругается на такое «invalid spec: ::ro» уже посреди сборки, поэтому ловим
-    // здесь и объясняем, чего не хватает.
-    const sides: Array<[string, string]> = [
-      ['host', host],
-      ['container', container],
-    ];
-    for (const [side, text] of sides) {
-      if (text === '') {
-        throw new Error(
-          `${where}.${side}: пусто — проверь, что переменная задана в .env или в окружении (например MAPLE_DIR)`,
-        );
-      }
-    }
-    return { host, container, mode: (mode ?? 'rw') as MountConfig['mode'] };
-  });
-}
 
 const TRANSPORTS: Array<NonNullable<McpServerConfig['transport']>> = ['stdio', 'streamable-http', 'sse'];
 
@@ -661,6 +649,13 @@ export function loadConfig(file: string, env: NodeJS.ProcessEnv = process.env): 
   const port = numberOr(raw.port, 'port', 8081);
   const users = parseUsers(raw.users);
   const auth = parseAuth(raw.auth, env, models);
+  if (raw.mounts !== undefined) {
+    // Кастомных маунтов больше нет: контейнер видит только /workspaces и служебное.
+    // Нужен чужой репозиторий — чекаут в workspace, а не маунт с хоста.
+    log.warn('mounts в конфиге больше не поддерживаются и пропущены', { file: resolved });
+  }
+  const mcp = parseMcp(raw.mcp, env);
+  const mapleDir = resolveMapleDir(mcp, env);
 
   return {
     host,
@@ -681,8 +676,8 @@ export function loadConfig(file: string, env: NodeJS.ProcessEnv = process.env): 
     models,
     auth,
     env: stringMap(raw.env, 'env', env),
-    mounts: parseMounts(raw.mounts, env),
-    mcp: parseMcp(raw.mcp, env),
+    mcp,
+    ...(mapleDir === undefined ? {} : { mapleDir }),
     telegram: parseTelegram(raw.telegram, raw.telegram_mapping, env, users),
     speech: parseSpeech(raw.speech, env, auth),
     users,

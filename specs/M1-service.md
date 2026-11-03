@@ -96,8 +96,7 @@ models:
   - { provider: deepinfra, id: deepseek-ai/DeepSeek-V4.1-Flash, thinking: off,    tier: fast }
   - { provider: deepinfra, id: deepseek-ai/DeepSeek-V4.1-Flash, thinking: medium, tier: strong }
 auth: { deepinfra: env:DEEPINFRA_API_KEY }
-mounts:
-  - { host: ~/src/scratchpad, container: /workspaces/scratchpad, mode: rw }
+# кастомных маунтов нет: контейнер видит только /workspaces и установку Maple
 
 users:
   - trousev

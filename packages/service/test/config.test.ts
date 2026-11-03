@@ -47,7 +47,7 @@ test('минимальный конфиг дочитывается умолча�
   assert.equal(config.docker.prefix, 'icarus-user');
   assert.equal(config.docker.socket, null);
   assert.deepEqual(config.users, [{ id: 'probe' }]);
-  assert.deepEqual(config.mounts, []);
+  assert.equal(config.mapleDir, undefined, 'без Maple внешних деревьев в контейнере нет');
   assert.deepEqual(config.auth, {});
   assert.deepEqual(config.env, {});
   assert.deepEqual(config.mcp, {});
@@ -76,10 +76,6 @@ auth:
   deepinfra: env:MY_KEY
 env:
   ICARUS_EXTRACT_AFTER_MS: '1000'
-mounts:
-  - host: /host/repo
-    container: /workspace/repo
-    mode: ro
 mcp:
   echo:
     command: node
@@ -102,7 +98,7 @@ users:
   assert.equal(config.models[1].thinking, undefined, 'thinking не выдумываем');
   assert.deepEqual(config.auth, { deepinfra: 'secret' });
   assert.equal(config.env.ICARUS_EXTRACT_AFTER_MS, '1000');
-  assert.deepEqual(config.mounts, [{ host: '/host/repo', container: '/workspace/repo', mode: 'ro' }]);
+  assert.equal(config.mapleDir, undefined);
   assert.equal(config.mcp.echo.command, 'node');
   assert.deepEqual(config.mcp.echo.args, ['/opt/echo.mjs']);
   assert.deepEqual(config.users, [{ id: 'probe' }, { id: 'probe2' }]);
@@ -170,35 +166,34 @@ dataDir: ~/icarus-test
 models: [{ provider: deepinfra, id: flash, tier: fast }]
 auth:
   deepinfra: \${MY_KEY}
-mounts:
-  - host: ~/src/repo
-    container: /workspace/repo
 users: [probe]
 `);
   const config = loadConfig(file, { MY_TOKEN: 'token', MY_KEY: 'secret' } as NodeJS.ProcessEnv);
 
   assert.equal(config.apiKey, 'token');
   assert.equal(config.dataDir, path.join(os.homedir(), 'icarus-test'));
-  assert.deepEqual(config.mounts, [
-    { host: path.join(os.homedir(), 'src/repo'), container: '/workspace/repo', mode: 'rw' },
-  ]);
+  assert.deepEqual(config.auth, { deepinfra: 'secret' });
 });
 
-test('одна переменная задаёт обе стороны маунта (путь установки вроде MAPLE_DIR)', () => {
-  const file = writeConfig(`apiKey: k
-dataDir: ~/icarus-test
-models: [{ provider: deepinfra, id: flash, tier: fast }]
-mounts:
-  - host: \${MAPLE_DIR}
-    container: \${MAPLE_DIR}
-    mode: ro
-users: [probe]
+test('Maple монтируется сам: путь берётся из MAPLE_DIR', () => {
+  const file = writeConfig(`${MINIMAL}mcp:
+  maple:
+    command: node
 `);
   const config = loadConfig(file, { MAPLE_DIR: '/opt/maple18' } as NodeJS.ProcessEnv);
+  assert.equal(config.mapleDir, '/opt/maple18');
 
-  assert.deepEqual(config.mounts, [
-    { host: '/opt/maple18', container: '/opt/maple18', mode: 'ro' },
-  ]);
+  assert.throws(() => loadConfig(file, {} as NodeJS.ProcessEnv), /MAPLE_DIR/);
+  assert.throws(() => loadConfig(file, { MAPLE_DIR: 'относительный' } as NodeJS.ProcessEnv), /абсолютный/);
+});
+
+test('старый mounts в конфиге не роняет старт: его просто больше нет', () => {
+  const file = writeConfig(`${MINIMAL}mounts:
+  - host: /host/repo
+    container: /workspace/repo
+`);
+  const config = loadConfig(file, {} as NodeJS.ProcessEnv);
+  assert.equal('mounts' in config, false, 'кастомные маунты выпилены из модели конфига');
 });
 
 test('пример конфига из репозитория разбирается', () => {
@@ -298,24 +293,19 @@ test('пустая переменная окружения не перебива
   }
 });
 
-test('прод-сценарий деплоя #57: пустой MAPLE_DIR из CI не ломает маунт', () => {
+test('прод-сценарий деплоя #57: пустой MAPLE_DIR из CI не ломает конфиг', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-deploy-'));
   const env = path.join(dir, '.env');
   const config = path.join(dir, 'config.yaml');
   fs.writeFileSync(env, 'MAPLE_DIR=/opt/maple18\n');
-  fs.writeFileSync(
-    config,
-    `${MINIMAL}mounts:\n  - host: \${MAPLE_DIR}\n    container: \${MAPLE_DIR}\n    mode: ro\n`,
-  );
+  fs.writeFileSync(config, `${MINIMAL}mcp:\n  maple:\n    command: node\n`);
 
   // Как на проде: vars.MAPLE_DIR не задана — workflow прокинул пустую строку,
   // script/redeploy положил дефолт в .env, а окружение так и осталось пустым.
   process.env.MAPLE_DIR = '';
   try {
     loadEnvFile(env);
-    assert.deepEqual(loadConfig(config).mounts, [
-      { host: '/opt/maple18', container: '/opt/maple18', mode: 'ro' },
-    ]);
+    assert.equal(loadConfig(config).mapleDir, '/opt/maple18');
   } finally {
     delete process.env.MAPLE_DIR;
   }
@@ -371,19 +361,7 @@ test('неизвестный tier у модели — ошибка', () => {
   assert.throws(() => loadConfig(file, {}), /tier/);
 });
 
-test('режим маунта только ro или rw', () => {
-  const file = writeConfig(`${MINIMAL}mounts:\n  - host: /h\n    container: /c\n    mode: rwx\n`);
-  assert.throws(() => loadConfig(file, {}), /mode/);
-});
 
-test('неподставившаяся переменная в маунте — понятная ошибка, а не ::ro', () => {
-  const file = writeConfig(`${MINIMAL}mounts:\n  - host: \${NO_SUCH_DIR}\n    container: \${NO_SUCH_DIR}\n    mode: ro\n`);
-  // Ни отсутствующая переменная, ни пустая, ни пробельная маунта не задают.
-  for (const value of [undefined, '', '   ']) {
-    const env = value === undefined ? {} : { NO_SUCH_DIR: value };
-    assert.throws(() => loadConfig(file, env as NodeJS.ProcessEnv), /mounts\[0\]\.host: пусто/);
-  }
-});
 
 test('битый YAML объясняет, что файл не разобрать', () => {
   const file = writeConfig('apiKey: token\n  models: [\n');

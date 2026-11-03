@@ -101,22 +101,15 @@ node tools/maple-mcp/test-sessions.mjs       # 25 проверок журнал�
   SSE по `Accept`, заголовок `Mcp-Session-Id`). Проверен официальным
   `@modelcontextprotocol/sdk` — тем же, что использует `pi-mcp-extension`.
 
-## Подключение к Икару (через docker compose)
+## Подключение к Икару
 
 Отдельный compose-сервис и systemd не нужны: **Maple 18 работает прямо внутри
 контейнера агента** — проверено, лицензия не привязана к железу
-(`HOSTID=INTERNET=*.*.*.*`). Всё делается штатными средствами Икара: `mounts:` +
-stdio-MCP.
+(`HOSTID=INTERNET=*.*.*.*`). Маунты сервис делает сам: включает `mcp.maple` —
+и монтирует `${MAPLE_DIR}` (тем же путём, что на хосте) и каталог `tools`
+репозитория в `/opt/icarus/tools`. В конфиге остаётся только сам сервер:
 
 ```yaml
-mounts:
-  - host: ${MAPLE_DIR}                    # сам Maple; обе стороны — из .env
-    container: ${MAPLE_DIR}
-    mode: ro
-  - host: /home/trousev/src/icarus/tools  # каталог с сервером
-    container: /opt/icarus/tools
-    mode: ro
-
 mcp:
   maple:
     command: node

@@ -18,6 +18,7 @@ import {
   CONTAINER_PATHS,
   containerWorkspace,
   PRIVATE_WORKSPACE,
+  REPO_ROOT,
   userContainer,
   userPaths,
   type IcarusConfig,
@@ -90,7 +91,12 @@ export function userVolumes(config: IcarusConfig, user: UserConfig): string[] {
     // он общий на весь инстанс и лежит вне его дерева.
     bind(paths.sharedMemory, CONTAINER_PATHS.sharedMemory),
     bind(paths.piAgent, CONTAINER_PATHS.piAgent),
-    ...config.mounts.map((mount) => bind(mount.host, mount.container, mount.mode === 'ro' ? 'ro' : undefined)),
+    // Maple — единственное внешнее дерево, которое контейнер видит. Путь установки
+    // обязан совпадать с хостовым: launcher ищет свои библиотеки по записанному
+    // внутри пути. Отдельного поля в конфиге для этого больше нет — сервис знает сам.
+    ...(config.mapleDir !== undefined ? [bind(config.mapleDir, config.mapleDir, 'ro')] : []),
+    // Сервер Maple живёт в репозитории: его код тоже нужен контейнеру.
+    ...(config.mapleDir !== undefined ? [bind(path.join(REPO_ROOT, 'tools'), '/opt/icarus/tools', 'ro')] : []),
   ];
 }
 

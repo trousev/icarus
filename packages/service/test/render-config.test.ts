@@ -17,10 +17,6 @@ models:
   - provider: deepinfra
     id: deepseek-ai/DeepSeek-V4.1-Flash
     tier: fast
-mounts:
-  - host: /srv/scratchpad
-    container: /workspace/scratchpad
-    mode: ro
 mcp:
   echo:
     command: node
@@ -80,8 +76,6 @@ test('без переменных конфиг на хосте пережива�
   assert.equal(config.apiKey, 'old-token');
   assert.equal(config.port, 9000);
   assert.equal(config.dataDir, '/srv/icarus');
-  assert.equal(config.mounts.length, 1, 'маунты с хоста не потерялись');
-  assert.equal(config.mounts[0]?.host, '/srv/scratchpad');
 });
 
 test('ключ API генерируется, если его нет ни в секрете, ни в конфиге', () => {

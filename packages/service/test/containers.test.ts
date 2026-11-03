@@ -17,7 +17,6 @@ const config = makeConfig({
   dataDir: '/data',
   host: '0.0.0.0',
   port: 8080,
-  mounts: [{ host: '/host/scratchpad', container: '/workspace/scratchpad', mode: 'ro' }],
 });
 
 /** Хостовые факты, которые script/server передаёт генератору compose. */
@@ -37,10 +36,10 @@ function render(input: IcarusConfig = config, extra: Record<string, unknown> = {
 
 /**
  * Отпечаток зависит в том числе от dataDir, а у фикстуры он каждый раз новый
- * (свежий временный каталог) — поэтому здесь dataDir и маунты зафиксированы.
+ * (свежий временный каталог) — поэтому здесь dataDir зафиксирован.
  */
 function spec(overrides: Partial<IcarusConfig> = {}, user = probe()): string {
-  return specFor(makeConfig({ dataDir: config.dataDir, mounts: config.mounts, ...overrides }), user);
+  return specFor(makeConfig({ dataDir: config.dataDir, ...overrides }), user);
 }
 
 test('уровни моделей и личность уезжают в окружение, а ключей панели там нет', () => {
@@ -57,13 +56,13 @@ test('уровни моделей и личность уезжают в окру
   assert.equal(containerEnv(own, probe()).ICARUS_MODEL_FAST, 'своё', 'явное окружение важнее');
 });
 
-test('отпечаток меняется от образа, dataDir, маунтов, окружения и моделей', () => {
+test('отпечаток меняется от образа, dataDir, Maple, окружения и моделей', () => {
   const base = spec();
   assert.equal(spec(), base, 'отпечаток детерминирован');
 
   assert.notEqual(spec({ docker: { ...config.docker, image: 'icarus-user:v2' } }), base, 'новый образ');
   assert.notEqual(spec({ dataDir: '/other' }), base, 'другой dataDir — другие пути памяти в контейнере');
-  assert.notEqual(spec({ mounts: [{ host: '/host/other', container: '/workspace/other' }] }), base, 'новый маунт');
+  assert.notEqual(spec({ mapleDir: '/opt/maple18' }), base, 'включили Maple — другое содержимое');
   assert.notEqual(spec({ env: { ICARUS_EXTRACT_AFTER_MS: '1000' } }), base, 'новое окружение');
   assert.notEqual(
     spec({ models: [{ provider: 'deepinfra', id: 'deepseek-ai/DeepSeek-V4.1-Flash', tier: 'fast' }] }),
@@ -72,13 +71,6 @@ test('отпечаток меняется от образа, dataDir, маунт
   );
 });
 
-test('порядок маунтов не влияет на отпечаток', () => {
-  const many = [
-    { host: '/host/a', container: '/workspace/a' },
-    { host: '/host/b', container: '/workspace/b' },
-  ];
-  assert.equal(spec({ mounts: many }), spec({ mounts: [...many].reverse() }));
-});
 
 test('стек: сервис, контейнер на человека и тёплый restart', () => {
   const compose = render();
@@ -101,10 +93,11 @@ test('стек: сервис, контейнер на человека и тёп
   assert.deepEqual(compose.services.icarus.depends_on, { 'icarus-user-probe': { condition: 'service_started' } });
 });
 
-test('пустой путь маунта до docker не доезжает', () => {
-  // Прод-сбой #57: неподставившаяся ${MAPLE_DIR} давала «::ro», и падал уже
-  // `docker compose build` — с «invalid spec: ::ro: empty section between colons».
-  const broken = makeConfig({ dataDir: config.dataDir, mounts: [{ host: '', container: '', mode: 'ro' }] });
+test('пустой путь Maple до docker не доезжает', () => {
+  // Прод-сбой #57: пустой MAPLE_DIR давал «::ro», и падал уже `docker compose build`
+  // с «invalid spec: ::ro: empty section between colons». Теперь путь заводится
+  // только вместе с сервером, но страховка в bind() остаётся.
+  const broken = makeConfig({ dataDir: config.dataDir, mapleDir: '' });
   assert.throws(() => renderCompose(broken, composeOptions), /пустым путём/);
 });
 
@@ -139,7 +132,6 @@ test('стек: контейнер человека — образ, маунты
     'приватный workspace монтируется только для чтения',
   );
   assert.ok(service.volumes.includes('/data/shared:/workspaces/.icarus/shared-memory'));
-  assert.ok(service.volumes.includes('/host/scratchpad:/workspace/scratchpad:ro'));
   assert.equal(service.environment.ICARUS_MODEL_FAST, 'deepinfra/deepseek-ai/DeepSeek-V4.1-Flash:off');
   assert.equal(service.environment.ICARUS_USER_ID, 'probe');
 });
@@ -170,7 +162,6 @@ test('стек: docker.dns доезжает до сервиса и до конт
   const withDns = makeConfig({
     docker: { ...config.docker, dns: ['1.1.1.1', '8.8.8.8'] },
     dataDir: config.dataDir,
-    mounts: config.mounts,
   });
   const compose = render(withDns);
 
@@ -182,7 +173,7 @@ test('стек: docker.dns доезжает до сервиса и до конт
 
   assert.notEqual(
     specFor(withDns, probe()),
-    specFor(makeConfig({ dataDir: config.dataDir, mounts: config.mounts }), probe()),
+    specFor(makeConfig({ dataDir: config.dataDir }), probe()),
     'смена DNS меняет отпечаток: старые контейнеры должны пересоздаться',
   );
 });

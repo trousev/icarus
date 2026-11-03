@@ -112,7 +112,7 @@ models:                         # общие модели: tier раздаёт �
   - { provider: deepinfra, id: deepseek-ai/DeepSeek-V4.1-Flash, thinking: off, tier: fast }
 # auth: { deepinfra: env:DEEPINFRA_API_KEY }   # обычно не нужно: ключ подхватится из .env
 env: { TZ: Europe/Dublin }      # часовой пояс человека: по нему Икар считает дату и датирует память
-mounts: []                      # каталоги с хоста — пока общие для всех
+# кастомных маунтов нет: контейнер видит только /workspaces и установку Maple
 mcp: {}                         # общие MCP-серверы; личные и расшаренные — в панели
 
 users:                          # люди: только id
