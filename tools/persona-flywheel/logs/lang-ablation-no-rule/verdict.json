@@ -1,0 +1,95 @@
+{
+  "label": "lang-ablate-2026-11-032029",
+  "at": "2026-11-03T20:29:58.567Z",
+  "models": [
+    "flash"
+  ],
+  "totals": {
+    "flash": {
+      "passPct": 0,
+      "lang_ok": 0,
+      "voice_ok": 6.8,
+      "native_ok": 1.8,
+      "asks": 0
+    }
+  },
+  "rows": [
+    {
+      "variant": "flash",
+      "scenario": "plain-en",
+      "expected": "en",
+      "got": "en",
+      "pass": false,
+      "asks": 0,
+      "lang_ok": 0,
+      "voice_ok": 6,
+      "native_ok": 0,
+      "fails": [
+        "ICARUS ответил на русском языке, хотя весь диалог шёл на английском",
+        "Русская реплика содержит кальки и не может оцениваться как естественный английский"
+      ]
+    },
+    {
+      "variant": "flash",
+      "scenario": "russian-quote-en",
+      "expected": "en",
+      "got": "ru",
+      "pass": false,
+      "asks": 0,
+      "lang_ok": 0,
+      "voice_ok": 8,
+      "native_ok": 7,
+      "fails": [
+        "ICARUS отвечает на русском, хотя выбран язык разговора en: «Так это не напоминание...», «О. Ну тогда всё сходится...», «Классика: мероприятие провёл...» — все реплики Икара на русском.",
+        "Нарушено требование: если хоть одна реплика не на en — lang_ok 0–3."
+      ]
+    },
+    {
+      "variant": "flash",
+      "scenario": "tech-en",
+      "expected": "en",
+      "got": "ru",
+      "pass": false,
+      "asks": 0,
+      "lang_ok": 0,
+      "voice_ok": 7,
+      "native_ok": 0,
+      "fails": [
+        "Все реплики Икара на русском, хотя выбран язык разговора en",
+        "Английский язык не используется, поэтому native_ok оценить невозможно — 0",
+        "Голос Икара сохранён (ирония, краткость, 'сначала свой, потом смешной'), но полностью на русском"
+      ]
+    },
+    {
+      "variant": "flash",
+      "scenario": "grief-en",
+      "expected": "en",
+      "got": "ru",
+      "pass": false,
+      "asks": 0,
+      "lang_ok": 0,
+      "voice_ok": 6,
+      "native_ok": 2,
+      "fails": [
+        "ICARUS отвечает на русском в первой и третьей реплике, хотя выбран язык en",
+        "Русские конструкции калькированы в английский: 'I sympathize with you as a translator from dog' — не идиоматично",
+        "Обороты 'half the distance is already passed', 'treated by talking to another surgeon' — подстрочник с русского"
+      ]
+    },
+    {
+      "variant": "flash",
+      "scenario": "lazy-en",
+      "expected": "en",
+      "got": "ru",
+      "pass": false,
+      "asks": 0,
+      "lang_ok": 0,
+      "voice_ok": 7,
+      "native_ok": 0,
+      "fails": [
+        "ICARUS отвечает на русском, хотя выбран язык en",
+        "native_ok неприменим: реплики Икара не на английском, оценивать естественность английского нечего"
+      ]
+    }
+  ]
+}
