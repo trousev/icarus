@@ -109,7 +109,10 @@ export function chatPage(session: PanelSession, options: ChatPageOptions): strin
         <button class="send" id="chat-send" aria-label="Отправить"${options.enabled ? '' : ' disabled'}>↑</button>
       </div>
       <div class="composer-foot">
-        <span id="chat-working">${options.enabled ? '' : 'чат недоступен: панель поднята без контейнера с pi'}</span>
+        <!-- Под полем ввода — только отказы и подтверждения. Прогресс хода
+             (шаги, команды, субагенты) живёт в трассировке ответа: дублировать
+             его мелким текстом снизу незачем. -->
+        <span id="chat-note">${options.enabled ? '' : 'чат недоступен: панель поднята без контейнера с pi'}</span>
         <span>Enter — отправить · Shift+Enter — перенос строки</span>
       </div>
     </div>

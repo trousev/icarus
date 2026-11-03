@@ -262,8 +262,14 @@ function setTitle(title) {
   document.title = 'Icarus · ' + (title || 'Новый чат');
 }
 
-function setWorking(text) {
-  el('chat-working').textContent = text || '';
+/**
+ * Строка под полем ввода — для того, чего не видно в ленте: отказ («не больше
+ * восьми вложений»), сорванная загрузка, подтверждение остановки. Что делает
+ * Икар прямо сейчас, здесь не пишем: шаги и команды и так идут в трассировке
+ * ответа, а второй экран прогресса под композером только мешает читать.
+ */
+function setNote(text) {
+  el('chat-note').textContent = text || '';
 }
 
 function showEmpty(show) {
@@ -362,7 +368,7 @@ function maybeLoadMore() {
   const box = el('chat-list');
   if (!nextCursor || loadingChats || box.clientHeight === 0) return;
   if (box.scrollHeight <= box.clientHeight + 24) {
-    loadChats(false).catch((error) => setWorking('не удалось догрузить диалоги: ' + error.message));
+    loadChats(false).catch((error) => setNote('не удалось догрузить диалоги: ' + error.message));
   }
 }
 
@@ -464,17 +470,17 @@ function addFiles(list) {
   let total = pending.reduce((sum, item) => sum + item.file.size, 0);
   for (const file of Array.from(list || [])) {
     if (pending.length >= MAX_FILES) {
-      setWorking('не больше ' + MAX_FILES + ' вложений на сообщение');
+      setNote('не больше ' + MAX_FILES + ' вложений на сообщение');
       break;
     }
     if (total + file.size > MAX_TOTAL_BYTES) {
-      setWorking('вложения больше ' + fileSizeText(MAX_TOTAL_BYTES) + ' — не отправлю');
+      setNote('вложения больше ' + fileSizeText(MAX_TOTAL_BYTES) + ' — не отправлю');
       break;
     }
     total += file.size;
     pending.push({ file, url: URL.createObjectURL(file), image: file.type.startsWith('image/') });
   }
-  if (pending.length) setWorking('');
+  if (pending.length) setNote('');
   renderPending();
 }
 
@@ -555,12 +561,12 @@ async function selectChat(id) {
     renderChats();
     setTitle(currentChat.title);
     setComposer(Boolean(currentChat.readOnly));
-    setWorking('');
+    setNote('');
     renderHistory(data.messages || []);
     closeMenu();
   } catch (error) {
     if (token !== historyToken) return;
-    setWorking('не удалось открыть разговор: ' + error.message);
+    setNote('не удалось открыть разговор: ' + error.message);
   }
 }
 
@@ -622,7 +628,7 @@ function startDraft(workspace = defaultWorkspace) {
   // Выбор workspace — не отдельный экран, а пустое состояние нового чата.
   renderPicker();
   updateComposerHint();
-  setWorking('');
+  setNote('');
   renderChats();
   history.replaceState(null, '', '/panel/chat?new=1');
   closeMenu();
@@ -747,7 +753,7 @@ function bindPicker() {
   screen.querySelectorAll('.ws-card[data-ws]').forEach((node) => {
     const open = (event) => {
       if (event.target.closest('[data-del]')) return;
-      openWorkspace(node.dataset.ws).catch((error) => setWorking('не удалось открыть workspace: ' + error.message));
+      openWorkspace(node.dataset.ws).catch((error) => setNote('не удалось открыть workspace: ' + error.message));
     };
     node.onclick = open;
     node.onkeydown = (event) => {
@@ -766,7 +772,7 @@ function bindPicker() {
   const create = el('ws-new');
   if (create) create.onclick = () => renderNewForm();
   const submit = el('ws-create');
-  if (submit) submit.onclick = () => submitWorkspace().catch((error) => setWorking(error.message));
+  if (submit) submit.onclick = () => submitWorkspace().catch((error) => setNote(error.message));
   const cancel = el('ws-cancel');
   if (cancel) cancel.onclick = () => bindNewCard(false);
   const input = el('ws-name');
@@ -774,7 +780,7 @@ function bindPicker() {
     input.onkeydown = (event) => {
       if (event.key === 'Enter') {
         event.preventDefault();
-        submitWorkspace().catch((error) => setWorking(error.message));
+        submitWorkspace().catch((error) => setNote(error.message));
       }
       if (event.key === 'Escape') bindNewCard(false);
     };
@@ -794,14 +800,14 @@ function bindNewCard(open) {
   const input = el('ws-name');
   if (input) input.focus();
   const submit = el('ws-create');
-  if (submit) submit.onclick = () => submitWorkspace().catch((error) => setWorking(error.message));
+  if (submit) submit.onclick = () => submitWorkspace().catch((error) => setNote(error.message));
   const cancel = el('ws-cancel');
   if (cancel) cancel.onclick = () => bindNewCard(false);
   if (input) {
     input.onkeydown = (event) => {
       if (event.key === 'Enter') {
         event.preventDefault();
-        submitWorkspace().catch((error) => setWorking(error.message));
+        submitWorkspace().catch((error) => setNote(error.message));
       }
       if (event.key === 'Escape') bindNewCard(false);
     };
@@ -816,7 +822,7 @@ async function submitWorkspace() {
   const input = el('ws-name');
   const name = (input ? input.value : '').trim();
   if (!name) {
-    setWorking('нужно название workspace');
+    setNote('нужно название workspace');
     return;
   }
   const data = await api('/panel/api/workspaces', { method: 'POST', body: JSON.stringify({ name }) });
@@ -841,7 +847,7 @@ async function openWorkspace(slug) {
   // Перерисовка заодно показывает только что созданную папку и гасит форму создания.
   renderPicker();
   updateComposerHint();
-  setWorking('');
+  setNote('');
   el('chat-input').focus();
 }
 
@@ -898,7 +904,7 @@ function askDeleteWorkspace(slug) {
       await loadChats(true);
       refreshPicker();
     } catch (error) {
-      setWorking('не удалось удалить workspace: ' + error.message);
+      setNote('не удалось удалить workspace: ' + error.message);
     }
   };
 }
@@ -985,41 +991,22 @@ function renderLive(box) {
 }
 
 function handleEvent(box, event) {
-  if (event.type === 'status') {
-    setWorking(event.text || 'Икар работает…');
-    return;
-  }
   if (event.type === 'text') {
     box.text += event.text || '';
     renderLive(box);
     return;
   }
+  // Шаги и их обновления живут в трассировке ответа: подпись «ТЕРМИНАЛ: такая-то
+  // команда» под композером дублировала её слово в слово, только мельче.
   if (event.type === 'step') {
     box.steps.push(event.step);
     renderLive(box);
-    setWorking((event.step.label || 'Икар') + ': ' + (event.step.detail || 'работает…'));
     return;
   }
   if (event.type === 'step-update') {
     const index = box.steps.findIndex((item) => item.id === event.id);
     if (index !== -1) box.steps[index] = event.step;
     renderLive(box);
-    const subs = (event.step && event.step.subagents) || [];
-    const running = subs.filter((sub) => sub.status === 'running');
-    if (running.length) {
-      // Внизу — только счёт: сами шаги детей живут в их собственном списке.
-      const done = subs.filter((sub) => sub.status === 'ok').length;
-      setWorking(
-        '⚙ субагенты: ' +
-          done +
-          ' из ' +
-          subs.length +
-          ', ' +
-          running.length +
-          ' ' +
-          plural(running.length, 'работает', 'работают', 'работают'),
-      );
-    }
     return;
   }
   if (event.type === 'step-end') {
@@ -1033,7 +1020,7 @@ function handleEvent(box, event) {
     return;
   }
   if (event.type === 'notice') {
-    setWorking(event.message || '');
+    setNote(event.message || '');
     return;
   }
   if (event.type === 'reauth') {
@@ -1067,7 +1054,7 @@ function handleEvent(box, event) {
     } else {
       loadChats(true).catch(() => {});
     }
-    setWorking(stoppedByUser ? 'остановил — можно писать дальше' : '');
+    setNote(stoppedByUser ? 'остановил — можно писать дальше' : '');
     return;
   }
   if (event.type === 'error') {
@@ -1075,7 +1062,7 @@ function handleEvent(box, event) {
     box.turn.classList.add('error');
     box.md.innerHTML = markdown(box.text);
     box.typing.hidden = true;
-    setWorking('');
+    setNote('');
   }
 }
 
@@ -1089,14 +1076,13 @@ async function sendText(forced) {
     try {
       await createChat();
     } catch (error) {
-      setWorking('не удалось создать чат: ' + error.message);
+      setNote('не удалось создать чат: ' + error.message);
       return;
     }
   }
 
   let attachments = [];
   if (files.length > 0) {
-    setWorking('готовлю вложения…');
     try {
       attachments = await Promise.all(
         files.map(async (item) => ({
@@ -1106,7 +1092,7 @@ async function sendText(forced) {
         })),
       );
     } catch (error) {
-      setWorking('не прочитать вложение: ' + error.message);
+      setNote('не прочитать вложение: ' + error.message);
       return;
     }
   }
@@ -1118,7 +1104,6 @@ async function sendText(forced) {
   showEmpty(false);
   addUser(text, files);
   const box = addAssistant();
-  setWorking(files.length ? 'отправляю вложения…' : 'Икар отвечает…');
 
   try {
     const response = await fetch('/panel/api/chat/send', {
@@ -1160,7 +1145,7 @@ async function sendText(forced) {
     box.text = [box.text, '\n\n[ошибка: ' + error.message + ']'].filter(Boolean).join('');
     box.md.innerHTML = markdown(box.text);
     box.typing.hidden = true;
-    setWorking('');
+    setNote('');
   } finally {
     setStreaming(false);
     box.typing.hidden = true;
@@ -1184,16 +1169,15 @@ function setStreaming(on) {
 async function stopStream() {
   if (!streaming || !currentId) return;
   el('chat-stop').disabled = true;
-  setWorking('останавливаю…');
   try {
     const result = await api('/panel/api/chat/abort', {
       method: 'POST',
       body: JSON.stringify({ chatId: currentId }),
     });
     stoppedByUser = Boolean(result.ok);
-    if (stoppedByUser) setWorking('остановил — можно писать дальше');
+    if (stoppedByUser) setNote('остановил — можно писать дальше');
   } catch (error) {
-    setWorking('остановить не вышло: ' + error.message);
+    setNote('остановить не вышло: ' + error.message);
   }
 }
 
@@ -1352,14 +1336,14 @@ el('chat-stop').onclick = () => {
 el('chat-search').addEventListener('input', () => {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(() => {
-    loadChats(true).catch((error) => setWorking('поиск не сработал: ' + error.message));
+    loadChats(true).catch((error) => setNote('поиск не сработал: ' + error.message));
   }, 180);
 });
 el('chat-list').addEventListener('scroll', () => {
   if (!nextCursor || loadingChats) return;
   const box = el('chat-list');
   if (box.scrollTop + box.clientHeight >= box.scrollHeight - 120) {
-    loadChats(false).catch((error) => setWorking('не удалось догрузить диалоги: ' + error.message));
+    loadChats(false).catch((error) => setNote('не удалось догрузить диалоги: ' + error.message));
   }
 });
 /* Подсказки живут и в пустом чате, и в черновике, и перерисовываются вместе с
@@ -1384,5 +1368,5 @@ el('chat-empty').addEventListener('click', (event) => {
   if (params.get('settings')) openSettings(params.get('settings'));
   if (writable) el('chat-input').focus();
 })().catch((error) => {
-  setWorking('чат не открылся: ' + error.message);
+  setNote('чат не открылся: ' + error.message);
 });
