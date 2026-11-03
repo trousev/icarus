@@ -16,7 +16,7 @@ import {
   type McpServerConfig,
   type UserConfig,
 } from './config.ts';
-import { effectiveServers, readStore, storePaths } from './mcp/registry.ts';
+import { effectiveServers, ensureOAuthProxyKeys, readStore, storePaths } from './mcp/registry.ts';
 
 const EXTENSIONS_DIR = path.join(REPO_ROOT, 'packages', 'extensions');
 
@@ -282,6 +282,10 @@ export function prepareUser(config: IcarusConfig, user: UserConfig) {
   let mcpServers: Record<string, McpServerConfig> = config.mcp;
   try {
     fs.mkdirSync(storePaths(config).dir, { recursive: true, mode: 0o700 });
+    // Старым OAuth-записям нужен ключ прокси: без него токен снова уедет в
+    // mcp.json и протухнет прямо в живом разговоре.
+    const keys = ensureOAuthProxyKeys(config, user.id);
+    if (keys.length > 0) log.info('MCP: OAuth-серверы переведены на локальный прокси', { user: user.id, servers: keys });
     const merged = effectiveServers(config, readStore(config), user.id);
     mcpServers = merged.servers;
     if (merged.skipped.length > 0) {

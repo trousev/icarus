@@ -213,11 +213,17 @@ mcp:
 | ручные endpoints | для упрямых серверов: authorization, token, registration, issuer задаются в форме |
 
 OAuth-поток ведёт сервис, а не pi: pi в контейнере без браузера, и его интерактивная
-авторизация рассчитана на TUI. Сервис проходит discovery, обменивает код на токен и кладёт
-его в `mcp.json` обычным `Authorization: Bearer`. Перед стартом новой сессии просроченный
-токен обновляется, поэтому `401` на первом вызове сервера не становится сюрпризом. Если
-разговор живёт дольше самого токена, сервер попросит доступ заново — кнопка «Переподключить»
-в панели обновит токен и перезапустит следующий ход.
+авторизация рассчитана на TUI. Сервис проходит discovery и обменивает код на токен, но
+**в `mcp.json` токен не кладёт**. Туда уезжает ссылка на локальный прокси сервиса
+(`http://icarus:<port>/mcp-proxy/<ключ>`): на каждом запросе pi сервис проверяет срок
+токена, при необходимости молча обновляет его по `refresh_token` и только потом идёт в MCP.
+Поэтому пятиминутный access token (такой выдаёт, например, Black Forest) не протухает
+посреди живого треда, а `401` от сервера лечится повтором с уже свежим токеном.
+
+Прокси — это тот же сервис, поэтому он доступен контейнерам людей по имени `icarus` в
+compose-сети. Если сервис живёт под другим именем или вне compose, база перекрывается
+переменной `ICARUS_MCP_PROXY_BASE` (например, `http://10.0.0.2:8081`). Кнопка
+«Переподключить» нужна только если умер сам `refresh_token`.
 
 Для OAuth нужен публичный адрес панели (`url:` в конфиге): callback идёт на
 `<url>/panel/mcp/oauth/callback`, а CIMD-документ — на
@@ -609,6 +615,7 @@ GitHub по SSH заходит на `trousev.pro` под `trousev`, обновл
 | `ICARUS_DNS` | необязательная переменная environment `production` | DNS-серверы контейнеров (`docker.dns`); не задана — дефолт из `script/redeploy`, `none` — убрать |
 | `ICARUS_URL` | необязательная переменная environment `production` | внешний адрес панели управления (`url`): его Икар называет человеку в чате; не задана — `script/redeploy` ставит `https://chat.trousev.pro/`, локально по умолчанию `http://localhost:8081` |
 | `ICARUS_SESSION_IDLE_MINUTES` | необязательная переменная environment `production` | сколько минут тишины означают «разговор закончен», после чего icarus сжимает сессию pi и гасит её; не задана — `script/redeploy` ставит 60 (час) |
+| `ICARUS_MCP_PROXY_BASE` | необязательная переменная environment `production` | база локального прокси OAuth-MCP, которая уезжает в `mcp.json`; не задана — `http://icarus:<port>/mcp-proxy` (имя контейнера сервиса в compose) |
 | `ICARUS_TELEGRAM_MAPPING` | необязательная переменная environment `production` | кто из Telegram чей человек: `@trousev:trousev,@vita:vita` (значения — id из `ICARUS_USERS`). Из неё собирается `telegram.mapping` в `config.yaml`; `none` — убрать маппинг, пусто — не трогать |
 | `ICARUS_API_KEY` | секрет environment `production` | Bearer для OpenAI-совместимого эндпоинта (`apiKey` в `config.yaml`) |
 | `DEEPINFRA_API_KEY` | секрет environment `production` | ключ провайдера — уезжает в `.env` |

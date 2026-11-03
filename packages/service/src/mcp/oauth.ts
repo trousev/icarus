@@ -861,6 +861,9 @@ export function credentialsFromCompleted(completed: CompletedAuthorization): Mcp
     clientId: completed.client.clientId,
     ...(completed.client.clientSecret === undefined ? {} : { clientSecret: completed.client.clientSecret }),
     tokenEndpointAuthMethod: completed.client.tokenEndpointAuthMethod,
+    // По этому ключу pi будет ходить в локальный прокси, а сервис — подставлять
+    // свежий Bearer. В mcp.json сам токен не попадает.
+    proxyKey: base64url(randomBytes(24)),
     authorizedAt: new Date().toISOString(),
   };
 }

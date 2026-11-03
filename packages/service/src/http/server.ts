@@ -11,6 +11,7 @@ import { handlePanel } from '../control/index.ts';
 import { skillDraftPrompt, SKILL_DRAFT_SYSTEM, SKILL_DRAFT_TIMEOUT_MS } from '../control/skill-draft.ts';
 import { listManaged } from '../docker/manager.ts';
 import { planReconciliation } from '../docker/reconcile.ts';
+import { handleMcpProxy } from '../mcp/proxy.ts';
 
 export const PUBLIC_MODEL_ID = 'icarus';
 
@@ -31,6 +32,21 @@ export function createServer(
   const draftSkills = options.draftSkills ?? typeof registry.oneShot === 'function';
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
+
+    // OAuth-MCP: pi ходит сюда вместо настоящего сервера, а сервис подставляет
+    // свежий Bearer на каждом запросе. Ключ случаен и лежит в mcp.json.
+    if (url.pathname.startsWith('/mcp-proxy/')) {
+      try {
+        await handleMcpProxy(req, res, url, config);
+      } catch (error) {
+        log.error('ошибка прокси MCP', { error: redact(String(error)) });
+        if (!res.headersSent) {
+          res.writeHead(502, { 'content-type': 'application/json' });
+          res.end(JSON.stringify(errorBody('прокси MCP сломался', 'server_error')));
+        }
+      }
+      return;
+    }
 
     // Панель управления — то, ради чего человек вообще открывает этот порт: на проде
     // весь домен смотрит сюда, и корень уводит в панель, а не в 404 сервиса.

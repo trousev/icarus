@@ -6,12 +6,19 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { userPaths } from '../src/config.ts';
 import { prepareUser } from '../src/workspace.ts';
-import { createServer, readStore, saveOAuthCredentials, saveCredentials, setEnabled } from '../src/mcp/registry.ts';
+import {
+  createServer,
+  effectiveServers,
+  readStore,
+  saveOAuthCredentials,
+  saveCredentials,
+  setEnabled,
+} from '../src/mcp/registry.ts';
 import { refreshUserMcpTokens } from '../src/mcp/refresh.ts';
 import type { FetchLike } from '../src/mcp/oauth.ts';
 import { makeConfig, probe } from './fixtures.ts';
 
-test('просроченный токен обновляется, и mcp.json получает новый Bearer', async () => {
+test('просроченный токен обновляется, а mcp.json уходит на прокси без Bearer', async () => {
   const config = makeConfig();
   const server = createServer(config, 'probe', {
     name: 'Задачи',
@@ -49,8 +56,12 @@ test('просроченный токен обновляется, и mcp.json п
   prepareUser(config, probe());
   const mcp = JSON.parse(
     fs.readFileSync(path.join(userPaths(config, probe()).piAgent, 'mcp.json'), 'utf8'),
-  ) as { mcpServers: Record<string, { headers?: Record<string, string> }> };
-  assert.equal(mcp.mcpServers[server.id]?.headers?.Authorization, 'Bearer new');
+  ) as { mcpServers: Record<string, { url?: string; headers?: Record<string, string> }> };
+  assert.match(mcp.mcpServers[server.id]?.url ?? '', /^http:\/\/icarus:\d+\/mcp-proxy\//);
+  assert.equal(mcp.mcpServers[server.id]?.headers?.Authorization, undefined, 'в mcp.json токена нет');
+
+  const direct = effectiveServers(config, readStore(config), 'probe', Date.now(), { proxyBase: null }).servers[server.id];
+  assert.equal(direct?.headers?.Authorization, 'Bearer new', 'прямой вид для панели/проверки — со свежим токеном');
 });
 
 test('выключенный сервер не обновляет токен: он всё равно не поедет в сессию', async () => {

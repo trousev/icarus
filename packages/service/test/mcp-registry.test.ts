@@ -15,9 +15,11 @@ import {
   createServer,
   deleteServer,
   effectiveServers,
+  ensureOAuthProxyKeys,
   listVisible,
   readStore,
   saveCredentials,
+  saveOAuthCredentials,
   setEnabled,
   setShared,
   slugify,
@@ -127,6 +129,35 @@ test('OAuth-токен уезжает в mcp.json заголовком, а не 
   const effective = effectiveServers(config, readStore(config), 'probe').servers[server.id];
   assert.equal(effective?.headers?.Authorization, 'Bearer token-1');
   assert.equal('auth' in (effective ?? {}), false, 'pi получает обычные заголовки: свой OAuth ему не нужен');
+});
+
+test('старым OAuth-записям достраивается ключ прокси, и токен уходит из mcp.json', () => {
+  const config = configWith();
+  const server = createServer(config, 'probe', {
+    name: 'Старый OAuth',
+    transport: 'streamable-http',
+    url: 'https://mcp.example.com/mcp',
+    auth: 'oauth',
+  });
+  saveCredentials(config, 'probe', server.id, { headers: {} });
+  saveOAuthCredentials(config, 'probe', server.id, {
+    accessToken: 'token-1',
+    refreshToken: 'refresh-1',
+    expiresAt: Date.now() + 3_600_000,
+  });
+  assert.equal(readStore(config).credentials.probe?.[server.id]?.oauth?.proxyKey, undefined);
+
+  const changed = ensureOAuthProxyKeys(config, 'probe');
+  assert.deepEqual(changed, [server.id]);
+  const key = readStore(config).credentials.probe?.[server.id]?.oauth?.proxyKey;
+  assert.match(key ?? '', /^[A-Za-z0-9_-]{20,}$/);
+
+  prepareUser(config, probe());
+  const json = JSON.parse(
+    fs.readFileSync(path.join(userPaths(config, probe()).piAgent, 'mcp.json'), 'utf8'),
+  ) as { mcpServers: Record<string, { url?: string; headers?: Record<string, string> }> };
+  assert.match(json.mcpServers[server.id]?.url ?? '', /\/mcp-proxy\//);
+  assert.equal(json.mcpServers[server.id]?.headers?.Authorization, undefined);
 });
 
 test('смена адреса сбрасывает чужие ключи: они относятся к другому серверу', () => {

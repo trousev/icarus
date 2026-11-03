@@ -14,15 +14,83 @@ import {
   readStore,
   saveOAuthCredentials,
   viewOf,
+  type McpOAuthCredentials,
 } from './registry.ts';
 import { refreshAuthorization, type FetchLike } from './oauth.ts';
 
-const inflight = new Map<string, Promise<void>>();
+const inflight = new Map<string, Promise<unknown>>();
 
 export type RefreshOptions = {
   fetchImpl?: FetchLike;
   now?: number;
 };
+
+export type FreshTokenOptions = RefreshOptions & {
+  /** За сколько до истечения обновлять. */
+  marginMs?: number;
+  /** Обновить даже свежий токен — после 401 от сервера. */
+  force?: boolean;
+};
+
+/**
+ * Токен для одного запроса через локальный прокси.
+ *
+ * В отличие от refreshUserMcpTokens это происходит не «перед сессией», а на
+ * каждом HTTP-запросе pi к MCP: пятиминутный токен Black Forest обновляется
+ * молча, и живой разговор не упирается в invalid_token.
+ */
+export async function freshOAuthForServer(
+  config: IcarusConfig,
+  userId: string,
+  serverId: string,
+  options: FreshTokenOptions = {},
+): Promise<McpOAuthCredentials> {
+  const store = readStore(config);
+  const server = store.servers[serverId];
+  if (!server || server.auth !== 'oauth') throw new Error('это не OAuth-MCP');
+  if (server.owner !== userId && !server.shared) throw new Error('MCP не расшарен этому человеку');
+  const oauth = store.credentials[userId]?.[serverId]?.oauth;
+  if (!oauth) throw new Error('OAuth-доступ не настроен');
+
+  const now = options.now ?? Date.now();
+  const margin = options.marginMs ?? 60_000;
+  const fresh = Boolean(oauth.accessToken) && (oauth.expiresAt === undefined || oauth.expiresAt > now + margin);
+  if (!options.force && fresh) return oauth;
+  if (!oauth.refreshToken) {
+    throw new Error('OAuth-токен истёк, а refresh_token нет — нужна повторная авторизация');
+  }
+
+  const key = `${userId}:${serverId}`;
+  const pending = inflight.get(key);
+  if (pending) {
+    await pending;
+    const next = readStore(config).credentials[userId]?.[serverId]?.oauth;
+    if (next) return next;
+    throw new Error('OAuth-токен не обновился');
+  }
+
+  const task = (async () => {
+    try {
+      const next = await refreshAuthorization({ oauth, fetchImpl: options.fetchImpl, now });
+      saveOAuthCredentials(config, userId, serverId, next);
+      log.info('MCP: токен обновлён по запросу прокси', { user: userId, server: serverId });
+      return next;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      saveOAuthCredentials(config, userId, serverId, { error: message });
+      log.warn('MCP: не удалось обновить токен для прокси', {
+        user: userId,
+        server: serverId,
+        error: redact(message),
+      });
+      throw error;
+    } finally {
+      inflight.delete(key);
+    }
+  })();
+  inflight.set(key, task);
+  return await task;
+}
 
 /**
  * Обновляет просроченные токены всех включённых серверов человека. Ошибку одного
