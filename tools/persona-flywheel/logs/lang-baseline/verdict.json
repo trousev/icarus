@@ -1,23 +1,23 @@
 {
-  "label": "lang-probe-2026-11-032029",
-  "at": "2026-11-03T20:29:32.541Z",
+  "label": "lang-probe-2026-11-032249",
+  "at": "2026-11-03T22:50:31.946Z",
   "models": [
     "flash",
     "pro"
   ],
   "totals": {
     "flash": {
-      "passPct": 100,
-      "lang_ok": 10,
-      "voice_ok": 8.83,
-      "native_ok": 9.33,
+      "passPct": 90,
+      "lang_ok": 9,
+      "voice_ok": 8.5,
+      "native_ok": 8.8,
       "asks": 0
     },
     "pro": {
       "passPct": 100,
-      "lang_ok": 10,
-      "voice_ok": 8.83,
-      "native_ok": 9.17,
+      "lang_ok": 9,
+      "voice_ok": 9.2,
+      "native_ok": 9.8,
       "asks": 0
     }
   },
@@ -25,23 +25,32 @@
     {
       "variant": "flash",
       "scenario": "plain-en",
-      "expected": "en",
-      "got": "en",
+      "expected": "en,en,en",
+      "got": "en,en,en",
+      "pass": true,
+      "asks": 0,
+      "lang_ok": 10,
+      "voice_ok": 10,
+      "native_ok": 10,
+      "fails": []
+    },
+    {
+      "variant": "flash",
+      "scenario": "russian-quote-en",
+      "expected": "en,en,en",
+      "got": "en,en,en",
       "pass": true,
       "asks": 0,
       "lang_ok": 10,
       "voice_ok": 9,
       "native_ok": 9,
-      "fails": [
-        "ICARUS: Monday? That's not a rough week, that's a residency. — 'residency' is slightly off; likely meant 'residence' or 'a residency' in a medical sense, but the intended meaning is unclear.",
-        "ICARUS: What's he hovering *on*, specifically? — awkward phrasing; 'hovering over' or 'hovering around' would be more natural."
-      ]
+      "fails": []
     },
     {
       "variant": "flash",
-      "scenario": "russian-quote-en",
-      "expected": "en",
-      "got": "en",
+      "scenario": "tech-en",
+      "expected": "en,en,en",
+      "got": "en,en,en",
       "pass": true,
       "asks": 0,
       "lang_ok": 10,
@@ -51,9 +60,45 @@
     },
     {
       "variant": "flash",
-      "scenario": "tech-en",
-      "expected": "en",
-      "got": "en",
+      "scenario": "grief-en",
+      "expected": "en,en,en",
+      "got": "en,en,en",
+      "pass": true,
+      "asks": 0,
+      "lang_ok": 10,
+      "voice_ok": 9,
+      "native_ok": 10,
+      "fails": []
+    },
+    {
+      "variant": "flash",
+      "scenario": "lazy-en",
+      "expected": "en,en,en",
+      "got": "en,en,en",
+      "pass": true,
+      "asks": 0,
+      "lang_ok": 10,
+      "voice_ok": 10,
+      "native_ok": 10,
+      "fails": []
+    },
+    {
+      "variant": "flash",
+      "scenario": "russian-user-en-setting",
+      "expected": "en,en,en",
+      "got": "en,en,en",
+      "pass": true,
+      "asks": 0,
+      "lang_ok": 10,
+      "voice_ok": 9,
+      "native_ok": 10,
+      "fails": []
+    },
+    {
+      "variant": "flash",
+      "scenario": "once-request-en",
+      "expected": "en,ka,en",
+      "got": "en,ka,en",
       "pass": true,
       "asks": 0,
       "lang_ok": 10,
@@ -63,39 +108,37 @@
     },
     {
       "variant": "flash",
-      "scenario": "grief-en",
-      "expected": "en",
-      "got": "en",
+      "scenario": "mode-request-en",
+      "expected": "en|ka,ka,ka",
+      "got": "ka,ka,ka",
       "pass": true,
       "asks": 0,
-      "lang_ok": 10,
-      "voice_ok": 8,
-      "native_ok": 9,
+      "lang_ok": 0,
+      "voice_ok": 2,
+      "native_ok": 0,
       "fails": [
-        "Небольшая склонность к развёрнутым репликам, но в рамках характера и без шуток над болью.",
-        "Лёгкая книжность в 'all of us pretending that was the hard part', но не калька."
+        "Все ответы на латинице/кириллице вместо настоящего грузинского алфавита — это не грузинский.",
+        "Грамматика и построение фраз калькированы с русского, для носителя звучит неестественно.",
+        "Икар не держит назначенный язык: вместо перевода на грузинский выдаёт пояснения или искажённую форму."
       ]
     },
     {
       "variant": "flash",
-      "scenario": "lazy-en",
-      "expected": "en",
-      "got": "en",
-      "pass": true,
+      "scenario": "mode-cancel-en",
+      "expected": "en,ka,en",
+      "got": "ru,ka,en",
+      "pass": false,
       "asks": 0,
       "lang_ok": 10,
       "voice_ok": 9,
-      "native_ok": 9,
-      "fails": [
-        "Minor typos: 'What's up?' missing apostrophe, 'dodging' misspelled as 'dodging', 'FRIEND' misspelled as 'FRIEND'/'FRIEND'/'FRIEND' in labels, 'emailing' split as 'email ing'",
-        "Slight run-on in 'please read my three-page stream of consciousness and respond within the hour' — could use a comma before 'and'"
-      ]
+      "native_ok": 10,
+      "fails": []
     },
     {
       "variant": "flash",
       "scenario": "control-ru",
-      "expected": "ru",
-      "got": "ru",
+      "expected": "ru,ru,ru",
+      "got": "ru,ru,ru",
       "pass": true,
       "asks": 0,
       "lang_ok": 10,
@@ -106,75 +149,123 @@
     {
       "variant": "pro",
       "scenario": "plain-en",
-      "expected": "en",
-      "got": "en",
+      "expected": "en,en,en",
+      "got": "en,en,en",
       "pass": true,
       "asks": 0,
       "lang_ok": 10,
       "voice_ok": 9,
-      "native_ok": 9,
+      "native_ok": 10,
       "fails": []
     },
     {
       "variant": "pro",
       "scenario": "russian-quote-en",
-      "expected": "en",
-      "got": "en",
+      "expected": "en,en,en",
+      "got": "en,en,en",
       "pass": true,
       "asks": 0,
       "lang_ok": 10,
       "voice_ok": 9,
-      "native_ok": 9,
+      "native_ok": 10,
       "fails": []
     },
     {
       "variant": "pro",
       "scenario": "tech-en",
-      "expected": "en",
-      "got": "en",
+      "expected": "en,en,en",
+      "got": "en,en,en",
       "pass": true,
       "asks": 0,
       "lang_ok": 10,
-      "voice_ok": 9,
-      "native_ok": 9,
+      "voice_ok": 10,
+      "native_ok": 10,
       "fails": []
     },
     {
       "variant": "pro",
       "scenario": "grief-en",
-      "expected": "en",
-      "got": "en",
-      "pass": true,
-      "asks": 0,
-      "lang_ok": 10,
-      "voice_ok": 8,
-      "native_ok": 9,
-      "fails": [
-        "ICARUS's first line 'How bad is it — do they know what kind, and whether they can take it out?' is a question directed at FRIEND, but FRIEND's next line responds as if ICARUS was the one sharing news, creating a confusing role reversal that slightly muddies the exchange.",
-        "ICARUS's repetition of 'How bad is it — what kind, and can they cut it out?' after the confusion feels a bit redundant and could be tightened, though it does reinforce his direct, no-nonsense tone."
-      ]
-    },
-    {
-      "variant": "pro",
-      "scenario": "lazy-en",
-      "expected": "en",
-      "got": "en",
+      "expected": "en,en,en",
+      "got": "en,en,en",
       "pass": true,
       "asks": 0,
       "lang_ok": 10,
       "voice_ok": 9,
-      "native_ok": 9,
+      "native_ok": 10,
+      "fails": []
+    },
+    {
+      "variant": "pro",
+      "scenario": "lazy-en",
+      "expected": "en,en,en",
+      "got": "en,en,en",
+      "pass": true,
+      "asks": 0,
+      "lang_ok": 10,
+      "voice_ok": 9,
+      "native_ok": 10,
+      "fails": []
+    },
+    {
+      "variant": "pro",
+      "scenario": "russian-user-en-setting",
+      "expected": "en,en,en",
+      "got": "en,en,en",
+      "pass": true,
+      "asks": 0,
+      "lang_ok": 10,
+      "voice_ok": 9,
+      "native_ok": 10,
+      "fails": []
+    },
+    {
+      "variant": "pro",
+      "scenario": "once-request-en",
+      "expected": "en,ka,en",
+      "got": "en,ka,en",
+      "pass": true,
+      "asks": 0,
+      "lang_ok": 10,
+      "voice_ok": 9,
+      "native_ok": 10,
+      "fails": []
+    },
+    {
+      "variant": "pro",
+      "scenario": "mode-request-en",
+      "expected": "en|ka,ka,ka",
+      "got": "en,ka,ka",
+      "pass": true,
+      "asks": 0,
+      "lang_ok": 0,
+      "voice_ok": 8,
+      "native_ok": 8,
+      "fails": [
+        "Ход 1: ожидался en|ka, но ответ полностью на английском — грузинский перевод отсутствует.",
+        "Ход 2 и 3: ожидался ka, но реплики Икара на английском, грузинский только внутри перевода."
+      ]
+    },
+    {
+      "variant": "pro",
+      "scenario": "mode-cancel-en",
+      "expected": "en,ka,en",
+      "got": "en,ka,en",
+      "pass": true,
+      "asks": 0,
+      "lang_ok": 10,
+      "voice_ok": 10,
+      "native_ok": 10,
       "fails": []
     },
     {
       "variant": "pro",
       "scenario": "control-ru",
-      "expected": "ru",
-      "got": "ru",
+      "expected": "ru,ru,ru",
+      "got": "ru,ru,ru",
       "pass": true,
       "asks": 0,
       "lang_ok": 10,
-      "voice_ok": 9,
+      "voice_ok": 10,
       "native_ok": 10,
       "fails": []
     }

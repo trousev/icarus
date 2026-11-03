@@ -124,9 +124,10 @@ function json(res: ServerResponse, status: number, payload: unknown): void {
 async function handleProfileApi(
   req: IncomingMessage,
   res: ServerResponse,
-  config: IcarusConfig,
+  ctx: PanelContext,
   userId: string,
 ): Promise<void> {
+  const { config } = ctx;
   const user = findUser(config, userId);
   if (!user) {
     json(res, 404, errorBody(`пользователь ${userId} не заведён`));
@@ -162,24 +163,33 @@ async function handleProfileApi(
     return;
   }
 
+  const previous = languageOf(config, user);
   writeProfile(config, user, { language: language as Language });
+
+  // Язык живёт в AGENTS.md, а его pi читает при старте процесса — значит, живую
+  // сессию без этой пометки смена языка не догонит, и человек услышит прежний язык.
+  // Помечаем только когда язык правда поменялся: лишний перезапуск сессии — это
+  // потеря контекста разговора ни за что.
+  if (language !== previous) bumpResources(ctx, userId);
+
   json(res, 200, { user: userId, language });
 }
 
 /**
- * Скиллы поменялись — pi об этом ещё не знает.
+ * Ресурсы человека поменялись — pi об этом ещё не знает.
  *
- * Каталог скиллов pi читает один раз при старте процесса, поэтому правка файла сама
- * по себе до живого разговора не доедет. Пометка «ресурсы обновились» говорит
- * реестру сессий поднять следующую сессию заново: идущий ход доигрывает на прежнем
- * наборе, а следующий ответ — уже с новым скиллом (см. SessionRegistry.bumpResources).
+ * Ресурсы pi читает один раз при старте процесса: каталог скиллов и карту окружения
+ * (AGENTS.md, а в ней — язык ответов). Поэтому правка файла сама по себе до живого
+ * разговора не доедет. Пометка «ресурсы обновились» говорит реестру сессий поднять
+ * следующую сессию заново: идущий ход доигрывает на прежнем наборе, а следующий
+ * ответ — уже с новым скиллом или на новом языке (см. SessionRegistry.bumpResources).
  * Ошибка тут не должна отменять сохранение: файл уже записан и закоммичен.
  */
 function bumpResources(ctx: PanelContext, userId: string): void {
   try {
     ctx.bump?.(userId);
   } catch (error) {
-    logger.warn('не удалось отметить обновление скиллов', { user: userId, error: String(error) });
+    logger.warn('не удалось отметить обновление ресурсов', { user: userId, error: String(error) });
   }
 }
 
@@ -513,7 +523,7 @@ async function handleApi(
   // `profile`. Имя настройки стоит сразу за `api`, а не после имени раздела.
   if (url.pathname === '/panel/profile/api' || url.pathname.startsWith('/panel/profile/api/')) {
     await prepare(config, userId);
-    await handleProfileApi(req, res, config, userId);
+    await handleProfileApi(req, res, ctx, userId);
     return;
   }
 
