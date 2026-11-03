@@ -491,6 +491,43 @@ test('знакомого человека бот слушает и отвеча�
   assert.ok(state.typing > 0, 'человек видит «печатает»');
 });
 
+test('ошибка авторизации MCP даёт в ответе ссылку на переподключение', async () => {
+  const steps: Step[] = [
+    {
+      type: 'tool_execution_start',
+      toolCallId: 'call-mcp',
+      toolName: 'mcp_black_forest_get_credits',
+      args: {},
+    },
+    {
+      type: 'tool_execution_end',
+      toolCallId: 'call-mcp',
+      toolName: 'mcp_black_forest_get_credits',
+      isError: true,
+      result: {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              error: 'invalid_token',
+              reauth_url: 'https://chat.example/panel/mcp?server=black-forest',
+            }),
+          },
+        ],
+      },
+    },
+    { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'Не вышло.' } },
+    { type: 'agent_settled' },
+  ];
+  const { bot, state } = makeBot({ steps });
+
+  await bot.handleUpdate(messageUpdate('сколько кредитов?'));
+
+  const text = chatText(state, 42);
+  assert.match(text, /Переподключить/);
+  assert.match(text, /https:\/\/chat\.example\/panel\/mcp\?server=black-forest/);
+});
+
 test('незнакомцу бот не открывает чужую память', async () => {
   const { bot, session, state } = makeBot();
 

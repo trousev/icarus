@@ -27,6 +27,7 @@ import {
 } from '../sessions/chats.ts';
 import { sessionFileForId, sessionFilesFor, textOfContent as textOf, type FileSession } from '../sessions/files.ts';
 import type { SessionRegistry } from '../sessions/registry.ts';
+import { mcpReauthNotice } from '../mcp/reauth.ts';
 import { log } from '../log.ts';
 
 export { readChats };
@@ -836,6 +837,8 @@ async function streamTurn(
   });
   const steps: ChatTraceStep[] = [];
   const byId = new Map<string, ChatTraceStep>();
+  const toolArgs = new Map<string, Record<string, unknown>>();
+  const reauthSent = new Set<string>();
   const send = (event: Record<string, unknown>): void => {
     if (!closed && !res.writableEnded) res.write(`${JSON.stringify(event)}\n`);
   };
@@ -859,7 +862,9 @@ async function streamTurn(
       case 'tool_execution_start': {
         const id = String(event.toolCallId ?? `${event.toolName}-${steps.length}`);
         const tool = String(event.toolName ?? 'tool');
-        const step = stepFor(tool, (event.args ?? {}) as Record<string, unknown>, id);
+        const args = (event.args ?? {}) as Record<string, unknown>;
+        toolArgs.set(id, args);
+        const step = stepFor(tool, args, id);
         steps.push(step);
         byId.set(id, step);
         send({ type: 'step', step });
@@ -882,6 +887,19 @@ async function streamTurn(
         const id = String(event.toolCallId ?? '');
         const step = byId.get(id);
         if (!step) break;
+        const tool = String(event.toolName ?? 'tool');
+        const notice = mcpReauthNotice({
+          config,
+          userId: user.id,
+          toolName: tool,
+          args: toolArgs.get(id) ?? {},
+          isError: event.isError === true,
+          result: event.result,
+        });
+        if (notice && !reauthSent.has(notice.url)) {
+          reauthSent.add(notice.url);
+          send({ type: 'reauth', server: notice.name, url: notice.url });
+        }
         step.status = event.isError === true ? 'error' : 'ok';
         const result = clip(resultText(event.result), 500);
         if (result) step.result = result;

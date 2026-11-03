@@ -502,6 +502,14 @@ function authStateOf(
   }
   const oauth = credentials?.oauth;
   if (oauthFresh(oauth, now)) return { ready: true, state: 'ready' };
+  // Прокси умеет обновить токен сам, а если refresh мёртв — вернуть ссылку на
+  // повторный вход. Поэтому сервер с ключом прокси остаётся в mcp.json даже
+  // с просроченным токеном: иначе человек увидел бы проблему только в панели.
+  if (oauth?.proxyKey && (oauth.accessToken || oauth.refreshToken)) {
+    return oauth.error
+      ? { ready: true, state: 'error', message: oauth.error }
+      : { ready: true, state: 'expired', message: 'токен обновится при запросе через прокси' };
+  }
   if (oauth?.error) return { ready: false, state: 'error', message: oauth.error };
   if (oauth?.refreshToken) {
     return { ready: false, state: 'expired', message: 'токен истёк — обновится при следующем подключении' };
