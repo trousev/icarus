@@ -20,7 +20,7 @@ export type PanelDenial = { status: 401 | 403; message: string; hint: string };
 export type PanelSession = {
   user: string;
   sections: PanelSection[];
-  scopes: Record<string, 'memory' | 'skills' | 'maple'>;
+  scopes: Record<string, 'memory' | 'skills' | 'maple' | 'profile'>;
   /** Заголовки областей: у каждой своё имя, и придумывать их в браузере незачем. */
   scopeLabels?: Record<string, string>;
   /** Модель и хранилище — то, чем человек проверяет, что смотрит в ту панель. */
@@ -28,6 +28,8 @@ export type PanelSession = {
   storage?: string;
   /** Есть ли кому написать скилл: в локальной панели контейнера с моделью нет. */
   draftSkills?: boolean;
+  /** Язык ответов этого человека: «ru» или «en». Раздел «Пользователь» им и занят. */
+  language?: string;
 };
 
 export type PanelView = PanelSession | PanelDenial;
@@ -60,6 +62,8 @@ const MEMORY_ABOUT =
   'Профиль, предпочтения и распорядок дня — то, что агент учитывает в первую очередь.';
 const MAPLE_ABOUT =
   'Журналы сессий, воркшиты и графики Maple. Раздел только для чтения: файлы создаёт сам Maple.';
+const PROFILE_ABOUT =
+  'Как Икар говорит с тобой. Язык меняет только язык ответов: характер, шутки и память остаются прежними.';
 const SKILLS_ABOUT =
   'Скиллы Икара: он видит их имена и описания и читает инструкцию, когда задача совпала. ' +
   'Сохранённый скилл уезжает в следующий же ответ — идущий разговор не рвётся.';
@@ -140,6 +144,18 @@ export function shell(body: string): string {
   .head .lead { min-width:0; }
 
   .cols { display:grid; grid-template-columns:330px minmax(0,1fr); gap:16px; align-items:start; }
+  /* У настроек нет колонки файлов: карточка одна и на всю ширину. */
+  .cols.single { grid-template-columns:minmax(0,1fr); }
+  /* Выбор языка: строка-переключатель, а не выпадающий список — вариантов два,
+     и оба должны быть видны сразу. */
+  .choice { display:flex; flex-direction:column; gap:8px; }
+  .choice label { display:flex; gap:11px; align-items:center; padding:12px 14px; border:1px solid var(--line);
+                  border-radius:9px; cursor:pointer; background:var(--bg); }
+  .choice label:hover { border-color:var(--accent); }
+  .choice label.on { border-color:var(--accent); background:var(--accent-soft); }
+  .choice input { accent-color:var(--accent); margin:0; }
+  .choice b { font-weight:500; }
+  .choice small { color:var(--dim); margin-left:auto; font-family:ui-monospace, monospace; font-size:12px; }
   .card { background:var(--panel); border:1px solid var(--line); border-radius:11px; overflow:hidden; }
   .card-head { display:flex; justify-content:space-between; gap:12px; align-items:center;
                padding:11px 16px; border-bottom:1px solid var(--line); color:var(--dim);
@@ -292,16 +308,19 @@ function sessionPage(session: PanelSession, page: PanelPage): string {
   const scope = page.scope && session.scopes[page.scope] ? page.scope : scopes[0];
   const skills = page.section === 'skills';
   const maple = page.section === 'maple';
+  // «Пользователь» — не список файлов, а форма. Ему не нужны ни колонка файлов,
+  // ни поиск, поэтому он рисуется собственной правой колонкой целиком.
+  const profile = page.section === 'profile';
   // Режим — свойство раздела. Он решает, какие маршруты зовёт страница и каким
   // рендером рисуется правая колонка: память правится построчно, скиллы — файлом,
   // математика только смотрится.
-  const mode = skills ? 'skills' : maple ? 'maple' : 'memory';
+  const mode = skills ? 'skills' : maple ? 'maple' : profile ? 'profile' : 'memory';
   const sectionLabel = session.sections.find((item) => item.id === page.section)?.label ?? 'Память';
-  const title = skills ? 'Скиллы' : maple ? 'Математика' : scopeLabel(session, scope);
-  const about = skills ? SKILLS_ABOUT : maple ? MAPLE_ABOUT : MEMORY_ABOUT;
+  const title = skills ? 'Скиллы' : maple ? 'Математика' : profile ? 'Пользователь' : scopeLabel(session, scope);
+  const about = skills ? SKILLS_ABOUT : maple ? MAPLE_ABOUT : profile ? PROFILE_ABOUT : MEMORY_ABOUT;
   // Крошки не повторяют заголовок, когда раздел назван так же: «Скиллы / Скиллы»
   // не сообщает ничего.
-  const breadcrumbs = [`Icarus`, sectionLabel, ...(maple || skills ? [] : [title])];
+  const breadcrumbs = [`Icarus`, sectionLabel, ...(maple || skills || profile ? [] : [title])];
 
   // Область в ссылке несёт только память: у скиллов и математики своей области нет,
   // и `?scope=personal` в их адресе — это ровно та путаница, когда раздел показывал
@@ -317,7 +336,7 @@ function sessionPage(session: PanelSession, page: PanelPage): string {
         );
       })
       .join('');
-  const areas = maple || skills
+  const areas = maple || skills || profile
     ? ''
     : `<nav class="areas">${scopes
         .map(
@@ -371,12 +390,12 @@ ${sidebar}
       )
       .join(' / ')}</div>
     <div class="search">
-      <input id="q" placeholder="${skills ? 'Поиск по скиллам' : maple ? 'Поиск по математике' : 'Поиск по памяти'}" size="30">
+      ${profile ? '' : `<input id="q" placeholder="${skills ? 'Поиск по скиллам' : maple ? 'Поиск по математике' : 'Поиск по памяти'}" size="30">`}
     </div>
     <div class="status"><i></i>Агент активен</div>
   </div>
   <div class="content">
-    <p class="section-title">${skills ? 'СКИЛЛЫ АГЕНТА' : maple ? 'МАТЕМАТИКА' : 'ПАМЯТЬ АГЕНТА'}</p>
+    <p class="section-title">${skills ? 'СКИЛЛЫ АГЕНТА' : maple ? 'МАТЕМАТИКА' : profile ? 'НАСТРОЙКИ' : 'ПАМЯТЬ АГЕНТА'}</p>
     <div class="head">
       <div class="lead">
         <h1>${escapeHtml(title)}</h1>
@@ -384,13 +403,13 @@ ${sidebar}
       </div>
       ${skills ? '<button class="btn primary" id="new-skill">Новый скилл</button>' : areas}
     </div>
-    <div class="cols">
-      <div class="card">
+    <div class="cols${profile ? ' single' : ''}">
+      ${profile ? '' : `<div class="card">
         <div class="card-head"><span>${skills ? 'СКИЛЛЫ' : maple ? 'ФАЙЛЫ MAPLE' : 'ФАЙЛЫ'}</span><span id="files-count"></span></div>
         <div id="files"><p class="empty">Читаю…</p></div>
-      </div>
+      </div>`}
       <div class="card" id="content-card">
-        <div class="file-head" id="file-head"${page.file || page.fresh ? '' : ' hidden'}>
+        <div class="file-head" id="file-head"${profile || page.file || page.fresh ? ' hidden' : ''}>
           <div>
             <strong id="file-name">${page.file ? escapeHtml(page.file) : ''}</strong>
             <div class="meta" id="file-meta"></div>
@@ -897,6 +916,12 @@ async function renderContent() {
     await renderSkill();
     return;
   }
+  // «Пользователь» — форма настроек: у неё нет ни файла, ни записей, поэтому она
+  // рисуется целиком здесь и больше никуда не ходит.
+  if (cfg.mode === 'profile') {
+    await renderProfile();
+    return;
+  }
   const path = cfg.file;
   if (!path) {
     showFileHead(null, null, false);
@@ -937,6 +962,47 @@ function renderReadOnly(data) {
   el('content').innerHTML = '<div class="rows">' + data.entries.map((entry) =>
     '<div class="row plain"><span class="num">' + entry.line + '</span><span class="row-text">' + esc(entry.text) + '</span></div>',
   ).join('') + '</div>';
+}
+
+// ── настройки: пользователь ──────────────────────────────────────────────────
+// Одна настройка — язык ответов. Сохраняем сразу по клику: отдельная кнопка
+// «Сохранить» у переключателя из двух вариантов только заставляет гадать, применилось
+// ли. Статус пишем туда же, где человек смотрит, — рядом с выбором.
+async function renderProfile() {
+  const data = await api('/panel/profile/api');
+  const current = data.language;
+  const options = data.languages.map((code) =>
+    '<label class="' + (code === current ? 'on' : '') + '" data-code="' + esc(code) + '">' +
+      '<input type="radio" name="language" value="' + esc(code) + '"' + (code === current ? ' checked' : '') + '>' +
+      '<b>' + esc((data.labels || {})[code] || code) + '</b>' +
+      '<small>' + esc(code) + '</small>' +
+    '</label>',
+  ).join('');
+
+  el('content').innerHTML =
+    '<div class="lead-box">' +
+      '<p class="field-label">ЯЗЫК ОТВЕТОВ</p>' +
+      '<div class="choice">' + options + '</div>' +
+      '<p class="hint" id="profile-status">На этом языке Икар будет говорить с тобой — ' +
+        'характер и память не меняются.</p>' +
+    '</div>';
+
+  el('content').querySelectorAll('.choice input').forEach((input) => {
+    input.onchange = guard(async () => {
+      const status = el('profile-status');
+      status.textContent = 'Сохраняю…';
+      try {
+        await api('/panel/profile/api', { method: 'POST', body: JSON.stringify({ language: input.value }) });
+        el('content').querySelectorAll('.choice label').forEach((label) =>
+          label.classList.toggle('on', label.dataset.code === input.value));
+        cfg.language = input.value;
+        // Следующая реплика поднимает pi заново: AGENTS.md читается при старте.
+        status.textContent = 'Сохранено. Следующий ответ будет на новом языке.';
+      } catch (error) {
+        status.textContent = 'Не сохранилось: ' + error.message;
+      }
+    });
+  });
 }
 
 // ── поиск ────────────────────────────────────────────────────────────────────
@@ -983,7 +1049,7 @@ if (el('new-skill')) el('new-skill').onclick = guard(() => go({ file: null, fres
 
 (async () => {
   document.title = '${PANEL_TITLE} · ' + cfg.user;
-  await Promise.all([loadCounts(), cfg.mode === 'skills' ? loadSkills() : loadFiles(), renderContent()]);
+  await Promise.all([loadCounts(), cfg.mode === 'skills' ? loadSkills() : cfg.mode === 'profile' ? Promise.resolve() : loadFiles(), renderContent()]);
 })().catch(fail);
 </script>`);
 }

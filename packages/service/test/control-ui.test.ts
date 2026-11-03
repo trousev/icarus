@@ -71,7 +71,13 @@ test('раздел скиллов — редактор, а не список ф�
   assert.match(list, /href="\/panel\/skills"/, 'раздел стоит в сайдбаре рядом с памятью');
   assert.doesNotMatch(list, /href="\/panel\/skills\?/, 'области у скиллов нет — и параметра тоже');
   assert.match(list, /id="new-skill"/, 'новый скилл заводится кнопкой');
-  assert.match(list, /cfg\.mode === 'skills' \? loadSkills\(\) : loadFiles\(\)/, 'список рисуется скиллами');
+  // Режим профиля вставлен между скиллами и памятью: у настроек нет списка файлов,
+  // и подставлять туда loadFiles значило бы дёргать несуществующий маршрут.
+  assert.match(
+    list,
+    /cfg\.mode === 'skills' \? loadSkills\(\) : cfg\.mode === 'profile' \? Promise\.resolve\(\) : loadFiles\(\)/,
+    'список рисуется скиллами, а у настроек его нет вовсе',
+  );
   assert.doesNotMatch(list, /id="count-skills"[^>]*>5</, 'число у раздела приходит из сервиса');
 
   // Пустой редактор нового скилла: раздел открывается и без файла, и это состояние

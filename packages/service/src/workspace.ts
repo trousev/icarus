@@ -19,6 +19,7 @@ import {
 } from './config.ts';
 import { effectiveServers, ensureOAuthProxyKeys, readStore, storePaths } from './mcp/registry.ts';
 import { ensureWorkspaces } from './workspaces.ts';
+import { DEFAULT_LANGUAGE, LANGUAGE_ADJECTIVES, LANGUAGE_ADVERBS, languageOf, type Language } from './profile.ts';
 
 const EXTENSIONS_DIR = path.join(REPO_ROOT, 'packages', 'extensions');
 
@@ -115,6 +116,8 @@ ${bullets.join('\n')}
 export function renderAgentsMd(
   config: IcarusConfig,
   servers: Record<string, McpServerConfig> = config.mcp,
+  /** Язык ответов этого человека: он меняет только раздел «Язык», всё остальное — общее. */
+  language: Language = config.userLanguage ?? DEFAULT_LANGUAGE,
 ): string {
   const home = CONTAINER_PATHS.home;
   const workspaces = CONTAINER_PATHS.workspaces;
@@ -187,7 +190,40 @@ ${mcp}
 
 - \`${home}/shared-memory/\` — только по явной просьбе. Сомневаешься — пиши в личное.
 - Не удаляй чужие файлы и не трогай ничего за пределами \`${workspaces}\`.
-${maple}`;
+${languageRule(language)}${maple}`;
+}
+
+/**
+ * Язык ответов — единственное место, где человек настраивает сам себя.
+ *
+ * Требование сформулировано императивно и один раз, потому что соблазнов два:
+ * (а) персона и весь AGENTS.md написаны по-русски, и модель незаметно для себя
+ * скатывается на язык промпта; (б) реплика человека на другом языке (цитата,
+ * лог, английская терминология) читается как просьба ответить на нём. Поэтому
+ * здесь прямо сказано: язык разговора — из настроек, а не из промпта, не из
+ * первого слова и не из длины прошлой реплики.
+ *
+ * Язык меняет ТОЛЬКО язык реплик. Характер, шутки, объём и «сначала свой, потом
+ * смешной» остаются как есть: иначе англоязычный Икар оказался бы другим
+ * человеком, а это уже не локализация, а вторая личность (см. icarus.md).
+ */
+function languageRule(language: Language): string {
+  const adverb = LANGUAGE_ADVERBS[language];
+  const adjective = LANGUAGE_ADJECTIVES[language];
+  return `
+## Язык
+
+Человек выбрал язык разговора в настройках («Пользователь» в панели): отвечаешь **строго ${adverb}**.
+
+- Персона, эта карта и память написаны по-русски — это язык *файлов*, а не разговора.
+  Не переходи на русский из-за того, что промпт русский: твой язык — ${adjective}, и это настройка, а не привычка.
+- Если человек пишет не на твоём языке — настройка не меняется. Отвечай на своём; про язык не переспрашивай:
+  на этот вопрос человек уже ответил в панели.
+- Если человек вставил в реплику чужой язык (цитата от мамы, лог, письмо) — это не смена
+  языка: отвечаешь на своём, а саму цитату цитируешь как есть, не переводя её.
+- Слова, которые не переводятся (термин, имя, кусок кода, название сервиса), оставляешь как есть.
+- Характер тот же: шутки, колкости, краткость и «сначала свой, потом смешной» — просто ${adverb}.
+`;
 }
 
 /** Ключи провайдеров в формате pi: ~/.pi/agent/auth.json. */
@@ -347,7 +383,9 @@ export function prepareUser(config: IcarusConfig, user: UserConfig) {
     if (moved > 0) log.info('расчёты Maple перенесены в постоянный каталог', { user: user.id, files: moved });
   }
 
-  writeFileSafe(paths.agentsMd, renderAgentsMd(config, mcpServers));
+  // Язык — из профиля человека: он меняет только раздел «Язык» в карте окружения,
+  // поэтому читается здесь, а не живёт в общем config.yaml.
+  writeFileSafe(paths.agentsMd, renderAgentsMd(config, mcpServers, languageOf(config, user)));
 
   const authPath = path.join(paths.piAgent, 'auth.json');
   writeFileSafe(authPath, renderAuthJson(config), 0o600);

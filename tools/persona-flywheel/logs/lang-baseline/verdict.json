@@ -1,0 +1,182 @@
+{
+  "label": "lang-probe-2026-11-032029",
+  "at": "2026-11-03T20:29:32.541Z",
+  "models": [
+    "flash",
+    "pro"
+  ],
+  "totals": {
+    "flash": {
+      "passPct": 100,
+      "lang_ok": 10,
+      "voice_ok": 8.83,
+      "native_ok": 9.33,
+      "asks": 0
+    },
+    "pro": {
+      "passPct": 100,
+      "lang_ok": 10,
+      "voice_ok": 8.83,
+      "native_ok": 9.17,
+      "asks": 0
+    }
+  },
+  "rows": [
+    {
+      "variant": "flash",
+      "scenario": "plain-en",
+      "expected": "en",
+      "got": "en",
+      "pass": true,
+      "asks": 0,
+      "lang_ok": 10,
+      "voice_ok": 9,
+      "native_ok": 9,
+      "fails": [
+        "ICARUS: Monday? That's not a rough week, that's a residency. — 'residency' is slightly off; likely meant 'residence' or 'a residency' in a medical sense, but the intended meaning is unclear.",
+        "ICARUS: What's he hovering *on*, specifically? — awkward phrasing; 'hovering over' or 'hovering around' would be more natural."
+      ]
+    },
+    {
+      "variant": "flash",
+      "scenario": "russian-quote-en",
+      "expected": "en",
+      "got": "en",
+      "pass": true,
+      "asks": 0,
+      "lang_ok": 10,
+      "voice_ok": 9,
+      "native_ok": 10,
+      "fails": []
+    },
+    {
+      "variant": "flash",
+      "scenario": "tech-en",
+      "expected": "en",
+      "got": "en",
+      "pass": true,
+      "asks": 0,
+      "lang_ok": 10,
+      "voice_ok": 9,
+      "native_ok": 9,
+      "fails": []
+    },
+    {
+      "variant": "flash",
+      "scenario": "grief-en",
+      "expected": "en",
+      "got": "en",
+      "pass": true,
+      "asks": 0,
+      "lang_ok": 10,
+      "voice_ok": 8,
+      "native_ok": 9,
+      "fails": [
+        "Небольшая склонность к развёрнутым репликам, но в рамках характера и без шуток над болью.",
+        "Лёгкая книжность в 'all of us pretending that was the hard part', но не калька."
+      ]
+    },
+    {
+      "variant": "flash",
+      "scenario": "lazy-en",
+      "expected": "en",
+      "got": "en",
+      "pass": true,
+      "asks": 0,
+      "lang_ok": 10,
+      "voice_ok": 9,
+      "native_ok": 9,
+      "fails": [
+        "Minor typos: 'What's up?' missing apostrophe, 'dodging' misspelled as 'dodging', 'FRIEND' misspelled as 'FRIEND'/'FRIEND'/'FRIEND' in labels, 'emailing' split as 'email ing'",
+        "Slight run-on in 'please read my three-page stream of consciousness and respond within the hour' — could use a comma before 'and'"
+      ]
+    },
+    {
+      "variant": "flash",
+      "scenario": "control-ru",
+      "expected": "ru",
+      "got": "ru",
+      "pass": true,
+      "asks": 0,
+      "lang_ok": 10,
+      "voice_ok": 9,
+      "native_ok": 10,
+      "fails": []
+    },
+    {
+      "variant": "pro",
+      "scenario": "plain-en",
+      "expected": "en",
+      "got": "en",
+      "pass": true,
+      "asks": 0,
+      "lang_ok": 10,
+      "voice_ok": 9,
+      "native_ok": 9,
+      "fails": []
+    },
+    {
+      "variant": "pro",
+      "scenario": "russian-quote-en",
+      "expected": "en",
+      "got": "en",
+      "pass": true,
+      "asks": 0,
+      "lang_ok": 10,
+      "voice_ok": 9,
+      "native_ok": 9,
+      "fails": []
+    },
+    {
+      "variant": "pro",
+      "scenario": "tech-en",
+      "expected": "en",
+      "got": "en",
+      "pass": true,
+      "asks": 0,
+      "lang_ok": 10,
+      "voice_ok": 9,
+      "native_ok": 9,
+      "fails": []
+    },
+    {
+      "variant": "pro",
+      "scenario": "grief-en",
+      "expected": "en",
+      "got": "en",
+      "pass": true,
+      "asks": 0,
+      "lang_ok": 10,
+      "voice_ok": 8,
+      "native_ok": 9,
+      "fails": [
+        "ICARUS's first line 'How bad is it — do they know what kind, and whether they can take it out?' is a question directed at FRIEND, but FRIEND's next line responds as if ICARUS was the one sharing news, creating a confusing role reversal that slightly muddies the exchange.",
+        "ICARUS's repetition of 'How bad is it — what kind, and can they cut it out?' after the confusion feels a bit redundant and could be tightened, though it does reinforce his direct, no-nonsense tone."
+      ]
+    },
+    {
+      "variant": "pro",
+      "scenario": "lazy-en",
+      "expected": "en",
+      "got": "en",
+      "pass": true,
+      "asks": 0,
+      "lang_ok": 10,
+      "voice_ok": 9,
+      "native_ok": 9,
+      "fails": []
+    },
+    {
+      "variant": "pro",
+      "scenario": "control-ru",
+      "expected": "ru",
+      "got": "ru",
+      "pass": true,
+      "asks": 0,
+      "lang_ok": 10,
+      "voice_ok": 9,
+      "native_ok": 10,
+      "fails": []
+    }
+  ]
+}
