@@ -17,15 +17,19 @@ function asUser(userId?: string): Record<string, string> {
 }
 
 async function withServer(
-  handler: (base: string, config: IcarusConfig) => Promise<void>,
+  handler: (base: string, config: IcarusConfig, bumped: string[]) => Promise<void>,
   overrides: Partial<IcarusConfig> = {},
 ): Promise<void> {
   const config = makeConfig({ users: [probe('probe'), probe('probe2')], ...overrides });
-  const server = createServer(config, {} as never, {});
+  // Отмечаем вызовы bump: смена языка обязана сказать реестру, что окружение
+  // изменилось, иначе живая сессия pi держит прежний AGENTS.md до перезапуска.
+  const bumped: string[] = [];
+  const registry = { bumpResources: (id: string) => (bumped.push(id), bumped.length) };
+  const server = createServer(config, registry as never, {});
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address() as AddressInfo;
   try {
-    await handler(`http://127.0.0.1:${port}`, config);
+    await handler(`http://127.0.0.1:${port}`, config, bumped);
   } finally {
     server.close();
   }
@@ -136,5 +140,23 @@ test('раздел «Пользователь» не открывает файл
     // не каталог памяти. Проверяем, что чужой сущности там не появилось.
     const files = await fetch(`${base}/panel/profile/files`, { headers: asUser('probe') });
     assert.equal(files.status, 404, 'файлов у раздела нет');
+  });
+});
+
+test('смена языка поднимает сессию заново, повтор — нет', async () => {
+  await withServer(async (base, _config, bumped) => {
+    // Язык живёт в AGENTS.md, а его pi читает при старте сессии. Без этой пометки
+    // человек сохранил бы английский и услышал прежний русский — ровно то, что
+    // и случилось на проде.
+    await save(base, { language: 'en' });
+    assert.deepEqual(bumped, ['probe'], 'смена языка помечает ресурсы обновлёнными');
+
+    // Тот же язык второй раз — перезапускать сессию незачем: это потеря контекста.
+    await save(base, { language: 'en' });
+    assert.deepEqual(bumped, ['probe'], 'повторное сохранение того же языка не трогает сессию');
+
+    // А другой человек — своя пометка.
+    await save(base, { language: 'en' }, 'probe2');
+    assert.deepEqual(bumped, ['probe', 'probe2']);
   });
 });
