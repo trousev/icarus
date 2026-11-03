@@ -266,6 +266,8 @@ export function shell(body: string): string {
   .generator .row { display:flex; gap:10px; align-items:center; padding:0 0 12px; }
   .generator .row .grow { flex:1; color:var(--dim); font-size:12px; }
   .hint { color:var(--dim); font-size:12px; margin:0; padding:0 0 14px; }
+  /* Подпись к блоку настроек — тот же начерк, что у заголовков карточек. */
+  .field-label { color:var(--dim); font-size:10px; letter-spacing:.14em; margin:0 0 10px; }
   .check { display:flex; gap:9px; align-items:center; color:var(--dim); font-size:13px; padding:0 0 16px; }
   .check input { accent-color:var(--accent); margin:0; }
   .hint code, .check code { font-family:ui-monospace, monospace; color:var(--text); }
@@ -1042,7 +1044,10 @@ el('tabs').querySelectorAll('.tab').forEach((tab) => tab.onclick = guard((event)
   event.preventDefault();
   go({ tab: tab.dataset.tab });
 }));
-el('q').onkeydown = (event) => { if (event.key === 'Enter') guard(doSearch)(); };
+// Строки поиска нет у настроек: раздел — форма, а не список файлов. Без проверки
+// el('q') возвращает null, и присваивание onkeydown валит весь скрипт — до того,
+// как страница нарисует хоть что-нибудь. Та же ловушка была со скиллами.
+if (el('q')) el('q').onkeydown = (event) => { if (event.key === 'Enter') guard(doSearch)(); };
 // «Новый скилл» — это адрес, а не скрытое состояние: ссылку на пустой редактор
 // можно переслать, а «назад» возвращает к списку.
 if (el('new-skill')) el('new-skill').onclick = guard(() => go({ file: null, fresh: true, tab: 'notes' }));
