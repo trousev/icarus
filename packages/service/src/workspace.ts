@@ -18,14 +18,42 @@ import {
   type UserConfig,
 } from './config.ts';
 import { effectiveServers, ensureOAuthProxyKeys, readStore, storePaths } from './mcp/registry.ts';
+import { ensureWorkspaces } from './workspaces.ts';
 
 const EXTENSIONS_DIR = path.join(REPO_ROOT, 'packages', 'extensions');
 
 export type PreparedUser = ReturnType<typeof prepareUser>;
 
+/** Старое хозяйство лежало прямо в каталоге человека: переносим его в .icarus. */
+function migrateLayout(paths: ReturnType<typeof userPaths>): void {
+  const moves: Array<[string, string]> = [
+    [path.join(paths.root, 'memory'), paths.memory],
+    [path.join(paths.root, 'incoming'), paths.incoming],
+    [path.join(paths.root, 'sessions'), paths.sessions],
+    [path.join(paths.root, 'maple'), paths.maple],
+    [path.join(paths.root, 'AGENTS.md'), paths.agentsMd],
+    [path.join(paths.root, 'icarus.md'), paths.icarusMd],
+    [path.join(paths.root, 'MAPLE.md'), paths.mapleMd],
+  ];
+  for (const [from, to] of moves) {
+    // Переносим только когда старого места ещё есть что переносить, а нового нет:
+    // повторный запуск ничего не трогает, а данные человека не теряются.
+    if (!fs.existsSync(from) || fs.existsSync(to)) continue;
+    fs.mkdirSync(path.dirname(to), { recursive: true });
+    try {
+      fs.renameSync(from, to);
+    } catch {
+      // Другой файл уже занял место — старый оставляем как есть, падать не за что.
+    }
+  }
+}
+
 export function ensureDirs(config: IcarusConfig, user: UserConfig): void {
   const paths = userPaths(config, user);
+  migrateLayout(paths);
   for (const dir of [
+    paths.workspaces,
+    paths.icarus,
     paths.memory,
     paths.incoming,
     paths.sessions,
@@ -44,6 +72,11 @@ export function ensureDirs(config: IcarusConfig, user: UserConfig): void {
   for (const sub of ['people', 'projects', 'journal']) {
     fs.mkdirSync(path.join(paths.memory, sub), { recursive: true });
   }
+  // shared-memory монтируется вложенно внутрь /workspaces/.icarus: точку монтирования
+  // заводим заранее, иначе docker создаст её root-овой внутри маунта.
+  fs.mkdirSync(path.join(paths.icarus, 'shared-memory'), { recursive: true });
+  // «Разговор» и «Приватный» существуют всегда — вместе с их AGENTS.md.
+  ensureWorkspaces(config, user);
 }
 
 /**
@@ -84,8 +117,9 @@ export function renderAgentsMd(
   servers: Record<string, McpServerConfig> = config.mcp,
 ): string {
   const home = CONTAINER_PATHS.home;
+  const workspaces = CONTAINER_PATHS.workspaces;
   const rows = [
-    '| `/workspace/` | **свободное место**: твоя мастерская | работай и твори здесь, если попросят |',
+    `| \`${workspaces}/<workspace>/\` | **рабочая папка**: та, в которой ты сейчас | работай и твори здесь |`,
     `| \`${home}/memory/\` | **личная память** этого человека | читай смело, пиши когда просят запомнить |`,
     `| \`${home}/shared-memory/\` | **семейная память**, общая для всех | писать **только по явной просьбе** |`,
     `| \`${home}/incoming/\` | вложения из чата | разбирай сам: прочитай, посмотри, разложи |`,
@@ -122,14 +156,23 @@ export function renderAgentsMd(
 
   return `# Где ты находишься
 
-Ты работаешь в контейнере. Служебное — память, вложения, сессии и твои промпты — лежит
-в \`${home}\`, это внутреннее хозяйство Икара. Сам \`/workspace\` пуст: это место
-человека, где ты можешь свободно работать и творить, ничего не задевая.
+Ты работаешь в контейнере. Рабочих пространств (workspace) несколько: каждое — своя
+папка в \`${workspaces}\`, и одна из них сейчас твоя — она названа в подсказке к
+разговору. Служебное — память, вложения, сессии и твои промпты — лежит рядом, в
+\`${home}\`, и **не входит ни в один workspace**: это внутреннее хозяйство Икара.
 
 | Путь | Что это | Как обращаться |
 |---|---|---|
 ${rows.join('\n')}
 ${mcp}
+## Как устроены workspace'ы
+
+- Каждый workspace — отдельная папка \`${workspaces}/<имя>\` со своим \`AGENTS.md\`:
+  правила этой папки читай там же.
+- Служебное лежит вне рабочих папок — в \`${home}\`. Память одна на все workspace'ы:
+  что узнал в одном, помнишь и в другом.
+- В «Приватном» workspace всё только для чтения: писать в память и в файлы нельзя.
+
 ## Как устроена память
 
 Память лежит в \`${home}/memory\`:
@@ -149,7 +192,7 @@ ${mcp}
 ## Границы
 
 - \`${home}/shared-memory/\` — только по явной просьбе. Сомневаешься — пиши в личное.
-- Не удаляй чужие файлы и не трогай ничего за пределами \`/workspace\`.
+- Не удаляй чужие файлы и не трогай ничего за пределами \`${workspaces}\`.
 ${maple}`;
 }
 

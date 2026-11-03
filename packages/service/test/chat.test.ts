@@ -54,7 +54,7 @@ function dialog(userText: string, assistantText: string, at = '2026-11-01T10:00:
 
 test('в chats.json только метаданные: id, title, createdAt, channel и conversationId', () => {
   const { config, user } = fixture();
-  const chat = createChat(config, user, new Date('2026-11-01T10:00:00.000Z'));
+  const chat = createChat(config, user, 'talk', new Date('2026-11-01T10:00:00.000Z'));
 
   assert.deepEqual(readChats(config, user), [
     {
@@ -62,6 +62,7 @@ test('в chats.json только метаданные: id, title, createdAt, cha
       title: 'Новый чат',
       createdAt: '2026-11-01T10:00:00.000Z',
       channel: 'web',
+      workspace: 'talk',
       conversationId: chat.id,
     },
   ]);
@@ -76,7 +77,7 @@ test('в chats.json только метаданные: id, title, createdAt, cha
 
 test('ход веб-чата: заголовок из первой реплики, превью и время из файла сессии', () => {
   const { config, user } = fixture();
-  const chat = createChat(config, user, new Date('2026-11-01T10:00:00.000Z'));
+  const chat = createChat(config, user, 'talk', new Date('2026-11-01T10:00:00.000Z'));
   putSessionFile(config, user, chat.id, dialog('Собери план на четверг', 'Вот план: встреча в 10:00.'));
 
   finishChat(config, user, chat.id, 'Собери план на четверг');
@@ -91,7 +92,7 @@ test('ход веб-чата: заголовок из первой реплик�
 
 test('история берётся из файла сессии: текст и трассировка, без сырых результатов', () => {
   const { config, user } = fixture();
-  const chat = createChat(config, user, new Date('2026-11-01T10:00:00.000Z'));
+  const chat = createChat(config, user, 'talk', new Date('2026-11-01T10:00:00.000Z'));
   putSessionFile(config, user, chat.id, [
     { type: 'message', timestamp: '2026-11-01T10:00:01.000Z', message: { role: 'user', content: 'Построй план' } },
     {
@@ -173,8 +174,8 @@ test('Telegram-разговор в реестре, в списке и тольк
 
 test('список сортируется по createdAt, а не по времени файла сессии', () => {
   const { config, user } = fixture();
-  const older = createChat(config, user, new Date('2026-01-01T10:00:00.000Z'));
-  const newer = createChat(config, user, new Date('2026-02-01T10:00:00.000Z'));
+  const older = createChat(config, user, 'talk', new Date('2026-01-01T10:00:00.000Z'));
+  const newer = createChat(config, user, 'talk', new Date('2026-02-01T10:00:00.000Z'));
   const { file: olderFile } = putSessionFile(
     config,
     user,
@@ -198,7 +199,7 @@ test('список листается страницами, следующая �
   const created = [];
   for (let index = 1; index <= 5; index += 1) {
     const day = String(index).padStart(2, '0');
-    const chat = createChat(config, user, new Date(`2026-11-${day}T10:00:00.000Z`));
+    const chat = createChat(config, user, 'talk', new Date(`2026-11-${day}T10:00:00.000Z`));
     const { file } = putSessionFile(
       config,
       user,
@@ -276,8 +277,8 @@ test('через API внешний разговор читается, но не
 });
 
 test('шаги называют то, чем Икар занимался, а не сырое имя тула', () => {
-  assert.equal(traceLabel('bash', { command: 'cat /workspace/.icarus/memory/identity.md' }), 'ПАМЯТЬ');
-  assert.equal(traceLabel('bash', { command: 'ls /workspace' }), 'ТЕРМИНАЛ');
+  assert.equal(traceLabel('bash', { command: 'cat /workspaces/.icarus/memory/identity.md' }), 'ПАМЯТЬ');
+  assert.equal(traceLabel('bash', { command: 'ls /workspaces' }), 'ТЕРМИНАЛ');
   assert.equal(traceLabel('mcp_connect', { name: 'homeassistant' }), 'MCP');
   assert.equal(traceLabel('mcp_homeassistant_llm__GetDateTime'), 'ДОМ');
   assert.equal(traceDetail('mcp_connect', { name: 'homeassistant' }), 'homeassistant');
@@ -292,16 +293,16 @@ test('картинка из workspace отдаётся только из incomin
   fs.writeFileSync(path.join(paths.incoming, 'kotic.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
   fs.writeFileSync(path.join(paths.maple, 'plot.gif'), Buffer.from('GIF89a'));
 
-  const incoming = chatImageFile(config, user, '/workspace/.icarus/incoming/kotic.png');
+  const incoming = chatImageFile(config, user, '/workspaces/.icarus/incoming/kotic.png');
   assert.equal(incoming?.type, 'image/png');
   assert.match(incoming?.file ?? '', /kotic\.png$/);
 
-  const maple = chatImageFile(config, user, '/workspace/.icarus/maple/plot.gif');
+  const maple = chatImageFile(config, user, '/workspaces/.icarus/maple/plot.gif');
   assert.equal(maple?.type, 'image/gif');
 
-  assert.equal(chatImageFile(config, user, '/workspace/.icarus/incoming/../../etc/passwd.png'), null);
-  assert.equal(chatImageFile(config, user, '/workspace/.icarus/icarus.md'), null);
-  assert.equal(chatImageFile(config, user, '/workspace/.icarus/incoming/нет-такой.png'), null);
+  assert.equal(chatImageFile(config, user, '/workspaces/.icarus/incoming/../../etc/passwd.png'), null);
+  assert.equal(chatImageFile(config, user, '/workspaces/.icarus/icarus.md'), null);
+  assert.equal(chatImageFile(config, user, '/workspaces/.icarus/incoming/нет-такой.png'), null);
 });
 
 test('вложения из браузера ложатся в incoming, картинки уходят и в files, и в images', () => {
@@ -319,7 +320,7 @@ test('вложения из браузера ложатся в incoming, кар�
   assert.equal(uploaded.images.length, 1);
   assert.equal(uploaded.images[0]?.mimeType, 'image/png');
   assert.deepEqual(uploaded.names, ['котик.png', 'план.txt']);
-  assert.ok(uploaded.files[0]?.startsWith('/workspace/.icarus/incoming/'));
+  assert.ok(uploaded.files[0]?.startsWith('/workspaces/.icarus/incoming/'));
   for (const file of uploaded.files) {
     assert.ok(fs.existsSync(path.join(incoming, path.basename(file))));
   }
@@ -332,11 +333,11 @@ test('вложения из браузера ложатся в incoming, кар�
 
 test('след вложений в реплике разбирается обратно в плашки', () => {
   const parsed = splitPromptAttachments(
-    'Смотри\n\n[Пользователь приложил файлы, они уже лежат на диске:\n- /workspace/.icarus/incoming/a.png\n- /workspace/.icarus/incoming/b.pdf]',
+    'Смотри\n\n[Пользователь приложил файлы, они уже лежат на диске:\n- /workspaces/.icarus/incoming/a.png\n- /workspaces/.icarus/incoming/b.pdf]',
   );
   assert.equal(parsed.text, 'Смотри');
   assert.deepEqual(parsed.attachments, [
-    { path: '/workspace/.icarus/incoming/a.png', image: true },
-    { path: '/workspace/.icarus/incoming/b.pdf', image: false },
+    { path: '/workspaces/.icarus/incoming/a.png', image: true },
+    { path: '/workspaces/.icarus/incoming/b.pdf', image: false },
   ]);
 });

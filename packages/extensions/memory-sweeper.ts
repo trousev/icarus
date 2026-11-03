@@ -23,7 +23,7 @@ import {
   writeSweepState,
 } from "./lib/memory-sweep.ts";
 
-const ICARUS = process.env.ICARUS_HOME ?? "/workspace/.icarus";
+const ICARUS = process.env.ICARUS_HOME ?? "/workspaces/.icarus";
 const MEMORY = process.env.ICARUS_MEMORY_DIR ?? `${ICARUS}/memory`;
 const AFTER_HOURS = sweepAfterHours(process.env.ICARUS_SWEEP_AFTER_HOURS);
 const STATE = sweepStatePath(ICARUS);

@@ -1,9 +1,9 @@
 // Превращает события тулов pi в короткие человеческие фразы для reasoning_content,
 // чтобы в чате было видно, что Икар делает руками, а не только его ответ.
 
-const WORKSPACE = '/workspace/';
+const WORKSPACE = '/workspaces/';
 /** Служебный каталог: в чате его префикс только мешает, «memory/identity.md» понятнее. */
-const HOME = '/workspace/.icarus/';
+const HOME = '/workspaces/.icarus/';
 
 function shortPath(value: unknown): string {
   const text = typeof value === 'string' ? value : '';

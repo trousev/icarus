@@ -9,7 +9,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { userPaths, type IcarusConfig, type UserConfig } from '../config.ts';
+import { DEFAULT_WORKSPACE, userPaths, type IcarusConfig, type UserConfig } from '../config.ts';
 import { titleFromText } from '../http/title.ts';
 import { log } from '../log.ts';
 import { channelForConversation, sessionIdFor, type ChatChannel } from './identity.ts';
@@ -30,6 +30,8 @@ export type ChatRecord = {
   channel: ChatChannel;
   /** Разговор в терминах pi: по нему находится файл истории. */
   conversationId?: string;
+  /** Рабочая папка разговора: разговор навсегда остаётся в своём workspace'е. */
+  workspace: string;
 };
 
 function chatsFile(config: IcarusConfig, user: UserConfig): string {
@@ -90,6 +92,8 @@ function normalize(value: unknown): ChatRecord | null {
     title: typeof item.title === 'string' && item.title.trim() ? item.title : defaultTitle(channel),
     createdAt: typeof item.createdAt === 'string' ? item.createdAt : new Date(0).toISOString(),
     channel,
+    // Записи до появления workspace'ов все жили в «Разговоре».
+    workspace: typeof item.workspace === 'string' && item.workspace ? item.workspace : DEFAULT_WORKSPACE,
     ...(conversationId ? { conversationId } : {}),
   };
 }
@@ -139,14 +143,47 @@ export function sessionIdOf(chat: ChatRecord, user: UserConfig): string {
   return sessionIdFor(user.id, chat.id);
 }
 
+/**
+ * Убирает workspace: его диалоги возвращаются в «Разговор» (панель так и обещает),
+ * а сами файлы истории не трогаются — они лежат в общей папке сессий.
+ */
+export function reassignChats(config: IcarusConfig, user: UserConfig, from: string, to = DEFAULT_WORKSPACE): number {
+  const chats = readChats(config, user);
+  let moved = 0;
+  for (const chat of chats) {
+    if (chat.workspace !== from) continue;
+    chat.workspace = to;
+    moved += 1;
+  }
+  if (moved > 0) writeChats(config, user, chats);
+  return moved;
+}
+
+/** В каком workspace'е живёт разговор: у записей до переезда — «Разговор». */
+export function workspaceForConversation(
+  config: IcarusConfig,
+  user: UserConfig,
+  conversationId: string,
+): string | undefined {
+  return readChats(config, user).find(
+    (chat) => chat.conversationId === conversationId || chat.id === conversationId,
+  )?.workspace;
+}
+
 /** Новый веб-чат: единственный канал, который панель создаёт сама. */
-export function createChatRecord(config: IcarusConfig, user: UserConfig, now = new Date()): ChatRecord {
+export function createChatRecord(
+  config: IcarusConfig,
+  user: UserConfig,
+  workspace: string = DEFAULT_WORKSPACE,
+  now = new Date(),
+): ChatRecord {
   const id = `web-${now.getTime().toString(36)}-${crypto.randomBytes(3).toString('hex')}`;
   const chat: ChatRecord = {
     id,
     title: NEW_CHAT_TITLE,
     createdAt: now.toISOString(),
     channel: 'web',
+    workspace,
     conversationId: id,
   };
   const chats = readChats(config, user);
@@ -165,6 +202,7 @@ export function ensureChat(
   user: UserConfig,
   conversationId: string,
   channel: ChatChannel,
+  workspace: string = DEFAULT_WORKSPACE,
   now = new Date(),
 ): ChatRecord {
   const chats = readChats(config, user);
@@ -180,6 +218,7 @@ export function ensureChat(
       title: defaultTitle(channel),
       createdAt: now.toISOString(),
       channel,
+      workspace,
       conversationId,
     };
     chats.unshift(chat);
@@ -354,6 +393,7 @@ export function backfillChats(config: IcarusConfig, user: UserConfig): void {
         title: defaultTitle(channel),
         createdAt: createdAtFromFileName(path.basename(session.file)) ?? new Date(session.mtimeMs).toISOString(),
         channel,
+        workspace: DEFAULT_WORKSPACE,
         ...(mappedConversation ? { conversationId: mappedConversation } : {}),
       });
     }

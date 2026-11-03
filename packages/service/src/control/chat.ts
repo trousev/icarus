@@ -9,7 +9,16 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { CONTAINER_HOME, CONTAINER_INCOMING, findUser, userPaths, type IcarusConfig, type UserConfig } from '../config.ts';
+import {
+  CONTAINER_HOME,
+  CONTAINER_INCOMING,
+  DEFAULT_WORKSPACE,
+  findUser,
+  userPaths,
+  type IcarusConfig,
+  type UserConfig,
+} from '../config.ts';
+import { findWorkspace } from '../workspaces.ts';
 import { readJsonBody } from '../http/openai.ts';
 import { errorBody } from '../http/sse.ts';
 import { titleFromText } from '../http/title.ts';
@@ -140,6 +149,8 @@ export type ChatSummary = {
   /** Время последнего сообщения из файла; у пустого разговора — createdAt. */
   updatedAt: string;
   channel: ChatChannel;
+  /** Рабочая папка разговора. */
+  workspace: string;
   /** Писать можно только в веб-чат: Telegram и API панель показывает, но не ведёт. */
   readOnly: boolean;
 };
@@ -175,8 +186,13 @@ function pageOffset(cursor: unknown): number {
 }
 
 /** Новый веб-чат; остальные каналы появляются в реестре сами при первом ходе. */
-export function createChat(config: IcarusConfig, user: UserConfig, now = new Date()): ChatSummary {
-  return summaryOf(createChatRecord(config, user, now), null);
+export function createChat(
+  config: IcarusConfig,
+  user: UserConfig,
+  workspace: string = DEFAULT_WORKSPACE,
+  now = new Date(),
+): ChatSummary {
+  return summaryOf(createChatRecord(config, user, workspace, now), null);
 }
 
 const IMAGE_MIME = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
@@ -276,7 +292,7 @@ export function splitPromptAttachments(text: string): { text: string; attachment
 
 function previewOf(text: string): string {
   // В превью не должно быть markdown-картинки: в списке диалогов она выглядит
-  // как «!\[котик](/workspace/.icarus/...)». Сам путь оставляем: если человек спросил
+  // как «!\[котик](/workspaces/.icarus/...)». Сам путь оставляем: если человек спросил
   // адрес файла, именно он и должен быть виден в строке превью.
   const plain = text
     .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
@@ -448,6 +464,7 @@ function summaryOf(chat: ChatRecord, digest: SessionDigest | null): ChatSummary 
     createdAt: chat.createdAt,
     updatedAt: digest?.updatedAt || chat.createdAt,
     channel: chat.channel,
+    workspace: chat.workspace,
     readOnly: chat.channel !== 'web',
   };
 }
@@ -476,9 +493,11 @@ export function listChatPage(
   query = '',
   limit: unknown = DEFAULT_PAGE_SIZE,
   cursor?: string | null,
+  workspace?: string | null,
 ): ChatPage {
   const needle = query.trim().toLocaleLowerCase('ru');
   const records = readChats(config, user)
+    .filter((chat) => !workspace || chat.workspace === workspace)
     .filter(
       (chat) => !needle || `${chat.title}\n${chat.conversationId ?? ''}`.toLocaleLowerCase('ru').includes(needle),
     )
@@ -513,6 +532,7 @@ export function summaryAfterTurn(chat: ChatRecord, userText: string, assistantTe
     preview: previewOf(assistantText || userText) || NEW_CHAT_PREVIEW,
     createdAt: chat.createdAt,
     updatedAt: new Date().toISOString(),
+    workspace: chat.workspace,
     channel: chat.channel,
     readOnly: chat.channel !== 'web',
   };
@@ -761,6 +781,7 @@ export function readHistory(config: IcarusConfig, user: UserConfig, chatId: stri
       preview: previewOf(lastAssistant?.text ?? firstUser) || (chat.channel === 'web' ? NEW_CHAT_PREVIEW : ''),
       createdAt: chat.createdAt,
       updatedAt: last?.timestamp || chat.createdAt,
+      workspace: chat.workspace,
       channel: chat.channel,
       readOnly: chat.channel !== 'web',
     },
@@ -814,7 +835,7 @@ async function streamTurn(
 
   let session;
   try {
-    session = await registry.acquire(user, chatId);
+    session = await registry.acquire(user, chatId, chat.workspace);
   } catch (error) {
     json(res, 503, errorBody(`сессия недоступна: ${String(error)}`, 'server_error'));
     return;
@@ -987,13 +1008,20 @@ export async function handleChatApi(
         url.searchParams.get('q') ?? '',
         url.searchParams.get('limit'),
         url.searchParams.get('cursor'),
+        url.searchParams.get('workspace'),
       );
       json(res, 200, page);
       return true;
     }
 
     if (pathname === '/panel/api/chats' && req.method === 'POST') {
-      json(res, 200, { chat: createChat(ctx.config, user) });
+      const body = await bodyOf(req);
+      const workspace = typeof body.workspace === 'string' && body.workspace ? body.workspace : DEFAULT_WORKSPACE;
+      if (!findWorkspace(ctx.config, user, workspace)) {
+        json(res, 404, errorBody(`workspace «${workspace}» не найден`));
+        return true;
+      }
+      json(res, 200, { chat: createChat(ctx.config, user, workspace) });
       return true;
     }
 

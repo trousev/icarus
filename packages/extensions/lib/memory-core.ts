@@ -12,7 +12,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-const ICARUS = process.env.ICARUS_HOME ?? "/workspace/.icarus";
+const ICARUS = process.env.ICARUS_HOME ?? "/workspaces/.icarus";
 const MEMORY = process.env.ICARUS_MEMORY_DIR ?? `${ICARUS}/memory`;
 const LIMIT_PER_FILE = 1200;
 const LIMIT_TOTAL = 6000;

@@ -60,13 +60,16 @@ icarus (docker, Node/TS) — тонкий фасад, без знания о в�
   │  stdio (JSONL)
   ▼
 Контейнер пользователя (node + pi + git + ripgrep)
-  /workspace/.icarus/memory         ← bind: ~/icarus/<user>/memory   (git)
-  /workspace/.icarus/shared-memory  ← bind: ~/icarus/shared          (git)
-  /workspace/.icarus/maple          ← bind: ~/icarus/<user>/maple    (журналы и графики Maple)
-  /workspace/.icarus/sessions       ← bind: ~/icarus/<user>/sessions (история разговоров)
-  /workspace/.icarus/AGENTS.md      ← генерирует сервис: раскладка и правила
-  /workspace/.icarus/icarus.md      ← системный промпт (руками)
-  /workspace/scratchpad             ← bind: ~/src/scratchpad         (свободное место)
+  /workspaces                        ← bind: ~/icarus/<user>/workspaces   (корень, rw)
+    .icarus/memory                   ← git, общая память человека
+    .icarus/shared-memory            ← bind: ~/icarus/shared (git)
+    .icarus/maple                    ← журналы и графики Maple
+    .icarus/sessions                 ← история разговоров pi
+    .icarus/AGENTS.md                ← генерирует сервис: раскладка и правила
+    .icarus/icarus.md                ← системный промпт (руками)
+    talk/                            ← workspace по умолчанию, свой AGENTS.md
+    private/                         ← bind ro: только чтение
+    <имя>/                           ← новые workspace'ы: просто папки
   ~/.pi/agent/auth.json     ← ключ этого человека
   ~/.pi/agent/models.json   ← уровни моделей и thinking effort
   расширения pi: persona, memory-core, memory-extractor, escalation
@@ -187,7 +190,7 @@ assistant…»). Значит, переопределение промпта н�
 |---|---|
 | Контракт LibreChat | Снят живой запрос: заголовки с плейсхолдерами, тело, история, вложения, отмена |
 | pi в контейнере | `docker exec -i icarus-test pi --mode rpc` — JSONL по stdio, события стримятся |
-| Тулы в песочнице | bash-тул видит `/workspace`, пишет в примонтированную память; файл появляется на хосте |
+| Тулы в песочнице | bash-тул работает в `/workspaces/<workspace>`, пишет в память через `/workspaces/.icarus`; файл появляется на хосте |
 | Расширения | Загружаются из `~/.pi/agent/extensions/`; расширение-персона подменило промпт |
 | Персона | Дефолтный промпт кодинг-ассистента вытеснен; `AGENTS.md` сохранён в промпте |
 | Живой диалог | Реплика «Ты помнишь, кто я?» → агент сам прочитал `memory/`; «Запомни: люблю кофе без сахара» → сам дописал `preferences.md` (проверено на хосте) |

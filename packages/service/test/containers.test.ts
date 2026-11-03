@@ -133,36 +133,37 @@ test('стек: контейнер человека — образ, маунты
   assert.equal(service.init, true, 'без init сироты (ядра Maple) копятся зомби');
   assert.deepEqual(service.labels, userLabels(config, probe()));
   assert.equal(service.labels['icarus.spec'], specFor(config, probe()));
-  assert.ok(service.volumes.includes('/data/users/probe/memory:/workspace/.icarus/memory'));
-  assert.ok(service.volumes.includes('/data/users/probe/sessions:/workspace/.icarus/sessions'));
+  assert.ok(service.volumes.includes('/data/users/probe/workspaces:/workspaces'));
+  assert.ok(
+    service.volumes.includes('/data/users/probe/workspaces/private:/workspaces/private:ro'),
+    'приватный workspace монтируется только для чтения',
+  );
+  assert.ok(service.volumes.includes('/data/shared:/workspaces/.icarus/shared-memory'));
   assert.ok(service.volumes.includes('/host/scratchpad:/workspace/scratchpad:ro'));
   assert.equal(service.environment.ICARUS_MODEL_FAST, 'deepinfra/deepseek-ai/DeepSeek-V4.1-Flash:off');
   assert.equal(service.environment.ICARUS_USER_ID, 'probe');
 });
 
-// Смысл переезда: /workspace — свободное место человека, а всё наше собрано в одном
-// служебном каталоге. Тест сторожит именно это, а не конкретные имена: как только
-// кто-то снова смонтирует память или AGENTS.md прямо в корень, он упадёт.
-test('стек: служебные маунты живут в /workspace/.icarus, а не в самом /workspace', () => {
+// Смысл переезда: рабочие папки — в /workspaces, а служебное собрано в
+// /workspaces/.icarus и не попадает ни в один workspace. Тест сторожит именно это,
+// а не конкретные имена: как только кто-то снова смонтирует память или AGENTS.md
+// отдельным маунтом, он упадёт.
+test('стек: один корень /workspaces и только приватный workspace — только для чтения', () => {
   const bare = makeConfig({ dataDir: config.dataDir });
   const volumes: string[] = render(bare).services['icarus-user-probe'].volumes;
-  const targets = volumes
-    .map((volume) => volume.split(':')[1] ?? '')
-    .filter((target) => target.startsWith('/workspace'));
+  const targets = volumes.map((volume) => volume.split(':')[1] ?? '').filter((target) => target.startsWith('/workspace'));
 
-  assert.ok(targets.length > 0, 'маунты в /workspace вообще есть');
+  assert.ok(targets.includes('/workspaces'), 'корень рабочих папок смонтирован');
+  assert.ok(targets.includes('/workspaces/private'), 'приватный workspace смонтирован');
   for (const target of targets) {
-    assert.ok(
-      target.startsWith('/workspace/.icarus/'),
-      `маунт «${target}» лежит в свободном месте человека — ему там не место`,
-    );
+    assert.ok(target === '/workspaces' || target.startsWith('/workspaces/'), `маунт «${target}» мимо /workspaces`);
   }
 
   const joined = volumes.join('\n');
-  assert.match(joined, /\/workspace\/\.icarus\/AGENTS\.md:ro/, 'карта окружения в служебном каталоге');
-  assert.match(joined, /\/workspace\/\.icarus\/icarus\.md:ro/, 'персона в служебном каталоге');
-  assert.doesNotMatch(joined, /:\/workspace\/AGENTS\.md/, 'корень /workspace свободен');
-  assert.doesNotMatch(joined, /\/workspace\/\.sessions/, 'каталог сессий тоже переехал');
+  assert.match(joined, /:\/workspaces$/m, 'корень смонтирован ровно один раз');
+  assert.match(joined, /:\/workspaces\/private:ro$/m, 'и только он закрыт на запись');
+  assert.doesNotMatch(joined, /:\/workspace\//, 'старых маунтов в /workspace больше нет');
+  assert.doesNotMatch(joined, /:\/workspaces\/\.icarus\/memory/, 'память — просто папка внутри корня');
 });
 
 test('стек: docker.dns доезжает до сервиса и до контейнеров людей', () => {

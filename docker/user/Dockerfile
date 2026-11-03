@@ -21,14 +21,14 @@ RUN npm install -g --ignore-scripts "@earendil-works/pi-coding-agent@${PI_VERSIO
 
 # В образе node:24-slim уже есть пользователь node с uid/gid 1000 — переиспользуем его,
 # чтобы файлы примонтированной памяти не становились root-овыми на хосте.
-# .icarus — служебный каталог: туда сервис монтирует память, сессии и промпты.
-# Сам /workspace остаётся свободным местом человека, поэтому заводим только его.
-RUN mkdir -p /home/node/.pi/agent /workspace/.icarus \
-    && chown -R node:node /home/node /workspace
+# .icarus — служебный каталог: в нём живут память, сессии и промпты, и он не
+# входит ни в один workspace. Рабочие папки создаёт сервис.
+RUN mkdir -p /home/node/.pi/agent /workspaces/.icarus \
+    && chown -R node:node /home/node /workspaces
 
 USER node
 ENV HOME=/home/node
-WORKDIR /workspace
+WORKDIR /workspaces
 
 # Проверочный MCP-сервер: им тестируем мост pi → MCP без внешних сервисов
 COPY --chown=node:node mcp/ /opt/icarus/mcp/

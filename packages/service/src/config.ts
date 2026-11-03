@@ -707,10 +707,19 @@ export function findTelegramUser(config: IcarusConfig, username: string | undefi
  * ничего не задевая. Один список на весь код — чтобы точка монтирования и путь,
  * который уезжает в промпт, не разъезжались.
  */
-export const CONTAINER_HOME = '/workspace/.icarus';
+export const CONTAINER_HOME = '/workspaces/.icarus';
+
+/**
+ * Корень рабочих пространств. Один workspace — одна папка внутри: агент работает
+ * в /workspaces/<slug>, а служебное хозяйство лежит рядом, в /workspaces/.icarus,
+ * и ни в один workspace не входит. Так папка человека остаётся его папкой, а мы
+ * не подмешиваем в неё свои файлы.
+ */
+export const CONTAINER_WORKSPACES = '/workspaces';
 
 /** Пути внутри контейнера: только то, что мы монтируем сами (см. userVolumes). */
 export const CONTAINER_PATHS = {
+  workspaces: CONTAINER_WORKSPACES,
   home: CONTAINER_HOME,
   memory: `${CONTAINER_HOME}/memory`,
   maple: `${CONTAINER_HOME}/maple`,
@@ -720,7 +729,20 @@ export const CONTAINER_PATHS = {
   agentsMd: `${CONTAINER_HOME}/AGENTS.md`,
   icarusMd: `${CONTAINER_HOME}/icarus.md`,
   mapleMd: `${CONTAINER_HOME}/MAPLE.md`,
+  /** pi-agent монтируется к pi, а не в рабочее дерево: это его собственный дом. */
+  piAgent: '/home/node/.pi/agent',
 } as const;
+
+/** Workspace по умолчанию: в нём живут и сюда же возвращаются диалоги. */
+export const DEFAULT_WORKSPACE = 'talk';
+
+/** Приватный workspace: память видна, но писать в неё нельзя. */
+export const PRIVATE_WORKSPACE = 'private';
+
+/** Каталог workspace внутри контейнера — он же cwd сессии pi. */
+export function containerWorkspace(slug: string): string {
+  return `${CONTAINER_WORKSPACES}/${slug}`;
+}
 
 /**
  * Куда контейнер человека видит каталог вложений (см. userVolumes в compose.ts).
@@ -732,18 +754,24 @@ export const CONTAINER_INCOMING = CONTAINER_PATHS.incoming;
 /** Пути на хосте, которые сервис готовит и монтирует пользователю. */
 export function userPaths(config: IcarusConfig, user: UserConfig) {
   const root = path.join(config.dataDir, 'users', user.id);
+  // Всё служебное — под /workspaces/.icarus: корень рабочих пространств
+  // монтируется в контейнер целиком, и .icarus просто лежит внутри него.
+  const workspaces = path.join(root, 'workspaces');
+  const icarus = path.join(workspaces, '.icarus');
   return {
     root,
-    memory: path.join(root, 'memory'),
+    workspaces,
+    icarus,
+    memory: path.join(icarus, 'memory'),
     /**
      * Математика: журналы сессий Maple, графики и воркшиты. Лежит рядом с памятью
      * и переживает и перезапуск сервиса, и пересоздание контейнера: MCP-мост pi
      * поднимается на время чата, поэтому всё, что должно остаться, обязано лежать
      * на хосте, а не во временном каталоге внутри контейнера.
      */
-    maple: path.join(root, 'maple'),
-    incoming: path.join(root, 'incoming'),
-    sessions: path.join(root, 'sessions'),
+    maple: path.join(icarus, 'maple'),
+    incoming: path.join(icarus, 'incoming'),
+    sessions: path.join(icarus, 'sessions'),
     piAgent: path.join(root, 'pi-agent'),
     /**
      * Скиллы: `~/.pi/agent/skills` внутри контейнера. Каталог агентский (не проектный),
@@ -752,10 +780,10 @@ export function userPaths(config: IcarusConfig, user: UserConfig) {
      * обещает те же, что у памяти.
      */
     skills: path.join(root, 'pi-agent', 'skills'),
-    agentsMd: path.join(root, 'AGENTS.md'),
-    icarusMd: path.join(root, 'icarus.md'),
+    agentsMd: path.join(icarus, 'AGENTS.md'),
+    icarusMd: path.join(icarus, 'icarus.md'),
     /** Инструкция по Maple: читается агентом по требованию, не висит в промпте. */
-    mapleMd: path.join(root, 'MAPLE.md'),
+    mapleMd: path.join(icarus, 'MAPLE.md'),
     sharedMemory: path.join(config.dataDir, 'shared'),
   };
 }

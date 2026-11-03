@@ -192,6 +192,8 @@ let streaming = false;
 let stoppedByUser = false;
 /** Черновик нового чата: на сервере его ещё нет, пока не ушло первое сообщение. */
 let draft = false;
+/** Workspace, в котором появится черновик нового разговора. */
+let draftWorkspace = 'talk';
 /** Поколение загрузки истории: ответ, пришедший после смены чата, уже не нужен. */
 let historyToken = 0;
 /** Можно ли писать в открытый разговор: Telegram и API в панели только читаются. */
@@ -202,6 +204,11 @@ let loadingChats = false;
 let loadGeneration = 0;
 let searchTimer = 0;
 let pending = [];
+/** Workspace'ы человека и тот, в котором открыт текущий разговор. */
+let workspaces = [];
+let currentWorkspace = cfg.defaultWorkspace || 'talk';
+/** Пустое состояние до подмены экраном выбора workspace'а. */
+let defaultEmptyHtml = '';
 const CHAT_PAGE_SIZE = 30;
 const MAX_FILES = 8;
 const MAX_TOTAL_BYTES = 10 * 1024 * 1024;
@@ -535,6 +542,8 @@ async function selectChat(id) {
     if (token !== historyToken) return;
     currentChat = data.chat;
     currentId = data.chat.id;
+    currentWorkspace = data.chat.workspace || 'talk';
+    updateComposerHint();
     history.replaceState(null, '', '/panel/chat?chat=' + encodeURIComponent(currentId));
     if (!chats.some((chat) => chat.id === currentId)) {
       chats.unshift(data.chat);
@@ -552,8 +561,9 @@ async function selectChat(id) {
 }
 
 /* ── новый чат ──────────────────────────────────────────────────────────────
-   Клик по «Новый чат» не заводит разговор на сервере: кнопка превращается в
-   строку черновика, а настоящий чат появляется только с первым сообщением. */
+   Клик по «Новый чат» не заводит разговор на сервере: сначала выбирается
+   workspace, потом появляется строка черновика, а настоящий чат создаётся
+   только с первым сообщением — уже в выбранной папке. */
 function setDraft(on) {
   draft = on;
   el('new-chat').hidden = on;
@@ -567,40 +577,310 @@ function endDraft() {
 
 /** Создаёт разговор на сервере — ровно в момент отправки первой реплики. */
 async function createChat() {
-  const data = await api('/panel/api/chats', { method: 'POST', body: '{}' });
+  const data = await api('/panel/api/chats', {
+    method: 'POST',
+    body: JSON.stringify({ workspace: draftWorkspace }),
+  });
   historyToken += 1;
   currentId = data.chat.id;
   currentChat = data.chat;
+  currentWorkspace = data.chat.workspace || draftWorkspace;
   setDraft(false);
+  // Экран выбора мог остаться в chat-empty после показа workspace'ов.
+  restoreEmptyState();
   // rememberChat сам убирает дубликат и двигает разговор наверх, не сбрасывая
   // уже догруженные страницы списка.
   rememberChat(data.chat);
   el('chat-list').scrollTop = 0;
   history.replaceState(null, '', '/panel/chat?chat=' + encodeURIComponent(currentId));
   setComposer(false);
+  updateComposerHint();
   return data.chat;
 }
 
-function startDraft() {
+function startDraft(workspace = currentWorkspace) {
   if (streaming) return;
-  if (draft) {
+  if (draft && draftWorkspace === workspace) {
     el('chat-input').focus();
     closeMenu();
     return;
   }
   closeSettings();
   historyToken += 1;
+  draftWorkspace = workspace;
+  currentWorkspace = workspace;
   currentId = null;
   currentChat = null;
+  currentMessages = [];
   setDraft(true);
   setComposer(false);
+  restoreEmptyState();
   setTitle('Новый чат');
   showEmpty(true);
+  updateComposerHint();
   setWorking('');
   renderChats();
   history.replaceState(null, '', '/panel/chat?new=1');
   closeMenu();
   el('chat-input').focus();
+}
+
+/* ── workspace'ы ─────────────────────────────────────────────────────────────
+   Экран выбора: папки человека, а не контейнеры. Создание и удаление тут —
+   операции над каталогами, контейнер не трогаем вовсе. */
+
+function wsLabel(slug) {
+  const found = workspaces.find((item) => item.slug === slug);
+  return found ? found.name : slug;
+}
+
+function wsKindLabel(ws) {
+  if (ws.kind === 'talk') return 'по умолчанию';
+  if (ws.kind === 'private') return 'только чтение';
+  return 'свой';
+}
+
+function wsDescription(ws) {
+  if (ws.kind === 'talk') return 'Своя рабочая папка и свой AGENTS.md. Память общая.';
+  if (ws.kind === 'private') {
+    return 'Приватный workspace: только чтение и никакой записи в память.';
+  }
+  return 'Отдельная рабочая папка со своим AGENTS.md.';
+}
+
+function wsGlyph(ws) {
+  if (ws.kind === 'private') return '◍';
+  if (ws.kind === 'talk') return '◔';
+  return '▣';
+}
+
+async function loadWorkspaces() {
+  const data = await api('/panel/api/workspaces');
+  workspaces = data.workspaces || [];
+  return data;
+}
+
+function wsCard(ws) {
+  const remove =
+    ws.kind === 'custom'
+      ? '<button class="ws-del" data-del="' + esc(ws.slug) + '" title="Удалить workspace" aria-label="Удалить workspace">' +
+        '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 7h16M9 7V5h6v2M7 7l1 13h8l1-13"/></svg>' +
+        '</button>'
+      : '';
+  return (
+    '<div class="ws-card' + (ws.slug === currentWorkspace ? ' active' : '') + '" data-ws="' + esc(ws.slug) +
+    '" role="button" tabindex="0">' +
+    '<div class="ws-top"><span class="ws-glyph">' + wsGlyph(ws) + '</span>' +
+    '<span class="ws-name">' + esc(ws.name) + '</span>' +
+    '<span class="ws-kind">' + esc(wsKindLabel(ws)) + '</span>' + remove + '</div>' +
+    '<p class="ws-desc">' + esc(wsDescription(ws)) + '</p>' +
+    '<div class="ws-foot"><code>' + esc(ws.path) + '</code><span class="ws-chip">AGENTS.md</span></div>' +
+    '</div>'
+  );
+}
+
+function newWsCard(open) {
+  if (!open) {
+    return (
+      '<button class="ws-card ws-new" id="ws-new">' +
+      '<div class="ws-top"><span class="ws-glyph ws-plus">+</span><span class="ws-name">Новый workspace</span>' +
+      '<span class="ws-kind">своя папка</span></div>' +
+      '<p class="ws-desc">Назовите пространство — оно получит отдельную рабочую папку.</p>' +
+      '</button>'
+    );
+  }
+  return (
+    '<div class="ws-card ws-new open">' +
+    '<input id="ws-name" placeholder="Название workspace" maxlength="64" autocomplete="off">' +
+    '<div class="ws-form"><button class="ws-create" id="ws-create">Создать</button>' +
+    '<button class="ws-cancel" id="ws-cancel">Отмена</button></div>' +
+    '<p class="ws-hint">Новый workspace получит отдельную рабочую папку со своим AGENTS.md.</p>' +
+    '</div>'
+  );
+}
+
+const WS_PROMPTS = [
+  'Собери план на сегодня',
+  'Что ты помнишь о Марке?',
+  'Подготовь сводку по проекту «Атлас»',
+  'Напомни про дни рождения в июне',
+];
+
+function pickerHtml() {
+  return (
+    '<div class="ws-screen">' +
+    '<p class="ws-kicker">WORKSPACES</p>' +
+    '<h2>Выберите workspace</h2>' +
+    '<p class="ws-about">Workspace — это рабочая папка агента. У каждого своя папка и свой ' +
+    'AGENTS.md, поэтому поведение отличается. «Приватный» — исключение: папка только для чтения, ' +
+    'а запись в память запрещена.</p>' +
+    '<div class="ws-grid">' + workspaces.map(wsCard).join('') + newWsCard(false) + '</div>' +
+    '<p class="ws-suggest-title">НАЧАТЬ В «' + esc(wsLabel('talk')).toUpperCase() + '»</p>' +
+    '<div class="suggestions ws-suggestions">' +
+    WS_PROMPTS.map((prompt) => '<button data-prompt="' + esc(prompt) + '">' + esc(prompt) + '</button>').join('') +
+    '</div>' +
+    '</div>'
+  );
+}
+
+function restoreEmptyState() {
+  if (defaultEmptyHtml) el('chat-empty').innerHTML = defaultEmptyHtml;
+}
+
+/** Экран выбора: показываем, когда разговор не открыт. */
+function showPicker() {
+  closeSettings();
+  closeMenu();
+  currentId = null;
+  currentChat = null;
+  currentMessages = [];
+  currentWorkspace = 'talk';
+  history.replaceState(null, '', '/panel/chat');
+  renderChats();
+  el('chat-messages').innerHTML = '';
+  el('chat-empty').hidden = false;
+  el('chat-empty').innerHTML = pickerHtml();
+  bindPicker();
+  setTitle('Выберите workspace');
+  document.title = 'Icarus · workspace';
+  setComposer(false);
+  updateComposerHint();
+  setWorking('');
+}
+
+function bindPicker() {
+  const screen = el('chat-empty');
+  screen.querySelectorAll('.ws-card[data-ws]').forEach((node) => {
+    const open = (event) => {
+      if (event.target.closest('[data-del]')) return;
+      openWorkspace(node.dataset.ws).catch((error) => setWorking('не удалось открыть workspace: ' + error.message));
+    };
+    node.onclick = open;
+    node.onkeydown = (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        open(event);
+      }
+    };
+  });
+  screen.querySelectorAll('[data-del]').forEach((node) => {
+    node.onclick = (event) => {
+      event.stopPropagation();
+      askDeleteWorkspace(node.dataset.del);
+    };
+  });
+  const create = el('ws-new');
+  if (create) create.onclick = () => renderNewForm();
+  const submit = el('ws-create');
+  if (submit) submit.onclick = () => submitWorkspace().catch((error) => setWorking(error.message));
+  const cancel = el('ws-cancel');
+  if (cancel) cancel.onclick = () => bindNewCard(false);
+  const input = el('ws-name');
+  if (input) {
+    input.onkeydown = (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        submitWorkspace().catch((error) => setWorking(error.message));
+      }
+      if (event.key === 'Escape') bindNewCard(false);
+    };
+  }
+  screen.querySelectorAll('.suggestions button').forEach((node) => {
+    node.onclick = () => startInTalk(node.dataset.prompt);
+  });
+}
+
+function bindNewCard(open) {
+  const screen = el('chat-empty');
+  const card = screen.querySelector('.ws-new');
+  if (!card) return;
+  if (!open) {
+    card.outerHTML = newWsCard(false);
+    bindPicker();
+    return;
+  }
+  card.outerHTML = newWsCard(true);
+  const input = el('ws-name');
+  if (input) input.focus();
+  const submit = el('ws-create');
+  if (submit) submit.onclick = () => submitWorkspace().catch((error) => setWorking(error.message));
+  const cancel = el('ws-cancel');
+  if (cancel) cancel.onclick = () => bindNewCard(false);
+  if (input) {
+    input.onkeydown = (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        submitWorkspace().catch((error) => setWorking(error.message));
+      }
+      if (event.key === 'Escape') bindNewCard(false);
+    };
+  }
+}
+
+function renderNewForm() {
+  bindNewCard(true);
+}
+
+async function submitWorkspace() {
+  const input = el('ws-name');
+  const name = (input ? input.value : '').trim();
+  if (!name) {
+    setWorking('нужно название workspace');
+    return;
+  }
+  const data = await api('/panel/api/workspaces', { method: 'POST', body: JSON.stringify({ name }) });
+  await loadWorkspaces();
+  await openWorkspace(data.workspace.slug);
+}
+
+async function openWorkspace(slug) {
+  if (streaming) return;
+  closeSettings();
+  // Разговор появится на сервере только с первой репликой — в этом workspace'е.
+  startDraft(slug);
+}
+
+async function startInTalk(prompt) {
+  if (streaming) return;
+  if (!currentId) startDraft('talk');
+  await sendText(prompt);
+}
+
+function updateComposerHint() {
+  const input = el('chat-input');
+  if (input) input.placeholder = 'Написать в «' + wsLabel(currentWorkspace) + '»';
+}
+
+function askDeleteWorkspace(slug) {
+  const ws = workspaces.find((item) => item.slug === slug);
+  if (!ws) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'ws-modal';
+  overlay.innerHTML =
+    '<div class="ws-modal-card" role="dialog" aria-modal="true">' +
+    '<h2>Удалить workspace?</h2>' +
+    '<p>Workspace «' + esc(ws.name) + '» будет удалён. Диалоги останутся и вернутся в «' +
+    esc(wsLabel('talk')) + '». Рабочая папка на диске не затрагивается.</p>' +
+    '<div class="ws-modal-actions"><button class="ws-ghost" data-cancel>Отмена</button>' +
+    '<button class="ws-danger" data-ok>Удалить</button></div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelector('[data-cancel]').onclick = close;
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) close();
+  });
+  overlay.querySelector('[data-ok]').onclick = async () => {
+    close();
+    try {
+      await api('/panel/api/workspaces/' + encodeURIComponent(slug), { method: 'DELETE' });
+      await loadWorkspaces();
+      await loadChats(true);
+      showPicker();
+    } catch (error) {
+      setWorking('не удалось удалить workspace: ' + error.message);
+    }
+  };
 }
 
 /* ── живой ответ ──────────────────────────────────────────────────────────── */
@@ -910,7 +1190,10 @@ function closeMenu() {
   el('chat-app').classList.remove('side-open');
 }
 
-el('new-chat').onclick = startDraft;
+el('new-chat').onclick = () => {
+  endDraft();
+  showPicker();
+};
 el('draft-item').onclick = () => el('chat-input').focus();
 el('toggle-side').onclick = () => {
   if (window.matchMedia('(max-width: 900px)').matches) el('chat-app').classList.toggle('side-open');
@@ -1071,9 +1354,11 @@ document.querySelectorAll('.suggestions button').forEach((node) => {
   const params = new URLSearchParams(window.location.search);
   await loadState();
   await loadChats(true);
+  await loadWorkspaces();
+  defaultEmptyHtml = el('chat-empty').innerHTML;
   if (currentId) await selectChat(currentId);
-  else if (params.get('new') || !chats.length) startDraft();
-  else await selectChat(chats[0].id);
+  else await showPicker();
+  updateComposerHint();
   if (params.get('settings')) openSettings(params.get('settings'));
   if (writable) el('chat-input').focus();
 })().catch((error) => {

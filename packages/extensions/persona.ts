@@ -10,9 +10,9 @@ import { buildMemoryCore } from "./lib/memory-core.ts";
 import { formatSkillsBlock, type SkillEntry } from "./lib/skills-core.ts";
 import { TIME_INSTRUCTION } from "./lib/time-core.ts";
 
-// Служебный каталог Икара: память, вложения, сессии и промпты. Сам /workspace
-// оставлен человеку под свободную работу — наших файлов там больше нет.
-const ICARUS = process.env.ICARUS_HOME ?? "/workspace/.icarus";
+// Служебный каталог Икара: память, вложения, сессии и промпты. Лежит рядом с
+// рабочими папками, но ни в одну из них не входит — и в этом весь смысл.
+const ICARUS = process.env.ICARUS_HOME ?? "/workspaces/.icarus";
 const PERSONA = `${ICARUS}/icarus.md`;
 const AGENTS = `${ICARUS}/AGENTS.md`;
 const DUMP = `${ICARUS}/.prompt-dump.txt`;
@@ -41,8 +41,8 @@ export default function (pi: ExtensionAPI) {
     }
 
     // Карту окружения читаем сами: pi ищет AGENTS.md только вверх от рабочего
-    // каталога, а наш файл теперь лежит в служебном каталоге. Свой AGENTS.md
-    // человека в /workspace, если он появится, приедет из pi и встанет следом.
+    // каталога, а наш файл лежит вне рабочих папок. AGENTS.md самого workspace'а
+    // приезжает из pi как контекстный файл и встаёт следом.
     const ownContext = (event.systemPromptOptions?.contextFiles ?? []).filter(
       (file: { path: string }) => file.path !== AGENTS,
     );
@@ -78,6 +78,32 @@ export default function (pi: ExtensionAPI) {
     };
     const skillsBlock = formatSkillsBlock(options.skills ?? [], options.selectedTools ?? []);
 
+    // Где именно идёт разговор: workspace приезжает переменной от сервиса. Без
+    // этой строки модель видела бы только «где-то есть папки» и работала бы не в той.
+    const workspace = process.env.ICARUS_WORKSPACE ?? "talk";
+    const isPrivate = process.env.ICARUS_PRIVATE === "1";
+    const workspaceBlock = [
+      '# Твой workspace',
+      '',
+      `Ты работаешь в папке \`/workspaces/${workspace}\` — это и есть твой рабочий каталог.`,
+      'Служебное (память, вложения, сессии) лежит вне его, в `/workspaces/.icarus`.',
+      '',
+      ...(isPrivate
+        ? [
+            '## Приватный режим',
+            '',
+            'Это приватный разговор: память о человеке не меняется.',
+            '',
+            '- Память **только для чтения**: читай её, но не меняй — ни файлы, ни журнал, ни проекты.',
+            '- Инструменты записи и оболочка отключены. Не обещай «запомнить», «сохранить»',
+            '  или «положить в файл»: этого сделать нельзя. Если просят запомнить —',
+            '  честно скажи, что в приватном режиме ничего не сохраняется, и предложи',
+            '  обычный workspace.',
+            '- Рабочая папка тоже только для чтения.',
+          ]
+        : []),
+    ].join('\n');
+
     // Канал приезжает из сервиса переменной ICARUS_CHANNEL. В веб-чате картинку
     // из workspace можно показать markdown-ом — в Telegram такая разметка не
     // рендерится, поэтому учим только тот канал, где это правда работает.
@@ -93,7 +119,15 @@ export default function (pi: ExtensionAPI) {
 
     // TIME_INSTRUCTION — текст постоянный: сама дата в промпт не едет, иначе он менялся
     // бы от смены даты и рвал кэш. Свежее время приезжает меткой к реплике (см. clock.ts).
-    const systemPrompt = [persona, contextFiles, memoryBlock, skillsBlock, channelBlock, TIME_INSTRUCTION]
+    const systemPrompt = [
+      persona,
+      workspaceBlock,
+      contextFiles,
+      memoryBlock,
+      skillsBlock,
+      channelBlock,
+      TIME_INSTRUCTION,
+    ]
       .filter(Boolean)
       .join("\n\n---\n\n");
 

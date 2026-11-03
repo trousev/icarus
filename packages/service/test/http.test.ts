@@ -10,7 +10,7 @@ import { API_KEY, makeConfig } from './fixtures.ts';
 type Step = Record<string, unknown>;
 
 const DEFAULT_STEPS: Step[] = [
-  { type: 'tool_execution_start', toolName: 'read', args: { path: '/workspace/.icarus/memory/identity.md' } },
+  { type: 'tool_execution_start', toolName: 'read', args: { path: '/workspaces/.icarus/memory/identity.md' } },
   { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'Привет' } },
   { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: ', Саня' } },
   { type: 'agent_settled' },
@@ -251,7 +251,7 @@ test('новое сообщение модели начинается с пус�
   const steps: Step[] = [
     { type: 'message_update', assistantMessageEvent: { type: 'text_start' } },
     { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'Теперь журнал.' } },
-    { type: 'tool_execution_start', toolName: 'read', args: { path: '/workspace/.icarus/memory/journal/2026-09.md' } },
+    { type: 'tool_execution_start', toolName: 'read', args: { path: '/workspaces/.icarus/memory/journal/2026-09.md' } },
     { type: 'tool_execution_end', toolName: 'read', isError: false },
     { type: 'message_update', assistantMessageEvent: { type: 'text_start' } },
     { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: '## Шаг 2\n\nПрочитал журнал.' } },

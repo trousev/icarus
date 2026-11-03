@@ -17,7 +17,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { localDate, localParts, resolveZone } from "./lib/time-core.ts";
 
-const ICARUS = process.env.ICARUS_HOME ?? "/workspace/.icarus";
+const ICARUS = process.env.ICARUS_HOME ?? "/workspaces/.icarus";
 const MEMORY = process.env.ICARUS_MEMORY_DIR ?? `${ICARUS}/memory`;
 const MODEL = process.env.ICARUS_EXTRACT_MODEL ?? "deepinfra/deepseek-ai/DeepSeek-V4.1-Flash";
 const QUIET_MS = Number(process.env.ICARUS_EXTRACT_AFTER_MS ?? 90_000);
