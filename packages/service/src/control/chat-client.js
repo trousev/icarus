@@ -207,6 +207,8 @@ let pending = [];
 /** Workspace'ы человека и тот, в котором открыт текущий разговор. */
 let workspaces = [];
 let currentWorkspace = cfg.defaultWorkspace || 'talk';
+/** Папка нового чата по умолчанию: клик по «Новый чат» не тащит папку прошлого разговора. */
+const defaultWorkspace = currentWorkspace;
 /** Пустое состояние до подмены экраном выбора workspace'а. */
 let defaultEmptyHtml = '';
 const CHAT_PAGE_SIZE = 30;
@@ -531,6 +533,8 @@ async function selectChat(id) {
   if (!id || streaming) return;
   closeSettings();
   endDraft();
+  // Из черновика могли остаться экран выбора workspace'а — открытому чату он чужой.
+  restoreEmptyState();
   const token = ++historyToken;
   currentId = id;
   history.replaceState(null, '', '/panel/chat?chat=' + encodeURIComponent(id));
@@ -561,9 +565,9 @@ async function selectChat(id) {
 }
 
 /* ── новый чат ──────────────────────────────────────────────────────────────
-   Клик по «Новый чат» не заводит разговор на сервере: сначала выбирается
-   workspace, потом появляется строка черновика, а настоящий чат создаётся
-   только с первым сообщением — уже в выбранной папке. */
+   Клик по «Новый чат» сразу открывает новый чат: слева появляется строка
+   черновика, справа — выбор workspace'а. Папку можно менять сколько угодно раз,
+   пока не ушло первое сообщение: настоящий чат создаётся только с ним. */
 function setDraft(on) {
   draft = on;
   el('new-chat').hidden = on;
@@ -598,7 +602,7 @@ async function createChat() {
   return data.chat;
 }
 
-function startDraft(workspace = currentWorkspace) {
+function startDraft(workspace = defaultWorkspace) {
   if (streaming) return;
   if (draft && draftWorkspace === workspace) {
     el('chat-input').focus();
@@ -613,9 +617,10 @@ function startDraft(workspace = currentWorkspace) {
   currentChat = null;
   setDraft(true);
   setComposer(false);
-  restoreEmptyState();
   setTitle('Новый чат');
   showEmpty(true);
+  // Выбор workspace — не отдельный экран, а пустое состояние нового чата.
+  renderPicker();
   updateComposerHint();
   setWorking('');
   renderChats();
@@ -705,16 +710,20 @@ const WS_PROMPTS = [
   'Напомни про дни рождения в июне',
 ];
 
+/** Подпись над готовыми запросами: они уйдут в выбранную папку, а не всегда в «Разговор». */
+function suggestTitle() {
+  return 'НАЧАТЬ В «' + wsLabel(currentWorkspace).toUpperCase() + '»';
+}
+
 function pickerHtml() {
   return (
     '<div class="ws-screen">' +
-    '<p class="ws-kicker">WORKSPACES</p>' +
     '<h2>Выберите workspace</h2>' +
     '<p class="ws-about">Workspace — это рабочая папка агента. У каждого своя папка и свой ' +
     'AGENTS.md, поэтому поведение отличается. «Приватный» — исключение: папка только для чтения, ' +
     'а запись в память запрещена.</p>' +
     '<div class="ws-grid">' + workspaces.map(wsCard).join('') + newWsCard(false) + '</div>' +
-    '<p class="ws-suggest-title">НАЧАТЬ В «' + esc(wsLabel('talk')).toUpperCase() + '»</p>' +
+    '<p class="ws-suggest-title" id="ws-suggest-title">' + esc(suggestTitle()) + '</p>' +
     '<div class="suggestions ws-suggestions">' +
     WS_PROMPTS.map((prompt) => '<button data-prompt="' + esc(prompt) + '">' + esc(prompt) + '</button>').join('') +
     '</div>' +
@@ -726,24 +735,11 @@ function restoreEmptyState() {
   if (defaultEmptyHtml) el('chat-empty').innerHTML = defaultEmptyHtml;
 }
 
-/** Экран выбора: показываем, когда разговор не открыт. */
-function showPicker() {
-  closeSettings();
-  closeMenu();
-  currentId = null;
-  currentChat = null;
-  currentWorkspace = 'talk';
-  history.replaceState(null, '', '/panel/chat');
-  renderChats();
-  el('chat-messages').innerHTML = '';
+/** Пустое состояние черновика: выбор workspace'а живёт прямо в новом чате. */
+function renderPicker() {
   el('chat-empty').hidden = false;
   el('chat-empty').innerHTML = pickerHtml();
   bindPicker();
-  setTitle('Выберите workspace');
-  document.title = 'Icarus · workspace';
-  setComposer(false);
-  updateComposerHint();
-  setWorking('');
 }
 
 function bindPicker() {
@@ -783,9 +779,6 @@ function bindPicker() {
       if (event.key === 'Escape') bindNewCard(false);
     };
   }
-  screen.querySelectorAll('.suggestions button').forEach((node) => {
-    node.onclick = () => startInTalk(node.dataset.prompt);
-  });
 }
 
 function bindNewCard(open) {
@@ -831,22 +824,51 @@ async function submitWorkspace() {
   await openWorkspace(data.workspace.slug);
 }
 
+/** Выбор папки: в черновике просто переключаем её, не покидая новый чат. */
 async function openWorkspace(slug) {
   if (streaming) return;
   closeSettings();
-  // Разговор появится на сервере только с первой репликой — в этом workspace'е.
-  startDraft(slug);
+  if (!draft) {
+    startDraft(slug);
+    return;
+  }
+  if (draftWorkspace === slug) {
+    el('chat-input').focus();
+    return;
+  }
+  draftWorkspace = slug;
+  currentWorkspace = slug;
+  // Перерисовка заодно показывает только что созданную папку и гасит форму создания.
+  renderPicker();
+  updateComposerHint();
+  setWorking('');
+  el('chat-input').focus();
 }
 
-async function startInTalk(prompt) {
+/** Готовый запрос уходит в выбранную папку — и создаёт чат, как обычная реплика. */
+async function startPrompt(prompt) {
   if (streaming) return;
-  if (!currentId) startDraft('talk');
+  if (!draft) startDraft();
   await sendText(prompt);
 }
 
 function updateComposerHint() {
   const input = el('chat-input');
   if (input) input.placeholder = 'Написать в «' + wsLabel(currentWorkspace) + '»';
+}
+
+/** Список папок изменился: перерисовываем выбор, не выкидывая человека из черновика. */
+function refreshPicker() {
+  if (!draft) {
+    startDraft();
+    return;
+  }
+  if (!workspaces.some((item) => item.slug === draftWorkspace)) {
+    draftWorkspace = defaultWorkspace;
+    currentWorkspace = defaultWorkspace;
+  }
+  renderPicker();
+  updateComposerHint();
 }
 
 function askDeleteWorkspace(slug) {
@@ -874,7 +896,7 @@ function askDeleteWorkspace(slug) {
       await api('/panel/api/workspaces/' + encodeURIComponent(slug), { method: 'DELETE' });
       await loadWorkspaces();
       await loadChats(true);
-      showPicker();
+      refreshPicker();
     } catch (error) {
       setWorking('не удалось удалить workspace: ' + error.message);
     }
@@ -1188,10 +1210,8 @@ function closeMenu() {
   el('chat-app').classList.remove('side-open');
 }
 
-el('new-chat').onclick = () => {
-  endDraft();
-  showPicker();
-};
+/* «Новый чат» всегда открывает именно новый чат: workspace выбирается уже в нём. */
+el('new-chat').onclick = () => startDraft();
 el('draft-item').onclick = () => el('chat-input').focus();
 el('toggle-side').onclick = () => {
   if (window.matchMedia('(max-width: 900px)').matches) el('chat-app').classList.toggle('side-open');
@@ -1342,10 +1362,14 @@ el('chat-list').addEventListener('scroll', () => {
     loadChats(false).catch((error) => setWorking('не удалось догрузить диалоги: ' + error.message));
   }
 });
-document.querySelectorAll('.suggestions button').forEach((node) => {
-  node.onclick = () => {
-    sendText(node.dataset.prompt).catch(() => {});
-  };
+/* Подсказки живут и в пустом чате, и в черновике, и перерисовываются вместе с
+   ними: слушаем контейнер, иначе восстановленная разметка теряет обработчики. */
+el('chat-empty').addEventListener('click', (event) => {
+  const button = event.target.closest('.suggestions button[data-prompt]');
+  if (!button) return;
+  event.preventDefault();
+  if (draft) startPrompt(button.dataset.prompt);
+  else sendText(button.dataset.prompt).catch(() => {});
 });
 
 (async () => {
@@ -1355,7 +1379,7 @@ document.querySelectorAll('.suggestions button').forEach((node) => {
   await loadWorkspaces();
   defaultEmptyHtml = el('chat-empty').innerHTML;
   if (currentId) await selectChat(currentId);
-  else await showPicker();
+  else startDraft();
   updateComposerHint();
   if (params.get('settings')) openSettings(params.get('settings'));
   if (writable) el('chat-input').focus();

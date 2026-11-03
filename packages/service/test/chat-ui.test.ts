@@ -84,18 +84,17 @@ test('ширина сайдбара тянется и запоминается',
   assert.match(html, /\.side-resizer \{ display: none; \}/, 'на узком экране ручки нет');
 });
 
-test('новый чат — черновик: сервер узнаёт о нём с первым сообщением', () => {
+test('новый чат — черновик: workspace выбирается прямо в нём', () => {
   const html = chatPage(SESSION, { enabled: true });
-  // Кнопка превращается в строку списка, а POST /chats уходит из createChat —
-  // то есть ровно перед отправкой первой реплики, а не по клику.
+  // Кнопка сразу открывает новый чат, а выбор workspace'а живёт в его пустом
+  // состоянии: папку можно менять до первого сообщения, не теряя черновик.
   assert.match(html, /id="draft-wrap" hidden/, 'черновик спрятан до клика');
   assert.match(html, /id="draft-item"/, 'у черновика своя строка в списке');
-  assert.match(
-    html,
-    /el\('new-chat'\)\.onclick = \(\) => \{\s*endDraft\(\);\s*showPicker\(\);/,
-    'клик по кнопке открывает выбор workspace',
-  );
-  assert.match(html, /function startDraft\(workspace = currentWorkspace\)/, 'workspace выбирается до черновика');
+  assert.match(html, /el\('new-chat'\)\.onclick = \(\) => startDraft\(\)/, 'клик по кнопке сразу открывает новый чат');
+  assert.match(html, /function startDraft\(workspace = defaultWorkspace\)/, 'workspace выбирается в черновике');
+  assert.match(html, /function startDraft[\s\S]*?renderPicker\(\)/, 'в новом чате виден выбор workspace');
+  assert.match(html, /function openWorkspace[\s\S]*?draftWorkspace = slug/, 'папку можно сменить до первого сообщения');
+  assert.doesNotMatch(html, /function showPicker/, 'отдельного экрана выбора больше нет');
   assert.match(
     html,
     /body: JSON\.stringify\(\{ workspace: draftWorkspace \}\)/,
@@ -107,6 +106,15 @@ test('новый чат — черновик: сервер узнаёт о нё�
   assert.match(html, /--side-row: 58px/, 'высота строки задана один раз');
   assert.match(html, /\.new-chat \{[\s\S]*?height: var\(--side-row\)/, 'кнопка высотой со строку списка');
   assert.match(html, /\.draft-wrap \.chat-item \{[^}]*height: var\(--side-row\)/, 'черновик той же высоты');
+});
+
+test('экран выбора workspace выровнен по заголовку и без лишней подписи', () => {
+  const html = chatPage(SESSION, { enabled: true });
+  // «WORKSPACES» дублировала заголовок, а общее центрирование абзацев пустого
+  // чата сдвигало пояснение вправо от «Выберите workspace».
+  assert.doesNotMatch(html, /ws-kicker/, 'подпись WORKSPACES убрана');
+  assert.doesNotMatch(html, /\.chat-empty p \{/, 'общее правило абзацев не задевает выбор workspace');
+  assert.match(html, /\.chat-empty > p \{/, 'центрируется только текст пустого чата');
 });
 
 test('над списком диалогов нет лишнего заголовка', () => {
