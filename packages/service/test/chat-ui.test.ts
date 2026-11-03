@@ -90,7 +90,17 @@ test('новый чат — черновик: сервер узнаёт о нё�
   // то есть ровно перед отправкой первой реплики, а не по клику.
   assert.match(html, /id="draft-wrap" hidden/, 'черновик спрятан до клика');
   assert.match(html, /id="draft-item"/, 'у черновика своя строка в списке');
-  assert.match(html, /el\('new-chat'\)\.onclick = startDraft/, 'клик по кнопке только открывает черновик');
+  assert.match(
+    html,
+    /el\('new-chat'\)\.onclick = \(\) => \{\s*endDraft\(\);\s*showPicker\(\);/,
+    'клик по кнопке открывает выбор workspace',
+  );
+  assert.match(html, /function startDraft\(workspace = currentWorkspace\)/, 'workspace выбирается до черновика');
+  assert.match(
+    html,
+    /body: JSON\.stringify\(\{ workspace: draftWorkspace \}\)/,
+    'разговор создаётся сразу в выбранной папке',
+  );
   assert.match(html, /async function createChat/, 'создание вынесено в отдельную функцию');
   assert.doesNotMatch(html, /newChat\(/, 'мгновенного создания больше нет');
   // Кнопка и черновик — одна и та же высота строки, иначе список прыгает.

@@ -373,3 +373,63 @@
   .chat-search { width: 100%; }
   .chat-crumbs { display: none; }
 }
+
+/* ── workspace'ы: экран выбора ────────────────────────────────────────────── */
+.ws-screen { width: 100%; max-width: 720px; text-align: left; }
+.ws-kicker { margin: 0 0 6px; color: var(--dim); font-size: 10px; letter-spacing: .16em; }
+.ws-screen h2 { margin: 0 0 8px; font-size: 26px; letter-spacing: -.3px; }
+.ws-about { color: var(--dim); margin: 0 0 20px; line-height: 1.6; max-width: 640px; }
+.ws-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.ws-card {
+  position: relative; display: flex; flex-direction: column; gap: 8px;
+  text-align: left; font: inherit; color: var(--text); cursor: pointer;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px 12px;
+}
+.ws-card:hover { border-color: #3b465e; }
+.ws-card.active { border-color: var(--accent); background: var(--accent-soft); }
+.ws-top { display: flex; align-items: center; gap: 8px; }
+.ws-glyph { color: var(--accent); font-size: 15px; line-height: 1; }
+.ws-name { font-weight: 600; font-size: 15px; }
+.ws-kind { color: var(--dim); font-size: 11px; }
+.ws-del {
+  margin-left: auto; display: grid; place-items: center; width: 26px; height: 26px;
+  border: 1px solid var(--line); border-radius: 7px; background: transparent; color: var(--dim);
+}
+.ws-del:hover { color: var(--danger); border-color: var(--danger); }
+.ws-desc { margin: 0; color: var(--dim); font-size: 12.5px; line-height: 1.55; }
+.ws-foot { display: flex; align-items: center; gap: 8px; margin-top: auto; padding-top: 8px; }
+.ws-foot code { color: var(--dim); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-chip {
+  margin-left: auto; color: var(--dim); font-size: 10px; border: 1px solid var(--line);
+  border-radius: 5px; padding: 1px 6px; white-space: nowrap;
+}
+.ws-new { border-style: dashed; }
+.ws-plus { color: var(--dim); font-size: 16px; }
+.ws-new input {
+  width: 100%; background: var(--bg); border: 1px solid var(--accent); border-radius: 8px;
+  color: var(--text); font: inherit; padding: 8px 10px; outline: none;
+}
+.ws-form { display: flex; gap: 8px; }
+.ws-create, .ws-cancel, .ws-ghost, .ws-danger {
+  border-radius: 8px; border: 1px solid var(--line); padding: 7px 14px; font-size: 12.5px;
+  background: var(--raise); color: var(--text);
+}
+.ws-create { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.ws-danger { background: rgba(247, 118, 142, .12); border-color: rgba(247, 118, 142, .5); color: var(--danger); }
+.ws-hint { margin: 0; color: var(--dim); font-size: 11.5px; }
+.ws-suggest-title { margin: 26px 0 10px; color: var(--dim); font-size: 10px; letter-spacing: .14em; }
+.ws-suggestions { width: 100%; }
+.ws-modal {
+  position: fixed; inset: 0; background: rgba(8, 10, 14, .62); display: grid; place-items: center;
+  padding: 20px; z-index: 60; backdrop-filter: blur(3px);
+}
+.ws-modal-card {
+  width: min(460px, 100%); background: var(--panel); border: 1px solid var(--line);
+  border-radius: 14px; padding: 22px; box-shadow: 0 24px 60px rgba(0, 0, 0, .45);
+}
+.ws-modal-card h2 { margin: 0 0 10px; font-size: 17px; }
+.ws-modal-card p { margin: 0 0 18px; color: var(--dim); line-height: 1.6; }
+.ws-modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+@media (max-width: 760px) {
+  .ws-grid { grid-template-columns: 1fr; }
+}

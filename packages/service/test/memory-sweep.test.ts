@@ -611,7 +611,7 @@ test('интервал уборки читается из окружения, 0 
 });
 
 test('состояние уборки: dot-файл вне памяти и проверка интервала', () => {
-  assert.equal(sweepStatePath('/workspace'), path.join('/workspace', '.sweep.json'));
+  assert.equal(sweepStatePath('/workspaces/.icarus'), path.join('/workspaces/.icarus', '.sweep.json'));
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-sweep-state-'));
   const file = sweepStatePath(dir);

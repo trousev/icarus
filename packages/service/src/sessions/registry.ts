@@ -5,10 +5,16 @@ import path from 'node:path';
 import { ensureContainerRunning } from '../docker/manager.ts';
 import { log, redact } from '../log.ts';
 import { COMPACT_TIMEOUT_MS, PiSession, sessionIdFor, type CompactResult, type PiCommand } from './pi-session.ts';
-import { ensureChat } from './chats.ts';
+import { ensureChat, workspaceForConversation } from './chats.ts';
 import { channelForConversation } from './identity.ts';
 import { runOneShot, type OneShotOptions } from './one-shot.ts';
-import { userPaths, type IcarusConfig, type ModelConfig, type UserConfig } from '../config.ts';
+import {
+  DEFAULT_WORKSPACE,
+  userPaths,
+  type IcarusConfig,
+  type ModelConfig,
+  type UserConfig,
+} from '../config.ts';
 import { refreshUserMcpTokens } from '../mcp/refresh.ts';
 import { prepareUser } from '../workspace.ts';
 
@@ -20,6 +26,7 @@ export type SessionFactory = (
   model: ModelConfig,
   container: string,
   generation: number,
+  workspace: string,
 ) => PiSession;
 
 export type RegistryDeps = {
@@ -128,8 +135,8 @@ export class SessionRegistry {
     this.config = config;
     this.createSession =
       deps.createSession ??
-      ((userConfig, user, conversationId, model, container, generation) =>
-        new PiSession(userConfig, user, conversationId, model, container, generation));
+      ((userConfig, user, conversationId, model, container, generation, workspace) =>
+        new PiSession(userConfig, user, conversationId, model, container, generation, undefined, workspace));
     this.ensureContainer = deps.ensureContainer ?? ensureContainerRunning;
     // Тишину проверяем чаще, чем она наступает: сжатие должно случиться «после часа»,
     // а не «когда-нибудь потом». Пять минут — потолок проверки, иначе при часе
@@ -147,7 +154,7 @@ export class SessionRegistry {
   /**
    * Отмечает, что ресурсы человека поменялись. Живые сессии не трогаем: идущий ход
    * нужно доиграть, а следующая сессия этого разговора поднимется уже заново (см.
-   * acquire). История при этом не теряется — она лежит в /workspace/.sessions.
+   * acquire). История при этом не теряется — она лежит в /workspace/.icarus/sessions.
    */
   bumpResources(userId: string): number {
     const next = this.generation(userId) + 1;
@@ -194,7 +201,10 @@ export class SessionRegistry {
   }
 
   /** Находит или поднимает сессию разговора. */
-  async acquire(user: UserConfig, conversationId: string): Promise<PiSession> {
+  async acquire(user: UserConfig, conversationId: string, workspace?: string): Promise<PiSession> {
+    // Разговор помнит свой workspace; явный аргумент нужен там, где запись ещё
+    // не создана (новый чат панели) или её только предстоит завести.
+    const target = workspace ?? workspaceForConversation(this.config, user, conversationId) ?? DEFAULT_WORKSPACE;
     const key = `${user.id}:${conversationId}`;
     const generation = this.generation(user.id);
 
@@ -205,9 +215,12 @@ export class SessionRegistry {
 
     const existing = this.sessions.get(key);
     if (existing && existing.alive) {
-      // Ход идёт — не рвём его: пусть доиграет на старом каталоге, а перезапуск
-      // случится при следующем обращении к этому разговору.
-      if (existing.generation === generation || existing.busy) {
+      // Разговор переехал в другой workspace — старый процесс смотрел не туда,
+      // и продолжать его в новой папке нельзя: перезапускаем.
+      if (existing.workspace !== target) {
+        existing.dispose();
+        this.sessions.delete(key);
+      } else if (existing.generation === generation || existing.busy) {
         existing.lastUsed = Date.now();
         return existing;
       }
@@ -233,12 +246,20 @@ export class SessionRegistry {
     } catch (error) {
       log.warn('MCP: окружение перед сессией не обновилось', { user: user.id, error: String(error) });
     }
-    const session = this.createSession(this.config, user, conversationId, this.fastModel(), container, generation);
+    const session = this.createSession(
+      this.config,
+      user,
+      conversationId,
+      this.fastModel(),
+      container,
+      generation,
+      target,
+    );
     this.sessions.set(key, session);
     // Разговор поднялся — значит, он существует. Реестр ведёт все каналы сразу:
     // панель показывает Telegram и API рядом с веб-чатами, ничего не сканируя.
     try {
-      ensureChat(this.config, user, conversationId, channelForConversation(conversationId));
+      ensureChat(this.config, user, conversationId, channelForConversation(conversationId), target);
     } catch (error) {
       // Реестр — удобство панели, а не условие разговора: его сбой не должен
       // оставить человека без ответа.
@@ -328,7 +349,7 @@ export class SessionRegistry {
    * файл сессии в архив: без этого pi открыл бы прошлую историю. Живой процесс гасим:
    * он держит разговор в памяти и всё равно дописывал бы старый файл.
    *
-   * Память тут ни при чём: она лежит в /workspace/memory и `/clear` её не трогает.
+   * Память тут ни при чём: она лежит в /workspace/.icarus/memory и `/clear` её не трогает.
    */
   async clear(user: UserConfig, conversationId: string): Promise<ClearOutcome> {
     const key = `${user.id}:${conversationId}`;

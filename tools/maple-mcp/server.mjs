@@ -75,7 +75,7 @@ function resolveUserPath(p) {
 
 const SESSION_DIR = (() => {
   if (process.env.MAPLE_SESSION_DIR) return process.env.MAPLE_SESSION_DIR;
-  // Икар задаёт MAPLE_SESSION_DIR явно (/workspace/maple) — там журналы лежат
+  // Икар задаёт MAPLE_SESSION_DIR явно (/workspace/.icarus/maple) — там журналы лежат
   // рядом с памятью и переживают пересборку контейнера. Старый путь в pi-agent
   // остаётся запасным: по нему лежат расчёты, сделанные до переезда.
   const home = process.env.HOME || homedir();

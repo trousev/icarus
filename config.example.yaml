@@ -3,7 +3,7 @@
 # Рабочий файл — config.yaml рядом с этим; он в git не попадает, а ./script/update
 # копирует его отсюда при первом запуске.
 #
-# Здесь всё общее для всех людей: модели, MCP, маунты. Ключи — в .env рядом (образец
+# Здесь всё общее для всех людей: модели, MCP. Ключи — в .env рядом (образец
 # .env.example), у человека — только id (см. users внизу), из него выводятся имя
 # контейнера, каталоги в dataDir и id сессии pi.
 
@@ -98,12 +98,9 @@ env:
   ICARUS_SUBAGENT_TASK_TIMEOUT_MS: '300000'
   ICARUS_SUBAGENT_BUDGET_MS: '900000'
 
-# Каталоги с хоста: пока общие для всех, у каждого человека те же (плюс его личные)
-mounts: []
-# mounts:
-#   - host: ~/src/scratchpad
-#     container: /workspace/scratchpad
-#     mode: ro
+# Кастомных маунтов с хоста больше нет: контейнер видит только рабочие папки
+# (`/workspaces/<имя>`), служебный `.icarus` и установку Maple. Нужен чужой
+# репозиторий — сделай `git clone` в один из workspace'ов.
 
 # MCP-серверы: то, чем Икар обрастает без правки кода.
 #
@@ -122,13 +119,12 @@ mcp:
     command: node
     args: ['/opt/icarus/mcp/echo-server.mjs']
     lifecycle: eager
-# Maple: считается локально, файлы сервера монтируются из репозитория.
-# MAPLE_DIR задаётся в .env; обе стороны маунта обязаны совпадать — launcher
-# Maple ищет свои библиотеки по тому же пути, что записан внутри него.
+# Maple: считается локально, установка и код сервера монтируются из репозитория.
+# MAPLE_DIR задаётся в .env — сервис сам монтирует его в контейнер тем же путём,
+# что и на хосте: launcher ищет свои библиотеки по записанному внутри пути.
 #
 # Куда Maple пишет журналы сессий и графики, задаётся здесь и обязано указывать в
-# /workspace/maple: это персистентный маунт из dataDir, который сервис монтирует
-# сам (прописывать его в mounts не нужно). MCP-мост pi живёт только на время чата,
+# /workspaces/.icarus/maple: сервис монтирует этот каталог сам. MCP-мост pi живёт только на время чата,
 # а контейнер человека пересоздаётся на каждом ./script/server — всё, что осталось
 # в других местах контейнера, расчёт не переживёт. Раздел «математика» в панели
 # управления читает ровно этот каталог.
@@ -138,17 +134,10 @@ mcp:
 #    env:
 #      MAPLE_BIN: ${MAPLE_DIR}/bin/maple
 #      MAPLE_TIMEOUT_SECONDS: "25"
-#      MAPLE_SESSION_DIR: /workspace/maple
-#      MAPLE_PLOT_DIR: /workspace/maple
+#      MAPLE_SESSION_DIR: /workspaces/.icarus/maple
+#      MAPLE_PLOT_DIR: /workspaces/.icarus/maple
 #      MAPLE_PLOT_URL_BASE: http://localhost:8081/maple
 #    lifecycle: eager
-# и в mounts выше:
-#   - host: ${MAPLE_DIR}
-#     container: ${MAPLE_DIR}
-#     mode: ro
-#   - host: <путь к чекауту>/tools
-#     container: /opt/icarus/tools
-#     mode: ro
 
 # Home Assistant: MCP-сервер живёт в самом HA (адрес вида <хост>/api/mcp) и без
 # ключа отвечает 401 — авторизация у него не своя, а обычная для HA: долгоживущий

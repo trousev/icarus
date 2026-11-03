@@ -3,6 +3,7 @@
 // приходится экранировать бэктики и скобки, а браузер получает один и тот же JS
 // и в локальной панели, и в сервисе на проде.
 import fs from 'node:fs';
+import { DEFAULT_WORKSPACE } from '../config.ts';
 import { escapeHtml, shell, type PanelSession } from './ui.ts';
 
 const CLIENT_CSS = fs.readFileSync(new URL('./chat-client.css', import.meta.url), 'utf8');
@@ -25,6 +26,7 @@ export function chatPage(session: PanelSession, options: ChatPageOptions): strin
     model: session.model ?? '—',
     storage: session.storage ?? 'git · local',
     enabled: options.enabled,
+    defaultWorkspace: DEFAULT_WORKSPACE,
   };
   // JSON уезжает в <script>: экранируем «<», иначе значение с </script> закроет тег.
   const json = JSON.stringify(config).replaceAll('<', '\\u003c');

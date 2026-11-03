@@ -179,29 +179,35 @@ export async function ensureContainerRunning(config: IcarusConfig, user: UserCon
   throw new Error(`контейнер ${name} не найден — подними стек: ./script/server`);
 }
 
-/** Запускает `docker exec -i` с проброшенным stdio — на этом стоит RPC-мост. */
+/**
+ * Запускает `docker exec -i` с проброшенным stdio — на этом стоит RPC-мост.
+ * `workdir` — рабочий каталог процесса: так сессия попадает в свой workspace, не
+ * требуя отдельного маунта и пересоздания контейнера.
+ */
 export function spawnDockerExec(
   config: IcarusConfig,
   container: string,
   args: string[],
   extraEnv: Record<string, string> = {},
+  workdir?: string,
 ): ChildProcess {
   const envArgs = Object.entries(extraEnv).flatMap(([key, value]) => ['-e', `${key}=${value}`]);
-  return spawn('docker', ['exec', '-i', ...envArgs, container, ...args], {
+  const dirArgs = workdir ? ['-w', workdir] : [];
+  return spawn('docker', ['exec', '-i', ...envArgs, ...dirArgs, container, ...args], {
     env: dockerEnv(config),
     stdio: ['pipe', 'pipe', 'pipe'],
   });
 }
 
 /**
- * Разовая команда в контейнере: stdin закрыт, рабочая папка — /workspace,
+ * Разовая команда в контейнере: stdin закрыт, рабочая папка — /workspaces,
  * наружу идёт только stdout. Для вызовов, которым не нужен ни диалог, ни сессия.
  */
 export function spawnDockerOnce(
   config: IcarusConfig,
   container: string,
   args: string[],
-  workdir = '/workspace',
+  workdir = '/workspaces',
 ): ChildProcess {
   return spawn('docker', ['exec', '-w', workdir, container, ...args], {
     env: dockerEnv(config),

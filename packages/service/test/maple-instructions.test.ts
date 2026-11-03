@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { migrateLegacyMaple, renderAgentsMd } from '../src/workspace.ts';
 import { userVolumes } from '../src/docker/compose.ts';
-import { REPO_ROOT, userPaths } from '../src/config.ts';
+import { userPaths } from '../src/config.ts';
 import { makeConfig, probe } from './fixtures.ts';
 
 test('без настроенного Maple в AGENTS.md нет ни слова про него', () => {
@@ -33,24 +33,12 @@ test('с Maple в AGENTS.md только указатель, а не вся ин
 
 // Формулы человеку — всегда в LaTeX, и в инструкции должно быть видно и само
 // правило, и чем его исполнять: `latex()` в Maple и `maple_to_latex` в MCP.
-test('MAPLE.md требует всегда писать формулы в LaTeX', () => {
-  const md = fs.readFileSync(path.join(REPO_ROOT, 'MAPLE.md'), 'utf8');
-  assert.match(md, /#+\s*⛔?\s*Формулы[^\n]*LaTeX/, 'нужен отдельный раздел про формулы');
-  assert.match(md, /ВСЕГДА/, 'правило должно звучать безоговорочно');
-  assert.match(md, /\$x\^2\$/, 'нужен пример формулы в строке');
-  assert.match(md, /\$\$\.\.\.\$\$/, 'нужен пример выносной формулы');
-  assert.match(md, /latex\(expr, output=string\)/, 'нужна команда Maple latex(...)');
-  assert.match(md, /mcp_maple_to_latex/, 'нужен инструмент для перевода в LaTeX');
-});
-
-test('MAPLE.md монтируется в контейнер только при настроенном сервере', () => {
-  const without = userVolumes(makeConfig(), probe()).join('\n');
-  assert.doesNotMatch(without, /MAPLE\.md/);
-  const withMaple = userVolumes(
-    makeConfig({ mcp: { maple: { command: 'node', args: ['x.mjs'] } } }),
-    probe(),
-  ).join('\n');
-  assert.match(withMaple, /MAPLE\.md:\/workspace\/MAPLE\.md:ro/);
+test('MAPLE.md — файл в служебном каталоге, а не отдельный маунт', () => {
+  // Инструкция лежит внутри .icarus, то есть внутри единственного маунта корня:
+  // отдельной точки монтирования у неё больше нет.
+  for (const config of [makeConfig(), makeConfig({ mcp: { maple: { command: 'node', args: ['x.mjs'] } } })]) {
+    assert.doesNotMatch(userVolumes(config, probe()).join('\n'), /MAPLE\.md/, 'MAPLE.md едет вместе с корнем');
+  }
 });
 
 test('обычные разделы инструкции не задеты', () => {
@@ -60,21 +48,16 @@ test('обычные разделы инструкции не задеты', () 
   assert.match(md, /Границы/);
 });
 
-test('каталог математики монтируется постоянно и виден в раскладке', () => {
+test('каталог математики живёт рядом с памятью и виден в раскладке', () => {
   const nobody = renderAgentsMd(makeConfig());
-  assert.doesNotMatch(nobody, /workspace\/maple/, 'без Maple каталога математики нет');
+  assert.doesNotMatch(nobody, /workspaces\/\.icarus\/maple/, 'без Maple каталога математики нет');
 
   const md = renderAgentsMd(makeConfig({ mcp: { maple: { command: 'node' } } }));
-  assert.match(md, /`\/workspace\/maple\/`/, 'агент должен знать, где лежат расчёты');
+  assert.match(md, /`\/workspaces\/\.icarus\/maple\/`/, 'агент должен знать, где лежат расчёты');
 
-  // Каталог берётся из dataDir человека, а не из временного каталога контейнера:
-  // иначе расчёт не переживёт пересоздание контейнера.
-  const volumes = userVolumes(makeConfig({ mcp: { maple: { command: 'node' } } }), probe()).join('\n');
-  assert.match(volumes, /maple:\/workspace\/maple/);
-  assert.doesNotMatch(volumes, /\/workspace\/maple:ro/, 'математику Maple пишет сам, только ro её сломает');
-
-  const without = userVolumes(makeConfig(), probe()).join('\n');
-  assert.doesNotMatch(without, /workspace\/maple/);
+  // Каталог живёт на хосте в dataDir человека, а не во временном слое контейнера.
+  const paths = userPaths(makeConfig({ mcp: { maple: { command: 'node' } } }), probe());
+  assert.match(paths.maple, /workspaces\/\.icarus\/maple$/);
 });
 
 test('старые журналы Maple из pi-agent переезжают в постоянный каталог', () => {

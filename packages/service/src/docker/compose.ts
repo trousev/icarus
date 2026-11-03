@@ -14,7 +14,16 @@
 // можно проверять тестами, а решения о запуске остаются в script/server.
 import path from 'node:path';
 import { stringify as stringifyYaml } from 'yaml';
-import { CONTAINER_INCOMING, userContainer, userPaths, type IcarusConfig, type UserConfig } from '../config.ts';
+import {
+  CONTAINER_PATHS,
+  containerWorkspace,
+  PRIVATE_WORKSPACE,
+  REPO_ROOT,
+  userContainer,
+  userPaths,
+  type IcarusConfig,
+  type UserConfig,
+} from '../config.ts';
 import { containerEnv, LABEL_MANAGED, LABEL_SPEC, LABEL_USER, specFor } from './spec.ts';
 
 /** Имя compose-проекта: по этой метке compose отличает свои контейнеры от чужих. */
@@ -63,24 +72,31 @@ function bind(source: string, target: string, mode?: 'ro'): string {
   return `${source}:${target}${mode === 'ro' ? ':ro' : ''}`;
 }
 
-/** Тома контейнера человека: личные каталоги, персона и общие маунты из конфига. */
+/**
+ * Тома контейнера человека: корень рабочих пространств, служебное и общие маунты.
+ *
+ * Монтируется один корень `/workspaces`, внутри которого лежат и папки workspace'ов,
+ * и служебный `.icarus`. Поэтому новый workspace — это `mkdir`, а не новый маунт:
+ * контейнер не пересоздаётся, живые сессии не рвутся.
+ */
 export function userVolumes(config: IcarusConfig, user: UserConfig): string[] {
   const paths = userPaths(config, user);
   return [
-    bind(paths.memory, '/workspace/memory'),
-    // Математика — персистентно и рядом с памятью: журналы сессий Maple и графики
-    // не должны умирать вместе с MCP-мостом pi или пересозданием контейнера.
-    ...(config.mcp?.maple ? [bind(paths.maple, '/workspace/maple')] : []),
-    bind(paths.incoming, CONTAINER_INCOMING),
-    bind(paths.sessions, '/workspace/.sessions'),
-    bind(paths.sharedMemory, '/workspace/shared-memory'),
-    bind(paths.piAgent, '/home/node/.pi/agent'),
-    bind(paths.agentsMd, '/workspace/AGENTS.md', 'ro'),
-    bind(paths.icarusMd, '/workspace/icarus.md', 'ro'),
-    // Инструкция по Maple монтируется только когда сервер настроен: пустой файл
-    // или каталог на его месте только путали бы агента.
-    ...(config.mcp?.maple ? [bind(paths.mapleMd, '/workspace/MAPLE.md', 'ro')] : []),
-    ...config.mounts.map((mount) => bind(mount.host, mount.container, mount.mode === 'ro' ? 'ro' : undefined)),
+    bind(paths.workspaces, CONTAINER_PATHS.workspaces),
+    // «Приватный» — единственный workspace, смонтированный только для чтения.
+    // Он лежит внутри уже смонтированного корня, поэтому docker накладывает его
+    // поверх; порядок в списке задаёт родителя раньше ребёнка.
+    bind(path.join(paths.workspaces, PRIVATE_WORKSPACE), containerWorkspace(PRIVATE_WORKSPACE), 'ro'),
+    // shared-memory — единственный каталог, который не принадлежит человеку:
+    // он общий на весь инстанс и лежит вне его дерева.
+    bind(paths.sharedMemory, CONTAINER_PATHS.sharedMemory),
+    bind(paths.piAgent, CONTAINER_PATHS.piAgent),
+    // Maple — единственное внешнее дерево, которое контейнер видит. Путь установки
+    // обязан совпадать с хостовым: launcher ищет свои библиотеки по записанному
+    // внутри пути. Отдельного поля в конфиге для этого больше нет — сервис знает сам.
+    ...(config.mapleDir !== undefined ? [bind(config.mapleDir, config.mapleDir, 'ro')] : []),
+    // Сервер Maple живёт в репозитории: его код тоже нужен контейнеру.
+    ...(config.mapleDir !== undefined ? [bind(path.join(REPO_ROOT, 'tools'), '/opt/icarus/tools', 'ro')] : []),
   ];
 }
 

@@ -8,6 +8,7 @@ import path from 'node:path';
 import { log } from './log.ts';
 import { renderModelsJson } from './providers.ts';
 import {
+  CONTAINER_PATHS,
   mcpLifecycle,
   REPO_ROOT,
   userPaths,
@@ -17,14 +18,42 @@ import {
   type UserConfig,
 } from './config.ts';
 import { effectiveServers, ensureOAuthProxyKeys, readStore, storePaths } from './mcp/registry.ts';
+import { ensureWorkspaces } from './workspaces.ts';
 
 const EXTENSIONS_DIR = path.join(REPO_ROOT, 'packages', 'extensions');
 
 export type PreparedUser = ReturnType<typeof prepareUser>;
 
+/** Старое хозяйство лежало прямо в каталоге человека: переносим его в .icarus. */
+function migrateLayout(paths: ReturnType<typeof userPaths>): void {
+  const moves: Array<[string, string]> = [
+    [path.join(paths.root, 'memory'), paths.memory],
+    [path.join(paths.root, 'incoming'), paths.incoming],
+    [path.join(paths.root, 'sessions'), paths.sessions],
+    [path.join(paths.root, 'maple'), paths.maple],
+    [path.join(paths.root, 'AGENTS.md'), paths.agentsMd],
+    [path.join(paths.root, 'icarus.md'), paths.icarusMd],
+    [path.join(paths.root, 'MAPLE.md'), paths.mapleMd],
+  ];
+  for (const [from, to] of moves) {
+    // Переносим только когда старого места ещё есть что переносить, а нового нет:
+    // повторный запуск ничего не трогает, а данные человека не теряются.
+    if (!fs.existsSync(from) || fs.existsSync(to)) continue;
+    fs.mkdirSync(path.dirname(to), { recursive: true });
+    try {
+      fs.renameSync(from, to);
+    } catch {
+      // Другой файл уже занял место — старый оставляем как есть, падать не за что.
+    }
+  }
+}
+
 export function ensureDirs(config: IcarusConfig, user: UserConfig): void {
   const paths = userPaths(config, user);
+  migrateLayout(paths);
   for (const dir of [
+    paths.workspaces,
+    paths.icarus,
     paths.memory,
     paths.incoming,
     paths.sessions,
@@ -38,11 +67,16 @@ export function ensureDirs(config: IcarusConfig, user: UserConfig): void {
     fs.mkdirSync(dir, { recursive: true });
   }
   // Каталог математики заводим только при настроенном Maple: пустая папка в
-  // /workspace без сервера только сбивала бы агента с толку.
+  // служебном каталоге без сервера только сбивала бы агента с толку.
   if (config.mcp?.maple) fs.mkdirSync(paths.maple, { recursive: true });
   for (const sub of ['people', 'projects', 'journal']) {
     fs.mkdirSync(path.join(paths.memory, sub), { recursive: true });
   }
+  // shared-memory монтируется вложенно внутрь /workspaces/.icarus: точку монтирования
+  // заводим заранее, иначе docker создаст её root-овой внутри маунта.
+  fs.mkdirSync(path.join(paths.icarus, 'shared-memory'), { recursive: true });
+  // «Разговор» и «Приватный» существуют всегда — вместе с их AGENTS.md.
+  ensureWorkspaces(config, user);
 }
 
 /**
@@ -82,22 +116,19 @@ export function renderAgentsMd(
   config: IcarusConfig,
   servers: Record<string, McpServerConfig> = config.mcp,
 ): string {
+  const home = CONTAINER_PATHS.home;
+  const workspaces = CONTAINER_PATHS.workspaces;
   const rows = [
-    '| `/workspace/memory/` | **личная память** этого человека | читай смело, пиши когда просят запомнить |',
-    '| `/workspace/shared-memory/` | **семейная память**, общая для всех | писать **только по явной просьбе** |',
-    '| `/workspace/incoming/` | вложения из чата | разбирай сам: прочитай, посмотри, разложи |',
-    '| `/workspace/icarus.md` | твой системный промпт | не редактируй |',
+    `| \`${workspaces}/<workspace>/\` | **рабочая папка**: та, в которой ты сейчас | работай и твори здесь |`,
+    `| \`${home}/memory/\` | **личная память** этого человека | читай смело, пиши когда просят запомнить |`,
+    `| \`${home}/shared-memory/\` | **семейная память**, общая для всех | писать **только по явной просьбе** |`,
+    `| \`${home}/incoming/\` | вложения из чата | разбирай сам: прочитай, посмотри, разложи |`,
+    `| \`${home}/icarus.md\` | твой системный промпт | не редактируй |`,
     ...(servers.maple
       ? [
-          '| `/workspace/maple/` | **математика**: журналы и файлы расчётов Maple | читай и считай через Maple, руками файлы не правь |',
+          `| \`${home}/maple/\` | **математика**: журналы и файлы расчётов Maple | читай и считай через Maple, руками файлы не правь |`,
         ]
       : []),
-    ...config.mounts.map(
-      (mount) =>
-        `| \`${mount.container}\` | репозиторий или каталог с кодом | ${
-          mount.mode === 'ro' ? 'только чтение' : 'можно менять, если попросят'
-        } |`,
-    ),
   ];
 
   // Детали про Maple живут в отдельном MAPLE.md и читаются по требованию.
@@ -110,7 +141,7 @@ export function renderAgentsMd(
     ? `
 ## Если нужна математика
 
-Математика, аналитика, Maple — читай \`MAPLE.md\`: там что умеет, как вести
+Математика, аналитика, Maple — читай \`${home}/MAPLE.md\`: там что умеет, как вести
 расчёты в сессиях и что говорить человеку.
 `
     : '';
@@ -119,20 +150,33 @@ export function renderAgentsMd(
 
   return `# Где ты находишься
 
-Ты работаешь в контейнере. Всё, что тебе нужно, лежит в \`/workspace\`:
+Ты работаешь в контейнере. Рабочих пространств (workspace) несколько: каждое — своя
+папка в \`${workspaces}\`, и одна из них сейчас твоя — она названа в подсказке к
+разговору. Служебное — память, вложения, сессии и твои промпты — лежит рядом, в
+\`${home}\`, и **не входит ни в один workspace**: это внутреннее хозяйство Икара.
 
 | Путь | Что это | Как обращаться |
 |---|---|---|
 ${rows.join('\n')}
 ${mcp}
+## Как устроены workspace'ы
+
+- Каждый workspace — отдельная папка \`${workspaces}/<имя>\` со своим \`AGENTS.md\`:
+  правила этой папки читай там же.
+- Служебное лежит вне рабочих папок — в \`${home}\`. Память одна на все workspace'ы:
+  что узнал в одном, помнишь и в другом.
+- В «Приватном» workspace всё только для чтения: писать в память и в файлы нельзя.
+
 ## Как устроена память
 
-- \`memory/identity.md\` — кто этот человек: имя, привычки, устойчивые предпочтения.
-- \`memory/preferences.md\` — вкусы, табу, как с ним разговаривать. Здесь и в identity — только устойчивое.
-- \`memory/people/\` — люди вокруг: по файлу на человека.
-- \`memory/projects/\` — длящиеся дела и временные состояния: здоровье, бумаги, работа, переезд, ремонт.
+Память лежит в \`${home}/memory\`:
+
+- \`identity.md\` — кто этот человек: имя, привычки, устойчивые предпочтения.
+- \`preferences.md\` — вкусы, табу, как с ним разговаривать. Здесь и в identity — только устойчивое.
+- \`people/\` — люди вокруг: по файлу на человека.
+- \`projects/\` — длящиеся дела и временные состояния: здоровье, бумаги, работа, переезд, ремонт.
   Датированной строкой состояния: «по состоянию на 21.09.2026 — …».
-- \`memory/journal/YYYY-MM.md\` — журнал: события по датам, построчно. В подсказку он не
+- \`journal/YYYY-MM.md\` — журнал: события по датам, построчно. В подсказку он не
   подмешивается: что было раньше — читай файлом, когда это и правда нужно.
 
 Правила простые: не дублируй то, что уже написано; противоречия не копи, а правь старую запись;
@@ -141,8 +185,8 @@ ${mcp}
 
 ## Границы
 
-- \`shared-memory/\` — только по явной просьбе. Сомневаешься — пиши в личное.
-- Не удаляй чужие файлы и не трогай ничего за пределами \`/workspace\`.
+- \`${home}/shared-memory/\` — только по явной просьбе. Сомневаешься — пиши в личное.
+- Не удаляй чужие файлы и не трогай ничего за пределами \`${workspaces}\`.
 ${maple}`;
 }
 
@@ -235,7 +279,7 @@ function copyDirFiles(from: string, to: string, depth = 0): string[] {
 /**
  * Переносит старые расчёты Maple из pi-agent в постоянный каталог математики.
  *
- * До появления `/workspace/maple` сервер по умолчанию писал журналы в
+ * До появления постоянного каталога математики сервер по умолчанию писал журналы в
  * `<pi-agent>/maple-mcp`, а каталог pi-agent при пересборке окружения не чистится —
  * то есть чужого там не бывает, и перенести его безопасно. Копируем, а не
  * перемещаем: если в постоянном каталоге уже есть свежая версия файла, побеждает

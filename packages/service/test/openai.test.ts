@@ -42,16 +42,16 @@ test('вложение раскодируется в файл, а не теря�
   const { text, files } = extractLatestUserMessage(messages, dir);
   assert.equal(text, 'что на картинке?');
   assert.equal(files.length, 1);
-  assert.match(files[0], /^\/workspace\/incoming\/.+\.png$/);
+  assert.match(files[0], /^\/workspaces\/\.icarus\/incoming\/.+\.png$/);
   const written = fs.readdirSync(dir);
   assert.equal(written.length, 1);
   assert.ok(fs.statSync(path.join(dir, written[0])).size > 0, 'файл не должен быть пустым');
 });
 
 test('упоминание вложений попадает в реплику', () => {
-  const prompt = buildPrompt('что тут?', ['/workspace/incoming/a.png']);
+  const prompt = buildPrompt('что тут?', ['/workspaces/.icarus/incoming/a.png']);
   assert.match(prompt, /что тут\?/);
-  assert.match(prompt, /\/workspace\/incoming\/a\.png/);
+  assert.match(prompt, /\/workspaces\/\.icarus\/incoming\/a\.png/);
 });
 
 test('подстановка ~ и переменных окружения', () => {
@@ -66,18 +66,18 @@ test('контейнер монтирует память, сессии и реп
     dataDir: '/data',
     docker: { image: 'icarus-user:dev', prefix: 'icarus-user', socket: null },
     models: [{ provider: 'deepinfra', id: 'deepseek-ai/DeepSeek-V4.1-Flash', tier: 'fast' as const }],
-    mounts: [{ host: '/host/scratchpad', container: '/workspace/scratchpad', mode: 'ro' as const }],
   } as unknown as IcarusConfig;
   const joined = userVolumes(config, { id: 'probe' }).join(' ');
-  assert.match(joined, /\/data\/users\/probe\/memory:\/workspace\/memory/);
-  assert.match(joined, /\/data\/users\/probe\/sessions:\/workspace\/\.sessions/);
-  assert.match(joined, /\/host\/scratchpad:\/workspace\/scratchpad:ro/);
+  assert.match(joined, /\/data\/users\/probe\/workspaces:\/workspaces/);
+  assert.match(joined, /\/data\/users\/probe\/workspaces\/private:\/workspaces\/private:ro/);
 });
 
 test('пути пользователя выводятся из dataDir', () => {
   const config = { dataDir: '/data' } as unknown as IcarusConfig;
   const paths = userPaths(config, { id: 'probe' });
-  assert.equal(paths.memory, '/data/users/probe/memory');
+  assert.equal(paths.workspaces, '/data/users/probe/workspaces');
+  assert.equal(paths.memory, '/data/users/probe/workspaces/.icarus/memory');
+  assert.equal(paths.agentsMd, '/data/users/probe/workspaces/.icarus/AGENTS.md');
   assert.equal(paths.sharedMemory, '/data/shared');
 });
 

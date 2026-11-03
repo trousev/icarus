@@ -17,8 +17,8 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { localDate, localParts, resolveZone } from "./lib/time-core.ts";
 
-const MEMORY = process.env.ICARUS_MEMORY_DIR ?? "/workspace/memory";
-const WORKSPACE = process.env.ICARUS_WORKSPACE ?? "/workspace";
+const ICARUS = process.env.ICARUS_HOME ?? "/workspaces/.icarus";
+const MEMORY = process.env.ICARUS_MEMORY_DIR ?? `${ICARUS}/memory`;
 const MODEL = process.env.ICARUS_EXTRACT_MODEL ?? "deepinfra/deepseek-ai/DeepSeek-V4.1-Flash";
 const QUIET_MS = Number(process.env.ICARUS_EXTRACT_AFTER_MS ?? 90_000);
 const MAX_TRANSCRIPT = 6000;
@@ -436,7 +436,9 @@ export function runOneShot(prompt: string, timeoutMs = 120_000): Promise<string>
         "--no-skills",
         "--no-prompt-templates",
       ],
-      { cwd: WORKSPACE, stdio: ["ignore", "pipe", "pipe"] },
+      // Рабочий каталог — служебный: относительные пути одноразового прогона
+      // не должны оказаться в свободном месте человека.
+      { cwd: ICARUS, stdio: ["ignore", "pipe", "pipe"] },
     );
 
     let stdout = "";

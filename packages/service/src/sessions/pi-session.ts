@@ -4,23 +4,50 @@ import { RpcClient, type RpcEvent, type Spawner } from './rpc-client.ts';
 import { channelForConversation, sessionIdFor } from './identity.ts';
 import { refreshChatTitle } from './chats.ts';
 import { log } from '../log.ts';
-import type { IcarusConfig, ModelConfig, UserConfig } from '../config.ts';
+import {
+  CONTAINER_PATHS,
+  containerWorkspace,
+  DEFAULT_WORKSPACE,
+  PRIVATE_WORKSPACE,
+  type IcarusConfig,
+  type ModelConfig,
+  type UserConfig,
+} from '../config.ts';
 
 /** Реэкспорт для тех, кто по-прежнему ищет id сессии рядом с PiSession. */
 export { sessionIdFor };
 
-export function piArgsFor(model: ModelConfig, sessionId: string): string[] {
+/**
+ * Что остаётся от расширений в приватном режиме: персона и всё, что только читает.
+ * Экстрактор и уборщик памяти сюда не входят — они пишут в память фоном.
+ */
+const PRIVATE_EXTENSIONS = ['persona.ts', 'clock.ts', 'control-panel.ts', 'web-search.ts', 'escalation.ts', 'private-guard.ts'];
+
+/** Инструменты, которыми можно писать. В приватном workspace их не выдаём вовсе. */
+const WRITE_TOOLS = 'write,edit,bash';
+
+export function piArgsFor(model: ModelConfig, sessionId: string, workspace: string = DEFAULT_WORKSPACE): string[] {
+  const isPrivate = workspace === PRIVATE_WORKSPACE;
   return [
     '--mode',
     'rpc',
     '--session-dir',
-    '/workspace/.sessions',
+    CONTAINER_PATHS.sessions,
     '--session-id',
     sessionId,
     '--model',
     `${model.provider}/${model.id}`,
     '--thinking',
     model.thinking ?? 'off',
+    ...(isPrivate
+      ? [
+          '--no-extensions',
+          ...PRIVATE_EXTENSIONS.flatMap((name) => ['-e', `${CONTAINER_PATHS.piAgent}/extensions/${name}`]),
+          // Даже если расширение не загрузится, тулы записи модель просто не увидит.
+          '--exclude-tools',
+          WRITE_TOOLS,
+        ]
+      : []),
   ];
 }
 
@@ -85,6 +112,8 @@ export class PiSession {
 
   readonly user: UserConfig;
   readonly conversationId: string;
+  /** В каком workspace'е идёт разговор: он же рабочий каталог процесса pi. */
+  readonly workspace: string;
   private config: IcarusConfig;
   private client: RpcClient;
   private listeners = new Set<(event: RpcEvent) => void>();
@@ -101,10 +130,12 @@ export class PiSession {
     generation = 0,
     /** Чем запускать pi: в тестах — заглушкой, в бою — docker exec (см. RpcClient). */
     spawner?: Spawner,
+    workspace: string = DEFAULT_WORKSPACE,
   ) {
     this.user = user;
     this.conversationId = conversationId;
     this.config = config;
+    this.workspace = workspace;
     this.key = `${user.id}:${conversationId}`;
     this.container = container;
     this.generation = generation;
@@ -113,10 +144,19 @@ export class PiSession {
     // Канал нужен расширению-персоне: в веб-чате можно показать картинку
     // markdown-ом, в Telegram — нельзя, и учить модель лишнему незачем.
     const channel = channelForConversation(conversationId);
-    this.client = new RpcClient(config, container, piArgsFor(model, this.sessionId), spawner, {
-      ICARUS_CHANNEL: channel,
-      ...modelEnv(config),
-    });
+    this.client = new RpcClient(
+      config,
+      container,
+      piArgsFor(model, this.sessionId, workspace),
+      spawner,
+      {
+        ICARUS_CHANNEL: channel,
+        ...modelEnv(config),
+        ICARUS_WORKSPACE: workspace,
+        ...(workspace === PRIVATE_WORKSPACE ? { ICARUS_PRIVATE: '1' } : {}),
+      },
+      containerWorkspace(workspace),
+    );
     this.detach = this.client.onEvent((event) => {
       // Во время сжатия сессия занята не ходом: `agent_settled` тут ни при чём,
       // иначе ход влез бы в сессию посреди переписывания контекста.

@@ -72,8 +72,8 @@ node tools/maple-mcp/test-sessions.mjs       # 25 проверок журнал�
 | `MAPLE_TIMEOUT_SECONDS` | `60` | таймаут одного вычисления, сек |
 | `MAPLE_IDLE_SECONDS` | `300` | простой, после которого ядро гасится |
 | `MAPLE_MAX_SESSIONS` | `4` | максимум одновременных ядер |
-| `MAPLE_SESSION_DIR` | `~/.pi/agent/maple-mcp`; в Икаре задан явно — `/workspace/maple` | журналы сессий |
-| `MAPLE_PLOT_DIR` | `<SESSION_DIR>/plots`; в Икаре задан явно — `/workspace/maple` | куда складывать графики |
+| `MAPLE_SESSION_DIR` | `~/.pi/agent/maple-mcp`; в Икаре задан явно — `/workspaces/.icarus/maple` | журналы сессий |
+| `MAPLE_PLOT_DIR` | `<SESSION_DIR>/plots`; в Икаре задан явно — `/workspaces/.icarus/maple` | куда складывать графики |
 | `MAPLE_JOURNAL_MAX_BYTES` | `524288` | предел журнала (дальше старые записи отбрасываются) |
 | `MAPLE_WORKSPACE_ROOT` | текущий каталог | база для относительных путей `.mw` |
 | `MAPLE_HTTP_PORT` / `MAPLE_HTTP_HOST` | `8770` / `0.0.0.0` | адрес HTTP-режима |
@@ -101,22 +101,15 @@ node tools/maple-mcp/test-sessions.mjs       # 25 проверок журнал�
   SSE по `Accept`, заголовок `Mcp-Session-Id`). Проверен официальным
   `@modelcontextprotocol/sdk` — тем же, что использует `pi-mcp-extension`.
 
-## Подключение к Икару (через docker compose)
+## Подключение к Икару
 
 Отдельный compose-сервис и systemd не нужны: **Maple 18 работает прямо внутри
 контейнера агента** — проверено, лицензия не привязана к железу
-(`HOSTID=INTERNET=*.*.*.*`). Всё делается штатными средствами Икара: `mounts:` +
-stdio-MCP.
+(`HOSTID=INTERNET=*.*.*.*`). Маунты сервис делает сам: включает `mcp.maple` —
+и монтирует `${MAPLE_DIR}` (тем же путём, что на хосте) и каталог `tools`
+репозитория в `/opt/icarus/tools`. В конфиге остаётся только сам сервер:
 
 ```yaml
-mounts:
-  - host: ${MAPLE_DIR}                    # сам Maple; обе стороны — из .env
-    container: ${MAPLE_DIR}
-    mode: ro
-  - host: /home/trousev/src/icarus/tools  # каталог с сервером
-    container: /opt/icarus/tools
-    mode: ro
-
 mcp:
   maple:
     command: node
@@ -125,10 +118,10 @@ mcp:
     env:
       MAPLE_BIN: ${MAPLE_DIR}/bin/maple
       MAPLE_TIMEOUT_SECONDS: "25"
-      # Журналы и графики — в постоянный каталог человека: /workspace/maple
+      # Журналы и графики — в постоянный каталог человека: /workspaces/.icarus/maple
       # сервис монтирует из dataDir сам, из config.yaml его прописывать не надо.
-      MAPLE_SESSION_DIR: /workspace/maple
-      MAPLE_PLOT_DIR: /workspace/maple
+      MAPLE_SESSION_DIR: /workspaces/.icarus/maple
+      MAPLE_PLOT_DIR: /workspaces/.icarus/maple
       MAPLE_PLOT_URL_BASE: http://localhost:8081/maple
     lifecycle: eager
 ```
@@ -152,7 +145,7 @@ docker exec -u node icarus-user-probe node /opt/icarus/tools/maple-mcp/test.mjs
 
 Инструкция для агента — отдельный файл **`MAPLE.md`** в корне репозитория. Если в
 `config.yaml` есть `mcp.maple`, сервис кладёт его в каталог человека и монтирует
-как `/workspace/MAPLE.md:ro`, а в `AGENTS.md` добавляет **только указатель**:
+как `/workspaces/.icarus/MAPLE.md:ro`, а в `AGENTS.md` добавляет **только указатель**:
 
 > Математика, аналитика, Maple — читай `MAPLE.md`.
 

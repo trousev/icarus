@@ -72,6 +72,7 @@ test('старый chats.json: preview и updatedAt выбрасываются, 
       title: 'План на неделю',
       createdAt: '2026-10-01T10:00:00.000Z',
       channel: 'web',
+      workspace: 'talk',
       conversationId: 'web-old',
     },
   ]);
@@ -119,6 +120,13 @@ test('ensureChat добавляет Telegram-разговор один раз и
   assert.equal(chats[0]?.id, 'telegram-42');
 });
 
+test('разговор, поднятый в приватном workspace, остаётся в нём и в реестре', () => {
+  const { config, user } = fixture();
+  const chat = ensureChat(config, user, 'api-private-1', 'api', 'private');
+  assert.equal(chat.workspace, 'private');
+  assert.equal(byId(readChats(config, user), 'api-private-1')?.workspace, 'private');
+});
+
 test('заголовок Telegram-разговора берётся из первой реплики и сохраняется', () => {
   const { config, user } = fixture();
   putSession(config, user, 'telegram-42', 'Собери отчёт для мамы');
@@ -137,6 +145,7 @@ test('sessionIdOf знает веб-чат, Telegram и старую session-з�
     title: 'Веб',
     createdAt: '2026-11-01T10:00:00.000Z',
     channel: 'web',
+    workspace: 'talk',
     conversationId: 'web-1',
   };
   const telegram: ChatRecord = {
@@ -144,6 +153,7 @@ test('sessionIdOf знает веб-чат, Telegram и старую session-з�
     title: 'Телега',
     createdAt: '2026-11-01T10:00:00.000Z',
     channel: 'telegram',
+    workspace: 'talk',
     conversationId: 'telegram-42',
   };
   const legacy: ChatRecord = {
@@ -151,6 +161,7 @@ test('sessionIdOf знает веб-чат, Telegram и старую session-з�
     title: 'Старый',
     createdAt: '2026-11-01T10:00:00.000Z',
     channel: 'telegram',
+    workspace: 'talk',
   };
 
   assert.equal(sessionIdOf(web, user), sessionIdFor(user.id, 'web-1'));
@@ -202,7 +213,14 @@ test('перед миграцией старый chats.json сохраняетс
   assert.equal(backup.chats[0]?.preview, 'превью', 'старый файл цел');
   const migrated = readChats(config, user);
   assert.equal(migrated[0]?.channel, 'web');
-  assert.deepEqual(Object.keys(migrated[0] ?? {}).sort(), ['channel', 'conversationId', 'createdAt', 'id', 'title']);
+  assert.deepEqual(Object.keys(migrated[0] ?? {}).sort(), [
+    'channel',
+    'conversationId',
+    'createdAt',
+    'id',
+    'title',
+    'workspace',
+  ]);
 });
 
 test('битый chats.json откладывается в сторону, а не затирается', () => {

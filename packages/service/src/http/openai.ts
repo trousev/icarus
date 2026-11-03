@@ -6,6 +6,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createHash } from 'node:crypto';
 import { log, redact } from '../log.ts';
 import { CONTAINER_INCOMING, findUser, userPaths, type IcarusConfig, type UserConfig } from '../config.ts';
+import { findWorkspace } from '../workspaces.ts';
 import { buildPrompt } from '../prompt.ts';
 import { compareHistory, normalizeContent, type IncomingMessage as ChatMessage } from '../sessions/divergence.ts';
 import { phraseForToolEnd, phraseForToolStart } from '../reasoning.ts';
@@ -258,6 +259,15 @@ export async function handleChatCompletions(
     return;
   }
 
+  // Workspace выбирает клиент; без заголовка разговор идёт в «Разговор».
+  const requestedWorkspace =
+    typeof req.headers['x-icarus-workspace'] === 'string' ? req.headers['x-icarus-workspace'].trim() : '';
+  if (requestedWorkspace && !findWorkspace(config, user, requestedWorkspace)) {
+    res.writeHead(404, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(errorBody(`workspace «${requestedWorkspace}» не найден`, 'not_found')));
+    return;
+  }
+
   const paths = userPaths(config, user);
   const { text, files, images } = extractLatestUserMessage(messages, paths.incoming);
   if (!text && files.length === 0) {
@@ -272,7 +282,7 @@ export async function handleChatCompletions(
 
   let session: PiSession;
   try {
-    session = await registry.acquire(user, conversationId);
+    session = await registry.acquire(user, conversationId, requestedWorkspace || undefined);
   } catch (error) {
     log.error('не удалось поднять сессию', { userId, error: String(error) });
     res.writeHead(503, { 'content-type': 'application/json' });

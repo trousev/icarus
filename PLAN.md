@@ -18,7 +18,7 @@
 |---|--------|---------|
 | 1 | Пользователи | 2–5 близких: изоляция настоящая, но без SaaS-обвязки |
 | 2 | Изоляция | Docker-контейнер на человека; люди перечислены в конфиге сервиса; контейнерами управляем программно |
-| 3 | Маунты | `memory/` (личное), `shared-memory/` (семейное), список репозиториев (`scratchpad` первым), `AGENTS.md` в корне |
+| 3 | Маунты | только внутренние: корень workspace'ов, `shared-memory`, установка Maple. Кастомные каталоги с хоста не поддерживаются — нужен репозиторий, делаем чекаут в workspace |
 | 4 | Наполнение памяти | Гибрид: «запомни» — сразу; плюс фоновый экстрактор, прозрачно и с откатом |
 | 5 | Форма памяти | Полки по смыслу + журнал: `identity.md`, `people/`, `preferences.md`, `projects/`, `journal/YYYY-MM.md` |
 | 6 | Чтение памяти | Компактное ядро всегда в промпте; остальное — тулами поиска (ещё и защита prompt-кеша) |
@@ -60,12 +60,16 @@ icarus (docker, Node/TS) — тонкий фасад, без знания о в�
   │  stdio (JSONL)
   ▼
 Контейнер пользователя (node + pi + git + ripgrep)
-  /workspace/memory         ← bind: ~/icarus/<user>/memory   (git)
-  /workspace/shared-memory  ← bind: ~/icarus/shared          (git)
-  /workspace/maple          ← bind: ~/icarus/<user>/maple    (журналы и графики Maple)
-  /workspace/scratchpad     ← bind: ~/src/scratchpad         (позже, не в MVP)
-  /workspace/AGENTS.md      ← генерирует сервис: раскладка и правила
-  /workspace/icarus.md      ← системный промпт (руками)
+  /workspaces                        ← bind: ~/icarus/<user>/workspaces   (корень, rw)
+    .icarus/memory                   ← git, общая память человека
+    .icarus/shared-memory            ← bind: ~/icarus/shared (git)
+    .icarus/maple                    ← журналы и графики Maple
+    .icarus/sessions                 ← история разговоров pi
+    .icarus/AGENTS.md                ← генерирует сервис: раскладка и правила
+    .icarus/icarus.md                ← системный промпт (руками)
+    talk/                            ← workspace по умолчанию, свой AGENTS.md
+    private/                         ← bind ro: только чтение
+    <имя>/                           ← новые workspace'ы: просто папки
   ~/.pi/agent/auth.json     ← ключ этого человека
   ~/.pi/agent/models.json   ← уровни моделей и thinking effort
   расширения pi: persona, memory-core, memory-extractor, escalation
@@ -186,7 +190,7 @@ assistant…»). Значит, переопределение промпта н�
 |---|---|
 | Контракт LibreChat | Снят живой запрос: заголовки с плейсхолдерами, тело, история, вложения, отмена |
 | pi в контейнере | `docker exec -i icarus-test pi --mode rpc` — JSONL по stdio, события стримятся |
-| Тулы в песочнице | bash-тул видит `/workspace`, пишет в примонтированную память; файл появляется на хосте |
+| Тулы в песочнице | bash-тул работает в `/workspaces/<workspace>`, пишет в память через `/workspaces/.icarus`; файл появляется на хосте |
 | Расширения | Загружаются из `~/.pi/agent/extensions/`; расширение-персона подменило промпт |
 | Персона | Дефолтный промпт кодинг-ассистента вытеснен; `AGENTS.md` сохранён в промпте |
 | Живой диалог | Реплика «Ты помнишь, кто я?» → агент сам прочитал `memory/`; «Запомни: люблю кофе без сахара» → сам дописал `preferences.md` (проверено на хосте) |

@@ -25,6 +25,7 @@
 // Новые маршруты короче и называют раздел явно — их и рисует сама панель.
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import fs from 'node:fs';
+import { handleWorkspacesApi } from './workspaces.ts';
 import { findUser, userPaths, type IcarusConfig } from '../config.ts';
 import { readJsonBody } from '../http/openai.ts';
 import { errorBody } from '../http/sse.ts';
@@ -416,6 +417,12 @@ async function handleApi(
   // до общего readJsonBody ниже.
   if (url.pathname === '/panel/api/chats' || url.pathname.startsWith('/panel/api/chat/')) {
     await handleChatApi(req, res, url, { config, userId, registry: ctx.registry });
+    return;
+  }
+
+  // Workspace'ы — папки, а не контейнеры: отдельная ветка, тот же человек из прокси.
+  if (url.pathname === '/panel/api/workspaces' || url.pathname.startsWith('/panel/api/workspaces/')) {
+    await handleWorkspacesApi(req, res, url, { config, userId });
     return;
   }
 
