@@ -519,7 +519,11 @@ test('ошибка авторизации MCP даёт в ответе ссыл�
     { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'Не вышло.' } },
     { type: 'agent_settled' },
   ];
-  const { bot, state } = makeBot({ steps });
+  const config = makeConfig({
+    url: 'https://chat.example',
+    telegram: { token: 'bot-token', mapping: { trousev: 'probe' } },
+  });
+  const { bot, state } = makeBot({ steps, config });
 
   await bot.handleUpdate(messageUpdate('сколько кредитов?'));
 

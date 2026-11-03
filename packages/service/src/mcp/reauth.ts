@@ -19,6 +19,17 @@ export function serverIdFromReauthUrl(url: string): string | null {
   }
 }
 
+/** Ссылку из тела ошибки принимаем только свою: чужой домен — фишинг. */
+function trustedReauthUrl(config: IcarusConfig, url: string): string | null {
+  try {
+    const own = new URL(config.url);
+    const candidate = new URL(url);
+    return own.origin === candidate.origin && candidate.pathname === '/panel/mcp' ? candidate.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Текст из результата тула: строка, content-блоки или JSON-строка с ними. */
 function textOf(value: unknown): string {
   if (typeof value === 'string') return value;
@@ -130,7 +141,8 @@ export function mcpReauthNotice(input: {
   if (!isMcpAuthFailure(input.toolName, input.isError, text)) return null;
 
   const fromText = reauthUrlFromText(text);
-  let server = fromText ? serverIdFromReauthUrl(fromText) : null;
+  const trusted = fromText ? trustedReauthUrl(input.config, fromText) : null;
+  let server = trusted ? serverIdFromReauthUrl(trusted) : null;
   if (!server && input.toolName === 'mcp_connect' && typeof input.args?.name === 'string') {
     server = input.args.name;
   }
@@ -140,6 +152,6 @@ export function mcpReauthNotice(input: {
   return {
     server,
     name: serverName(input.config, input.userId, server),
-    url: fromText ?? mcpReauthUrl(input.config, server),
+    url: trusted ?? mcpReauthUrl(input.config, server),
   };
 }
