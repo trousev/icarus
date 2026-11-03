@@ -189,10 +189,13 @@ function pageOffset(cursor: unknown): number {
 export function createChat(
   config: IcarusConfig,
   user: UserConfig,
-  workspace: string = DEFAULT_WORKSPACE,
+  // Третий аргумент — workspace, но старые вызовы передавали сюда дату: различаем.
+  workspaceOrNow: string | Date = DEFAULT_WORKSPACE,
   now = new Date(),
 ): ChatSummary {
-  return summaryOf(createChatRecord(config, user, workspace, now), null);
+  const workspace = typeof workspaceOrNow === 'string' ? workspaceOrNow : DEFAULT_WORKSPACE;
+  const createdAt = workspaceOrNow instanceof Date ? workspaceOrNow : now;
+  return summaryOf(createChatRecord(config, user, workspace, createdAt), null);
 }
 
 const IMAGE_MIME = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);

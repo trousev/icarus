@@ -611,7 +611,6 @@ function startDraft(workspace = currentWorkspace) {
   currentWorkspace = workspace;
   currentId = null;
   currentChat = null;
-  currentMessages = [];
   setDraft(true);
   setComposer(false);
   restoreEmptyState();
@@ -733,7 +732,6 @@ function showPicker() {
   closeMenu();
   currentId = null;
   currentChat = null;
-  currentMessages = [];
   currentWorkspace = 'talk';
   history.replaceState(null, '', '/panel/chat');
   renderChats();
