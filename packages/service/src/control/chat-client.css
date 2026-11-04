@@ -323,7 +323,9 @@
   max-width: 900px; margin: 7px auto 0; display: flex; justify-content: space-between;
   gap: 12px; color: var(--dim); font-size: 11px; min-height: 16px;
 }
-#chat-working { color: var(--dim); }
+/* Слева — отказы и подтверждения, справа — подсказка по клавишам. Прогресса
+   хода тут нет: шаги и команды видны в трассировке ответа. */
+#chat-note { color: var(--dim); }
 /* Внешний разговор: композер выключен, но лента и трассировка читаются как обычно. */
 .composer-locked {
   max-width: 900px; margin: 0 auto 8px; padding: 9px 12px;

@@ -879,11 +879,12 @@ async function streamTurn(
     switch (event.type) {
       case 'message_update': {
         const delta = event.assistantMessageEvent as { type?: string; delta?: string } | undefined;
+        // Начало размышления отдельным событием не шлём: в ленте уже стоит
+        // «Икар думает», а строка под композером прогресс не показывает.
         if (delta?.type === 'text_delta' && delta.delta) {
           answer += delta.delta;
           send({ type: 'text', text: delta.delta });
         }
-        if (delta?.type === 'thinking_start') send({ type: 'status', text: 'думает…' });
         break;
       }
       case 'tool_execution_start': {
