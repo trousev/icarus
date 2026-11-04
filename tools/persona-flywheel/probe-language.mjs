@@ -5,6 +5,13 @@
 // проверять надо ровно эту сборку: персона-русская + карта-окружения-английская.
 // flywheel так не умеет — он гоняет один файл.
 //
+// ВАЖНО про слой: правило языка живёт в двух местах — раздел «Язык» в промпте (сборка
+// сервиса) и короткая строка у последней реплики человека (packages/extensions/language.ts).
+// В pi системное сообщение не доезжает (convertToLlm его режет, PR #116), поэтому язык
+// в бою держит именно строка у реплики. Стенд дописывает её тоже — иначе он мерил бы один
+// промпт и объявлял бы рабочий прод сломанным: на вырезанном разделе без строки у реплики
+// он давал 78% (разовая просьба не исполнялась), а со строкой — 100%.
+//
 // Что проверяем (все — по одному свойству на прогон):
 //   1. говорит ли Икар по-английски, когда промпт русский (главная гипотеза);
 //   2. не сваливается ли на русский от русской вставки в сообщении человека
@@ -24,6 +31,7 @@ import { writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { chat, ROOT, MODELS, mapLimit, parseJson } from "./lib/api.mjs";
 import { languageRule } from "../../packages/service/src/workspace.ts";
+import { languageOverride } from "../../packages/extensions/language.ts";
 
 // ── как сервис собирает промпт в бою ─────────────────────────────────────────
 // Персона читается файлом, раздел «Язык» берётся ИЗ СЕРВИСА (languageRule), а не
@@ -209,10 +217,16 @@ async function runScenario({ system, scenario, maxTokens = 560 }) {
     userHistory.push({ role: "user", content: userText });
     dialogue.push({ role: "user", text: userText });
 
+    // Правило у реплики — как в бою: language.ts дописывает его к последней реплике
+    // человека, и в pi оно переживает convertToLlm (системное сообщение — нет, PR #116).
+    // Без этого стенд мерил бы только карту и объявлял бы рабочий прод сломанным.
     const reply = await chat({
       model: MODELS.icarus,
       system,
-      messages: [{ role: "user", content: `${icarusStart}\n\n---\n\n${transcript(dialogue)}` }],
+      messages: [{
+        role: "user",
+        content: `${icarusStart}\n\n---\n\n${transcript(dialogue)}\n\n${languageOverride(scenario.lang === "en" ? "English" : "Russian")}`,
+      }],
       maxTokens,
       temperature: 1,
     });

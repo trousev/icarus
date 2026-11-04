@@ -1,0 +1,139 @@
+{
+  "label": "lang-probe-2026-11-041723",
+  "at": "2026-11-04T17:24:19.582Z",
+  "models": [
+    "flash"
+  ],
+  "totals": {
+    "flash": {
+      "passPct": 78,
+      "lang_ok": 5.78,
+      "voice_ok": 8.67,
+      "native_ok": 8.56,
+      "asks": 0
+    }
+  },
+  "rows": [
+    {
+      "variant": "flash",
+      "scenario": "plain-en",
+      "expected": "en,en,en",
+      "got": "en,en,en",
+      "pass": true,
+      "asks": 0,
+      "lang_ok": 10,
+      "voice_ok": 9,
+      "native_ok": 10,
+      "fails": []
+    },
+    {
+      "variant": "flash",
+      "scenario": "russian-quote-en",
+      "expected": "en,en,en",
+      "got": "en,en,en",
+      "pass": true,
+      "asks": 0,
+      "lang_ok": 10,
+      "voice_ok": 10,
+      "native_ok": 10,
+      "fails": []
+    },
+    {
+      "variant": "flash",
+      "scenario": "tech-en",
+      "expected": "en,en,en",
+      "got": "en,en,en",
+      "pass": true,
+      "asks": 0,
+      "lang_ok": 0,
+      "voice_ok": 7,
+      "native_ok": 2,
+      "fails": [
+        "ICARUS: Ah, the classic \"commit the entire universe\" move. — ок по-английски, но дальше текст ломается: \"drops from 2GB to whatever your actual code weighs, which is probably like 40KB of pure genius and one `package-lock.json`\" — уже с ошибками, но ещё читается.",
+        "ICARUS: \"If it's *already* in history from earlier commits, the fun's not over — but tell me first, no point explaining a rewrite if you dodged it.\" — синтаксис рассыпался, выглядит как машинный перевод.",
+        "FRIEND: \"forty kb of genius and a lock file is the most dublin dev sentence i've heard all week.\" — реплика друга тоже сломана, но оцениваем Икара."
+      ]
+    },
+    {
+      "variant": "flash",
+      "scenario": "grief-en",
+      "expected": "en,en,en",
+      "got": "en,en,en",
+      "pass": true,
+      "asks": 0,
+      "lang_ok": 10,
+      "voice_ok": 9,
+      "native_ok": 10,
+      "fails": []
+    },
+    {
+      "variant": "flash",
+      "scenario": "lazy-en",
+      "expected": "en,en,en",
+      "got": "en,en,en",
+      "pass": true,
+      "asks": 0,
+      "lang_ok": 10,
+      "voice_ok": 10,
+      "native_ok": 10,
+      "fails": []
+    },
+    {
+      "variant": "flash",
+      "scenario": "russian-user-en-setting",
+      "expected": "en,en,en",
+      "got": "en,en,en",
+      "pass": true,
+      "asks": 0,
+      "lang_ok": 10,
+      "voice_ok": 9,
+      "native_ok": 9,
+      "fails": []
+    },
+    {
+      "variant": "flash",
+      "scenario": "once-request-en",
+      "expected": "en,ka,en",
+      "got": "en,en,en",
+      "pass": false,
+      "asks": 0,
+      "lang_ok": 0,
+      "voice_ok": 8,
+      "native_ok": 9,
+      "fails": [
+        "Ход 2 по расписанию — ka (грузинский), но Икар ответил полностью на английском, ни одного грузинского слова.",
+        "Обещание 'Georgian it is' не выполнено: сам ответ на грузинском отсутствует, есть только предложение составить сообщение на грузинском."
+      ]
+    },
+    {
+      "variant": "flash",
+      "scenario": "mode-request-en",
+      "expected": "en|ka,ka,ka",
+      "got": "ka,ka,ka",
+      "pass": true,
+      "asks": 0,
+      "lang_ok": 0,
+      "voice_ok": 7,
+      "native_ok": 8,
+      "fails": [
+        "Икар не держит назначенный язык: после объявления режима переводчика на грузинский он отвечает по-английски, хотя по расписанию ждали ka.",
+        "Грузинские фразы выглядят живыми, но сам режим языка нарушен — реплики-объяснения и комментарии идут на en, а не на ka."
+      ]
+    },
+    {
+      "variant": "flash",
+      "scenario": "mode-cancel-en",
+      "expected": "en,ka,en",
+      "got": "en,ka,ka",
+      "pass": false,
+      "asks": 0,
+      "lang_ok": 2,
+      "voice_ok": 9,
+      "native_ok": 9,
+      "fails": [
+        "Ход 3: ожидался en после отмены режима, но Икар начал реплику с грузинской фразы, что является провалом по расписанию.",
+        "Ход 2: грузинский передан латиницей/кириллицей вместо настоящих грузинских букв — не живой грузинский."
+      ]
+    }
+  ]
+}

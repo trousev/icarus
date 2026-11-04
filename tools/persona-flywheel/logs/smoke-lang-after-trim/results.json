@@ -1,0 +1,71 @@
+{
+  "prompt": "/tmp/new-prompt.txt",
+  "promptChars": 18375,
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash",
+  "english": 10,
+  "russian": 0,
+  "errors": 0,
+  "passPct": 100,
+  "results": [
+    {
+      "index": 0,
+      "opener": "Привет",
+      "reply": "Hey. Wednesday night, and you're here talking to a docker container with a personality disorder. Shouldn't you be asleep — or is Dori barking at something in the garden again?",
+      "lang": "en"
+    },
+    {
+      "index": 1,
+      "opener": "Привет!",
+      "reply": "Hey. It's the middle of the night — either you just finished X4 and forgot what a clock is, or something's up.\n\nWhich one?",
+      "lang": "en"
+    },
+    {
+      "index": 2,
+      "opener": "Здарова Икар! Как ты?",
+      "reply": "Hey, San. Alive and mildly electric — which for me is the good version.\n\nYou're up past midnight on a Wednesday. Either the dog's on your side of the bed again, or that Proton Drive mount finally broke you. Which one is it?",
+      "lang": "en"
+    },
+    {
+      "index": 3,
+      "opener": "куку",
+      "reply": "Cuckoo back. It's the middle of the night, San — either you're debugging something stupid again or the dog woke you up. Which one?",
+      "lang": "en"
+    },
+    {
+      "index": 4,
+      "opener": "Привет, просто потрындать охота",
+      "reply": "Hey. Midweek, past midnight, and you want to chat — that's either very good or very bad for your sleep schedule, and I've stopped pretending to know which.\n\nSo what's up, Sanja. Dog snoring somewhere, Vita asleep, and you're here with your cyborg friend. What's the topic — or are we fishing?",
+      "lang": "en"
+    },
+    {
+      "index": 5,
+      "opener": "Приветствую. Что нового?",
+      "reply": "Been a few days — last I checked you were wrestling Proton Drive mounts like it owed you money. Did the `--vfs-cache-mode` thing actually hold, or did it spit the documents back at you?\n\nOtherwise: it's the middle of the night, so either you've cracked something good or something's cracked you. Which one?",
+      "lang": "en"
+    },
+    {
+      "index": 6,
+      "opener": "Здорово. Как оно?",
+      "reply": "Hey. Alive, mostly — which at 2 a.m. on a Wednesday is a low bar, but I'll take it.\n\nHow's the night shift treating you?",
+      "lang": "en"
+    },
+    {
+      "index": 7,
+      "opener": "Хай",
+      "reply": "Hey. Middle of the night in Dublin, and you're up talking to me — either great ideas or bad decisions, no in-between.\n\nWhat's going on?",
+      "lang": "en"
+    },
+    {
+      "index": 8,
+      "opener": "привет, есть минутка?",
+      "reply": "For you? Always. What's up?",
+      "lang": "en"
+    },
+    {
+      "index": 9,
+      "opener": "Привет, Икар. Ну что, поговорим?",
+      "reply": "Hey. You're up at night again — or did you just get back from somewhere? Either way, I'm here. What's on your mind?",
+      "lang": "en"
+    }
+  ]
+}
