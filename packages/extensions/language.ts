@@ -1,59 +1,67 @@
-// Язык разговора — отдельным системным сообщением, а не абзацем внутри большой карты.
+// Язык разговора — дописываем к реплике человека, а не отдельным системным сообщением.
 //
-// Почему так. Правило языка лежало в конце AGENTS.md — русского документа на сотни
-// строк о характере, памяти и руках. До модели оно доезжало и читалось, но не держало:
-// человек писал «Привет», а Икар отвечал по-русски, хотя в настройке стоял English.
-// Замер на боевом промпте (tools/persona-flywheel/smoke-language.mjs):
+// Почему не отдельным system-сообщением. Именно так и было задумано сначала, и на
+// голом API это работало (20/20), но в pi сообщение тихо терялось: агент прогоняет
+// историю через convertToLlm, а тот фильтрует всё, кроме user/assistant/toolResult —
 //
-//   правило в конце AGENTS.md .......... 0/10 ответов на английском
-//   правило отдельным system-сообщением  20/20 (короткое — 15/15)
+//   function defaultConvertToLlm(messages){
+//     return messages.filter(m => m.role === "user" || m.role === "assistant" || m.role === "toolResult");
+//   }
 //
-// Дело не в формулировке и не в позиции внутри документа: в длинном промпте модель
-// читает правило языка как часть образа и зеркалит язык реплики. Отдельное системное
-// сообщение — это констрейнт, а не фломастер, и оно идёт последним, ближе всего к ходу.
-//
-// Сообщение уезжает в копию на КАЖДЫЙ запрос к модели (в ходе с тулами это несколько
-// раз), но в сессию не пишется и в транскрипте не копится — поэтому правило держим
-// коротким: длина на боевом промпте ничего не покупала (894 симв → 9/10, 136 → 10/10).
+// Системное сообщение из хука context в запрос не попадает: до модели доезжает только
+// системный ПРОМПТ (он едет отдельным полем) и реплики. Поэтому правило языка живёт
+// там же, где метка времени из clock.ts: дописано к последней реплике человека.
+// Так оно доезжает всегда — и не зависит от того, что pi решит отфильтровать.
 //
 // Язык приезжает переменной ICARUS_LANGUAGE (полное имя: English, Russian) — его
-// готовит сервис из профиля человека (см. containerEnv в docker/spec.ts). Кода (en, ru)
-// в контейнере нет: в текст идёт только имя.
+// готовит сервис из профиля человека (см. containerEnv в docker/spec.ts).
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export type ChatMessage = { role?: string; content?: string | Array<{ type?: string; text?: string }> };
 
 /**
- * Текст требования по имени языка. Экспортируется ради теста: правило — это данные,
- * и его форма (императив, имя языка, случай чужой реплики) должна быть проверяема.
- *
- * Длина здесь не работает. На боевом промпте вариант на 894 символа давал 9/10, короткий
- * на 136 — 10/10 (и 15/15 повторно, и контроль на ru — 10/10). Поэтому текста ровно
- * столько, сколько несёт три вещи: имя языка, запрет зеркалить и случай первого ответа.
+ * Текст требования по имени языка. Экспортируется ради теста: правило — данные,
+ * и его форма (имя языка, запрет зеркалить, случай первого ответа) должна быть
+ * проверяема. Длина не работает: 894 символа давали 9/10 на голом API, 136 — 10/10.
  */
 export function languageOverride(name: string): string {
-  return `Твой язык разговора — ${name}. Не зеркаль язык его реплики: он пишет по-русски, ты отвечаешь на ${name}. Первый ответ — тоже на ${name}.`;
+  return `[Твой язык разговора — ${name}. Не зеркаль язык его реплики: он пишет по-русски, ты отвечаешь на ${name}. Первый ответ — тоже на ${name}.]`;
 }
 
-/** Полное имя языка из переменной контейнера. Пустое или неизвестное — правило не шлём. */
+/** Полное имя языка из переменной контейнера. Пустое — правило не шлём. */
 function languageNameFromEnv(): string | undefined {
   const raw = (process.env.ICARUS_LANGUAGE ?? "").trim();
   return raw.length > 0 ? raw : undefined;
 }
 
 /**
- * Приписать системное сообщение с языком. Возвращаем новый массив — как clock.ts:
- * pi ждёт, что хук правит копию сообщений, а не исходные.
- *
- * Именно ДОБАВЛЯЕМ отдельное сообщение, а не дописываем в конец длинного системного.
- * На этом стоит всё: дописанное в конец большого русского промпта правило не держало
- * (0/10), отдельным системным сообщением — держит (20/20). Сливать их обратно нельзя,
- * даже если системное сообщение уже есть.
+ * Дописать правило к последней реплике человека — как appendMoment в clock.ts.
+ * Возвращаем новый массив (pi правит копию) или null, если реплики нет.
  */
-export function appendLanguageOverride<T extends ChatMessage>(messages: T[], name: string): T[] {
+export function appendLanguageOverride<T extends ChatMessage>(messages: T[], name: string): T[] | null {
+  const lastUser = messages.map((message) => message?.role).lastIndexOf("user");
+  if (lastUser === -1) return null;
+
+  const target = messages[lastUser];
+  const content = target?.content;
   const next = messages.slice();
-  next.push({ role: "system", content: [{ type: "text", text: languageOverride(name) }] } as unknown as T);
-  return next;
+  const block = { type: "text", text: languageOverride(name) };
+
+  if (typeof content === "string") {
+    next[lastUser] = { ...target, content: `${content}\n\n${languageOverride(name)}` };
+    return next;
+  }
+
+  if (Array.isArray(content)) {
+    const blocks = content.slice();
+    const lastText = blocks.map((entry) => entry?.type).lastIndexOf("text");
+    if (lastText === -1) blocks.push(block);
+    else blocks[lastText] = { ...blocks[lastText], text: `${blocks[lastText]?.text ?? ""}\n\n${languageOverride(name)}` };
+    next[lastUser] = { ...target, content: blocks };
+    return next;
+  }
+
+  return null;
 }
 
 export default function (pi: ExtensionAPI) {
