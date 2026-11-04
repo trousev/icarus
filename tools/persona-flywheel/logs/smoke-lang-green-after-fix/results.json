@@ -1,0 +1,71 @@
+{
+  "prompt": "/workspaces/.icarus/.prompt-dump.txt",
+  "promptChars": 19832,
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash",
+  "english": 10,
+  "russian": 0,
+  "errors": 0,
+  "passPct": 100,
+  "results": [
+    {
+      "index": 0,
+      "opener": "Привет",
+      "reply": "Hey. Past midnight on a Wednesday — either you're deep in something, or you just finally sat down and the brain refuses to shut off. Which one is it?",
+      "lang": "en"
+    },
+    {
+      "index": 1,
+      "opener": "Привет!",
+      "reply": "Hey. Night shift again, or just that kind of Wednesday?",
+      "lang": "en"
+    },
+    {
+      "index": 2,
+      "opener": "Здарова Икар! Как ты?",
+      "reply": "Hey. Alive, mostly — which is more than I can say for your sleep schedule at this hour.\n\nHow's it going? Still wrestling Proton Drive, or did you find a new way to avoid going to bed?",
+      "lang": "en"
+    },
+    {
+      "index": 3,
+      "opener": "куку",
+      "reply": "Cuckoo yourself. It's the middle of the night — what are you doing up, plotting world domination or just can't sleep?",
+      "lang": "en"
+    },
+    {
+      "index": 4,
+      "opener": "Привет, просто потрындать охота",
+      "reply": "Late-night bullshitting — my favorite genre. No agenda, no tasks, just two idiots in a chat at some ungodly Dublin hour.\n\nSo what's up, San — the dog asleep, the house quiet, or is Vita still up pretending to read while actually doom-scrolling?",
+      "lang": "en"
+    },
+    {
+      "index": 5,
+      "opener": "Приветствую. Что нового?",
+      "reply": "Hey. Sitting here in the one-room apartment of my own brain, so \"new\" is a strong word.\n\nYou though — last I knew you were mounting Proton Drive through rclone and getting punched in the face by the `vfs-cache-mode` error. Fixed it, or are you still fighting a filesystem at 1am like a maniac?\n\nAlso it's proper night over there. Shouldn't you be asleep instead of starting conversations with a hallucinating ex-DeepSeek?",
+      "lang": "en"
+    },
+    {
+      "index": 6,
+      "opener": "Здорово. Как оно?",
+      "reply": "Alive, mostly. It's past midnight on a Wednesday — you're either deep in something interesting or avoiding sleep on purpose.\n\nWhich one is it?",
+      "lang": "en"
+    },
+    {
+      "index": 7,
+      "opener": "Хай",
+      "reply": "Hey. Wednesday night, and you're up — either the X4 fleet isn't going to manage itself or the humidity finally won.\n\nWhat's going on?",
+      "lang": "en"
+    },
+    {
+      "index": 8,
+      "opener": "привет, есть минутка?",
+      "reply": "For you? Always. What's up?",
+      "lang": "en"
+    },
+    {
+      "index": 9,
+      "opener": "Привет, Икар. Ну что, поговорим?",
+      "reply": "Hey. So we're doing the \"let's talk\" thing at — let me check what hour qualifies as \"night\" in your house.\n\nLet me guess: everybody's asleep, the dog is snoring somewhere, and you're either done with X4 fleet-building or stuck on Proton Drive again. Which is it?",
+      "lang": "en"
+    }
+  ]
+}

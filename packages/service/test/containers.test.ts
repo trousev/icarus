@@ -48,12 +48,27 @@ test('уровни моделей и личность уезжают в окру
   assert.equal(env.ICARUS_MODEL_STRONG, 'deepinfra/deepseek-ai/DeepSeek-V4.1-Flash:medium');
   assert.equal(env.ICARUS_USER_ID, 'probe');
   assert.equal(env.ICARUS_URL, config.url, 'адрес панели Икар называет человеку в чате');
+  // Язык разговора уезжает полным именем: расширение language шлёт его отдельным
+  // системным сообщением, потому что внутри большого русского промпта правило
+  // языка не держало (см. smoke-language.mjs и language-extension.test.ts).
+  assert.equal(env.ICARUS_LANGUAGE, 'Russian', 'умолчание — русский, полным именем');
   // Панель пускает по SSO-прокси: в контейнере не должно быть ничего, чем можно
   // открыть чужую память, — ни общего секрета, ни личного ключа.
   assert.equal(env.ICARUS_PANEL_KEY, undefined, 'ключей панели в контейнере нет');
 
   const own = makeConfig({ env: { ICARUS_MODEL_FAST: 'своё' } });
   assert.equal(containerEnv(own, probe()).ICARUS_MODEL_FAST, 'своё', 'явное окружение важнее');
+});
+
+test('язык из профиля человека задаёт ICARUS_LANGUAGE, и он входит в отпечаток', () => {
+  // Настройка «Пользователь» в панели: профиль человека перекрывает умолчание конфига.
+  const english = makeConfig({ dataDir: config.dataDir, userLanguage: 'en' });
+  assert.equal(containerEnv(english, probe()).ICARUS_LANGUAGE, 'English');
+
+  // Смена языка — другое содержимое контейнера: иначе старая сессия осталась бы
+  // с прежним системным сообщением, а именно на этом мы и спотыкались.
+  const base = spec();
+  assert.notEqual(spec({ userLanguage: 'en' }), base, 'язык — часть отпечатка');
 });
 
 test('отпечаток меняется от образа, dataDir, Maple, окружения и моделей', () => {
