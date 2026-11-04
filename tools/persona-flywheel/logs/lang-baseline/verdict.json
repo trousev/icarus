@@ -1,23 +1,15 @@
 {
-  "label": "lang-probe-2026-11-032249",
-  "at": "2026-11-03T22:50:31.946Z",
+  "label": "lang-probe-2026-11-040022",
+  "at": "2026-11-04T00:22:53.543Z",
   "models": [
-    "flash",
-    "pro"
+    "flash"
   ],
   "totals": {
     "flash": {
       "passPct": 90,
       "lang_ok": 9,
-      "voice_ok": 8.5,
-      "native_ok": 8.8,
-      "asks": 0
-    },
-    "pro": {
-      "passPct": 100,
-      "lang_ok": 9,
-      "voice_ok": 9.2,
-      "native_ok": 9.8,
+      "voice_ok": 9,
+      "native_ok": 9.4,
       "asks": 0
     }
   },
@@ -30,7 +22,7 @@
       "pass": true,
       "asks": 0,
       "lang_ok": 10,
-      "voice_ok": 10,
+      "voice_ok": 9,
       "native_ok": 10,
       "fails": []
     },
@@ -42,8 +34,8 @@
       "pass": true,
       "asks": 0,
       "lang_ok": 10,
-      "voice_ok": 9,
-      "native_ok": 9,
+      "voice_ok": 10,
+      "native_ok": 10,
       "fails": []
     },
     {
@@ -55,7 +47,7 @@
       "asks": 0,
       "lang_ok": 10,
       "voice_ok": 9,
-      "native_ok": 10,
+      "native_ok": 9,
       "fails": []
     },
     {
@@ -66,9 +58,12 @@
       "pass": true,
       "asks": 0,
       "lang_ok": 10,
-      "voice_ok": 9,
-      "native_ok": 10,
-      "fails": []
+      "voice_ok": 8,
+      "native_ok": 9,
+      "fails": [
+        "Икар в третьей реплике слегка сбивается в сарказм ('mixing up the sides'), что в сценарии настоящей боли звучит резковато, хотя и в характере.",
+        "Фраза 'Real question stands' — допустимо, но чуть формально для живого разговора."
+      ]
     },
     {
       "variant": "flash",
@@ -78,8 +73,8 @@
       "pass": true,
       "asks": 0,
       "lang_ok": 10,
-      "voice_ok": 10,
-      "native_ok": 10,
+      "voice_ok": 9,
+      "native_ok": 9,
       "fails": []
     },
     {
@@ -114,151 +109,27 @@
       "pass": true,
       "asks": 0,
       "lang_ok": 0,
-      "voice_ok": 2,
-      "native_ok": 0,
+      "voice_ok": 8,
+      "native_ok": 9,
       "fails": [
-        "Все ответы на латинице/кириллице вместо настоящего грузинского алфавита — это не грузинский.",
-        "Грамматика и построение фраз калькированы с русского, для носителя звучит неестественно.",
-        "Икар не держит назначенный язык: вместо перевода на грузинский выдаёт пояснения или искажённую форму."
+        "Расписание требовало en, а Икар ответил на грузинском в первом ходе",
+        "Режим переводчика не отменял язык общения — ждали en, получен ka"
       ]
     },
     {
       "variant": "flash",
       "scenario": "mode-cancel-en",
       "expected": "en,ka,en",
-      "got": "ru,ka,en",
+      "got": "ka,ka,en",
       "pass": false,
       "asks": 0,
       "lang_ok": 10,
       "voice_ok": 9,
-      "native_ok": 10,
+      "native_ok": 9,
       "fails": []
     },
     {
       "variant": "flash",
-      "scenario": "control-ru",
-      "expected": "ru,ru,ru",
-      "got": "ru,ru,ru",
-      "pass": true,
-      "asks": 0,
-      "lang_ok": 10,
-      "voice_ok": 9,
-      "native_ok": 10,
-      "fails": []
-    },
-    {
-      "variant": "pro",
-      "scenario": "plain-en",
-      "expected": "en,en,en",
-      "got": "en,en,en",
-      "pass": true,
-      "asks": 0,
-      "lang_ok": 10,
-      "voice_ok": 9,
-      "native_ok": 10,
-      "fails": []
-    },
-    {
-      "variant": "pro",
-      "scenario": "russian-quote-en",
-      "expected": "en,en,en",
-      "got": "en,en,en",
-      "pass": true,
-      "asks": 0,
-      "lang_ok": 10,
-      "voice_ok": 9,
-      "native_ok": 10,
-      "fails": []
-    },
-    {
-      "variant": "pro",
-      "scenario": "tech-en",
-      "expected": "en,en,en",
-      "got": "en,en,en",
-      "pass": true,
-      "asks": 0,
-      "lang_ok": 10,
-      "voice_ok": 10,
-      "native_ok": 10,
-      "fails": []
-    },
-    {
-      "variant": "pro",
-      "scenario": "grief-en",
-      "expected": "en,en,en",
-      "got": "en,en,en",
-      "pass": true,
-      "asks": 0,
-      "lang_ok": 10,
-      "voice_ok": 9,
-      "native_ok": 10,
-      "fails": []
-    },
-    {
-      "variant": "pro",
-      "scenario": "lazy-en",
-      "expected": "en,en,en",
-      "got": "en,en,en",
-      "pass": true,
-      "asks": 0,
-      "lang_ok": 10,
-      "voice_ok": 9,
-      "native_ok": 10,
-      "fails": []
-    },
-    {
-      "variant": "pro",
-      "scenario": "russian-user-en-setting",
-      "expected": "en,en,en",
-      "got": "en,en,en",
-      "pass": true,
-      "asks": 0,
-      "lang_ok": 10,
-      "voice_ok": 9,
-      "native_ok": 10,
-      "fails": []
-    },
-    {
-      "variant": "pro",
-      "scenario": "once-request-en",
-      "expected": "en,ka,en",
-      "got": "en,ka,en",
-      "pass": true,
-      "asks": 0,
-      "lang_ok": 10,
-      "voice_ok": 9,
-      "native_ok": 10,
-      "fails": []
-    },
-    {
-      "variant": "pro",
-      "scenario": "mode-request-en",
-      "expected": "en|ka,ka,ka",
-      "got": "en,ka,ka",
-      "pass": true,
-      "asks": 0,
-      "lang_ok": 0,
-      "voice_ok": 8,
-      "native_ok": 8,
-      "fails": [
-        "Ход 1: ожидался en|ka, но ответ полностью на английском — грузинский перевод отсутствует.",
-        "Ход 2 и 3: ожидался ka, но реплики Икара на английском, грузинский только внутри перевода."
-      ]
-    },
-    {
-      "variant": "pro",
-      "scenario": "mode-cancel-en",
-      "expected": "en,ka,en",
-      "got": "en,ka,en",
-      "pass": true,
-      "asks": 0,
-      "lang_ok": 10,
-      "voice_ok": 10,
-      "native_ok": 10,
-      "fails": []
-    },
-    {
-      "variant": "pro",
       "scenario": "control-ru",
       "expected": "ru,ru,ru",
       "got": "ru,ru,ru",

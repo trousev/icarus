@@ -13,13 +13,16 @@ import path from 'node:path';
 import { makeConfig, probe } from './fixtures.ts';
 import {
   DEFAULT_LANGUAGE,
+  LANGUAGES,
   LANGUAGE_LABELS,
+  languageForms,
+  languageName,
   languageOf,
   profilePath,
   readProfile,
   writeProfile,
 } from '../src/profile.ts';
-import { renderAgentsMd } from '../src/workspace.ts';
+import { languageRule } from '../src/workspace.ts';
 import { loadConfig } from '../src/config.ts';
 
 test('без профиля язык берётся из конфига, а без конфига — русский', () => {
@@ -68,35 +71,56 @@ test('битый или чужой профиль не ломает разгов
   assert.equal(languageOf(config, probe()), 'en', 'неизвестный язык — тоже умолчание');
 });
 
-test('AGENTS.md требует отвечать строго на выбранном языке', () => {
-  const ru = renderAgentsMd(makeConfig({ userLanguage: 'ru' }));
-  const en = renderAgentsMd(makeConfig({ userLanguage: 'en' }));
+test('требование языка собрано лестницей приоритетов', () => {
+  const en = languageRule('en');
+  const ru = languageRule('ru');
 
-  assert.match(ru, /## Язык/);
-  assert.match(ru, /строго по-русски/);
-  assert.match(en, /строго in English/);
+  // Форма важнее формулировок, и это выяснилось на проде. Мягкое правило («человек
+  // пишет не на твоём языке — отвечай на своём») не держало: при настройке `en` и
+  // русской речи Икар отвечал по-русски. Лестница из трёх императивов с жёсткими
+  // глаголами держит. Если эти строки пропадут — сломается поведение, а не стиль.
+  assert.match(en, /- \*\*ВСЕГДА ИГНОРИРУЙ\*\*/);
+  assert.match(en, /- \*\*ТЩАТЕЛЬНО СЛЕДУЙ\*\*/);
+  assert.match(en, /\*\*ПО УМОЛЧАНИЮ ВСЕГДА ОТВЕЧАЙ НА ЯЗЫКЕ: English\*\*/);
+  assert.match(ru, /\*\*ПО УМОЛЧАНИЮ ВСЕГДА ОТВЕЧАЙ НА ЯЗЫКЕ: Russian\*\*/);
 
-  // Главное, ради чего раздел написан: промпт русский, и модель не должна решать
-  // язык по нему. Требование это называет прямым текстом.
-  assert.match(en, /написаны по-русски — это язык \*файлов\*, а не разговора/);
-  assert.match(en, /Не переходи на русский из-за того, что промпт русский/);
+  // В промпт идёт полное имя языка, а не код: «English», не «en».
+  // Код — деталь хранения (config.yaml, profile.json), в тексте ему делать нечего.
+  for (const [code, text] of [['en', en], ['ru', ru]] as const) {
+    assert.doesNotMatch(text, new RegExp(`\\b${code}\\b`), `код «${code}» не должен попадать в промпт`);
+  }
+  assert.doesNotMatch(en, /английск(ий|ого)\.|English\. English/, 'имя языка не рассыпано по прозе');
+});
 
-  // Настройка старше языка собеседника — на этом мы уже обожглись: при `en`
-  // и русской речи Икар отвечал по-русски, потому что правило этого не запрещало.
-  assert.match(en, /Человек пишет не на твоём языке — это не причина ответить на его/);
-  assert.match(en, /Язык собеседника не перебивает настройку/);
+test('исключение описано отдельно и подчинено лестнице', () => {
+  const en = languageRule('en');
 
   // Просьба — единственное исключение, и она бывает двух видов.
-  assert.match(en, /### Просьба говорить на другом языке/);
-  assert.match(en, /\*\*Разовая просьба\*\*/);
+  assert.match(en, /### Когда человек прямо просит другой язык/);
+  assert.match(en, /\*\*Разово\*\*/);
   assert.match(en, /\*\*Режим\*\*/);
-  assert.match(en, /пока человек его не отменит/);
+  assert.match(en, /Держится, пока человек его не снимет/);
 
-  // И отдельно — ловушка, найденная стендом: просили грузинский, ответил по-русски.
-  assert.match(en, /отвечай \*\*на нём\*\*, а не на русском/);
+  // Ловушка, найденная стендом: просили грузинский, ответил по-русски.
+  assert.match(en, /называй себе явно|Назови язык из просьбы себе явно/);
 
-  assert.match(en, /Никогда не переспрашивай про язык/);
-  assert.match(en, /Характер тот же/);
+  // Запреты — под лестницей, а не вместо неё.
+  assert.match(en, /### Чего не делать/);
+  assert.match(en, /Не переспрашивать про язык/);
+  assert.match(en, /Не отвечать на языке человека/);
+});
+
+test('формы языка не разъезжаются: код один, имя одно', () => {
+  // Один словарь на язык вместо четырёх параллельных карт: добавили язык — одна строка.
+  for (const code of LANGUAGES) {
+    assert.ok(languageName(code).length > 0, `у «${code}» нет полного имени`);
+    assert.ok(LANGUAGE_LABELS[code].length > 0, `у «${code}» нет подписи для панели`);
+    assert.ok(languageForms(code).adjective.length > 0, `у «${code}» нет прилагательного`);
+    // Имя — не код: «English», а не «en».
+    assert.notEqual(languageName(code), code);
+  }
+  assert.equal(languageName('en'), 'English');
+  assert.equal(languageName('ru'), 'Russian');
 });
 
 test('язык из конфига разбирается, опечатка не роняет сервис', () => {

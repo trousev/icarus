@@ -94,7 +94,9 @@ test('сохранение языка пишет профиль и доезжа�
     const { prepareUser } = await import('../src/workspace.ts');
     prepareUser(config, probe('probe'));
     const agents = fs.readFileSync(userPaths(config, probe('probe')).agentsMd, 'utf8');
-    assert.match(agents, /строго in English/);
+    // Проверяем лестницу, а не одну фразу: имя языка полное, кода в промпте нет.
+    assert.match(agents, /ПО УМОЛЧАНИЮ ВСЕГДА ОТВЕЧАЙ НА ЯЗЫКЕ: English/);
+    assert.doesNotMatch(agents, /\ben\b/, 'код языка в промпт не попадает');
   });
 });
 
