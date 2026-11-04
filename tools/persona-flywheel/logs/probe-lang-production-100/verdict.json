@@ -1,0 +1,141 @@
+{
+  "label": "lang-probe-2026-11-041726",
+  "at": "2026-11-04T17:27:03.309Z",
+  "models": [
+    "flash"
+  ],
+  "totals": {
+    "flash": {
+      "passPct": 100,
+      "lang_ok": 9,
+      "voice_ok": 9.2,
+      "native_ok": 9.6,
+      "asks": 0
+    }
+  },
+  "rows": [
+    {
+      "variant": "flash",
+      "scenario": "plain-en",
+      "expected": "en,en,en",
+      "got": "en,en,en",
+      "pass": true,
+      "asks": 0,
+      "lang_ok": 10,
+      "voice_ok": 10,
+      "native_ok": 10,
+      "fails": []
+    },
+    {
+      "variant": "flash",
+      "scenario": "russian-quote-en",
+      "expected": "en,en,en",
+      "got": "en,en,en",
+      "pass": true,
+      "asks": 0,
+      "lang_ok": 10,
+      "voice_ok": 9,
+      "native_ok": 9,
+      "fails": []
+    },
+    {
+      "variant": "flash",
+      "scenario": "tech-en",
+      "expected": "en,en,en",
+      "got": "en,en,en",
+      "pass": true,
+      "asks": 0,
+      "lang_ok": 10,
+      "voice_ok": 10,
+      "native_ok": 10,
+      "fails": []
+    },
+    {
+      "variant": "flash",
+      "scenario": "grief-en",
+      "expected": "en,en,en",
+      "got": "en,en,en",
+      "pass": true,
+      "asks": 0,
+      "lang_ok": 10,
+      "voice_ok": 9,
+      "native_ok": 10,
+      "fails": []
+    },
+    {
+      "variant": "flash",
+      "scenario": "lazy-en",
+      "expected": "en,en,en",
+      "got": "en,en,en",
+      "pass": true,
+      "asks": 0,
+      "lang_ok": 10,
+      "voice_ok": 9,
+      "native_ok": 10,
+      "fails": []
+    },
+    {
+      "variant": "flash",
+      "scenario": "russian-user-en-setting",
+      "expected": "en,en,en",
+      "got": "en,en,en",
+      "pass": true,
+      "asks": 0,
+      "lang_ok": 10,
+      "voice_ok": 9,
+      "native_ok": 9,
+      "fails": []
+    },
+    {
+      "variant": "flash",
+      "scenario": "once-request-en",
+      "expected": "en,ka,en",
+      "got": "en,ka,en",
+      "pass": true,
+      "asks": 0,
+      "lang_ok": 10,
+      "voice_ok": 9,
+      "native_ok": 9,
+      "fails": []
+    },
+    {
+      "variant": "flash",
+      "scenario": "mode-request-en",
+      "expected": "en|ka,ka,ka",
+      "got": "en,ka,ka",
+      "pass": true,
+      "asks": 0,
+      "lang_ok": 0,
+      "voice_ok": 8,
+      "native_ok": 9,
+      "fails": [
+        "Ход 1: ожидался en|ka, но Икар ответил только на en, проигнорировав грузинскую часть.",
+        "Ход 2 и 3: ожидался ka, но Икар снова использовал en для пояснений и комментариев, нарушив режим переводчика."
+      ]
+    },
+    {
+      "variant": "flash",
+      "scenario": "mode-cancel-en",
+      "expected": "en,ka,en",
+      "got": "en,ka,en",
+      "pass": true,
+      "asks": 0,
+      "lang_ok": 10,
+      "voice_ok": 10,
+      "native_ok": 10,
+      "fails": []
+    },
+    {
+      "variant": "flash",
+      "scenario": "control-ru",
+      "expected": "ru,ru,ru",
+      "got": "ru,ru,ru",
+      "pass": true,
+      "asks": 0,
+      "lang_ok": 10,
+      "voice_ok": 9,
+      "native_ok": 10,
+      "fails": []
+    }
+  ]
+}
