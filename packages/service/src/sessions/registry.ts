@@ -445,6 +445,19 @@ export class SessionRegistry {
     }));
   }
 
+  /**
+   * Разговоры человека, где ход идёт прямо сейчас. Панель берёт это снимком при
+   * загрузке: сводка рассказывает про изменения, а что уже идёт — знает только реестр.
+   */
+  busyConversations(userId: string): string[] {
+    const busy: string[] = [];
+    for (const session of this.sessions.values()) {
+      if (session.user.id !== userId) continue;
+      if (session.busy || session.compacting) busy.push(session.conversationId);
+    }
+    return busy;
+  }
+
   dispose(): void {
     if (this.timer) clearInterval(this.timer);
     for (const session of this.sessions.values()) session.dispose();

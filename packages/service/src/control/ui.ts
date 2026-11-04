@@ -89,7 +89,8 @@ export function shell(body: string): string {
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%237aa2f7'/%3E%3Ctext x='16' y='23' font-size='20' font-family='sans-serif' font-weight='bold' fill='%230f1116' text-anchor='middle'%3EI%3C/text%3E%3C/svg%3E">
 <style>
   :root { color-scheme: dark; --bg:#0f1116; --side:#13161d; --panel:#1b1f28; --raise:#20242e;
-          --line:#262b36; --text:#e6e8ec; --dim:#8b93a1; --accent:#7aa2f7; --accent-soft:#1e2a44; --danger:#f7768e; }
+          --line:#262b36; --text:#e6e8ec; --dim:#8b93a1; --accent:#7aa2f7; --accent-soft:#1e2a44; --danger:#f7768e;
+          --busy:#e0af68; --unread:#9ece6a; }
   * { box-sizing: border-box; }
   body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 ui-sans-serif, system-ui, sans-serif; }
   button { font:inherit; cursor:pointer; }

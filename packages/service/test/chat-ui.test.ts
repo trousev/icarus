@@ -149,7 +149,46 @@ test('ответ можно остановить на середине: кноп
   const html = chatPage(SESSION, { chatId: 'web-1', enabled: true });
   assert.match(html, /id="chat-stop"/, 'в композере есть кнопка остановки');
   assert.match(html, /\/panel\/api\/chat\/abort/, 'она ходит в abort, а не просто прячется');
-  assert.match(html, /function setStreaming/, 'показ кнопки переключается вместе с потоком');
+  assert.match(html, /function setLive/, 'показ кнопки переключается вместе с живым потоком');
+});
+
+test('ход в чужом разговоре не запирает панель', () => {
+  const html = chatPage(SESSION, { chatId: 'web-1', enabled: true });
+  // Замок снят: переключение разговоров и новый чат больше не зависят от того,
+  // идёт ли где-то ход. Раньше тут стояли `if (streaming) return` в четырёх местах.
+  assert.doesNotMatch(html, /if \(!id \|\| streaming\) return/, 'открыть другой разговор можно всегда');
+  assert.doesNotMatch(html, /function startDraft[^]*?if \(streaming\) return/, 'новый чат заводится при чужом ходе');
+  assert.doesNotMatch(html, /async function openWorkspace[^]*?if \(streaming\) return/, 'папка тоже переключается');
+  // Занятость по-прежнему останавливает отправку — но только в СВОЁМ разговоре.
+  assert.match(html, /busyChats\.has\(currentId\)/, 'в занятый разговор не пишем');
+});
+
+test('сводка рассказывает про чужие ходы: старт, финал и снимок состояния', () => {
+  const html = chatPage(SESSION, { enabled: true });
+  assert.match(html, /\/panel\/api\/chat\/events/, 'панель подписана на сводку');
+  assert.match(html, /\/panel\/api\/chat\/status/, 'и сверяется снимком после переподключения');
+  assert.match(html, /new EventSource/, 'сводка едет штатным EventSource');
+  assert.match(html, /event\.type === 'busy'/, 'старт хода поднимает отметку');
+  assert.match(html, /event\.type !== 'idle'/, 'финал её снимает');
+});
+
+test('в сайдбаре видно, где идёт ход и где есть непрочитанное', () => {
+  const html = chatPage(SESSION, { enabled: true });
+  assert.match(html, /class="chat-dot/, 'точка рисуется строкой списка');
+  assert.match(html, /\.chat-dot\.busy/, 'жёлтая — ход идёт');
+  assert.match(html, /\.chat-dot\.unread/, 'зелёная — есть непрочитанное');
+  assert.match(html, /function markUnread/, 'зелёная ставится, когда ответ пришёл в неоткрытый разговор');
+  assert.match(html, /function markRead/, 'и гаснет при открытии');
+  assert.match(html, /icarus\.unread/, 'непрочитанное живёт в localStorage');
+  assert.match(html, /function pruneUnread/, 'удалённые разговоры не оставляют вечную точку');
+});
+
+test('уход из разговора не бросает ход, а отписывается от потока', () => {
+  const html = chatPage(SESSION, { enabled: true });
+  assert.match(html, /function detachLive/, 'подписка снимается отдельно от остановки');
+  assert.match(html, /liveAbort\.abort\(\)/, 'чтение потока рвётся, чтобы не читать в пустоту');
+  // Остановка хода — это по-прежнему явный `stopStream` с походом в abort.
+  assert.match(html, /async function stopStream/, 'стоп остался отдельной кнопкой');
 });
 
 test('субагенты в чате видны живым списком, а не одной строкой', () => {
@@ -173,4 +212,214 @@ test('под полем ввода нет второго экрана прогр
   assert.doesNotMatch(html, /субагенты: /, 'счёт субагентов не дублируется мелким текстом');
   assert.doesNotMatch(html, /Икар отвечает…/, '«отвечает…» внизу тоже лишнее');
   assert.match(html, /не больше ' \+ MAX_FILES/, 'отказ по вложениям по-прежнему виден');
+});
+
+/* ── клиент чата по-настоящему ───────────────────────────────────────────────
+   Разметку и имена функций проверять мало: ошибка вроде `if (streaming)` вместо
+   `if (streaming())` в разметке не видна, а панель ломает. Поэтому исполняем
+   скрипт в DOM — с заглушками сети и EventSource — и смотрим, что он делает. */
+import { parseHTML } from 'linkedom';
+
+/** Стенд: страница чата, заглушка fetch и перехваченная сводка. */
+async function driveChat(
+  options: {
+    chatId?: string;
+    /** Что отвечать на маршруты; ключ — подстрока пути. */
+    routes?: Record<string, () => unknown>;
+  } = {},
+) {
+  const html = chatPage(SESSION, { chatId: options.chatId, enabled: true });
+  const { document, window } = parseHTML(html);
+  const scripts = [...document.querySelectorAll('script')].map((node) => node.textContent ?? '').filter(Boolean);
+
+  const calls: string[] = [];
+  const store = new Map<string, string>();
+  const globals = window as unknown as Record<string, unknown>;
+  window.URL.createObjectURL = () => 'blob:x';
+  window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+  // Скрипт чата — обычный браузерный: он читает `window.location`, а не аргумент.
+  globals.location = { href: 'http://panel/panel/chat', search: '', pathname: '/panel/chat' };
+  globals.history = { replaceState() {} };
+  globals.localStorage = {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => void store.set(key, value),
+    removeItem: (key: string) => void store.delete(key),
+  };
+
+  window.fetch = async (url: string) => {
+    const path = String(url);
+    calls.push(path);
+    const route = Object.entries(options.routes || {}).find(([key]) => path.includes(key))?.[1];
+    const body = route ? route() : {};
+    return {
+      ok: true,
+      headers: { get: () => 'application/json' },
+      json: async () => body,
+      body: { getReader: () => ({ read: async () => ({ done: true }) }) },
+    };
+  };
+
+  /** Сводка: то, что панель слушает, — храним последний экземпляр. */
+  let bulletin: { onopen?: () => void; onmessage?: (message: { data: string }) => void } | null = null;
+  class FakeEventSource {
+    onopen: (() => void) | null = null;
+    onmessage: ((message: { data: string }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    constructor() {
+      bulletin = this as unknown as typeof bulletin;
+    }
+  }
+  globals.EventSource = FakeEventSource;
+
+  const code = scripts.join('\n');
+  const run = new Function('window', 'document', 'fetch', 'URL', 'location', 'history', 'localStorage', code);
+  run(window, document, window.fetch, window.URL, globals.location, globals.history, globals.localStorage);
+  // Скрипт асинхронный: даём микрозадачам и таймерам пройти.
+  await new Promise((resolve) => setTimeout(resolve, 40));
+
+  return {
+    document,
+    calls,
+    store,
+    /** Проиграть событие сводки, как это сделал бы сервер. */
+    event: (payload: Record<string, unknown>) => bulletin?.onmessage?.({ data: JSON.stringify(payload) }),
+    sidebar: () => document.getElementById('chat-list')?.innerHTML ?? '',
+    /** Тела ответа в ленте: столько плашек, сколько видит человек. */
+    bodies: () => document.querySelectorAll('.turn.assistant').length,
+    /** Кусок разговора ищем прямо в ленте. */
+    messages: () => document.getElementById('chat-messages')?.innerHTML ?? '',
+  };
+}
+
+test('панель открывается с занятым чужим разговором и никуда не падает', async () => {
+  const app = await driveChat({
+    chatId: 'web-1',
+    routes: {
+      '/panel/api/chat/status': () => ({ busy: ['web-2'] }),
+      '/panel/api/chat/history': () => ({
+        chat: { id: 'web-1', title: 'Разговор', workspace: 'talk' },
+        messages: [],
+        live: false,
+      }),
+      '/panel/api/chats': () => ({ chats: [{ id: 'web-1', title: 'Разговор' }, { id: 'web-2', title: 'Долгий таск' }] }),
+    },
+  });
+
+  // Разговор web-2 в работе: он один и помечен, остальные — нет.
+  assert.match(app.sidebar(), /chat-dot busy/, 'занятый разговор помечен жёлтой точкой');
+  const dots = [...app.sidebar().matchAll(/chat-dot (\w+)/g)].map((match) => match[1]);
+  assert.deepEqual(dots, ['busy'], 'единственная точка — на работающем разговоре');
+});
+
+test('ответ в неоткрытый разговор ставит зелёную точку, открытие её гасит', async () => {
+  const app = await driveChat({
+    chatId: 'web-1',
+    routes: {
+      '/panel/api/chat/status': () => ({ busy: [] }),
+      '/panel/api/chat/history': () => ({
+        chat: { id: 'web-1', title: 'Разговор', workspace: 'talk' },
+        messages: [],
+        live: false,
+      }),
+      '/panel/api/chats': () => ({ chats: [{ id: 'web-1', title: 'Разговор' }, { id: 'web-2', title: 'Долгий таск' }] }),
+    },
+  });
+
+  // Ход в web-2 встал, пока человек смотрел web-1.
+  app.event({ userId: 'probe', chatId: 'web-2', type: 'idle', chat: { id: 'web-2', title: 'Долгий таск' } });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+
+  assert.match(app.sidebar(), /chat-dot unread/, 'непрочитанный ответ помечен зелёной точкой');
+  const stored = JSON.parse(app.store.get('icarus.unread') || '[]');
+  assert.ok(stored.includes('web-2'), 'непрочитанное переживёт перезагрузку: оно в localStorage');
+});
+
+test('сводка поднимает и снимает жёлтую точку на чужом разговоре', async () => {
+  const app = await driveChat({
+    chatId: 'web-1',
+    routes: {
+      '/panel/api/chat/status': () => ({ busy: [] }),
+      '/panel/api/chat/history': () => ({
+        chat: { id: 'web-1', title: 'Разговор', workspace: 'talk' },
+        messages: [],
+        live: false,
+      }),
+      '/panel/api/chats': () => ({ chats: [{ id: 'web-1', title: 'Разговор' }, { id: 'web-2', title: 'Долгий таск' }] }),
+    },
+  });
+
+  app.event({ userId: 'probe', chatId: 'web-2', type: 'busy' });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.match(app.sidebar(), /chat-dot busy/, 'начали думать — точка зажглась');
+
+  app.event({ userId: 'probe', chatId: 'web-2', type: 'idle', chat: { id: 'web-2', title: 'Долгий таск' } });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.match(app.sidebar(), /chat-dot unread/, 'кончили — жёлтая сменилась зелёной');
+  assert.doesNotMatch(app.sidebar(), /chat-dot busy/, 'жёлтой больше нет');
+});
+
+test('панель подписана на сводку и сверяется снимком состояния', async () => {
+  const app = await driveChat({
+    chatId: 'web-1',
+    routes: {
+      '/panel/api/chat/status': () => ({ busy: [] }),
+      '/panel/api/chat/history': () => ({
+        chat: { id: 'web-1', title: 'Разговор', workspace: 'talk' },
+        messages: [],
+        live: false,
+      }),
+      '/panel/api/chats': () => ({ chats: [{ id: 'web-1', title: 'Разговор' }] }),
+    },
+  });
+
+  assert.ok(app.calls.some((call) => call.includes('/panel/api/chat/status')), 'снимок занятости спрошен при входе');
+});
+
+test('возврат в идущий ход не удваивает ответ в ленте', async () => {
+  // Настоящий возврат: история открылась, живой поток подхватился, человек ушёл
+  // и вернулся. Раньше каждая подписка добавляла своё тело — и один и тот же
+  // ответ висел в ленте столько раз, сколько раз туда заходили.
+  const app = await driveChat({
+    chatId: 'web-1',
+    routes: {
+      '/panel/api/chat/status': () => ({ busy: ['web-1'] }),
+      '/panel/api/chat/history': () => ({
+        chat: { id: 'web-1', title: 'Разговор', workspace: 'talk' },
+        messages: [],
+        live: true,
+      }),
+      '/panel/api/chats': () => ({ chats: [{ id: 'web-1', title: 'Разговор' }] }),
+    },
+  });
+  assert.equal(app.bodies(), 1, 'идущий ход рисует ровно одно тело');
+
+  // Человек ушёл в другой разговор — плашка остаётся в ленте на своём месте,
+  // а не выбрасывается, и подписка снята.
+  app.document.querySelector('[data-id="web-1"]').onclick?.();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+
+  // Вернулся — тот же самый ход, а не второй ответ.
+  app.document.querySelector('[data-id="web-1"]').onclick?.();
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(app.bodies(), 1, 'второй вход в тот же ход подхватывает то же тело');
+});
+
+test('idle из сводки убирает живую плашку, а запись разговора остаётся одна', async () => {
+  const app = await driveChat({
+    chatId: 'web-1',
+    routes: {
+      '/panel/api/chat/status': () => ({ busy: ['web-1'] }),
+      '/panel/api/chat/history': () => ({
+        chat: { id: 'web-1', title: 'Разговор', workspace: 'talk' },
+        messages: [],
+        live: true,
+      }),
+      '/panel/api/chats': () => ({ chats: [{ id: 'web-1', title: 'Разговор' }] }),
+    },
+  });
+  assert.equal(app.bodies(), 1, 'ход идёт — тело на месте');
+
+  app.event({ userId: 'probe', chatId: 'web-1', type: 'idle', chat: { id: 'web-1', title: 'Разговор' } });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(app.bodies(), 0, 'ход кончился — плашка убрана, её место занимает запись разговора');
 });

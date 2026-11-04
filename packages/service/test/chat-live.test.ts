@@ -5,7 +5,17 @@
 // целиком — с размышлениями и шагами, а не только с итогом.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { emit, finishTurn, liveTurn, startTurn, subscribe, type LiveEvent } from '../src/control/chat-live.ts';
+import {
+  broadcast,
+  emit,
+  finishTurn,
+  liveTurn,
+  startTurn,
+  subscribe,
+  watchAll,
+  type BulletinEvent,
+  type LiveEvent,
+} from '../src/control/chat-live.ts';
 
 test('события копятся, даже когда зрителя нет', () => {
   const turn = startTurn('probe', 'web-1');
@@ -74,4 +84,41 @@ test('чужой сбой подписчика не рвёт ход осталь
 
   emit(turn, { type: 'text', text: 'жив' });
   assert.deepEqual(дошло, [{ type: 'text', text: 'жив' }]);
+});
+
+test('сводка рассказывает про ходы во всех разговорах сразу', () => {
+  const слышал: BulletinEvent[] = [];
+  const отписка = watchAll((event) => слышал.push(event));
+
+  // Два разговора в работе одновременно — ради этого сводка и заведена.
+  broadcast({ userId: 'probe', chatId: 'web-1', type: 'busy' });
+  broadcast({ userId: 'probe', chatId: 'web-2', type: 'busy' });
+  broadcast({ userId: 'probe', chatId: 'web-1', type: 'idle', chat: { id: 'web-1' } });
+
+  assert.deepEqual(
+    слышал,
+    [
+      { userId: 'probe', chatId: 'web-1', type: 'busy' },
+      { userId: 'probe', chatId: 'web-2', type: 'busy' },
+      { userId: 'probe', chatId: 'web-1', type: 'idle', chat: { id: 'web-1' } },
+    ],
+    'сводка идёт по всем разговорам, старт и финал — вперемешку',
+  );
+
+  отписка();
+  broadcast({ userId: 'probe', chatId: 'web-3', type: 'busy' });
+  assert.equal(слышал.length, 3, 'отписанный больше ничего не слышит');
+});
+
+test('сорвавшийся слушатель сводки не глушит остальных', () => {
+  const дошло: BulletinEvent[] = [];
+  const убрать = watchAll(() => {
+    throw new Error('слушатель сломался');
+  });
+  const отписка = watchAll((event) => дошло.push(event));
+
+  broadcast({ userId: 'probe', chatId: 'web-1', type: 'busy' });
+  assert.equal(дошло.length, 1, 'живой слушатель получил событие');
+  убрать();
+  отписка();
 });

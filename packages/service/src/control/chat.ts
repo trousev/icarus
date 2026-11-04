@@ -37,7 +37,7 @@ import {
 import { sessionFileForId, sessionFilesFor, textOfContent as textOf, type FileSession } from '../sessions/files.ts';
 import type { SessionRegistry } from '../sessions/registry.ts';
 import { mcpReauthNotice } from '../mcp/reauth.ts';
-import { emit, finishTurn, liveTurn, runningTurn, startTurn, subscribe } from './chat-live.ts';
+import { broadcast, emit, finishTurn, liveTurn, runningTurn, startTurn, subscribe, watchAll } from './chat-live.ts';
 import { log } from '../log.ts';
 
 export { readChats };
@@ -316,9 +316,23 @@ export function finishChat(
   id: string,
   userText: string,
 ): ChatRecord | null {
+  // Единственное место, где ход закрывается окончательно: успех, провал и обрыв
+  // запроса "closed" проходят через него, а сорвавшийся ход в catch в него не
+  // доходит. Поэтому сводку шлём отсюда, а не из streamTurn: иначе любой ранний
+  // выход оставил бы разговор жёлтым навсегда.
   const chat = findChatRecord(config, user, id);
-  if (!chat || !isGenericTitle(chat)) return chat;
+  const settled = !chat || !isGenericTitle(chat) ? chat : retitleChat(config, user, chat, userText);
+  broadcast({ userId: user.id, chatId: id, type: 'idle', chat: settled ?? undefined });
+  return settled;
+}
 
+/** Первая реплика становится заголовком: остальные ходы его уже не трогают. */
+function retitleChat(
+  config: IcarusConfig,
+  user: UserConfig,
+  chat: ChatRecord,
+  userText: string,
+): ChatRecord {
   const generated = titleFromText(userText);
   if (!generated) return chat;
   const title = generated.length >= 47 ? `${generated.slice(0, 46).trimEnd()}…` : generated;
@@ -875,6 +889,8 @@ async function streamTurn(
   // Ход переживает зрителя: события копит hub, а этот ответ — лишь один из
   // подписчиков. F5 вычеркнет его, ход продолжит идти, а панель потом догонит.
   const turn = startTurn(user.id, chatId);
+  // Сайдбар других разговоров должен узнать, что тут начали думать.
+  broadcast({ userId: user.id, chatId, type: 'busy' });
   const send = (event: Record<string, unknown>): void => emit(turn, event);
   const settle = (): void => {
     if (done) return;
@@ -972,6 +988,9 @@ async function streamTurn(
     await settled;
 
     const userText = text || attachments.names.join(', ');
+    // `finishChat` не только даёт запись с заголовком, но и шлёт в сводку
+    // `idle` — поэтому он обязан стоять до `done`, иначе гонка: ответ дошёл,
+    // а точка в сайдбаре ещё жёлтая.
     const record = finishChat(config, user, chatId, userText);
     const summary = record ? summaryAfterTurn(record, userText, answer) : null;
     send({ type: 'done', chat: summary, steps });
@@ -990,6 +1009,9 @@ async function streamTurn(
   } catch (error) {
     log.error('чат: ход сорвался', { user: user.id, chatId, error: String(error) });
     send({ type: 'error', message: error instanceof Error ? error.message : String(error) });
+    // Сорвавшийся ход тоже "встал": `finishChat` в него не доходит, поэтому
+    // `idle` шлём здесь — иначе разговор залипнет жёлтым навсегда.
+    finishChat(config, user, chatId, text || attachments.names.join(', '));
     finishTurn(turn);
     unsubscribe();
     unsubscribeSession();
@@ -1069,6 +1091,40 @@ export async function handleChatApi(
       // Только про идущий ход: доигранный ответ уже лежит в истории, и второй
       // раз рисовать его из потока нельзя.
       json(res, 200, { ...history, live: Boolean(runningTurn(user.id, id)) });
+      return true;
+    }
+
+    // Сводка по всем разговорам: какое событие кому. Отдельным каналом, а не
+    // живым потоком разговора, — панели нужно знать про чужие ходы, не читая их
+    // целиком. Дельт текста тут нет: только старт и финал.
+    if (pathname === '/panel/api/chat/events' && req.method === 'GET') {
+      res.writeHead(200, {
+        'content-type': 'text/event-stream; charset=utf-8',
+        'cache-control': 'no-cache, no-transform',
+        connection: 'keep-alive',
+        'x-accel-buffering': 'no',
+      });
+      // Комментарий-строка сразу: прокси и браузер должны увидеть живое соединение,
+      // а не решить, что ответ завис.
+      res.write(': icarus bulletin\n\n');
+      const off = watchAll((event) => {
+        // Чужие ходы человека не касаются.
+        if (event.userId !== user.id) return;
+        if (res.writableEnded) return;
+        try {
+          res.write(`data: ${JSON.stringify(event)}\n\n`);
+        } catch (error) {
+          log.warn('чат: событие сводки не ушло', { error: String(error) });
+        }
+      });
+      res.on('close', off);
+      return true;
+    }
+
+    if (pathname === '/panel/api/chat/status' && req.method === 'GET') {
+      // Снимок для того, кто только открыл панель или переподключил сводку:
+      // события за время разрыва потеряны, а состояние — вот оно.
+      json(res, 200, { busy: ctx.registry?.busyConversations(user.id) ?? [] });
       return true;
     }
 

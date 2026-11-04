@@ -20,6 +20,7 @@ import {
   traceDetail,
   traceLabel,
 } from '../src/control/chat.ts';
+import { watchAll, type BulletinEvent } from '../src/control/chat-live.ts';
 import { makeConfig, PANEL_USER_HEADER, probe } from './fixtures.ts';
 
 function fixture() {
@@ -88,6 +89,39 @@ test('ход веб-чата: заголовок из первой реплик�
   assert.match(found?.preview ?? '', /10:00/);
   assert.equal(found?.updatedAt, '2026-11-01T10:00:01.000Z');
   assert.equal(listChatPage(config, user, 'нет-такого-слова').chats.length, 0);
+});
+
+test('finishChat закрывает ход сводкой: разговор не залипает жёлтым', () => {
+  // Ход, дошедший до записи, обязан сказать сводке `idle` — иначе сайдбар
+  // считает его идущим вечно. Дело не только в счастливом пути: сюда же
+  // приходит и `closed`, и любой ранний выход, который до catch не доходит.
+  const { config, user } = fixture();
+  const chat = createChat(config, user, 'talk', new Date('2026-11-01T10:00:00.000Z'));
+
+  const слышал: BulletinEvent[] = [];
+  const отписка = watchAll((event) => слышал.push(event));
+  const record = finishChat(config, user, chat.id, 'Собери план на четверг');
+  отписка();
+
+  const последний = слышал.at(-1);
+  assert.equal(последний?.type, 'idle', 'ход встал');
+  assert.equal(последний?.chatId, chat.id, 'и это тот самый разговор');
+  assert.equal(последний?.userId, 'probe', 'событие адресовано владельцу, а не всем подряд');
+  assert.equal((последний?.chat as { id?: string })?.id, chat.id, 'в сводке едет запись разговора');
+  assert.equal(record?.title, 'Собери план на четверг', 'заголовок по-прежнему берётся из первой реплики');
+});
+
+test('ход без записи тоже не оставляет разговор жёлтым', () => {
+  // Разговор уже удалён или его файл недоступен: `finishChat` записи не даст,
+  // но `idle` из сводки уйти обязан — иначе нечего будет гасить.
+  const { config, user } = fixture();
+  const слышал: BulletinEvent[] = [];
+  const отписка = watchAll((event) => слышал.push(event));
+  const record = finishChat(config, user, 'web-нет-такого', 'Что-нибудь');
+  отписка();
+
+  assert.equal(record, null, 'записи нет');
+  assert.equal(слышал.at(-1)?.type, 'idle', 'а сводка всё равно узнала, что ход встал');
 });
 
 test('история берётся из файла сессии: текст и трассировка, без сырых результатов', () => {
