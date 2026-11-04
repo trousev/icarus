@@ -563,6 +563,8 @@ async function selectChat(id) {
     setComposer(Boolean(currentChat.readOnly));
     setNote('');
     renderHistory(data.messages || []);
+    // Разговор открылся, а ход всё ещё идёт: цепляемся к живому потоку.
+    if (data.live && !streaming) void attachLive();
     closeMenu();
   } catch (error) {
     if (token !== historyToken) return;
@@ -1119,27 +1121,7 @@ async function sendText(forced) {
       throw new Error(message);
     }
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      let cut = buffer.indexOf('\n');
-      while (cut !== -1) {
-        const line = buffer.slice(0, cut).trim();
-        buffer = buffer.slice(cut + 1);
-        if (line) {
-          try {
-            handleEvent(box, JSON.parse(line));
-          } catch {
-            /* одна битая строка не должна рвать весь ответ */
-          }
-        }
-        cut = buffer.indexOf('\n');
-      }
-    }
+    await readStream(response, box);
   } catch (error) {
     box.turn.classList.add('error');
     box.text = [box.text, '\n\n[ошибка: ' + error.message + ']'].filter(Boolean).join('');
@@ -1150,6 +1132,55 @@ async function sendText(forced) {
     setStreaming(false);
     box.typing.hidden = true;
     input.focus();
+  }
+}
+
+/** Строчки NDJSON из потока: общий разбор и для отправки, и для догона хода. */
+async function readStream(response, box) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let cut = buffer.indexOf('\n');
+    while (cut !== -1) {
+      const line = buffer.slice(0, cut).trim();
+      buffer = buffer.slice(cut + 1);
+      if (line) {
+        try {
+          handleEvent(box, JSON.parse(line));
+        } catch {
+          /* одна битая строка не должна рвать весь ответ */
+        }
+      }
+      cut = buffer.indexOf('\n');
+    }
+  }
+}
+
+/**
+ * Догон идущего хода — после F5 или открытия панели на другом устройстве.
+ * Сервер сперва отдаёт накопленный журнал, потом живое до самого `done`,
+ * поэтому ответ собирается с нуля ровно таким, каким был бы без перезагрузки.
+ */
+async function attachLive() {
+  if (streaming || !currentId) return;
+  const box = addAssistant();
+  setStreaming(true);
+  try {
+    const response = await fetch('/panel/api/chat/stream?id=' + encodeURIComponent(currentId));
+    if (!response.ok) {
+      // Ход успел кончиться: историю подтянем свежей загрузкой.
+      return;
+    }
+    await readStream(response, box);
+  } catch (error) {
+    setNote('догнать ответ не вышло: ' + error.message);
+  } finally {
+    setStreaming(false);
+    box.typing.hidden = true;
   }
 }
 
