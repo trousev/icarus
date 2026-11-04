@@ -37,6 +37,7 @@ import {
 import { sessionFileForId, sessionFilesFor, textOfContent as textOf, type FileSession } from '../sessions/files.ts';
 import type { SessionRegistry } from '../sessions/registry.ts';
 import { mcpReauthNotice } from '../mcp/reauth.ts';
+import { emit, finishTurn, liveTurn, runningTurn, startTurn, subscribe } from './chat-live.ts';
 import { log } from '../log.ts';
 
 export { readChats };
@@ -844,7 +845,12 @@ async function streamTurn(
     return;
   }
   if (session.busy) {
-    json(res, 409, errorBody('в этом разговоре уже идёт ответ', 'conflict_error'));
+    // Ход идёт без зрителя (панель перезагрузили): это не ошибка, а повод
+    // прицепиться к потоку. Отдаём 409 с подсказкой, чтобы клиент знал дорогу.
+    json(res, 409, {
+      ...errorBody('в этом разговоре уже идёт ответ', 'conflict_error'),
+      live: true,
+    });
     return;
   }
 
@@ -855,7 +861,6 @@ async function streamTurn(
     'x-accel-buffering': 'no',
   });
 
-  let closed = false;
   let done = false;
   let answer = '';
   let resolveSettled: () => void = () => {};
@@ -866,16 +871,25 @@ async function streamTurn(
   const byId = new Map<string, ChatTraceStep>();
   const toolArgs = new Map<string, Record<string, unknown>>();
   const reauthSent = new Set<string>();
-  const send = (event: Record<string, unknown>): void => {
-    if (!closed && !res.writableEnded) res.write(`${JSON.stringify(event)}\n`);
-  };
+
+  // Ход переживает зрителя: события копит hub, а этот ответ — лишь один из
+  // подписчиков. F5 вычеркнет его, ход продолжит идти, а панель потом догонит.
+  const turn = startTurn(user.id, chatId);
+  const send = (event: Record<string, unknown>): void => emit(turn, event);
   const settle = (): void => {
     if (done) return;
     done = true;
     resolveSettled();
   };
 
-  const unsubscribe = session.onEvent((event) => {
+  /** Пишем зрителю, только пока он есть; остальное уже накоплено в hub. */
+  const writeTo = (target: ServerResponse, event: Record<string, unknown>): void => {
+    if (target.writableEnded) return;
+    target.write(`${JSON.stringify(event)}\n`);
+  };
+  const unsubscribe = subscribe(turn, (event) => writeTo(res, event));
+
+  const unsubscribeSession = session.onEvent((event) => {
     switch (event.type) {
       case 'message_update': {
         const delta = event.assistantMessageEvent as { type?: string; delta?: string } | undefined;
@@ -953,24 +967,19 @@ async function streamTurn(
     }
   });
 
-  res.on('close', () => {
-    if (res.writableEnded || done) return;
-    closed = true;
-    log.info('чат: клиент ушёл — прерываю ход', { user: user.id, chatId });
-    void session.abort();
-    settle();
-  });
-
   try {
     await session.prompt(prompt, attachments.images);
     await settled;
-    if (closed) return;
 
     const userText = text || attachments.names.join(', ');
     const record = finishChat(config, user, chatId, userText);
     const summary = record ? summaryAfterTurn(record, userText, answer) : null;
     send({ type: 'done', chat: summary, steps });
-    res.end();
+    // Ход встал: догоняющий зритель получит хвост и закроет соединение сам.
+    finishTurn(turn);
+    unsubscribe();
+    unsubscribeSession();
+    if (!res.writableEnded) res.end();
     log.info('чат: ход завершён', {
       user: user.id,
       chatId,
@@ -980,12 +989,11 @@ async function streamTurn(
     });
   } catch (error) {
     log.error('чат: ход сорвался', { user: user.id, chatId, error: String(error) });
-    if (!closed && !res.writableEnded) {
-      send({ type: 'error', message: error instanceof Error ? error.message : String(error) });
-      res.end();
-    }
-  } finally {
+    send({ type: 'error', message: error instanceof Error ? error.message : String(error) });
+    finishTurn(turn);
     unsubscribe();
+    unsubscribeSession();
+    if (!res.writableEnded) res.end();
   }
 }
 
@@ -1056,12 +1064,71 @@ export async function handleChatApi(
         json(res, 404, errorBody('разговор не найден'));
         return true;
       }
-      json(res, 200, history);
+      // Ход мог пережить перезагрузку панели: сообщаем об этом сразу вместе с
+      // историей, чтобы клиент цеплялся к потоку, а не гадал, почему тихо.
+      // Только про идущий ход: доигранный ответ уже лежит в истории, и второй
+      // раз рисовать его из потока нельзя.
+      json(res, 200, { ...history, live: Boolean(runningTurn(user.id, id)) });
       return true;
     }
 
     if (!ctx.registry) {
       json(res, 501, errorBody('чат недоступен: панель поднята без контейнера с pi', 'invalid_request_error'));
+      return true;
+    }
+
+    // Догон идущего хода: панель открылась заново (F5, новая вкладка) и хочет
+    // прицепиться к тому, что уже происходит. Отдаём накопленное и держим
+    // соединение до конца хода — это и есть «переподключиться к стриму».
+    if (pathname === '/panel/api/chat/stream' && req.method === 'GET') {
+      const id = chatIdOf(url.searchParams.get('id'));
+      if (!id) {
+        json(res, 400, errorBody('не указан разговор'));
+        return true;
+      }
+      const chat = findChatRecord(ctx.config, user, id);
+      if (!chat) {
+        json(res, 404, errorBody('разговор не найден'));
+        return true;
+      }
+      if (chat.channel !== 'web') {
+        json(res, 403, errorBody('разговор начат не в панели: здесь он только для чтения', 'permission_error'));
+        return true;
+      }
+      const turn = liveTurn(user.id, id);
+      if (!turn) {
+        // Хода нет: панель просто берёт историю, поток ей не нужен.
+        json(res, 200, { live: false });
+        return true;
+      }
+
+      res.writeHead(200, {
+        'content-type': 'application/x-ndjson; charset=utf-8',
+        'cache-control': 'no-cache, no-transform',
+        connection: 'keep-alive',
+        'x-accel-buffering': 'no',
+      });
+      res.write(`${JSON.stringify({ type: 'live', resumed: true })}\n`);
+
+      let off = (): void => {};
+      // Зритель ушёл (F5, закрытая вкладка) — просто вычёркиваем его. Ход продолжает
+      // идти, и следующая панель догонит его тем же накопленным журналом.
+      const detach = (): void => off();
+      res.on('close', detach);
+      // Уходим сразу после `done`/`error`: дальше ход уже нечего рассказывать.
+      off = subscribe(turn, (event) => {
+        if (res.writableEnded) return;
+        res.write(`${JSON.stringify(event)}\n`);
+        if (event.type === 'done' || event.type === 'error') {
+          off();
+          res.end();
+        }
+      });
+      // Ход успел встать, пока подписывались: хвост отдан на replay, закрываемся.
+      if (turn.done && !res.writableEnded) {
+        off();
+        res.end();
+      }
       return true;
     }
 
