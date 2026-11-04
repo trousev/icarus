@@ -187,7 +187,30 @@ function assistantHtml(message) {
 let chats = [];
 let currentId = cfg.chatId || null;
 let currentChat = null;
-let streaming = false;
+/**
+ * Чей ход панель сейчас СМОТРИТ (подписка на живой поток этого разговора).
+ * Было булево `streaming`; стало идентификатором, потому что смотреть можно
+ * только один разговор, а идти ходы могут во многих сразу.
+ */
+let liveChatId = null;
+/**
+ * Ящик ответа, который сейчас достримивается, и его обрыв. Держим рядом: ушедший
+ * разговор нужно бросить так, чтобы это не выглядело ошибкой в его ленте.
+ */
+let liveBox = null;
+let liveAbort = null;
+/**
+ * Тело ответа на идущий ход для каждого разговора: F5 или уход в другой чат —
+ * это "ушёл смотреть", а не "отвечай заново". Вернувшись к тому же ходу, панель
+ * подхватывает ту же плашку: иначе два возврата в один ход — два ответа в ленте.
+ */
+const liveBodies = new Map();
+/** Разговоры, где ход идёт прямо сейчас — из сводки и снимка статуса. */
+const busyChats = new Set();
+/** Разговоры с непрочитанным ответом — жёлтая/зелёная точка в сайдбаре. */
+const unread = new Set();
+/** Идёт ли ход прямо в открытом разговоре: композеру и «стоп» это и нужно. */
+const streaming = () => liveChatId !== null && liveChatId === currentId;
 /** Нажал ли человек «стоп» в этом ходе: по флагу понятно, чем кончился ответ. */
 let stoppedByUser = false;
 /** Черновик нового чата: на сервере его ещё нет, пока не ушло первое сообщение. */
@@ -214,6 +237,63 @@ let defaultEmptyHtml = '';
 const CHAT_PAGE_SIZE = 30;
 const MAX_FILES = 8;
 const MAX_TOTAL_BYTES = 10 * 1024 * 1024;
+const UNREAD_KEY = 'icarus.unread';
+
+/**
+ * Непрочитанное живёт только в браузере: серверу оно ни к чему, а лишний
+ * персист ради зелёной точки не нужен. Отсюда и следствие — на другом устройстве
+ * точки свои (см. README).
+ */
+function loadUnread() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(UNREAD_KEY) || '[]');
+    if (Array.isArray(raw)) for (const id of raw) if (typeof id === 'string') unread.add(id);
+  } catch {
+    /* битый ключ — просто начнём с пустого */
+  }
+}
+
+function saveUnread() {
+  try {
+    localStorage.setItem(UNREAD_KEY, JSON.stringify([...unread]));
+  } catch {
+    /* приватный режим — точка просто не запомнится */
+  }
+}
+
+/** Ответ пришёл в разговор, который человек не смотрит: ставим зелёную точку. */
+function markUnread(chatId) {
+  if (!chatId) return;
+  // Смотрим этот разговор и вкладка на виду — ответ и так на экране, точка лишняя.
+  if (chatId === currentId && !document.hidden) return;
+  if (unread.has(chatId)) return;
+  unread.add(chatId);
+  saveUnread();
+  renderChats();
+}
+
+/** Разговор открыли (или вкладка вернулась к нему) — точка гаснет. */
+function markRead(chatId) {
+  if (!chatId || !unread.has(chatId)) return;
+  unread.delete(chatId);
+  saveUnread();
+  renderChats();
+}
+
+/**
+ * Разговор удалён или его id устарел — точка на него больше не нужна. Чистим по
+ * фактически загруженному списку, а не гадаем, что там лежит в localStorage.
+ */
+function pruneUnread() {
+  const known = new Set(chats.map((chat) => chat.id));
+  let changed = false;
+  for (const id of [...unread]) {
+    if (known.has(id)) continue;
+    unread.delete(id);
+    changed = true;
+  }
+  if (changed) saveUnread();
+}
 
 /** Как назвать вход, из которого пришёл разговор. */
 function channelName(chat) {
@@ -299,13 +379,19 @@ function renderChats() {
       group = label;
       html += '<div class="chat-group"><p class="chat-group-title">' + esc(label) + '</p>';
     }
+    // Точка одна и она старше видит занятость: жёлтая — ход идёт, зелёная — есть
+    // непрочитанный ответ. Разметка точки появляется, только когда она нужна, —
+    // иначе `gap` у flex-строки съедал бы место под пустую колонку.
+    const dot = busyChats.has(chat.id) ? 'busy' : unread.has(chat.id) ? 'unread' : '';
     html +=
       '<button class="chat-item' +
       (chat.id === currentId ? ' active' : '') +
       (chat.readOnly ? ' read-only' : '') +
       '" data-id="' +
       esc(chat.id) +
-      '"><div class="chat-item-top"><span class="chat-item-title">' +
+      '"><div class="chat-item-top">' +
+      (dot ? '<span class="chat-dot ' + dot + '"></span>' : '') +
+      '<span class="chat-item-title">' +
       esc(chat.title) +
       '</span>' +
       (channelTag(chat) ? '<span class="chat-item-tag">' + esc(channelTag(chat)) + '</span>' : '') +
@@ -353,6 +439,7 @@ async function loadChats(reset = true) {
       chats = chats.concat(incoming.filter((chat) => !seen.has(chat.id)));
     }
     nextCursor = data.nextCursor || null;
+    if (reset) pruneUnread();
     renderChats();
     if (reset) el('chat-list').scrollTop = 0;
   } finally {
@@ -466,7 +553,9 @@ function clearPending(revoke = true) {
 }
 
 function addFiles(list) {
-  if (streaming || !writable) return;
+  // Прикрепить файл можно, только пока сам этот разговор молчит: вложение уйдёт
+  // вместе со следующей репликой, а она в занятый разговор не пойдёт.
+  if (streaming() || !writable) return;
   let total = pending.reduce((sum, item) => sum + item.file.size, 0);
   for (const file of Array.from(list || [])) {
     if (pending.length >= MAX_FILES) {
@@ -536,7 +625,11 @@ function renderHistory(messages) {
 }
 
 async function selectChat(id) {
-  if (!id || streaming) return;
+  // Переключение разговоров больше не заперто: уходим, отписавшись от потока
+  // (ход доживёт на сервере), и цепляемся к новому, если там что-то идёт.
+  if (!id) return;
+  if (liveChatId) detachLive();
+  markRead(id);
   closeSettings();
   endDraft();
   // Из черновика могли остаться экран выбора workspace'а — открытому чату он чужой.
@@ -564,7 +657,7 @@ async function selectChat(id) {
     setNote('');
     renderHistory(data.messages || []);
     // Разговор открылся, а ход всё ещё идёт: цепляемся к живому потоку.
-    if (data.live && !streaming) void attachLive();
+    if (data.live && !streaming()) void attachLive();
     closeMenu();
   } catch (error) {
     if (token !== historyToken) return;
@@ -611,7 +704,7 @@ async function createChat() {
 }
 
 function startDraft(workspace = defaultWorkspace) {
-  if (streaming) return;
+  if (liveChatId) detachLive();
   if (draft && draftWorkspace === workspace) {
     el('chat-input').focus();
     closeMenu();
@@ -834,7 +927,7 @@ async function submitWorkspace() {
 
 /** Выбор папки: в черновике просто переключаем её, не покидая новый чат. */
 async function openWorkspace(slug) {
-  if (streaming) return;
+  if (liveChatId) detachLive();
   closeSettings();
   if (!draft) {
     startDraft(slug);
@@ -855,7 +948,6 @@ async function openWorkspace(slug) {
 
 /** Готовый запрос уходит в выбранную папку — и создаёт чат, как обычная реплика. */
 async function startPrompt(prompt) {
-  if (streaming) return;
   if (!draft) startDraft();
   await sendText(prompt);
 }
@@ -975,7 +1067,33 @@ function addAssistant() {
     text: '',
     steps: [],
     traceOpen: true,
+    stopped: false,
   };
+}
+
+/**
+ * Плажка ответа для идущего хода. Второй заход в тот же ход — не новый ответ:
+ * берём уже нарисованную плашку и достраиваем её поверх остальных.
+ */
+function assistantBoxFor(chatId) {
+  const existing = liveBodies.get(chatId);
+  if (existing && existing.turn.isConnected) {
+    el('chat-messages').append(existing.turn);
+    scrollToBottom(true);
+    return existing;
+  }
+  const box = addAssistant();
+  box.chatId = chatId;
+  liveBodies.set(chatId, box);
+  return box;
+}
+
+/** Ход кончился записью в разговоре: плашку держать больше не за чем. */
+function dropLiveBody(chatId) {
+  const box = liveBodies.get(chatId);
+  if (!box) return;
+  liveBodies.delete(chatId);
+  box.turn.remove();
 }
 
 function renderLive(box) {
@@ -988,7 +1106,7 @@ function renderLive(box) {
   const next = box.trace.querySelector('details.trace');
   if (next) next.open = box.traceOpen;
   box.md.innerHTML = markdown(box.text);
-  box.typing.hidden = Boolean(box.text) || !streaming;
+  box.typing.hidden = Boolean(box.text) || !streaming();
   scrollToBottom();
 }
 
@@ -1047,6 +1165,9 @@ function handleEvent(box, event) {
       box.md.innerHTML = markdown(box.text);
     }
     box.typing.hidden = true;
+    // Ответ окончательный и уже показан живой плашкой: в карте ему делать нечего,
+    // иначе следующее возвращение в этот разговор нарисует его второй раз.
+    dropLiveBody(box.chatId);
     if (event.chat) {
       currentChat = event.chat;
       currentId = event.chat.id;
@@ -1069,7 +1190,8 @@ function handleEvent(box, event) {
 }
 
 async function sendText(forced) {
-  if (streaming || !writable) return;
+  // Отказ только от СВОЕГО занятого разговора: чужие ходы отправке не мешают.
+  if (!writable || (currentId && busyChats.has(currentId))) return;
   const input = el('chat-input');
   const text = String(forced ?? input.value).trim();
   const files = pending.slice();
@@ -1099,39 +1221,58 @@ async function sendText(forced) {
     }
   }
 
-  setStreaming(true);
+  // Запоминаем, чей это ход: пока он идёт, человек может уйти в другой разговор,
+  // и `finally` не должен затирать подписку, которая к тому времени станет чужой.
+  const turnChatId = currentId;
+  setLive(turnChatId);
+  const abort = new AbortController();
+  liveAbort = abort;
   input.value = '';
   growInput();
   clearPending(false);
   showEmpty(false);
   addUser(text, files);
-  const box = addAssistant();
+  const box = assistantBoxFor(turnChatId);
+  box.stopped = false;
+  liveBox = box;
 
   try {
     const response = await fetch('/panel/api/chat/send', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ chatId: currentId, text, attachments }),
+      body: JSON.stringify({ chatId: turnChatId, text, attachments }),
+      signal: abort.signal,
     });
     if (!response.ok) {
       const type = response.headers.get('content-type') || '';
-      const message = type.includes('application/json')
-        ? ((await response.json().catch(() => ({}))).error || {}).message || response.statusText
-        : 'ответ не начался: ' + response.status;
-      throw new Error(message);
+      const data = type.includes('application/json') ? await response.json().catch(() => ({})) : {};
+      // Ход уже идёт (кто-то другой написал туда же): это не ошибка, а повод
+      // прицепиться к живому потоку вместо того, чтобы падать с 409-кой.
+      if (data.live) {
+        dropLiveBody(turnChatId);
+        setLive(null);
+        await attachLive();
+        return;
+      }
+      throw new Error((data.error || {}).message || response.statusText || 'ответ не начался: ' + response.status);
     }
 
     await readStream(response, box);
   } catch (error) {
-    box.turn.classList.add('error');
-    box.text = [box.text, '\n\n[ошибка: ' + error.message + ']'].filter(Boolean).join('');
-    box.md.innerHTML = markdown(box.text);
-    box.typing.hidden = true;
-    setNote('');
+    // Ушли в другой разговор — ответ доедет на сервере, панель его догонит.
+    if (!box.stopped) {
+      box.turn.classList.add('error');
+      box.text = [box.text, '\n\n[ошибка: ' + error.message + ']'].filter(Boolean).join('');
+      box.md.innerHTML = markdown(box.text);
+      setNote('');
+    }
   } finally {
-    setStreaming(false);
+    if (liveAbort === abort) liveAbort = null;
+    if (liveBox === box) liveBox = null;
+    markRead(turnChatId);
+    if (liveChatId === turnChatId) setLive(null);
     box.typing.hidden = true;
-    input.focus();
+    if (currentId === turnChatId) input.focus();
   }
 }
 
@@ -1141,7 +1282,15 @@ async function readStream(response, box) {
   const decoder = new TextDecoder();
   let buffer = '';
   for (;;) {
-    const { value, done } = await reader.read();
+    let chunk;
+    try {
+      chunk = await reader.read();
+    } catch (error) {
+      // Отписка рвёт чтение намеренно — это не ошибка ответа.
+      if (box.stopped) return;
+      throw error;
+    }
+    const { value, done } = chunk;
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
     let cut = buffer.indexOf('\n');
@@ -1166,39 +1315,131 @@ async function readStream(response, box) {
  * поэтому ответ собирается с нуля ровно таким, каким был бы без перезагрузки.
  */
 async function attachLive() {
-  if (streaming || !currentId) return;
-  const box = addAssistant();
-  setStreaming(true);
+  if (streaming() || !currentId) return;
+  const chatId = currentId;
+  const box = assistantBoxFor(chatId);
+  setLive(chatId);
+  const abort = new AbortController();
+  liveAbort = abort;
+  liveBox = box;
+  box.stopped = false;
   try {
-    const response = await fetch('/panel/api/chat/stream?id=' + encodeURIComponent(currentId));
+    const response = await fetch('/panel/api/chat/stream?id=' + encodeURIComponent(chatId), {
+      signal: abort.signal,
+    });
     if (!response.ok) {
       // Ход успел кончиться: историю подтянем свежей загрузкой.
+      dropLiveBody(chatId);
       return;
     }
     await readStream(response, box);
   } catch (error) {
-    setNote('догнать ответ не вышло: ' + error.message);
+    if (!box.stopped) setNote('догнать ответ не вышло: ' + error.message);
   } finally {
-    setStreaming(false);
+    if (liveAbort === abort) liveAbort = null;
+    if (liveBox === box) liveBox = null;
+    markRead(chatId);
+    // Подписка могла к этому моменту уже уехать в другой разговор: трогаем
+    // состояние, только если оно всё ещё наше.
+    if (liveChatId === chatId) setLive(null);
     box.typing.hidden = true;
   }
+}
+
+/* ── сводка по всем разговорам ──────────────────────────────────────────────
+   Отдельный канал поверх разговоров: панель узнаёт, что где-то начали думать и
+   где-то закончили, не подписываясь на полный поток каждого разговора. Событий
+   мало (старт и финал), поэтому стримом он не душит. */
+let bulletin = null;
+
+function applyBulletin(event) {
+  if (!event || !event.chatId) return;
+  if (event.type === 'busy') {
+    busyChats.add(event.chatId);
+    renderChats();
+    // Открыт занятый разговор, а мы к нему не подписаны (ход начался в другой
+    // вкладке или мы только что его открыли) — цепляемся.
+    if (event.chatId === currentId && !streaming()) void attachLive();
+    return;
+  }
+  if (event.type !== 'idle') return;
+  busyChats.delete(event.chatId);
+  if (event.chat) {
+    // Ответ окончательный — живую плашку можно убрать: запись разговора заменит её.
+    dropLiveBody(event.chatId);
+    rememberChat(event.chat);
+  }
+  // Ход доехал, пока мы смотрели другой разговор: ставим зелёную точку.
+  markUnread(event.chatId);
+  renderChats();
+}
+
+async function syncStatus() {
+  try {
+    const data = await api('/panel/api/chat/status');
+    const incoming = new Set(data.busy || []);
+    // Снимок — истина на момент открытия: подчищаем всё, чего в нём нет (ход мог
+    // кончиться, пока мы были отключены и события за это время потерялись).
+    for (const id of [...busyChats]) if (!incoming.has(id)) busyChats.delete(id);
+    for (const id of incoming) busyChats.add(id);
+    renderChats();
+    if (currentId && busyChats.has(currentId) && !streaming()) void attachLive();
+  } catch {
+    /* снимок — удобство; чат должен открыться и без него */
+  }
+}
+
+function startBulletin() {
+  if (bulletin || !window.EventSource) return;
+  bulletin = new EventSource('/panel/api/chat/events');
+  // `EventSource` сам переподключается, но события за время разрыва теряет —
+  // поэтому на каждое открытие (и первое, и после обрыва) сверяемся с сервером.
+  bulletin.onopen = () => void syncStatus();
+  bulletin.onmessage = (message) => {
+    try {
+      applyBulletin(JSON.parse(message.data));
+    } catch {
+      /* одна битая строка не должна ронять канал */
+    }
+  };
+  bulletin.onerror = () => {
+    // Состояние соединения браузер держит сам; тут делать нечего.
+  };
+}
+
+/**
+ * Отписка без остановки хода: человек ушёл в другой разговор, но Икар продолжает
+ * думать. Вернётся — `/chat/stream` отдаст накопленное с нуля (см. attachLive).
+ */
+function detachLive() {
+  // Бросаем чтение намеренно: обрыв тут — не ошибка ответа, а уход человека.
+  if (liveBox) liveBox.stopped = true;
+  if (liveAbort) {
+    liveAbort.abort();
+    liveAbort = null;
+  }
+  liveBox = null;
+  if (liveChatId) setLive(null);
 }
 
 /**
  * Пока идёт ответ, на месте «отправить» стоит «стоп»: остановить ход можно и в
  * середине — вместе с субагентами, которые в этот момент работают.
  */
-function setStreaming(on) {
-  streaming = Boolean(on);
+function setLive(chatId) {
+  liveChatId = chatId || null;
+  const on = Boolean(liveChatId);
   el('chat-stop').hidden = !on;
   el('chat-stop').disabled = false;
   el('chat-send').hidden = Boolean(on);
   el('chat-send').disabled = on || !writable;
   if (!on) stoppedByUser = false;
+  // Точка «в работе» в сайдбаре — это в том числе наш собственный ход.
+  renderChats();
 }
 
 async function stopStream() {
-  if (!streaming || !currentId) return;
+  if (!streaming() || !currentId) return;
   el('chat-stop').disabled = true;
   try {
     const result = await api('/panel/api/chat/abort', {
@@ -1387,12 +1628,25 @@ el('chat-empty').addEventListener('click', (event) => {
   else sendText(button.dataset.prompt).catch(() => {});
 });
 
+/* Вкладка вернулась на перед — то, что человек смотрит, становится прочитанным. */
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && currentId) markRead(currentId);
+});
+window.addEventListener('focus', () => {
+  if (currentId) markRead(currentId);
+});
+
 (async () => {
   const params = new URLSearchParams(window.location.search);
+  loadUnread();
   await loadState();
   await loadChats(true);
   await loadWorkspaces();
   defaultEmptyHtml = el('chat-empty').innerHTML;
+  startBulletin();
+  // Снимок занятости берём сразу, не дожидаясь открытия сводки: ходы могли
+  // начаться до того, как панель открылась, и узнать о них больше негде.
+  await syncStatus();
   if (currentId) await selectChat(currentId);
   else startDraft();
   updateComposerHint();

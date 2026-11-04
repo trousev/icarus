@@ -14,6 +14,44 @@ export type LiveEvent = Record<string, unknown>;
 
 type Subscriber = (event: LiveEvent) => void;
 
+/**
+ * Сводка по всем разговорам человека: панели нужно знать, где ход идёт и где он
+ * кончился, не подписываясь на полный поток каждого разговора. Событий мало и они
+ * редкие — старт хода и финал; дельты текста тут не ходят.
+ */
+export type BulletinEvent = {
+  /** Чей ход: панель чужие события должна пропустить. */
+  userId: string;
+  chatId: string;
+  type: 'busy' | 'idle';
+  /** id/payload обновлённой записи разговора — только для `idle`. */
+  chat?: unknown;
+};
+
+type Watcher = (event: BulletinEvent) => void;
+
+/** Кто слушает сводку: по писцу на живой GET-ответ панели. */
+const watchers = new Set<Watcher>();
+
+/** Подписка на сводку по всем разговорам. Возвращает отписку. */
+export function watchAll(watcher: Watcher): () => void {
+  watchers.add(watcher);
+  return () => {
+    watchers.delete(watcher);
+  };
+}
+
+/** Событие сводки — всем, кто слушает. Упавший писец чужих не роняет. */
+export function broadcast(event: BulletinEvent): void {
+  for (const watcher of watchers) {
+    try {
+      watcher(event);
+    } catch (error) {
+      log.warn('чат: слушатель сводки отвалился', { error: String(error) });
+    }
+  }
+}
+
 type Turn = {
   /** Накопленные события с начала хода: по ним новый зритель догоняет ход. */
   events: LiveEvent[];

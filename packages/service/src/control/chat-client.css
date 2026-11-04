@@ -99,6 +99,14 @@
 .chat-item:hover { background: var(--raise); }
 .chat-item.active { background: var(--accent-soft); }
 .chat-item-top { display: flex; gap: 10px; align-items: baseline; }
+/* Точка состояния: жёлтая — ход идёт, зелёная — есть непрочитанный ответ.
+   Стоит слева от заголовка, в строке списка. */
+.chat-dot {
+  flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%;
+  align-self: center; margin-right: -3px;
+}
+.chat-dot.busy { background: var(--busy); animation: pulse 1.2s infinite; }
+.chat-dot.unread { background: var(--unread); }
 .chat-item-title {
   flex: 1; min-width: 0; font-size: 13px; font-weight: 500;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
