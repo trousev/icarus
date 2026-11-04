@@ -231,6 +231,19 @@ test('под полем ввода нет второго экрана прогр
    скрипт в DOM — с заглушками сети и EventSource — и смотрим, что он делает. */
 import { parseHTML } from 'linkedom';
 
+/**
+ * Ответ маршрута, который надо отдать не JSON-ом, а потоком: `text`/`done` —
+ * ровно так, как их шлёт сервер в NDJSON. Без этого конец стриминга не проверить.
+ */
+function streamReply(...lines: string[]) {
+  return { stream: lines };
+}
+
+/** Ответ маршрута, который должен провалиться (например, ход уже кончился). */
+function failedReply(status = 404, body: unknown = {}) {
+  return { failure: { status, body } };
+}
+
 /** Стенд: страница чата, заглушка fetch и перехваченная сводка. */
 async function driveChat(
   options: {
@@ -262,6 +275,34 @@ async function driveChat(
     calls.push(path);
     const route = Object.entries(options.routes || {}).find(([key]) => path.includes(key))?.[1];
     const body = route ? route() : {};
+    if (body && typeof body === 'object' && 'stream' in body) {
+      const chunks = (body as { stream: string[] }).stream;
+      let at = 0;
+      return {
+        ok: true,
+        headers: { get: () => 'application/x-ndjson; charset=utf-8' },
+        json: async () => ({}),
+        body: {
+          getReader: () => ({
+            read: async () =>
+              at < chunks.length
+                ? { value: new TextEncoder().encode(chunks[at++] + '\n'), done: false }
+                : { done: true },
+          }),
+        },
+      };
+    }
+    if (body && typeof body === 'object' && 'failure' in body) {
+      const { status, body: failed } = (body as { failure: { status: number; body: unknown } }).failure;
+      return {
+        ok: false,
+        status,
+        statusText: 'Not Found',
+        headers: { get: () => 'application/json' },
+        json: async () => failed,
+        body: { getReader: () => ({ read: async () => ({ done: true }) }) },
+      };
+    }
     return {
       ok: true,
       headers: { get: () => 'application/json' },
@@ -415,7 +456,11 @@ test('возврат в идущий ход не удваивает ответ �
   assert.equal(app.bodies(), 1, 'второй вход в тот же ход подхватывает то же тело');
 });
 
-test('idle из сводки убирает живую плашку, а запись разговора остаётся одна', async () => {
+test('idle из сводки не стирает уже показанный ответ', async () => {
+  // Тот самый рецидив: `idle` идёт по сводке, `done` — по потоку разговора, это
+  // разные соединения, и сводка успевает первой. Раньше `idle` выбрасывал живую
+  // плашку из ленты в расчёте, что «запись разговора заменит её», но запись
+  // никто не перерисовывал — ответ исчезал до перезагрузки страницы.
   const app = await driveChat({
     chatId: 'web-1',
     routes: {
@@ -425,12 +470,75 @@ test('idle из сводки убирает живую плашку, а запи
         messages: [],
         live: true,
       }),
+      '/panel/api/chat/stream': () =>
+        streamReply(JSON.stringify({ type: 'text', text: 'ответ, который нельзя терять' })),
       '/panel/api/chats': () => ({ chats: [{ id: 'web-1', title: 'Разговор' }] }),
     },
   });
   assert.equal(app.bodies(), 1, 'ход идёт — тело на месте');
+  assert.match(app.messages(), /ответ, который нельзя терять/, 'текст уже достримился');
 
   app.event({ userId: 'probe', chatId: 'web-1', type: 'idle', chat: { id: 'web-1', title: 'Разговор' } });
   await new Promise((resolve) => setTimeout(resolve, 10));
-  assert.equal(app.bodies(), 0, 'ход кончился — плашка убрана, её место занимает запись разговора');
+  assert.equal(app.bodies(), 1, 'запись разговора — это и есть та же плашка, вторую не рисуем');
+  assert.match(app.messages(), /ответ, который нельзя терять/, 'ответ остался в ленте после idle');
+});
+
+test('конец стриминга оставляет ответ в ленте, а не прячет до перезагрузки', async () => {
+  const app = await driveChat({
+    chatId: 'web-1',
+    routes: {
+      '/panel/api/chat/status': () => ({ busy: [] }),
+      '/panel/api/chat/history': () => ({
+        chat: { id: 'web-1', title: 'Разговор', workspace: 'talk' },
+        messages: [],
+        live: false,
+      }),
+      '/panel/api/chats': () => ({ chats: [{ id: 'web-1', title: 'Разговор' }] }),
+      '/panel/api/chat/send': () =>
+        streamReply(
+          JSON.stringify({ type: 'text', text: 'готово: ' }),
+          JSON.stringify({ type: 'text', text: 'ответ целиком' }),
+          JSON.stringify({ type: 'done', chat: { id: 'web-1', title: 'Разговор' } }),
+        ),
+    },
+  });
+
+  app.document.getElementById('chat-input').value = 'привет';
+  app.document.getElementById('chat-send').onclick?.();
+  await new Promise((resolve) => setTimeout(resolve, 40));
+
+  assert.match(app.messages(), /ответ целиком/, 'после done ответ остался на экране');
+  assert.ok(app.messages().includes('привет'), 'и реплика человека тоже');
+  assert.equal(app.bodies(), 1, 'одно тело ответа, без дублей');
+});
+
+test('ход кончился между историей и подпиской — лента перечитывается сама', async () => {
+  // Гонка: история сказала `live`, а `/chat/stream` уже 404 — ход только что
+  // записан. Без перечитывания ленты ответа не видно до перезагрузки.
+  let historyCalls = 0;
+  const app = await driveChat({
+    chatId: 'web-1',
+    routes: {
+      '/panel/api/chat/status': () => ({ busy: [] }),
+      '/panel/api/chat/history': () => {
+        historyCalls += 1;
+        const chat = { id: 'web-1', title: 'Разговор', workspace: 'talk' };
+        if (historyCalls === 1) return { chat, messages: [], live: true };
+        return {
+          chat,
+          messages: [
+            { role: 'user', text: 'привет' },
+            { role: 'assistant', text: 'ответ, который уже записан', timestamp: new Date().toISOString() },
+          ],
+          live: false,
+        };
+      },
+      '/panel/api/chat/stream': () => failedReply(404),
+      '/panel/api/chats': () => ({ chats: [{ id: 'web-1', title: 'Разговор' }] }),
+    },
+  });
+
+  assert.match(app.messages(), /ответ, который уже записан/, 'записанный ответ подтянулся без F5');
+  assert.equal(app.bodies(), 1, 'пустая плашка-пустышка выброшена, остался только ответ');
 });

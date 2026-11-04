@@ -1088,12 +1088,23 @@ function assistantBoxFor(chatId) {
   return box;
 }
 
-/** Ход кончился записью в разговоре: плашку держать больше не за чем. */
+/** Плашка — не ответ, а неудавшийся заход (ход уже занят другим): из ленты её вон. */
 function dropLiveBody(chatId) {
   const box = liveBodies.get(chatId);
   if (!box) return;
   liveBodies.delete(chatId);
   box.turn.remove();
+}
+
+/**
+ * Ход кончился записью в разговоре, и плашка уже несёт готовый ответ: в ленте её
+ * оставляем — это и есть сообщение, которое человек читает. Из карты убираем:
+ * вернувшись сюда, панель прочитает запись из истории, а не дорисует второй ответ.
+ * Раньше плашку тут выбрасывали из DOM в расчёте, что «запись разговора заменит
+ * её», но никто её не перерисовывал: ответ пропадал до перезагрузки страницы.
+ */
+function settleLiveBody(chatId) {
+  liveBodies.delete(chatId);
 }
 
 function renderLive(box) {
@@ -1165,9 +1176,10 @@ function handleEvent(box, event) {
       box.md.innerHTML = markdown(box.text);
     }
     box.typing.hidden = true;
-    // Ответ окончательный и уже показан живой плашкой: в карте ему делать нечего,
-    // иначе следующее возвращение в этот разговор нарисует его второй раз.
-    dropLiveBody(box.chatId);
+    // Ответ окончательный и уже показан живой плашкой: саму плашку оставляем в
+    // ленте (это и есть сообщение), а из карты убираем — иначе следующее
+    // возвращение в этот разговор нарисует его второй раз.
+    settleLiveBody(box.chatId);
     if (event.chat) {
       currentChat = event.chat;
       currentId = event.chat.id;
@@ -1310,6 +1322,23 @@ async function readStream(response, box) {
 }
 
 /**
+ * Перечитать ленту разговора. Нужно там, где ответ уже записан, а в DOM его нет:
+ * ход кончился между загрузкой истории и подпиской на живой поток.
+ */
+async function reloadHistory(chatId) {
+  if (currentId !== chatId) return;
+  const token = ++historyToken;
+  try {
+    const data = await api('/panel/api/chat/history?id=' + encodeURIComponent(chatId));
+    if (token !== historyToken || currentId !== chatId) return;
+    currentChat = data.chat;
+    renderHistory(data.messages || []);
+  } catch (error) {
+    setNote('ответ пришёл, но лента не обновилась: ' + error.message);
+  }
+}
+
+/**
  * Догон идущего хода — после F5 или открытия панели на другом устройстве.
  * Сервер сперва отдаёт накопленный журнал, потом живое до самого `done`,
  * поэтому ответ собирается с нуля ровно таким, каким был бы без перезагрузки.
@@ -1328,8 +1357,10 @@ async function attachLive() {
       signal: abort.signal,
     });
     if (!response.ok) {
-      // Ход успел кончиться: историю подтянем свежей загрузкой.
+      // Ход успел кончиться, пока подписывались: плашка-пустышка — не ответ, её
+      // вон, а готовый ответ уже лежит в записи разговора — перечитываем ленту.
       dropLiveBody(chatId);
+      await reloadHistory(chatId);
       return;
     }
     await readStream(response, box);
@@ -1364,11 +1395,11 @@ function applyBulletin(event) {
   }
   if (event.type !== 'idle') return;
   busyChats.delete(event.chatId);
-  if (event.chat) {
-    // Ответ окончательный — живую плашку можно убрать: запись разговора заменит её.
-    dropLiveBody(event.chatId);
-    rememberChat(event.chat);
-  }
+  // Ответ окончательный: плашку не выбрасываем — она уже несёт готовый текст.
+  // `idle` приходит по сводке раньше `done` (разные соединения), поэтому именно
+  // здесь ответ и пропадал, если событие успевало первым.
+  settleLiveBody(event.chatId);
+  if (event.chat) rememberChat(event.chat);
   // Ход доехал, пока мы смотрели другой разговор: ставим зелёную точку.
   markUnread(event.chatId);
   renderChats();
