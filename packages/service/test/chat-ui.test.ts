@@ -73,6 +73,17 @@ test('скролл в списке диалогов — тонкий и в ст�
   assert.match(html, /\.chat-scroll::-webkit-scrollbar \{ width: 8px; \}/, 'ленту не трогаем');
 });
 
+test('скролл в поле ввода — тонкий и в стык с правой границей', () => {
+  const html = chatPage(SESSION, { enabled: true });
+  // Поле выезжает в padding рамки, как список диалогов: полоса касается границы,
+  // а не висит посреди поля рядом с кнопкой. Кнопки поэтому стоят поверх поля.
+  assert.match(html, /\.composer-box textarea \{[\s\S]*?margin-right: -9px/, 'полоса прижата к границе рамки');
+  assert.match(html, /\.composer-box textarea \{[\s\S]*?scrollbar-gutter: stable/, 'место под полосу не прыгает');
+  assert.match(html, /\.composer-box textarea::-webkit-scrollbar \{ width: 4px; \}/, 'в поле полоса 4px');
+  assert.match(html, /\.send, \.stop \{ position: absolute;/, 'кнопки не отнимают у поля правый край');
+  assert.match(html, /\.composer-box \{[\s\S]*?position: relative/, 'рамка держит кнопки внутри себя');
+});
+
 test('ширина сайдбара тянется и запоминается', () => {
   const html = chatPage(SESSION, { enabled: true });
   // Ручка на правой границе: колонка следует за --side-w, настройки открываются
