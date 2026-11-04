@@ -301,16 +301,29 @@
 .composer-box .attach:hover { background:var(--raise); color:var(--text); }
 .composer-box .attach svg { display:block; }
 .composer-box {
+  position: relative;
   max-width: 900px; margin: 0 auto; display: flex; gap: 10px; align-items: flex-end;
   background: var(--panel); border: 1px solid var(--line); border-radius: 13px;
   padding: 9px 9px 9px 14px;
 }
 .composer-box:focus-within { border-color: var(--accent); }
+/* Поле тянется до самой правой границы рамки: полоса прокрутки встаёт в стык с
+   ней, как в списке диалогов, а не висит посередине поля. Кнопки отправки и
+   стопа живут поверх поля в правом нижнем углу — отсюда и padding справа. */
 .composer-box textarea {
   flex: 1; min-width: 0; resize: none; border: 0; outline: 0; background: none;
-  color: var(--text); font: inherit; line-height: 1.5; max-height: 200px; padding: 7px 0;
+  color: var(--text); font: inherit; line-height: 1.5; max-height: 200px;
+  margin-right: -9px; padding: 7px 51px 7px 0;
+  /* Место под полосу держим всегда, иначе строки переливаются на её ширину. */
+  scrollbar-gutter: stable;
 }
+/* В поле полоса такая же тонкая, как в списке диалогов, и без стрелок. */
+.composer-box textarea::-webkit-scrollbar { width: 4px; }
+.composer-box textarea::-webkit-scrollbar-track { background: transparent; }
+.composer-box textarea::-webkit-scrollbar-thumb { background: var(--line); border-radius: 2px; }
 .composer-box textarea::placeholder { color: var(--dim); }
+/* Отправка и стоп — поверх поля, у правого нижнего угла рамки. */
+.send, .stop { position: absolute; right: 9px; bottom: 9px; }
 .send {
   width: 36px; height: 36px; flex: 0 0 auto; border-radius: 9px; border: 0;
   background: var(--accent); color: #0f1116; font-size: 19px; font-weight: 700;
