@@ -4,6 +4,7 @@
 // контейнеры, а не только тот, который первым попал под руку.
 import { createHash } from 'node:crypto';
 import { CONTAINER_PATHS, userContainer, type IcarusConfig, type UserConfig } from '../config.ts';
+import { languageName, languageOf } from '../profile.ts';
 
 export const LABEL_MANAGED = 'icarus.managed';
 export const LABEL_USER = 'icarus.user';
@@ -32,6 +33,10 @@ export function containerEnv(config: IcarusConfig, user: UserConfig): Record<str
     ICARUS_HOME: CONTAINER_PATHS.home,
     ICARUS_USER_ID: user.id,
     ICARUS_URL: config.url,
+    // Язык разговора — полным именем (English, Russian). Расширение language шлёт его
+    // отдельным системным сообщением: внутри большого русского промпта правило языка
+    // не держало (замер — tools/persona-flywheel/smoke-language.mjs).
+    ICARUS_LANGUAGE: languageName(languageOf(config, user)),
   };
 }
 
