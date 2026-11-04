@@ -66,9 +66,10 @@ export function languageOf(text) {
 }
 
 async function runOnce(opener, index) {
-  const messages = [{ role: "user", content: `${STAMP}\n\n${opener}` }];
-  // Патч: отдельное системное сообщение в конце — ровно так его шлёт расширение.
-  if (FIX) messages.push({ role: "system", content: [{ type: "text", text: languageOverride(FIX_LANG) }] });
+  // Патч: правило дописывается к реплике человека — ровно так его шлёт расширение
+  // (packages/extensions/language.ts), и ровно так его переживает convertToLlm в pi.
+  const content = FIX ? `${STAMP}\n\n${opener}\n\n${languageOverride(FIX_LANG)}` : `${STAMP}\n\n${opener}`;
+  const messages = [{ role: "user", content }];
   const reply = await chat({
     model: MODEL,
     system: SYSTEM,
@@ -107,7 +108,7 @@ const lines = [
   `# smoke-language — ${label}`,
   "",
   `Промпт: \`${PROMPT_PATH}\` (${SYSTEM.length} символов, ${SYSTEM.split("\n").length} строк)`,
-  `Модель: ${MODEL}. Разговоров: ${results.length}. Патч (--fix): ${FIX ? `да, правило отдельным system-сообщением (${FIX_LANG})` : "нет"}.`,
+  `Модель: ${MODEL}. Разговоров: ${results.length}. Патч (--fix): ${FIX ? `да, правило дописано к реплике (${FIX_LANG})` : "нет"}.`,
   "",
   "## Итог",
   "",

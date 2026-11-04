@@ -1,15 +1,27 @@
-// Язык разговора отдельным системным сообщением.
+// Язык разговора: правило дописывается к реплике человека.
 //
-// Охраняем ровно тот дефект, ради которого расширение и появилось: правило языка
-// внутри большого русского промпта не держало — при настройке English и русской
-// реплике человека Икар отвечал по-русски (0/10 в
-// tools/persona-flywheel/smoke-language.mjs). Отдельное системное сообщение держит:
-// 20/20 там же. Тесты ниже проверяют не «красиво ли написано», а механику:
-// сообщение добавляется, идёт системным и последним, несёт полное имя языка и
-// называет случай-ловушку (первый ответ и чужая реплика).
+// Здесь охраняется ровно тот дефект, из-за которого настройка «English» не работала
+// в бою. История такая: сначала правило уезжало ОТДЕЛЬНЫМ системным сообщением, и тесты
+// это проверяли — а в pi сообщение тихо терялось. Агент прогоняет историю через
+// convertToLlm, и тот фильтрует всё, кроме user/assistant/toolResult:
+//
+//   function defaultConvertToLlm(messages){
+//     return messages.filter(m => m.role === "user" || m.role === "assistant" || m.role === "toolResult");
+//   }
+//
+// Тесты были зелёные, прод — нет: они проверяли слой расширения, а терялось слоем выше.
+// Поэтому теперь проверяем не «что вернул хук», а что правило ОСТАЁТСЯ в реплике
+// человека — то есть переживает фильтр pi. Для этого есть тест с настоящим фильтром.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import registerLanguage, { appendLanguageOverride, languageOverride } from '../../extensions/language.ts';
+
+/** Тот самый фильтр pi: всё, кроме user/assistant/toolResult, в запрос не едет. */
+function convertToLlm(messages: Array<{ role?: string }>) {
+  return messages.filter(
+    (message) => message.role === 'user' || message.role === 'assistant' || message.role === 'toolResult',
+  );
+}
 
 test('имя языка — полное, а не код', () => {
   const text = languageOverride('English');
@@ -29,23 +41,44 @@ test('правило называет случай-ловушку: первый 
 });
 
 test('правило короткое: длина ничего не покупает', () => {
-  // На боевом промпте вариант на 894 символа давал 9/10, на 136 — 10/10 (и 15/15).
-  // Держим краткость под тестом, чтобы правило не расползлось обратно в простыню:
-  // оно висит в промпте на КАЖДОМ запросе к модели, и лишнее там дороже, чем кажется.
+  // На голом API вариант на 894 символа давал 9/10, короткий — 10/10 и 15/15.
+  // Держим краткость под тестом: правило висит на КАЖДОМ запросе к модели.
   assert.ok(languageOverride('English').length < 220, 'правило должно оставаться коротким');
 });
 
-test('сообщение добавляется системным и последним', () => {
+test('правило дописывается к реплике человека, а не новым сообщением', () => {
   const messages = [
-    { role: 'system', content: 'большая русская карта' },
     { role: 'user', content: 'Привет' },
+    { role: 'assistant', content: 'Здарова' },
+    { role: 'user', content: 'как оно?' },
   ];
-  const next = appendLanguageOverride(messages, 'English');
-  assert.equal(next.length, messages.length + 1, 'добавлено ровно одно сообщение');
-  const added = next[next.length - 1];
-  assert.equal(added.role, 'system', 'идёт системным: это констрейнт, а не реплика');
-  // Последним — значит ближе всего к ходу модели, читается перед ответом.
-  assert.equal(next[next.length - 1], added);
+  const next = appendLanguageOverride(messages, 'English')!;
+  assert.equal(next.length, messages.length, 'новых сообщений не добавляем');
+  // Именно к последней реплике человека: правило должно быть ближе всего к ходу.
+  assert.match(String(next[2]!.content), /Привет|как оно\?/);
+  assert.match(String(next[2]!.content), /English/);
+  assert.doesNotMatch(String(next[0]!.content), /English/, 'первая реплика не тронута');
+});
+
+test('правило переживает convertToLlm — ради этого всё и переделано', () => {
+  // Главный тест. Системное сообщение тут бы не выжило, и именно на этом мы споткнулись.
+  const next = appendLanguageOverride([{ role: 'user', content: 'Привет' }], 'English')!;
+  const request = convertToLlm(next as Array<{ role?: string }>);
+  assert.equal(request.length, 1, 'реплика человека на месте');
+  assert.match(String((request[0] as { content?: unknown }).content), /English/, 'правило доехало до запроса');
+});
+
+test('блоки контента: правило едет в последний текстовый блок', () => {
+  const messages = [
+    { role: 'user', content: [{ type: 'text', text: 'Привет' }, { type: 'image', text: '' }] },
+  ];
+  const next = appendLanguageOverride(messages, 'English')!;
+  const content = next[0]!.content as Array<{ type?: string; text?: string }>;
+  assert.match(String(content[0]?.text), /English/, 'правило в текстовом блоке, картинка не тронута');
+});
+
+test('нет реплики человека — хук молчит', () => {
+  assert.equal(appendLanguageOverride([{ role: 'assistant', content: '...' }], 'English'), null);
 });
 
 test('исходные сообщения не мутируются: pi правит копию', () => {
@@ -55,30 +88,13 @@ test('исходные сообщения не мутируются: pi прав
   assert.equal(JSON.stringify(messages), before);
 });
 
-test('контекст вызывается на каждом запросе хода, но сообщение не копится', () => {
-  // pi зовёт хук context на КАЖДЫЙ запрос к модели — в ходе с тулами это несколько
-  // раз. Сообщение при этом уезжает в копию, а не в сессию, и следующий вызов
-  // получает тот же исходный список: дубликаты не накапливаются.
-  let session = [{ role: 'system', content: 'большая карта' }, { role: 'user', content: 'Привет' }];
-  const counts = [];
-  for (let step = 0; step < 3; step++) {
-    const forRequest = appendLanguageOverride(session, 'English');
-    counts.push(forRequest.filter((m) => m.role === 'system').length);
-    // Сессия растёт как обычно (ответ модели, тулы) — нашей реплики там не появляется.
-    session = [...session, { role: 'assistant', content: `шаг ${step}` }];
-  }
-  assert.deepEqual(counts, [2, 2, 2], 'ровно одно системное сообщение языка на каждый запрос, без накопления');
-});
-
 test('без настройки расширение молчит', () => {
   // Пустая переменная — правило не шлём: английский по умолчанию не навязываем.
   const previous = process.env.ICARUS_LANGUAGE;
   delete process.env.ICARUS_LANGUAGE;
   try {
     const handlers: Array<() => unknown> = [];
-    const fakePi = {
-      on: (_event: string, handler: () => unknown) => handlers.push(handler),
-    } as never;
+    const fakePi = { on: (_event: string, handler: () => unknown) => handlers.push(handler) } as never;
     registerLanguage(fakePi);
     assert.equal(handlers.length, 0, 'обработчика контекста нет вовсе');
   } finally {
@@ -86,7 +102,7 @@ test('без настройки расширение молчит', () => {
   }
 });
 
-test('с настройкой расширение подписывается на контекст и правит его', () => {
+test('с настройкой расширение правит контекст, и правило остаётся в запросе', () => {
   const previous = process.env.ICARUS_LANGUAGE;
   process.env.ICARUS_LANGUAGE = 'English';
   try {
@@ -101,12 +117,10 @@ test('с настройкой расширение подписывается н
 
     const result = handler!({ messages: [{ role: 'user', content: 'Привет' }] });
     assert.ok(result?.messages, 'вернул правленый список');
-    const last = result!.messages[result!.messages.length - 1] as { role: string; content: unknown };
-    assert.equal(last.role, 'system');
-    const text = Array.isArray(last.content)
-      ? (last.content as Array<{ text?: string }>).map((b) => b.text ?? '').join('')
-      : String(last.content);
-    assert.match(text, /English/, 'в правленом списке есть имя языка');
+    // И — то, ради чего стоит весь тест: после фильтра pi правило на месте.
+    const request = convertToLlm(result!.messages as Array<{ role?: string }>);
+    const text = request.map((m) => JSON.stringify(m)).join('');
+    assert.match(text, /English/, 'правило доехало до запроса');
   } finally {
     if (previous !== undefined) process.env.ICARUS_LANGUAGE = previous;
     else delete process.env.ICARUS_LANGUAGE;
