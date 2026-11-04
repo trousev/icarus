@@ -17,29 +17,54 @@ import { userPaths, type IcarusConfig, type UserConfig } from './config.ts';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { log } from './log.ts';
 
-/** Язык ответов. Пока два: русский и английский. */
+/**
+ * Язык ответов. Код (`ru`, `en`) — ключ хранения: он живёт в config.yaml и в
+ * profile.json и НИКОГДА не попадает в промпт. В тексте требования язык называется
+ * полным именем: «отвечай на языке: English».
+ */
 export const LANGUAGES = ['ru', 'en'] as const;
 export type Language = (typeof LANGUAGES)[number];
 
 export const DEFAULT_LANGUAGE: Language = 'ru';
 
-/** Как язык видит человек в панели — подписи кнопок, а не для печати вслух. */
-export const LANGUAGE_LABELS: Record<Language, string> = {
-  ru: 'Русский',
-  en: 'English',
+/**
+ * Всё, что нужно прозе промпта, — одним словарём на язык.
+ *
+ * Так, а не четырьмя параллельными картами, по двум причинам. Первая: карты
+ * разъезжаются — добавили язык в одну и забыли в другой. Вторая: формы для русского
+ * текста разные и не выводятся из имени («English», но «in English»; «Русский», но
+ * «по-русски»), и держать их рядом с именем честнее, чем изобретать общее правило.
+ *
+ * Новый язык — одна строка здесь плюс строка в LANGUAGES.
+ */
+type LanguageForms = {
+  /** Как язык называется человеку в панели — подпись кнопки. */
+  label: string;
+  /** Полное имя для промпта: «отвечай на языке: English». Только оно идёт в текст. */
+  name: string;
+  /** Прилагательное для русской прозы: «твой язык — английский». */
+  adjective: string;
 };
 
-/** «по-русски» / «in English» — как язык называть в самом требовании. */
-export const LANGUAGE_ADVERBS: Record<Language, string> = {
-  ru: 'по-русски',
-  en: 'in English',
+const FORMS: Record<Language, LanguageForms> = {
+  ru: { label: 'Русский', name: 'Russian', adjective: 'русский' },
+  en: { label: 'English', name: 'English', adjective: 'английский' },
 };
 
-/** Как называть язык прилагательным («английский текст»). */
-export const LANGUAGE_ADJECTIVES: Record<Language, string> = {
-  ru: 'русский',
-  en: 'английский',
-};
+/** Подписи для панели: как язык видит человек. */
+export const LANGUAGE_LABELS: Record<Language, string> = Object.fromEntries(
+  LANGUAGES.map((code) => [code, FORMS[code].label]),
+) as Record<Language, string>;
+
+/** Полное имя языка для промпта. В тексте требования — только это. */
+export function languageName(language: Language): string {
+  return FORMS[language].name;
+}
+
+/** Формы для русской прозы требования (см. languageRule). */
+export function languageForms(language: Language): LanguageForms {
+  return FORMS[language];
+}
 
 export type Profile = { language: Language };
 
