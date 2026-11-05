@@ -234,16 +234,37 @@ test('отчёт родителю: статусы, причины и обрез�
   assert.match(report, /таймаут/);
 
   const long = renderReport(
-    [{ index: 0, agent: 'worker', task: 'писать', status: 'ok', output: 'я'.repeat(5000) }],
+    [{ index: 0, agent: 'worker', task: 'писать', status: 'ok', output: 'я'.repeat(20000) }],
     limits,
     1000,
   );
   assert.match(long, /обрезано/);
+  assert.match(long, /8000/, 'в пометке об обрезке назван сам лимит');
+  assert.ok(long.length < 9000, 'вывод в отчёте не превышает лимит с запасом на пометку');
+
+  const fits = renderReport(
+    [{ index: 0, agent: 'worker', task: 'писать', status: 'ok', output: 'я'.repeat(7000) }],
+    limits,
+    1000,
+  );
+  assert.ok(!/обрезано/.test(fits), 'вывод в пределах лимита проходит целиком');
 
   const progress = renderProgress(states, limits, 5000);
   assert.match(progress, /1 из 2/);
   assert.match(progress, /готово/);
   assert.match(progress, /ошибка/);
+});
+
+test('промпты ролей и описание инструмента знают про лимит и про файл', () => {
+  const tool = loadTool();
+  const description = (tool as unknown as { description?: string }).description ?? '';
+  assert.match(description, /8000/, 'в описании назван лимит вывода');
+  assert.match(description, /файл/, 'в описании сказано, что делать с объёмным материалом');
+
+  for (const agent of Object.values(AGENTS)) {
+    assert.match(agent.systemPrompt, /коротк|сжат/i, `у роли ${agent.name} есть требование к краткости`);
+    assert.match(agent.systemPrompt, /файл/i, `роль ${agent.name} умеет уносить объём в файл`);
+  }
 });
 
 test('пустой набор и незнакомый агент — отказ без запуска процессов', async () => {
