@@ -12,6 +12,7 @@ import {
   ensureChat,
   readChats,
   refreshChatTitle,
+  renderSessionsMap,
   sessionIdOf,
   type ChatRecord,
 } from '../src/sessions/chats.ts';
@@ -233,4 +234,52 @@ test('битый chats.json откладывается в сторону, а н�
   const broken = fs.readdirSync(root).filter((name) => name.startsWith('chats.json.corrupt-'));
   assert.equal(broken.length, 1, 'битый файл сохранён для разбора');
   assert.ok(fs.existsSync(path.join(root, 'chats.json')), 'реестр собран заново');
+});
+
+test('карта разговоров: по ссылке из панели находится файл сессии pi', () => {
+  const { config, user } = fixture();
+  const telegram = putSession(config, user, 'telegram-473232394-163396', 'Первая реплика из телеги');
+  const web = putSession(config, user, 'web-mw2nt32t-f06bd6', 'Первая реплика из панели');
+  ensureChat(config, user, 'telegram-473232394-163396', 'telegram');
+  ensureChat(config, user, 'web-mw2nt32t-f06bd6', 'web');
+
+  const map = JSON.parse(renderSessionsMap(config, user)) as {
+    sessions: Array<{ conversationId: string; sessionId: string; file?: string; channel: string }>;
+  };
+  const byConversation = new Map(map.sessions.map((entry) => [entry.conversationId, entry]));
+
+  for (const [conversationId, expected] of [
+    ['telegram-473232394-163396', telegram],
+    ['web-mw2nt32t-f06bd6', web],
+  ] as const) {
+    const entry = byConversation.get(conversationId);
+    assert.ok(entry, `в карте есть ${conversationId}`);
+    // Главное: id сессии и файл истории достаются без знания userId, которого
+    // в контейнере нет. Файл указываем абсолютным — агент идёт по нему напрямую.
+    assert.equal(entry.sessionId, expected.sessionId);
+    assert.equal(entry.file, expected.file);
+  }
+
+  assert.equal(byConversation.get('telegram-473232394-163396')?.channel, 'telegram');
+  assert.equal(byConversation.get('web-mw2nt32t-f06bd6')?.channel, 'web');
+});
+
+test('карта разговоров: без файла сессии запись остаётся, но без пути', () => {
+  const { config, user } = fixture();
+  // Реестр знает о разговоре, а файла истории ещё нет: карта не должна врать,
+  // что путь есть, — иначе агент пойдёт открывать несуществующий файл.
+  ensureChat(config, user, 'web-no-file-yet', 'web');
+
+  const map = JSON.parse(renderSessionsMap(config, user)) as {
+    sessions: Array<{ conversationId: string; file?: string }>;
+  };
+  const entry = map.sessions.find((item) => item.conversationId === 'web-no-file-yet');
+  assert.ok(entry, 'запись есть');
+  assert.equal(entry.file, undefined, 'пути нет, пока нет файла');
+});
+
+test('карта разговоров: пустой реестр даёт пустую карту, а не падение', () => {
+  const { config, user } = fixture();
+  const map = JSON.parse(renderSessionsMap(config, user)) as { sessions: unknown[] };
+  assert.deepEqual(map.sessions, []);
 });

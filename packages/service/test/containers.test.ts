@@ -173,6 +173,42 @@ test('стек: один корень /workspaces и только приватн
   assert.doesNotMatch(joined, /:\/workspaces\/\.icarus\/memory/, 'память — просто папка внутри корня');
 });
 
+test('стек: реестр и карта разговоров смонтированы только для чтения', () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-chats-'));
+  const root = path.join(dataDir, 'users', 'probe');
+  fs.mkdirSync(path.join(root, 'workspaces', '.icarus'), { recursive: true });
+  // Файлы заводит prepareUser до генерации compose; здесь повторяем его работу,
+  // чтобы проверить именно маунт, а не порядок вызовов.
+  fs.writeFileSync(path.join(root, 'chats.json'), '{"chats":[]}\n');
+  fs.writeFileSync(path.join(root, 'workspaces', '.icarus', 'sessions.json'), '{"sessions":[]}\n');
+
+  const service = render(makeConfig({ dataDir })).services['icarus-user-probe'];
+  const volumes: string[] = service.volumes;
+
+  // Агент по ссылке из панели находит файл сессии — но пишет в оба файла сервис,
+  // поэтому контейнер видит их закрытыми: иначе разговор остался бы без истории.
+  assert.ok(
+    volumes.includes(`${path.join(root, 'chats.json')}:/workspaces/.icarus/chats.json:ro`),
+    'реестр разговоров едет только для чтения',
+  );
+  assert.ok(
+    volumes.includes(
+      `${path.join(root, 'workspaces', '.icarus', 'sessions.json')}:/workspaces/.icarus/sessions.json:ro`,
+    ),
+    'карта разговоров едет только для чтения',
+  );
+});
+
+test('стек: без файлов на хосте маунтов разговоров нет — docker не создаст пустой каталог', () => {
+  // Прод-ловушка: docker на несуществующий путь маунта создаёт каталог, и тогда
+  // «chats.json» внутри контейнера — папка, а не файл. Поэтому путь монтируется
+  // только когда файл есть (его заводит prepareUser, см. workspace.ts).
+  const bare = makeConfig({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-bare-')) });
+  const joined = render(bare).services['icarus-user-probe'].volumes.join('\n');
+  assert.doesNotMatch(joined, /chats\.json/, 'нет файла — нет маунта');
+  assert.doesNotMatch(joined, /sessions\.json/, 'нет карты — нет маунта');
+});
+
 test('стек: docker.dns доезжает до сервиса и до контейнеров людей', () => {
   const withDns = makeConfig({
     docker: { ...config.docker, dns: ['1.1.1.1', '8.8.8.8'] },

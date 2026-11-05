@@ -740,6 +740,10 @@ export const CONTAINER_PATHS = {
   maple: `${CONTAINER_HOME}/maple`,
   incoming: `${CONTAINER_HOME}/incoming`,
   sessions: `${CONTAINER_HOME}/sessions`,
+  /** Реестр разговоров: только чтение, чтобы агент мог связать id панели с сессией pi. */
+  chats: `${CONTAINER_HOME}/chats.json`,
+  /** Карта разговоров для агента: conversationId → sessionId и файл истории. */
+  sessionsMap: `${CONTAINER_HOME}/sessions.json`,
   sharedMemory: `${CONTAINER_HOME}/shared-memory`,
   agentsMd: `${CONTAINER_HOME}/AGENTS.md`,
   icarusMd: `${CONTAINER_HOME}/icarus.md`,
@@ -787,6 +791,10 @@ export function userPaths(config: IcarusConfig, user: UserConfig) {
     maple: path.join(icarus, 'maple'),
     incoming: path.join(icarus, 'incoming'),
     sessions: path.join(icarus, 'sessions'),
+    /** Реестр разговоров лежит в корне человека, а контейнеру отдаётся внутрь .icarus. */
+    chats: path.join(root, 'chats.json'),
+    /** Карта разговоров для агента — рядом с реестром, тоже только чтение. */
+    sessionsMap: path.join(icarus, 'sessions.json'),
     piAgent: path.join(root, 'pi-agent'),
     /**
      * Скиллы: `~/.pi/agent/skills` внутри контейнера. Каталог агентский (не проектный),

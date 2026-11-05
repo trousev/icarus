@@ -426,6 +426,34 @@ export function backfillChats(config: IcarusConfig, user: UserConfig): void {
   }
 }
 
+/**
+ * Карта разговоров для агента: `conversationId` → id сессии pi и файл истории.
+ *
+ * Агент видит сессии только как файлы `<время>_<id>.jsonl`, а из имени обратно разговор
+ * не восстановить (см. files.ts). Ссылка из панели несёт `conversationId`, и сам он
+ * посчитать id сессии не может — тот считается хешем с id человека, которого в контейнере
+ * нет. Поэтому карту рендерит сервис (у него есть и то, и другое) и кладёт рядом с
+ * реестром, куда агент смотрит через read-only маунт (см. compose.ts, workspace.ts).
+ */
+export function renderSessionsMap(config: IcarusConfig, user: UserConfig): string {
+  const paths = userPaths(config, user);
+  const entries = readChats(config, user).map((chat) => {
+    const conversationId = chat.conversationId ?? chat.id;
+    const sessionId = sessionIdOf(chat, user);
+    const file = sessionFileForId(paths.sessions, sessionId);
+    return {
+      conversationId,
+      sessionId,
+      channel: chat.channel,
+      workspace: chat.workspace,
+      title: chat.title,
+      ...(file ? { file } : {}),
+    };
+  });
+
+  return `${JSON.stringify({ sessions: entries }, null, 2)}\n`;
+}
+
 /** Находит запись по id панели, conversationId или старому `session:<id>`. */
 export function findChatRecord(config: IcarusConfig, user: UserConfig, id: string): ChatRecord | null {
   const chats = readChats(config, user);
