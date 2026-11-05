@@ -12,6 +12,7 @@
 //
 // Здесь только чистая сборка YAML: никакого docker и никаких побочных эффектов — так её
 // можно проверять тестами, а решения о запуске остаются в script/server.
+import fs from 'node:fs';
 import path from 'node:path';
 import { stringify as stringifyYaml } from 'yaml';
 import {
@@ -90,6 +91,11 @@ export function userVolumes(config: IcarusConfig, user: UserConfig): string[] {
     // shared-memory — единственный каталог, который не принадлежит человеку:
     // он общий на весь инстанс и лежит вне его дерева.
     bind(paths.sharedMemory, CONTAINER_PATHS.sharedMemory),
+    // Реестр разговоров — только для чтения: агент по id панели находит файл сессии,
+    // но писать в него не должен (реестр ведёт сервис, см. sessions/chats.ts).
+    ...(fs.existsSync(paths.chats) ? [bind(paths.chats, CONTAINER_PATHS.chats, 'ro')] : []),
+    // Карта разговоров — тот же read-only: её рендерит сервис перед стартом контейнера.
+    ...(fs.existsSync(paths.sessionsMap) ? [bind(paths.sessionsMap, CONTAINER_PATHS.sessionsMap, 'ro')] : []),
     bind(paths.piAgent, CONTAINER_PATHS.piAgent),
     // Maple — единственное внешнее дерево, которое контейнер видит. Путь установки
     // обязан совпадать с хостовым: launcher ищет свои библиотеки по записанному

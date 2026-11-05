@@ -19,6 +19,7 @@ import {
 } from './config.ts';
 import { effectiveServers, ensureOAuthProxyKeys, readStore, storePaths } from './mcp/registry.ts';
 import { ensureWorkspaces } from './workspaces.ts';
+import { renderSessionsMap } from './sessions/chats.ts';
 import { DEFAULT_LANGUAGE, languageName, languageOf, type Language } from './profile.ts';
 
 const EXTENSIONS_DIR = path.join(REPO_ROOT, 'packages', 'extensions');
@@ -76,6 +77,17 @@ export function ensureDirs(config: IcarusConfig, user: UserConfig): void {
   // shared-memory монтируется вложенно внутрь /workspaces/.icarus: точку монтирования
   // заводим заранее, иначе docker создаст её root-овой внутри маунта.
   fs.mkdirSync(path.join(paths.icarus, 'shared-memory'), { recursive: true });
+  // Реестр разговоров монтируется в контейнер файлом, а не каталогом: если файла нет,
+  // docker создаст на его месте каталог и маунт останется пустым. Пустой реестр — это
+  // валидное состояние (разговоров ещё нет), поэтому заводим его сами.
+  if (!fs.existsSync(paths.chats)) {
+    fs.writeFileSync(paths.chats, `${JSON.stringify({ chats: [] }, null, 2)}\n`, { mode: 0o600 });
+  }
+  // То же и для карты разговоров: она пересоздаётся перед каждым стартом (см. prepareUser),
+  // но к моменту генерации compose файл уже должен существовать.
+  if (!fs.existsSync(paths.sessionsMap)) {
+    fs.writeFileSync(paths.sessionsMap, `${JSON.stringify({ sessions: [] }, null, 2)}\n`, { mode: 0o600 });
+  }
   // «Разговор» и «Приватный» существуют всегда — вместе с их AGENTS.md.
   ensureWorkspaces(config, user);
 }
@@ -126,6 +138,8 @@ export function renderAgentsMd(
     `| \`${home}/memory/\` | **личная память** этого человека | читай смело, пиши когда просят запомнить |`,
     `| \`${home}/shared-memory/\` | **семейная память**, общая для всех | писать **только по явной просьбе** |`,
     `| \`${home}/incoming/\` | вложения из чата | разбирай сам: прочитай, посмотри, разложи |`,
+    `| \`${home}/chats.json\` | **реестр разговоров** (только чтение): id, канал, workspace | сам агент в него не пишет |`,
+    `| \`${home}/sessions.json\` | **карта разговоров** (только чтение): conversationId → sessionId и файл | по ссылке из панели найдёшь сессию |`,
     `| \`${home}/icarus.md\` | твой системный промпт | не редактируй |`,
     ...(servers.maple
       ? [
@@ -185,6 +199,22 @@ ${mcp}
 Правила простые: не дублируй то, что уже написано; противоречия не копи, а правь старую запись;
 в журнал пиши коротко и с датой. Что может измениться — держи в \`projects/\` с датой, а не в
 \`identity.md\`. Структуру можно расширять, если смысла не хватает.
+
+## Как связать разговор с сессией pi
+
+Ссылка на разговор в панели выглядит как \`.../panel/chat?chat=<conversationId>\`:
+\`web-…\` — веб-чат, \`telegram-…\` — разговор в Telegram.
+
+Сам файл истории по одному \`conversationId\` не найти: имя файла — \`<время создания>_<sessionId>.jsonl\`,
+а \`sessionId\` — это хеш от человека и разговора, и человека ты не знаешь. Поэтому не считай
+хеш сам, а возьми готовую карту:
+
+1. Возьми \`conversationId\` из ссылки.
+2. Найди его в \`${home}/sessions.json\` — там \`conversationId\` и готовый \`sessionId\` и путь к файлу.
+3. Открой файл истории и проверь первые реплики: это точно тот разговор?
+
+Одинаковые куски текста (id вложений, цитаты) встречаются у разных чатов — совпадение
+подстроки ничего не доказывает. Особенно осторожно с \`grep\` по всем сессиям сразу.
 
 ## Границы
 
@@ -393,6 +423,18 @@ export function prepareUser(config: IcarusConfig, user: UserConfig) {
   // Язык — из профиля человека: он меняет только раздел «Язык» в карте окружения,
   // поэтому читается здесь, а не живёт в общем config.yaml.
   writeFileSafe(paths.agentsMd, renderAgentsMd(config, mcpServers, languageOf(config, user)));
+
+  // Карта разговоров для агента: по ссылке из панели он находит файл сессии в этом
+  // же ответе, а не гадает по именам файлов. Перерисовываем при каждом старте —
+  // за время жизни контейнера разговоры успевают появиться, переименоваться и уехать
+  // в другой workspace (см. sessions/chats.ts).
+  try {
+    writeFileSafe(paths.sessionsMap, renderSessionsMap(config, user));
+  } catch (error) {
+    // Сломанный реестр — не повод не пускать человека в разговор: агент просто
+    // останется без карты (и в AGENTS.md написано, что она read-only).
+    log.warn('карта разговоров не собралась', { user: user.id, error: String(error) });
+  }
 
   const authPath = path.join(paths.piAgent, 'auth.json');
   writeFileSafe(authPath, renderAuthJson(config), 0o600);
