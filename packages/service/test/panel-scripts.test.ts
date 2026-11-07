@@ -136,6 +136,9 @@ test('страница ключей рисует маршрутизацию по
           bannedUntil, banReason: 'credits', broken: false, fails: 3, lastError: 'HTTP 429', lastErrorAt: null },
         { id: 'you', label: 'You.com', keyName: 'YOU_API_KEY', present: false, current: false,
           bannedUntil: null, banReason: null, broken: true, fails: 60, lastError: null, lastErrorAt: null },
+        { id: 'you-free', label: 'You.com · MCP без ключа', keyName: '', keyless: true, present: true,
+          current: false, bannedUntil: null, banReason: null, broken: false, fails: 0,
+          lastError: null, lastErrorAt: null },
       ],
       fetch: {
         current: 'exa',
@@ -171,6 +174,9 @@ test('страница ключей рисует маршрутизацию по
   assert.match(content, /data-check="exa" data-capability="fetch"/, 'проверка извлечения знает свою возможность');
   assert.match(content, /data-edit-key="SERPAPI_API_KEY"/, 'из сводки можно задать ключ');
   assert.match(content, /data-edit-key="YOU_API_KEY">Задать/, 'у отсутствующего ключа кнопка «Задать»');
+  assert.match(content, /data-check="you-free"/, 'провайдера без ключа тоже можно проверить');
+  assert.match(content, /без ключа/, 'вместо пустого имени ключа — «без ключа»');
+  assert.doesNotMatch(content, /data-edit-key=""/, 'у провайдера без ключа нечего задавать');
 
   // «Задать» открывает форму ввода в строке ключа, а не молчит.
   const setButton = [...document.querySelectorAll('[data-edit-key]')].find(

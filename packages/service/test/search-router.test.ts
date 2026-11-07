@@ -33,6 +33,8 @@ const KEY_ENV: Record<ProviderId, string> = {
   tavily: 'TAVILY_API_KEY',
   firecrawl: 'FIRECRAWL_API_KEY',
   you: 'YOU_API_KEY',
+  // Ключа нет: провайдер включается настройкой ICARUS_SEARCH_FREE, а не .env.
+  'you-free': 'ICARUS_SEARCH_FREE',
   linkup: 'LINKUP_API_KEY',
 };
 
@@ -44,6 +46,7 @@ const HOSTS: Record<string, ProviderId> = {
   'api.tavily.com': 'tavily',
   'api.firecrawl.dev': 'firecrawl',
   'ydc-index.io': 'you',
+  'api.you.com': 'you-free',
   'api.linkup.so': 'linkup',
 };
 
@@ -73,6 +76,29 @@ function configWith(keys: Partial<Record<ProviderId, string>>): IcarusConfig {
   return makeConfig({ secretEnv });
 }
 
+/** Ответ бесплатного MCP: JSON-RPC в SSE, внутри — форма REST-выдачи You.com. */
+function mcpJson(payload: unknown): Response {
+  const body = JSON.stringify({ jsonrpc: '2.0', id: 1, result: payload });
+  return new Response(`event: message\ndata: ${body}\n\n`, {
+    status: 200,
+    headers: { 'content-type': 'text/event-stream' },
+  });
+}
+
+const okYouFree = () =>
+  mcpJson({
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify({ results: { web: [{ title: 'Free', url: 'https://free.dev', description: 'x' }] } }),
+      },
+    ],
+  });
+
+/** Так выглядит исчерпанная суточная квота: 200 OK, но result.isError. */
+const quotaYouFree = () =>
+  mcpJson({ isError: true, content: [{ type: 'text', text: 'Error: Free tier limit exceeded.' }] });
+
 const okSerpApi = () =>
   json({
     organic_results: [
@@ -93,8 +119,18 @@ function clockAt(start = Date.parse('2026-11-07T12:00:00Z')) {
 
 // --- выбор провайдера --------------------------------------------------------
 
-test('рейтинг: первым идёт SerpApi, Linkup — последним', () => {
-  assert.deepEqual(RATING, ['serpapi', 'serpstack', 'brave', 'exa', 'tavily', 'firecrawl', 'you', 'linkup']);
+test('рейтинг: первым идёт SerpApi, Linkup — последним, бесплатный MCP — рядом с You.com', () => {
+  assert.deepEqual(RATING, [
+    'serpapi',
+    'serpstack',
+    'brave',
+    'exa',
+    'tavily',
+    'firecrawl',
+    'you',
+    'you-free',
+    'linkup',
+  ]);
 });
 
 test('текущий — первый по рейтингу с ключом, и сам по себе не меняется', async () => {
@@ -117,6 +153,41 @@ test('без ключей — честный no-keys, а не поход в се
   const fetch = fakeFetch({});
   const result = await routeSearch(config, 'запрос', 2, { fetch });
   assert.deepEqual(result, { ok: false, reason: 'no-keys', tried: [], current: null, retryAt: null });
+});
+
+test('бесплатный MCP ищет без единого ключа', async () => {
+  const config = makeConfig({ env: { ICARUS_SEARCH_FREE: 'on' } });
+  const result = await routeSearch(config, 'запрос', 2, { fetch: fakeFetch({ 'you-free': okYouFree }) });
+  assert.equal(result.ok, true);
+  assert.equal(result.ok && result.provider, 'you-free');
+  assert.equal(result.ok && result.results[0]?.url, 'https://free.dev');
+});
+
+test('бесплатный MCP включён по умолчанию: пустой env — и поиск всё равно есть', async () => {
+  const config = makeConfig({ env: {} });
+  const result = await routeSearch(config, 'запрос', 1, { fetch: fakeFetch({ 'you-free': okYouFree }) });
+  assert.equal(result.ok && result.provider, 'you-free');
+});
+
+test('ICARUS_SEARCH_FREE=off выключает бесплатного провайдера', async () => {
+  const config = makeConfig({ env: { ICARUS_SEARCH_FREE: 'off' } });
+  const result = await routeSearch(config, 'запрос', 2, { fetch: fakeFetch({}) });
+  assert.deepEqual(result, { ok: false, reason: 'no-keys', tried: [], current: null, retryAt: null });
+});
+
+test('кончилась бесплатная квота — карантин до полуночи UTC, а не ровные сутки', async () => {
+  const config = makeConfig({ env: { ICARUS_SEARCH_FREE: 'on' } });
+  const clock = clockAt();
+  const result = await routeSearch(config, 'запрос', 1, { fetch: fakeFetch({ 'you-free': quotaYouFree }), now: clock.now });
+  assert.equal(result.ok, false);
+
+  const state = readRouterState(stateFile(config));
+  assert.equal(state.providers['you-free']?.banReason, 'credits');
+  assert.equal(
+    Date.parse(state.providers['you-free']?.bannedUntil ?? ''),
+    Date.parse('2026-11-08T00:01:00Z'),
+    'квота вернётся в полночь, а не через 24 часа от отказа',
+  );
 });
 
 test('провайдер без ключа пропускается, текущий переезжает на живого', async () => {
@@ -366,6 +437,21 @@ test('проверка из панели снимает карантин, есл
   assert.equal(provider?.fails, 0);
 });
 
+test('панель видит провайдера без ключа: keyless, present, пустой keyName', () => {
+  const config = makeConfig({ env: { ICARUS_SEARCH_FREE: 'on' } });
+  const row = searchStatus(config).providers.find((provider) => provider.id === 'you-free');
+  assert.equal(row?.keyless, true);
+  assert.equal(row?.present, true);
+  assert.equal(row?.keyName, '');
+});
+
+test('проверка из панели зовёт провайдера без ключа, а не отказывает', async () => {
+  const config = makeConfig({ env: { ICARUS_SEARCH_FREE: 'on' } });
+  const result = await checkProvider(config, 'you-free', { fetch: fakeFetch({ 'you-free': okYouFree }) });
+  assert.equal(result.ok, true);
+  assert.equal(result.results, 1);
+});
+
 test('проверка из панели без ключа не ходит в сеть и говорит прямо', async () => {
   const config = configWith({});
   const check = await checkProvider(config, 'serpapi', {
@@ -538,6 +624,15 @@ test('каждый адаптер шлёт ключ туда, куда надо,
     tavily: { results: [{ title: 'T', url: 'https://t.dev', content: 'x' }] },
     firecrawl: { data: [{ title: 'F', url: 'https://f.dev', description: 'x' }] },
     you: { results: { web: [{ title: 'Y', url: 'https://y.dev', description: 'x' }] } },
+    // Бесплатный MCP отвечает не REST-телом, а JSON-RPC: результат лежит
+    // строкой в content[0].text, и внутри — та же форма results.web.
+    'you-free': {
+      jsonrpc: '2.0',
+      id: 1,
+      result: {
+        content: [{ type: 'text', text: JSON.stringify({ results: { web: [{ title: 'Y', url: 'https://y.dev', description: 'x' }] } }) }],
+      },
+    },
     linkup: { results: [{ name: 'L', url: 'https://l.dev', content: 'x' }] },
   };
   const seen = new Map<ProviderId, { url: URL; init: RequestInit }>();
@@ -571,6 +666,14 @@ test('каждый адаптер шлёт ключ туда, куда надо,
   assert.equal(you?.url.hostname, 'ydc-index.io');
   assert.equal((you?.init.headers as Record<string, string>)['x-api-key'], 'secret-key');
   assert.match(String(you?.init.body), /лиссабон/);
+
+  // Бесплатный MCP: тот же You.com, но без ключа вообще — ни заголовка, ни query.
+  const free = seen.get('you-free');
+  assert.equal(free?.url.hostname, 'api.you.com');
+  assert.equal(free?.url.searchParams.get('profile'), 'free');
+  assert.equal((free?.init.headers as Record<string, string>).authorization, undefined);
+  assert.equal((free?.init.headers as Record<string, string>)['x-api-key'], undefined);
+  assert.equal(JSON.parse(String(free?.init.body)).params.name, 'you-search');
 });
 
 test('провайдеры зарегистрированы ровно в порядке рейтинга', () => {

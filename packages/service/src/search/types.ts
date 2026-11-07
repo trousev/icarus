@@ -14,6 +14,7 @@ export const PROVIDER_IDS = [
   'tavily',
   'firecrawl',
   'you',
+  'you-free',
   'linkup',
 ] as const;
 
@@ -77,6 +78,13 @@ export type SearchProvider = {
   label: string;
   /** Переменные окружения, в которых ищется ключ (первая непустая побеждает). */
   keyNames: string[];
+  /** Ключ не нужен: провайдер доступен всегда (бесплатный MCP You.com). */
+  keyless?: boolean;
+  /**
+   * Когда вернётся квота после «кончились кредиты». Для суточных лимитов —
+   * следующая полночь: ровные сутки держали бы провайдера дольше, чем нужно.
+   */
+  creditsResetAt?: (now: number) => number;
   search(query: string, limit: number, ctx: ProviderContext): Promise<SearchResult[]>;
 };
 

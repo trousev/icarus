@@ -382,9 +382,19 @@ export function keyCatalog(): KeyInfo[] {
     {
       name: 'YOU_API_KEY',
       label: 'Поиск — You.com',
-      description: 'API You.com. Без ключа доступен только бесплатный MCP-профиль, роутеру нужен ключ.',
+      description:
+        'API You.com с ключом: больше квоты и чтение страниц. Бесплатный MCP-профиль работает и без него — см. ICARUS_SEARCH_FREE.',
       group: 'search',
       where: 'https://you.com/platform',
+      apply: 'session',
+    },
+    {
+      name: 'ICARUS_SEARCH_FREE',
+      label: 'Поиск — бесплатный MCP You.com',
+      description:
+        'on (по умолчанию) — роутер ходит в MCP You.com без ключа: 100 поисков в сутки, страницы читать не умеет. off — выключить совсем.',
+      group: 'search',
+      plain: true,
       apply: 'session',
     },
     {
