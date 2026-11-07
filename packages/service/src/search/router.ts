@@ -29,6 +29,7 @@ import {
   type SearchProviderId,
   type SearchResult,
 } from './types.ts';
+import { recordUsage } from './usage.ts';
 import type { IcarusConfig } from '../config.ts';
 
 /**
@@ -337,12 +338,14 @@ export async function routeSearch(
       const previous = before.providers[id];
       const dirty = !previous || previous.fails > 0 || previous.bannedUntil !== null || previous.broken;
       const after = dirty ? await mutateRouterState(file, (next) => applySuccess(next, id)) : before;
+      await recordUsage(config, 'search', id, true, { now });
       return { ok: true, provider: id, results, tried, current: after.current };
     } catch (error) {
       // Клиент ушёл — это не вина провайдера, банить нельзя.
       if (options.signal?.aborted) break;
       const failure = asFailure(error);
       await mutateRouterState(file, (next) => applyFailure(next, id, failure, now(), candidates));
+      await recordUsage(config, 'search', id, false, { now });
       tried.push({ provider: id, reason: failureText(failure) });
     }
   }

@@ -129,9 +129,11 @@ test('страница ключей рисует маршрутизацию по
     ],
     search: {
       current: 'serpapi',
+      usage: { days: 7, since: '2026-11-01', through: '2026-11-07' },
       providers: [
         { id: 'serpapi', label: 'SerpApi', keyName: 'SERPAPI_API_KEY', present: true, current: true,
-          bannedUntil: null, banReason: null, broken: false, fails: 0, lastError: null, lastErrorAt: null },
+          bannedUntil: null, banReason: null, broken: false, fails: 0, lastError: null, lastErrorAt: null,
+          usage: { ok: 12, fail: 3 } },
         { id: 'brave', label: 'Brave', keyName: 'BRAVE_API_KEY', present: true, current: false,
           bannedUntil, banReason: 'credits', broken: false, fails: 3, lastError: 'HTTP 429', lastErrorAt: null },
         { id: 'you', label: 'You.com', keyName: 'YOU_API_KEY', present: false, current: false,
@@ -176,6 +178,8 @@ test('страница ключей рисует маршрутизацию по
   assert.match(content, /data-check="exa" data-capability="fetch"/, 'проверка извлечения знает свою возможность');
   assert.match(content, /data-edit-key="SERPAPI_API_KEY"/, 'из сводки можно задать ключ');
   assert.match(content, /data-edit-key="YOU_API_KEY">Задать/, 'у отсутствующего ключа кнопка «Задать»');
+  assert.match(content, /за 7 дней: <b>12<\/b> успехов · <b>3<\/b> отказа/, 'видно, сколько ключ отдал и сколько отказал');
+  assert.match(content, /за 7 дней: не звали/, 'у незваного ключа честный ноль');
   assert.match(content, /data-check="you-free"/, 'провайдера без ключа тоже можно проверить');
   assert.match(content, /<code>без ключа<\/code><span class="pill own">работает<\/span>/, 'статус бесплатного — «работает», а не второе «без ключа»');
   assert.match(content, /100 поисков в сутки/, 'под названием видно, чем провайдер ограничен');

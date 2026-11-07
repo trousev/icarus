@@ -8,6 +8,15 @@
   const esc = (value) =>
     String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 
+  // Русское склонение: «1 отказ», «2 отказа», «5 отказов».
+  const plural = (n, one, few, many) => {
+    const mod10 = n % 10;
+    const mod100 = n % 100;
+    if (mod10 === 1 && mod100 !== 11) return one;
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+    return many;
+  };
+
   const api = async (path, options = {}) => {
     const response = await fetch(path, {
       ...options,
@@ -90,6 +99,21 @@
     return '<span class="pill own">работает</span>';
   }
 
+  /** Сколько ключ отдал за окно статистики: успехи и отказы. */
+  function usageLine(provider) {
+    const usage = provider.usage || { ok: 0, fail: 0 };
+    const days = (data && data.search && data.search.usage && data.search.usage.days) || 7;
+    if (!usage.ok && !usage.fail) {
+      return '<div class="keys-desc keys-usage">за ' + days + ' дней: не звали</div>';
+    }
+    return (
+      '<div class="keys-desc keys-usage">за ' + days + ' дней: ' +
+        '<b>' + esc(usage.ok) + '</b> ' + plural(usage.ok, 'успех', 'успеха', 'успехов') + ' · ' +
+        '<b>' + esc(usage.fail) + '</b> ' + plural(usage.fail, 'отказ', 'отказа', 'отказов') +
+      '</div>'
+    );
+  }
+
   function providerRow(provider, capability) {
     const current = provider.current ? '<span class="pill env">текущий</span>' : '';
     const why = provider.lastError
@@ -113,6 +137,7 @@
           '<div class="keys-label">' + esc(provider.label) + '</div>' +
           note +
           why +
+          usageLine(provider) +
         '</div>' +
         '<div class="keys-actions">' +
           edit +
