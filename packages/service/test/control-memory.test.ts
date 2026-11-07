@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { listFiles, mapleExtensions, readImageFile, readMemoryFile, removeFile, removeLine, resolveInside, searchMemory } from '../src/control/memory.ts';
+import { listFiles, readImageFile, readMemoryFile, removeFile, removeLine, resolveInside, searchMemory } from '../src/control/memory.ts';
 import { commitAll, ensureRepo, log, revert, show } from '../src/control/git.ts';
 
 function tempRoot(): string {
@@ -103,29 +103,31 @@ test('откат по мусорному хешу не делается', async 
   assert.equal((await revert(root, 'не-хеш')).ok, false);
 });
 
-test('математика: журналы и графики читаются своим набором расширений', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-maple-'));
+test('набор допустимых расширений задаётся снаружи и не размывается', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-rules-'));
+  // Свой набор — как у раздела, который открывает не только .md.
+  const allowed = new Set(['.jsonl', '.mw', '.gif']);
   fs.writeFileSync(path.join(root, 'osc.jsonl'), '{"code":"dsolve(...):"}\n');
   fs.writeFileSync(path.join(root, '0123456789abcdef.gif'), 'GIF89a');
   fs.writeFileSync(path.join(root, 'worksheet.mw'), '<worksheet/>');
-  // Память в каталог математики не подмешивается: разделы не пересекаются.
+  // Чужой набор в этот раздел не подмешивается.
   fs.writeFileSync(path.join(root, 'identity.md'), '- Кто-то\n');
 
   assert.deepEqual(
-    listFiles(root, '', mapleExtensions).map((file) => file.path).sort(),
+    listFiles(root, '', allowed).map((file) => file.path).sort(),
     ['0123456789abcdef.gif', 'osc.jsonl', 'worksheet.mw'],
   );
-  assert.match(String(readMemoryFile(root, 'osc.jsonl', mapleExtensions)), /dsolve/);
+  assert.match(String(readMemoryFile(root, 'osc.jsonl', allowed)), /dsolve/);
 
-  const image = readImageFile(root, '0123456789abcdef.gif', mapleExtensions);
+  const image = readImageFile(root, '0123456789abcdef.gif', allowed);
   assert.ok(image);
   assert.equal(image.type, 'image/gif');
   // Не картинка и не разрешённое расширение — не отдаём.
-  assert.equal(readImageFile(root, 'osc.jsonl', mapleExtensions), null);
-  assert.equal(readImageFile(root, '../../etc/passwd.gif', mapleExtensions), null);
-  assert.equal(readMemoryFile(root, 'identity.md', mapleExtensions), null);
+  assert.equal(readImageFile(root, 'osc.jsonl', allowed), null);
+  assert.equal(readImageFile(root, '../../etc/passwd.gif', allowed), null);
+  assert.equal(readMemoryFile(root, 'identity.md', allowed), null);
 
-  // «Забыть строку» в журнале Maple — нельзя: файл не проходит по расширениям.
+  // «Забыть строку» в чужом файле — нельзя: он не проходит по расширениям.
   assert.equal(removeLine(root, 'osc.jsonl', '- Любая строка').ok, false);
   // А обычной памяти это по-прежнему можно.
   assert.equal(removeLine(root, 'identity.md', '- Кто-то').ok, true);

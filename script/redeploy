@@ -36,8 +36,8 @@
 #                     через запятую; пусто — маппинг из config.yaml не трогаем,
 #                     `none` — убрать. Токен бота — секрет TELEGRAM_BOT_TOKEN.
 #   MAPLE_DIR         каталог установки Maple на хосте (по умолчанию /opt/maple18).
-#                     Оттуда же берётся путь CLI внутри контейнеров людей:
-#                     config.yaml подставляет ${MAPLE_DIR} в маунт и в MAPLE_BIN.
+#                     Оттуда же берётся путь CLI внутри контейнеров людей: сервис
+#                     монтирует установку и подставляет ${MAPLE_DIR} в MAPLE_BIN.
 #   HOMEASSISTANT_TOKEN  ключ к MCP Home Assistant (секрет): уезжает в .env и
 #                     подставляется в заголовок авторизации mcp.homeassistant.
 #                     Пусто — строку в .env не трогаем (блок в config.yaml без ключа
@@ -181,8 +181,8 @@ upsert_env HOMEASSISTANT_TOKEN "${HOMEASSISTANT_TOKEN:-}"
 # Путь к Maple: не секрет, но тоже задаётся снаружи (variables.MAPLE_DIR), чтобы
 # локаль и прод настраивались одинаково. Незаданная repo-переменная приезжает из
 # workflow не пустотой, а пустой строкой (envs SSH-экшена), а пустое окружение
-# сильнее .env — ${MAPLE_DIR} в config.yaml раскрылся бы в '', и маунт превратился
-# бы в ::ro (docker: invalid spec). Поэтому пустое значение считаем «не задано»,
+# сильнее .env — ${MAPLE_DIR} в MAPLE_BIN раскрылся бы в '', и контейнер остался бы
+# без пути к CLI. Поэтому пустое значение считаем «не задано»,
 # подставляем дефолт и экспортируем его: и render-config, и compose-write, и
 # docker compose обязаны видеть один и тот же путь.
 MAPLE_DIR="${MAPLE_DIR:-/opt/maple18}"

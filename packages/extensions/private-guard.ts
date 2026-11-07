@@ -7,7 +7,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const WRITE_TOOLS = new Set(["write", "edit", "bash"]);
-/** MCP-серверы умеют писать сами: Maple, например, кладёт журналы. */
+/** MCP-серверы умеют писать сами: их инструменты не наши, и в приватной папке им нечего делать. */
 const WRITE_MCP = /^mcp_/;
 
 export default function (pi: ExtensionAPI) {

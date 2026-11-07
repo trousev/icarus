@@ -29,8 +29,6 @@ async function withServer(
 ): Promise<void> {
   const config = makeConfig({
     users: [probe('probe'), probe('probe2')],
-    // Maple настроен: у панели появляется третий раздел — математика.
-    mcp: { maple: { command: 'node', args: ['/opt/icarus/tools/maple-mcp/server.mjs'] } },
     ...overrides,
   });
   seed(userPaths(config, probe('probe')).memory, {
@@ -39,12 +37,6 @@ async function withServer(
   });
   seed(userPaths(config, probe('probe2')).memory, { 'secret.md': '- Чужой секрет\n' });
   seed(userPaths(config, probe('probe')).sharedMemory, { 'family.md': '- Общий факт\n' });
-  // Расчёты Maple: журнал сессии и график. Панель показывает их в разделе математики.
-  seed(userPaths(config, probe('probe')).maple, {
-    'osc.jsonl': '{"t":"2026-09-21T10:00:00.000Z","code":"sol:=dsolve(diff(y(x),x)=y(x)):"}\n',
-    '0123456789abcdef.gif': 'GIF89a',
-  });
-  seed(userPaths(config, probe('probe2')).maple, { 'чужой.jsonl': '{"code":"secret"}:\n' });
 
   const server = createServer(config, {} as never);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -102,11 +94,6 @@ test('человека называет заголовок: панель отк�
     assert.match(html, /"user":"probe"/, 'в странице — имя вошедшего: его назвал прокси');
     assert.match(html, /Icarus \/ Память \/ <b>Личная<\/b>/, 'крошки знают, где мы');
     assert.doesNotMatch(html, /panel\.devUser/, 'объяснять отказ нечего: доступ есть');
-
-    // Раздел математики — свой адрес, и там та же панель.
-    const maple = await fetch(`${base}/panel/maple?scope=maple`, { headers: asUser('probe') });
-    assert.equal(maple.status, 200);
-    assert.match(await maple.text(), /Icarus \/ <b>Математика<\/b>/);
   });
 });
 
@@ -118,28 +105,17 @@ test('корень домена уводит в панель', async () => {
   });
 });
 
-test('раздел решает, что за область: математика не притворяется памятью и наоборот', async () => {
+test('раздел решает, что за область: скиллы не притворяются памятью и наоборот', async () => {
   await withServer(async (base) => {
-    // Раньше область слушалась вперёд раздела, и `/panel/maple?scope=personal`
-    // показывал личную память под заголовком математики — а математика при этом
-    // висела ещё и третьей областью. Дуба нет: раздел и область развязаны.
-    const personalInMaple = (await (
-      await fetch(`${base}/panel/maple/files?scope=personal`, { headers: asUser('probe') })
-    ).json()) as { mode: string; files: Array<{ path: string }> };
-    assert.equal(personalInMaple.mode, 'maple');
-    assert.deepEqual(
-      personalInMaple.files.map((file) => file.path).sort(),
-      ['0123456789abcdef.gif', 'osc.jsonl'],
-      'раздел математики отдаёт расчёты, что бы ни стояло в scope',
-    );
-
-    // И наоборот: maple в области памяти больше не открывает чужой каталог.
-    const mapleInMemory = (await (
+    // Область слушается не вперёд раздела: `/panel/memory?scope=maple` раньше
+    // открывал чужой каталог под заголовком памяти. Теперь незнакомая область —
+    // это личная память, и никакой пятый корень она не открывает.
+    const personalInMemory = (await (
       await fetch(`${base}/panel/memory/files?scope=maple`, { headers: asUser('probe') })
     ).json()) as { scope: string; mode: string; files: Array<{ path: string }> };
-    assert.equal(mapleInMemory.scope, 'personal', 'незнакомая область — это личная память');
-    assert.equal(mapleInMemory.mode, 'memory');
-    assert.deepEqual(mapleInMemory.files.map((file) => file.path).sort(), ['identity.md', 'people/barsik.md']);
+    assert.equal(personalInMemory.scope, 'personal', 'незнакомая область — это личная память');
+    assert.equal(personalInMemory.mode, 'memory');
+    assert.deepEqual(personalInMemory.files.map((file) => file.path).sort(), ['identity.md', 'people/barsik.md']);
 
     // У скиллов области нет вовсе: что бы ни стояло в scope, раздел отдаёт скиллы,
     // а не чужой каталог. Своей областью скиллы тоже не объявить.
@@ -150,7 +126,6 @@ test('раздел решает, что за область: математик�
     assert.equal(skills.mode, 'skills');
     assert.deepEqual(skills.skills, [], 'пустой каталог скиллов — это пустой список скиллов');
 
-    // Своей областью математику не объявить: её нет в списке областей.
     const state = (await (await api(base, 'probe', 'state')).json()) as { scopes: string[] };
     assert.deepEqual(state.scopes, ['personal', 'shared']);
   });
@@ -217,15 +192,12 @@ test('панель показывает только память своего �
         { id: 'memory', label: 'Память' },
         { id: 'skills', label: 'Скиллы' },
         { id: 'mcp', label: 'MCP' },
-        { id: 'maple', label: 'Математика' },
         { id: 'profile', label: 'Пользователь' },
       ],
       'разделы панели приходят из сервиса',
     );
-    // Областей памяти ровно две: скиллы и математика — отдельные разделы со своим
-    // корнем, а не третья и четвёртая область. Пока математика была и тем и другим,
-    // панель показывала её дважды.
-    assert.deepEqual(state.scopes, ['personal', 'shared'], 'скиллы и математика не области памяти');
+    // Областей памяти ровно две: скиллы — отдельный раздел со своим корнем.
+    assert.deepEqual(state.scopes, ['personal', 'shared'], 'скиллы не область памяти');
     assert.deepEqual(state.modes, { personal: 'memory', shared: 'memory' });
 
     const files = (await (await api(base, 'probe', 'files?scope=personal')).json()) as {
@@ -240,28 +212,6 @@ test('панель показывает только память своего �
     const alien = await api(base, 'probe', 'file?scope=personal&path=secret.md');
     assert.equal(alien.status, 404);
   });
-});
-
-test('без Maple раздела математики нет и в адресе: он уводит в память', async () => {
-  await withServer(
-    async (base) => {
-      const state = (await (await api(base, 'probe', 'state')).json()) as {
-        sections: Array<{ id: string }>;
-      };
-      assert.deepEqual(
-        state.sections.map((section) => section.id),
-        ['memory', 'skills', 'mcp', 'profile'],
-        'математики нет в разделах, MCP и настройки человека остаются',
-      );
-
-      // Ссылка на выключенный раздел осталась у людей в закладках: страница не
-      // должна открываться пустой, у которой каждый запрос — отказ.
-      const page = await fetch(`${base}/panel/maple`, { headers: asUser('probe'), redirect: 'manual' });
-      assert.equal(page.status, 302);
-      assert.equal(page.headers.get('location'), '/panel/memory');
-    },
-    { mcp: {} },
-  );
 });
 
 test('записи памяти приезжают с датами из истории, а пачка удаляется одним коммитом', async () => {
@@ -354,13 +304,6 @@ test('файл скачивается как файл: имя в заголов�
     const disposition = String(cyrillic.headers.get('content-disposition'));
     assert.match(disposition, /filename="________\.md"/, 'ASCII-вариант без кириллицы');
     assert.match(disposition, /filename\*=UTF-8''%D0%B7%D0%B4%D0%BE%D1%80%D0%BE%D0%B2%D1%8C%D0%B5\.md/, 'имя целиком — в UTF-8');
-
-    // График Maple: скачивание не должно превращать картинку в текст.
-    const plot = await fetch(`${base}/panel/maple/file?scope=maple&path=0123456789abcdef.gif&download=1`, {
-      headers: asUser('probe'),
-    });
-    assert.equal(plot.headers.get('content-type'), 'image/gif');
-    assert.equal(await plot.text(), 'GIF89a', 'байты те же, что и у <img>');
 
     // Скачивание — это чтение, а не правка: проверки пути тут те же.
     const alien = await fetch(`${base}/panel/memory/file?scope=personal&path=secret.md&download=1`, {
@@ -458,94 +401,10 @@ test('удаление файла: чужое, не-markdown и выход из 
       api(base, 'probe', 'delete', { method: 'POST', body: JSON.stringify(body) });
 
     assert.equal((await attempt({ scope: 'personal', path: '../../etc/passwd.md' })).status, 400);
-    assert.equal((await attempt({ scope: 'personal', path: 'osc.jsonl' })).status, 400, 'чужой формат не трогаем');
+    assert.equal((await attempt({ scope: 'personal', path: 'notes.txt' })).status, 400, 'чужой формат не трогаем');
     assert.equal((await attempt({ scope: 'personal', path: 'secret.md' })).status, 400, 'чужого файла не видно');
     assert.equal((await attempt({ scope: 'personal', path: '' })).status, 400);
   });
-});
-
-test('раздел математики показывает расчёты Maple, но не даёт их править', async () => {
-  await withServer(async (base) => {
-    const files = (await (await api(base, 'probe', 'files?scope=maple')).json()) as {
-      mode: string;
-      files: Array<{ path: string }>;
-    };
-    assert.equal(files.mode, 'maple', 'раздел математики помечен как read-only');
-    assert.deepEqual(files.files.map((file) => file.path).sort(), ['0123456789abcdef.gif', 'osc.jsonl']);
-
-    const journal = await api(base, 'probe', 'file?scope=maple&path=osc.jsonl');
-    assert.equal(journal.status, 200);
-    assert.match(String(((await journal.json()) as { content: string }).content), /dsolve/);
-
-    // График — байтами, а не строкой в JSON: так его показывает <img> в панели.
-    const plot = await api(base, 'probe', 'file?scope=maple&path=0123456789abcdef.gif&raw=1');
-    assert.equal(plot.status, 200);
-    assert.equal(plot.headers.get('content-type'), 'image/gif');
-    assert.equal(await plot.text(), 'GIF89a');
-
-    // Журнал сессии — это код, из которого Maple восстанавливает состояние:
-    // построчная правка через панель его сломала бы.
-    const forget = await api(base, 'probe', 'forget', {
-      method: 'POST',
-      body: JSON.stringify({ scope: 'maple', path: 'osc.jsonl', line: '{' }),
-    });
-    assert.equal(forget.status, 400);
-    const revert = await api(base, 'probe', 'revert', {
-      method: 'POST',
-      body: JSON.stringify({ scope: 'maple', commit: 'deadbee' }),
-    });
-    assert.equal(revert.status, 400);
-    // Удалить журнал целиком — тоже правка, и в математике её быть не должно.
-    const remove = await api(base, 'probe', 'delete', {
-      method: 'POST',
-      body: JSON.stringify({ scope: 'maple', path: 'osc.jsonl' }),
-    });
-    assert.equal(remove.status, 400);
-
-    // Новые маршруты разделов читают то же самое и так же не дают править Maple:
-    // раздел в адресе сильнее области в запросе.
-    const journalEntries = (await (
-      await fetch(`${base}/panel/maple/entries?scope=maple&path=osc.jsonl`, { headers: asUser('probe') })
-    ).json()) as { entries: Array<{ text: string }>; capped: boolean };
-    assert.equal(journalEntries.capped, false);
-    assert.match(journalEntries.entries.map((entry) => entry.text).join('\n'), /dsolve/);
-
-    const sneaky = await fetch(`${base}/panel/maple/forget-many`, {
-      method: 'POST',
-      headers: { ...asUser('probe'), 'content-type': 'application/json' },
-      body: JSON.stringify({ scope: 'personal', path: 'osc.jsonl', lines: [1] }),
-    });
-    assert.equal(sneaky.status, 400, 'математика правится только со стороны Maple');
-
-    // И чужого человека в математике тоже не видно.
-    assert.equal((await api(base, 'probe', 'file?scope=maple&path=чужой.jsonl')).status, 404);
-  });
-});
-
-test('панель не отдаёт журнал Maple как память', async () => {
-  await withServer(async (base) => {
-    // Каталоги разные: файл математики в личной памяти не открывается вовсе.
-    assert.equal((await api(base, 'probe', 'file?scope=personal&path=osc.jsonl')).status, 404);
-    // И наоборот: markdown памяти не притворяется расчётом Maple.
-    assert.equal((await api(base, 'probe', 'file?scope=maple&path=identity.md')).status, 404);
-  });
-});
-
-test('без Maple в конфиге раздела математики нет и через API', async () => {
-  const config = makeConfig({ users: [probe('probe')] });
-  seed(userPaths(config, probe('probe')).maple, { 'osc.jsonl': '{}\n' });
-  const server = createServer(config, {} as never);
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const { port } = server.address() as AddressInfo;
-  try {
-    const base = `http://127.0.0.1:${port}`;
-    const state = (await (await api(base, 'probe', 'state')).json()) as { scopes: string[] };
-    assert.deepEqual(state.scopes, ['personal', 'shared'], 'выключенный раздел не предлагается');
-    // Старые файлы на диске остались — но доступа к ним у панели быть не должно.
-    assert.equal((await api(base, 'probe', 'files?scope=maple')).status, 404);
-  } finally {
-    server.close();
-  }
 });
 
 test('старая ссылка «настройки поверх чата» ведёт на страницу раздела', async () => {

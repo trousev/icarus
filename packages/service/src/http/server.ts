@@ -1,9 +1,7 @@
 // HTTP-сервер icarus: три маршрута и ничего лишнего.
 import http from 'node:http';
-import fs from 'node:fs';
-import path from 'node:path';
 import { log, redact } from '../log.ts';
-import { findUser, userPaths, type IcarusConfig } from '../config.ts';
+import { findUser, type IcarusConfig } from '../config.ts';
 import type { SessionRegistry } from '../sessions/registry.ts';
 import { errorBody } from './sse.ts';
 import { handleChatCompletions, headerValue } from './openai.ts';
@@ -129,38 +127,6 @@ export function createServer(
           containers,
         }),
       );
-      return;
-    }
-
-    // Графики Maple. Мост pi изображения не пропускает, поэтому MCP кладёт файл
-    // в каталог математики человека и возвращает markdown-ссылку сюда: так картинка
-    // доезжает до чата. Имя файла — 16 случайных hex, угадать путь нельзя.
-    // Старый каталог в pi-agent проверяем вторым: расчёты, не пережившие переезд,
-    // должны открываться, пока их не перенесли.
-    if (req.method === 'GET' && url.pathname.startsWith('/maple/')) {
-      const name = decodeURIComponent(url.pathname.slice('/maple/'.length));
-      if (!/^[a-f0-9]{16}\.(gif|jpe?g|bmp)$/i.test(name)) {
-        res.writeHead(404, { 'content-type': 'application/json' });
-        res.end(JSON.stringify(errorBody('нет такого графика', 'not_found')));
-        return;
-      }
-      for (const user of config.users) {
-        const paths = userPaths(config, user);
-        const candidates = [
-          path.join(paths.maple, name),
-          path.join(paths.piAgent, 'maple-mcp', 'plots', name),
-        ];
-        const file = candidates.find((candidate) => fs.existsSync(candidate));
-        if (!file) continue;
-        const ext = path.extname(file).toLowerCase();
-        const type =
-          ext === '.gif' ? 'image/gif' : ext === '.bmp' ? 'image/bmp' : ext === '.png' ? 'image/png' : 'image/jpeg';
-        res.writeHead(200, { 'content-type': type, 'cache-control': 'private, max-age=3600' });
-        fs.createReadStream(file).pipe(res);
-        return;
-      }
-      res.writeHead(404, { 'content-type': 'application/json' });
-      res.end(JSON.stringify(errorBody('график не найден', 'not_found')));
       return;
     }
 

@@ -44,6 +44,13 @@ export type McpServerConfig = {
   headers?: Record<string, string>;
   lifecycle?: 'eager' | 'lazy';
   /**
+   * Служебный сервер: он есть у всех и всегда включён, а в панели его нет.
+   * Так живут встроенные умения вроде Maple — это часть Икара, а не чужой
+   * инструмент, который человек добавляет, настраивает и выключает себе.
+   * Из mcp.json и AGENTS.md он при этом никуда не пропадает.
+   */
+  hidden?: boolean;
+  /**
    * Человеческое описание сервера для модели. В mcp.json не уезжает: из него
    * собирается подсказка в AGENTS.md — зачем сервер нужен и когда его подключать
    * (см. renderAgentsMd). Без описания модель видит только имя сервера.
@@ -804,7 +811,6 @@ export const CONTAINER_PATHS = {
   workspaces: CONTAINER_WORKSPACES,
   home: CONTAINER_HOME,
   memory: `${CONTAINER_HOME}/memory`,
-  maple: `${CONTAINER_HOME}/maple`,
   incoming: `${CONTAINER_HOME}/incoming`,
   sessions: `${CONTAINER_HOME}/sessions`,
   /** Реестр разговоров: только чтение, чтобы агент мог связать id панели с сессией pi. */
@@ -814,7 +820,6 @@ export const CONTAINER_PATHS = {
   sharedMemory: `${CONTAINER_HOME}/shared-memory`,
   agentsMd: `${CONTAINER_HOME}/AGENTS.md`,
   icarusMd: `${CONTAINER_HOME}/icarus.md`,
-  mapleMd: `${CONTAINER_HOME}/MAPLE.md`,
   /** pi-agent монтируется к pi, а не в рабочее дерево: это его собственный дом. */
   piAgent: '/home/node/.pi/agent',
 } as const;
@@ -849,13 +854,6 @@ export function userPaths(config: IcarusConfig, user: UserConfig) {
     workspaces,
     icarus,
     memory: path.join(icarus, 'memory'),
-    /**
-     * Математика: журналы сессий Maple, графики и воркшиты. Лежит рядом с памятью
-     * и переживает и перезапуск сервиса, и пересоздание контейнера: MCP-мост pi
-     * поднимается на время чата, поэтому всё, что должно остаться, обязано лежать
-     * на хосте, а не во временном каталоге внутри контейнера.
-     */
-    maple: path.join(icarus, 'maple'),
     incoming: path.join(icarus, 'incoming'),
     sessions: path.join(icarus, 'sessions'),
     /** Реестр разговоров лежит в корне человека, а контейнеру отдаётся внутрь .icarus. */
@@ -872,8 +870,6 @@ export function userPaths(config: IcarusConfig, user: UserConfig) {
     skills: path.join(root, 'pi-agent', 'skills'),
     agentsMd: path.join(icarus, 'AGENTS.md'),
     icarusMd: path.join(icarus, 'icarus.md'),
-    /** Инструкция по Maple: читается агентом по требованию, не висит в промпте. */
-    mapleMd: path.join(icarus, 'MAPLE.md'),
     sharedMemory: path.join(config.dataDir, 'shared'),
   };
 }

@@ -350,9 +350,9 @@ const IMAGE_TYPES: Record<string, string> = {
 };
 
 /**
- * Картинка из workspace по пути, который модель написала в markdown. Наружу
- * отдаём только incoming/ и maple/: там лежат вложения и графики, и оба каталога
- * уже смонтированы в контейнер. Всё остальное — 404, а не «почитай хост».
+ * Картинка по пути, который модель написала в markdown. Наружу отдаём только
+ * картинки из вложений и рабочих папок человека: оба каталога уже смонтированы
+ * в контейнер. Всё остальное — 404, а не «почитай хост».
  */
 export function chatImageFile(
   config: IcarusConfig,
@@ -363,8 +363,17 @@ export function chatImageFile(
   let relative = raw.trim();
   if (!relative || relative.includes('\u0000')) return null;
   if (relative.startsWith('file://')) relative = relative.slice('file://'.length);
+  // MCP-сервер отдаёт путь в markdown закодированным (пробелы в имени папки), а
+  // %2e%2e после раскодирования всё равно упрётся в проверку «..» ниже.
+  if (/%[0-9a-f]{2}/i.test(relative)) {
+    try {
+      relative = decodeURIComponent(relative);
+    } catch {
+      return null;
+    }
+  }
   // Служебный каталог снимаем первым: после общего '/workspace/' от него осталось бы
-  // '.icarus/incoming/…', и ни incoming/, ни maple/ уже не совпали бы.
+  // '.icarus/incoming/…', и ни incoming/, ни workspaces/ уже не совпали бы.
   if (relative.startsWith(`${CONTAINER_HOME}/`)) relative = relative.slice(CONTAINER_HOME.length + 1);
   else if (relative.startsWith('/workspace/')) relative = relative.slice('/workspace/'.length);
   else if (relative.startsWith('workspace/')) relative = relative.slice('workspace/'.length);
@@ -373,9 +382,11 @@ export function chatImageFile(
   const paths = userPaths(config, user);
   let root = paths.incoming;
   if (relative.startsWith('incoming/')) relative = relative.slice('incoming/'.length);
-  else if (relative.startsWith('maple/')) {
-    root = paths.maple;
-    relative = relative.slice('maple/'.length);
+  // Файлы, которые агент создал сам (графики и что угодно ещё), лежат в его
+  // workspace: рисовать их в чате — единственный способ донести картинку до человека.
+  else if (relative.startsWith('workspaces/')) {
+    root = paths.workspaces;
+    relative = relative.slice('workspaces/'.length);
   }
 
   if (!relative || relative.includes('..')) return null;
@@ -594,7 +605,6 @@ function clip(text: string, limit: number): string {
 export function traceLabel(tool: string, args: Record<string, unknown> = {}): string {
   const text = JSON.stringify(args);
   if (tool.startsWith('mcp_homeassistant')) return 'ДОМ';
-  if (tool.startsWith('mcp_maple')) return 'MAPLE';
   if (tool === 'mcp_connect' || tool === 'mcp_status') return 'MCP';
   // Любой пользовательский MCP: mcp_<сервер>_<инструмент>. Иначе всё, что человек
   // добавил сам, рисовалось бы безликим «ТУЛ».

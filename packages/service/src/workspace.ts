@@ -32,10 +32,8 @@ function migrateLayout(paths: ReturnType<typeof userPaths>): void {
     [path.join(paths.root, 'memory'), paths.memory],
     [path.join(paths.root, 'incoming'), paths.incoming],
     [path.join(paths.root, 'sessions'), paths.sessions],
-    [path.join(paths.root, 'maple'), paths.maple],
     [path.join(paths.root, 'AGENTS.md'), paths.agentsMd],
     [path.join(paths.root, 'icarus.md'), paths.icarusMd],
-    [path.join(paths.root, 'MAPLE.md'), paths.mapleMd],
   ];
   for (const [from, to] of moves) {
     // Переносим только когда старого места ещё есть что переносить, а нового нет:
@@ -68,9 +66,8 @@ export function ensureDirs(config: IcarusConfig, user: UserConfig): void {
   ]) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  // Каталог математики заводим только при настроенном Maple: пустая папка в
-  // служебном каталоге без сервера только сбивала бы агента с толку.
-  if (config.mcp?.maple) fs.mkdirSync(paths.maple, { recursive: true });
+  // Каталог математики не заводим: файлы расчётов Maple теперь живут в рабочей
+  // папке разговора, рядом с остальной работой человека.
   for (const sub of ['people', 'projects', 'journal']) {
     fs.mkdirSync(path.join(paths.memory, sub), { recursive: true });
   }
@@ -141,27 +138,7 @@ export function renderAgentsMd(
     `| \`${home}/chats.json\` | **реестр разговоров** (только чтение): id, канал, workspace | сам агент в него не пишет |`,
     `| \`${home}/sessions.json\` | **карта разговоров** (только чтение): conversationId → sessionId и файл | по ссылке из панели найдёшь сессию |`,
     `| \`${home}/icarus.md\` | твой системный промпт | не редактируй |`,
-    ...(servers.maple
-      ? [
-          `| \`${home}/maple/\` | **математика**: журналы и файлы расчётов Maple | читай и считай через Maple, руками файлы не правь |`,
-        ]
-      : []),
   ];
-
-  // Детали про Maple живут в отдельном MAPLE.md и читаются по требованию.
-  // В основную память кладём только указатель: иначе инструкция про символьный
-  // счёт висит в каждом разговоре, включая те, где математики нет вовсе.
-  // Математика — только если сервер включён у ЭТОГО человека: общий Maple можно
-  // выключить себе переключателем, и тогда инструкция «считай через Maple» была бы
-  // ложью — инструментов-то нет.
-  const maple = servers.maple
-    ? `
-## Если нужна математика
-
-Математика, аналитика, Maple — читай \`${home}/MAPLE.md\`: там что умеет, как вести
-расчёты в сессиях и что говорить человеку.
-`
-    : '';
 
   const mcp = renderMcpOnDemand(servers);
 
@@ -220,7 +197,7 @@ ${mcp}
 
 - \`${home}/shared-memory/\` — только по явной просьбе. Сомневаешься — пиши в личное.
 - Не удаляй чужие файлы и не трогай ничего за пределами \`${workspaces}\`.
-${languageRule(language)}${maple}`;
+${languageRule(language)}`;
 }
 
 /**
@@ -349,46 +326,6 @@ function copyDirFiles(from: string, to: string, depth = 0): string[] {
   return copied;
 }
 
-/**
- * Переносит старые расчёты Maple из pi-agent в постоянный каталог математики.
- *
- * До появления постоянного каталога математики сервер по умолчанию писал журналы в
- * `<pi-agent>/maple-mcp`, а каталог pi-agent при пересборке окружения не чистится —
- * то есть чужого там не бывает, и перенести его безопасно. Копируем, а не
- * перемещаем: если в постоянном каталоге уже есть свежая версия файла, побеждает
- * она, а старый остаётся на месте — терять чужие расчёты из-за уборки нельзя.
- * Функция идемпотентна: после первого переноса копировать уже нечего.
- */
-export function migrateLegacyMaple(legacy: string, maple: string): number {
-  let entries: fs.Dirent[];
-  try {
-    if (!fs.existsSync(legacy)) return 0;
-    entries = fs.readdirSync(legacy, { withFileTypes: true });
-  } catch {
-    return 0;
-  }
-
-  fs.mkdirSync(maple, { recursive: true });
-  let copied = 0;
-  for (const entry of entries) {
-    if (entry.name.startsWith('.')) continue;
-    const source = path.join(legacy, entry.name);
-    const target = path.join(maple, entry.name);
-    if (entry.isDirectory()) {
-      copied += migrateLegacyMaple(source, target);
-      continue;
-    }
-    if (!entry.isFile() || fs.existsSync(target)) continue;
-    try {
-      fs.copyFileSync(source, target);
-      copied += 1;
-    } catch {
-      // отдельный файл не скопировался — переживём, остальные важнее
-    }
-  }
-  return copied;
-}
-
 export function prepareUser(config: IcarusConfig, user: UserConfig) {
   ensureDirs(config, user);
   const paths = userPaths(config, user);
@@ -413,11 +350,6 @@ export function prepareUser(config: IcarusConfig, user: UserConfig) {
       user: user.id,
       error: String(error),
     });
-  }
-
-  if (config.mcp?.maple) {
-    const moved = migrateLegacyMaple(path.join(paths.piAgent, 'maple-mcp'), paths.maple);
-    if (moved > 0) log.info('расчёты Maple перенесены в постоянный каталог', { user: user.id, files: moved });
   }
 
   // Язык — из профиля человека: он меняет только раздел «Язык» в карте окружения,
@@ -462,21 +394,11 @@ export function prepareUser(config: IcarusConfig, user: UserConfig) {
     log.warn('icarus.md не найден — агент останется на дефолтном промпте', { source: personaSource });
   }
 
-  // Инструкция по Maple — отдельным файлом, читается по требованию. Нет сервера —
-  // файла быть не должно: иначе агент обещает то, чего у него нет.
-  // Файл кладём всегда, когда Maple настроен в стеке: он может быть источником
-  // bind-mount'а, и удалять его из-под контейнера нельзя. Выключенный себе Maple
-  // просто не упоминается в AGENTS.md — модель не знает, что его читать.
-  if (config.mcp?.maple) {
-    const mapleSource = path.join(REPO_ROOT, 'MAPLE.md');
-    if (fs.existsSync(mapleSource)) {
-      writeFileSafe(paths.mapleMd, fs.readFileSync(mapleSource, 'utf8'));
-    } else {
-      log.warn('MAPLE.md не найден — агент не узнает, как работать с Maple', { source: mapleSource });
-    }
-  } else if (fs.existsSync(paths.mapleMd)) {
-    fs.rmSync(paths.mapleMd, { force: true });
-  }
+  // Старая инструкция по Maple жила отдельным файлом; теперь правила в описаниях
+  // инструментов, и оставленный файл только путал бы агента. Это наш управляемый
+  // файл, поэтому убираем его без вопросов (расчётов в нём нет).
+  const legacyMapleMd = path.join(paths.icarus, 'MAPLE.md');
+  if (fs.existsSync(legacyMapleMd)) fs.rmSync(legacyMapleMd, { force: true });
 
   // Каталог расширений — управляемый: чистим его, иначе после переименований там
   // остаются старые копии, которые pi продолжит загружать как расширения.

@@ -3,8 +3,7 @@
 // Смыслы, которые тут охраняются, появились не из любви к разметке:
 //  - номер строки — подсказка для глаза, а не текст: иначе копирование выделенного
 //    куска приезжает с цифрами и отступом;
-//  - правки и удаление есть только у памяти: у математики файлы создаёт Maple, и
-//    журнал сессии — это код, из которого сессия восстанавливается;
+//  - правки и удаление есть только у памяти и скиллов: у остальных разделов свой рендер;
 //  - разделы рисуются из SECTIONS, а не зашиты в страницу;
 //  - в странице нет никаких пропусков: человека называет SSO-прокси.
 import test from 'node:test';
@@ -15,10 +14,10 @@ const SESSION: PanelSession = {
   user: 'probe',
   sections: [
     { id: 'memory', label: 'Память' },
-    { id: 'maple', label: 'Математика' },
+    { id: 'skills', label: 'Скиллы' },
   ],
-  scopes: { personal: 'memory', shared: 'memory', maple: 'maple' },
-  scopeLabels: { personal: 'Личная', shared: 'Семейная', maple: 'Математика' },
+  scopes: { personal: 'memory', shared: 'memory' },
+  scopeLabels: { personal: 'Личная', shared: 'Семейная' },
   model: 'icarus-core-2',
 };
 
@@ -34,7 +33,7 @@ test('номер строки в панели не попадает в выде�
   assert.match(html, /<span class="row-text">' \+ esc\(/, 'текст записи лежит отдельно от номера');
 });
 
-test('память правится, математика только смотрится', () => {
+test('память правится построчно, у скиллов свой рендер', () => {
   const html = panelHtml(SESSION, { section: 'memory', scope: 'personal', file: 'identity.md' });
 
   // Области приходят из сервиса: их подписи и число файлов панель не выдумывает.
@@ -46,15 +45,8 @@ test('память правится, математика только смот�
   assert.match(html, /endpoint\('forget-many'\)/, 'пачка уходит маршрутом раздела');
   assert.match(html, /askConfirm\('Убрать из памяти '/);
 
-  // А у математики ни галочек, ни истории файла: рендер другой ветки.
-  const maple = panelHtml(SESSION, { section: 'maple', scope: 'maple', file: 'osc.jsonl' });
-  assert.match(maple, /renderReadOnly\(data\)/, 'журнал Maple рисуется без галочек');
-  assert.match(
-    maple,
-    /showFileHead\(path, 'только для чтения', false\)/,
-    'у математики нет вкладки истории',
-  );
-  assert.match(maple, /\.file-head\[hidden\] \{ display:none; \}/, 'пустая шапка файла не занимает место');
+  // Пустая шапка файла не занимает место: без файла её нет.
+  assert.match(html, /\.file-head\[hidden\] \{ display:none; \}/);
 });
 
 test('раздел скиллов — редактор, а не список файлов с галочками', () => {
@@ -109,27 +101,14 @@ test('раздел скиллов — редактор, а не список ф�
   assert.match(open, /skillStatus\('Не сохранилось: '/, 'ошибка сохранения видна в редакторе');
 });
 
-test('без Maple раздела математики в панели нет', () => {
-  const session: PanelSession = {
-    ...SESSION,
-    sections: [{ id: 'memory', label: 'Память' }],
-    scopes: { personal: 'memory', shared: 'memory' },
-  };
-  const html = panelHtml(session, { section: 'memory', scope: 'personal' });
-  assert.doesNotMatch(html, /href="\/panel\/maple/, 'выключенного раздела в сайдбаре нет');
-  assert.doesNotMatch(html, /id="count-maple"/);
-});
-
 test('шапка подписана Icarus Control Panel и рисует разделы из сервиса', () => {
-  const html = panelHtml(SESSION, { section: 'maple', scope: 'maple' });
+  const html = panelHtml(SESSION, { section: 'memory', scope: 'personal' });
   assert.match(html, /<title>Icarus Control Panel<\/title>/);
   assert.match(html, /<b>Icarus<\/b>/, 'в сайдбаре — имя панели');
   assert.match(html, /document\.title = 'Icarus Control Panel · ' \+ cfg\.user/);
-  // Область в ссылке несёт только память: у математики своей области нет, и
-  // `?scope=personal` в её адресе — это и была та путаница с двумя входами.
-  assert.match(html, /href="\/panel\/memory\?scope=maple"/, 'раздел памяти — ссылкой с областью');
-  assert.match(html, /href="\/panel\/maple"/, 'у математики область в адресе не тащим');
-  assert.doesNotMatch(html, /href="\/panel\/maple\?/, 'лишнего параметра у раздела математики нет');
+  // Область в ссылке несёт только память: у скиллов своей области нет, и
+  // `?scope=personal` в их адресе — это и была та путаница с двумя входами.
+  assert.match(html, /href="\/panel\/memory\?scope=shared"/, 'раздел памяти — ссылкой с областью');
   assert.match(html, /icarus-core-2/, 'в подвале видно, какая модель работает');
 
   // Следующий раздел — это ещё одна ссылка, а не переделка страницы.
@@ -161,7 +140,7 @@ test('отказ доступа объясняет причину и экран�
 test('у настроек одно меню — в левой панели, без горизонтальных табов', () => {
   // Раньше разделы открывались поверх чата: сверху горизонтальные табы, внутри —
   // второй сайдбар. Теперь меню настроек одно и живёт в левой панели страницы.
-  for (const section of ['memory', 'maple']) {
+  for (const section of ['memory', 'skills']) {
     const html = panelHtml(SESSION, { section });
     assert.match(html, /<aside>/, 'меню разделов живёт в левой панели');
     assert.match(html, /<p class="nav-title">НАСТРОЙКИ<\/p>/);

@@ -6,13 +6,10 @@
 //
 // Главный экран — /panel/chat: диалоги, лента и композер. Чат ходит в те же сессии
 // pi, что Telegram, только conversationId начинается с web-. Настройки
-// (/panel/memory, /panel/skills, /panel/mcp, /panel/maple) открываются панелью
-// поверх чата.
+// (/panel/memory, /panel/skills, /panel/mcp) открываются панелью поверх чата.
 //
-// Внутри памяти три области: личная, семейная и математика; математика — не память
-// в том же смысле: её файлы создаёт Maple, и панель показывает их только для чтения
-// (ни «забыть», ни откатов): журнал сессии — это код, из которого сессия
-// восстанавливается, и построчная правка его сломает.
+// Внутри памяти две области: личная и семейная. Файлов встроенных умений здесь нет:
+// их инструменты — обычный MCP, а всё созданное живёт в рабочей папке разговора.
 //
 // Скиллы — третий вид раздела: их пишет человек, и правка тут не построчная, а целым
 // файлом (`SKILL.md`). Панель — автор скиллов, pi — их читатель: каталог скиллов
@@ -34,7 +31,6 @@ import {
   countFiles,
   isImageFile,
   listFiles,
-  mapleExtensions,
   memoryExtensions,
   readImageFile,
   readMemoryFile,
@@ -91,7 +87,6 @@ export const SECTIONS: { id: string; label: string; adminOnly?: boolean }[] = [
   { id: 'memory', label: 'Память' },
   { id: 'skills', label: 'Скиллы' },
   { id: 'mcp', label: 'MCP' },
-  { id: 'maple', label: 'Математика' },
   // Ключи — настройка инсталляции, а не человека: раздел видят и открывают только
   // админы. Стоит он перед «Пользователем»: остальное — про содержимое, это — про
   // доступы, а последним идёт личная настройка.
@@ -99,16 +94,15 @@ export const SECTIONS: { id: string; label: string; adminOnly?: boolean }[] = [
   { id: 'profile', label: 'Пользователь' },
 ];
 
-type Scope = 'personal' | 'shared' | 'skills' | 'maple' | 'profile';
-/** Режим раздела: memory правится построчно, skills — целым файлом, maple — только смотрится. */
-export type ScopeMode = 'memory' | 'skills' | 'maple' | 'profile';
+type Scope = 'personal' | 'shared' | 'skills' | 'profile';
+/** Режим раздела: memory правится построчно, skills — целым файлом. */
+export type ScopeMode = 'memory' | 'skills' | 'profile';
 
 /** Заголовки областей: их рисует панель, и держать их в браузере незачем. */
 const SCOPE_LABELS: Record<string, string> = {
   personal: 'Личная',
   shared: 'Семейная',
   skills: 'Скиллы',
-  maple: 'Математика',
 };
 
 function json(res: ServerResponse, status: number, payload: unknown): void {
@@ -227,18 +221,12 @@ function sendAttachment(res: ServerResponse, relative: string, content: string):
 
 /**
  * Область памяти из запроса: всё незнакомое — личная, как и раньше.
- *
- * Математики здесь нет намеренно: это не область памяти, а отдельный раздел со
- * своим корнем и своим правом на запись. Пока она была и тем и другим, панель
- * показывала её дважды — таблеткой среди областей и разделом в сайдбаре, — а
- * `/panel/memory?scope=maple` рисовал чужие файлы под заголовком памяти.
  */
 function parseScope(raw: unknown): 'personal' | 'shared' {
   return raw === 'shared' ? raw : 'personal';
 }
 
 function modeFor(scope: Scope): ScopeMode {
-  if (scope === 'maple') return 'maple';
   if (scope === 'skills') return 'skills';
   // Профиль — не файлы, а форма настроек: у него свой рендер и свои маршруты,
   // и в общий разбор «файлов памяти» он не заходит.
@@ -249,18 +237,16 @@ function modeFor(scope: Scope): ScopeMode {
 /**
  * Какую область читает запрос.
  *
- * У новых маршрутов раздел стоит в адресе (`/panel/maple/files`) и решает всё:
+ * У новых маршрутов раздел стоит в адресе (`/panel/skills/files`) и решает всё:
  * область из query там только путала бы. У старых (`/panel/api/*`) раздела в
  * адресе нет — они и раньше называли область параметром, и открытая в браузере
  * вкладка панели должна продолжать работать после обновления сервиса.
  */
 function scopeFor(section: string | undefined, raw: unknown): Scope {
-  if (section === 'maple') return 'maple';
   if (section === 'skills') return 'skills';
   if (section === 'profile') return 'profile';
   if (section === 'memory') return parseScope(raw);
-  const legacy = raw === 'shared' || raw === 'maple' ? raw : 'personal';
-  return legacy;
+  return raw === 'shared' ? raw : 'personal';
 }
 
 /** Корень раздела и набор расширений, которые в нём вообще допустимы. */
@@ -269,7 +255,6 @@ function resolveScope(config: IcarusConfig, userId: string, scope: Scope) {
   if (!user) return null;
   const paths = userPaths(config, user);
   if (scope === 'shared') return { root: paths.sharedMemory, allowed: memoryExtensions };
-  if (scope === 'maple') return { root: paths.maple, allowed: mapleExtensions };
   if (scope === 'skills') return { root: paths.skills, allowed: skillExtensions };
   // Профиль — один файл, и живёт он на уровень выше памяти. Корнем отдаём каталог
   // человека: списком файлов его никто не ходит, а «есть ли файл» — вопрос к нему же.
@@ -302,10 +287,6 @@ async function prepare(config: IcarusConfig, userId: string): Promise<void> {
   // Отдельный от pi-agent: в самом pi-agent лежат auth.json и mcp.json с ключами, и
   // заводить репозиторий над ними значило бы коммитить ключи.
   await ensureRepo(paths.skills);
-  // Математику в git не берём: журналы переписываются на каждом шаге расчёта,
-  // и коммит на каждый вызов Maple — это история ни о чём. Панель её и не
-  // показывает, а репозиторий заводить «на будущее» незачем.
-  if (config.mcp?.maple) fs.mkdirSync(paths.maple, { recursive: true });
 }
 
 /** Сколько файлов в каждой области: панель показывает это числом у раздела. */
@@ -326,7 +307,6 @@ function countsFor(config: IcarusConfig, userId: string): Record<string, number>
     // Сломанное хранилище MCP не должно ронять счётчики всей панели.
     logger.warn('MCP: счётчик не собрался', { user: userId, error: String(error) });
   }
-  if (config.mcp?.maple) counts.maple = countFiles(paths.maple, mapleExtensions);
   return counts;
 }
 
@@ -375,16 +355,8 @@ export async function handlePanel(
     // Старые ссылки открывали настройки поверх чата (?settings=memory). Теперь у
     // настроек своя страница с меню в левой панели — туда и ведём, не теряя раздел.
     const legacySettings = page.section === 'chat' ? url.searchParams.get('settings') : null;
-    if (legacySettings && /^(memory|skills|mcp|maple|keys|profile)$/.test(legacySettings)) {
+    if (legacySettings && /^(memory|skills|mcp|keys|profile)$/.test(legacySettings)) {
       res.writeHead(302, { location: `/panel/${legacySettings}` });
-      res.end();
-      return true;
-    }
-    // Раздел математики есть только там, где настроен Maple. Прятать его из
-    // сайдбара мало: в закладках у людей он остался, и открытая страница молча
-    // показывала бы пустой раздел, у которого каждый запрос — отказ.
-    if (page.section === 'maple' && !config.mcp?.maple) {
-      res.writeHead(302, { location: '/panel/memory' });
       res.end();
       return true;
     }
@@ -444,28 +416,28 @@ export async function handlePanel(
   return false;
 }
 
-/** Раздел из адреса: /panel/chat, /panel/memory, /panel/skills, /panel/mcp, /panel/maple, /panel/keys и /panel/profile. */
+/** Раздел из адреса: /panel/chat, /panel/memory, /panel/skills, /panel/mcp, /panel/keys и /panel/profile. */
 function routePage(pathname: string): PanelPage | null {
   if (pathname === '/panel/chat' || pathname === '/panel/chat/') return { section: 'chat' };
-  const match = /^\/panel\/(memory|skills|maple|mcp|keys|profile)\/?$/.exec(pathname);
+  const match = /^\/panel\/(memory|skills|mcp|keys|profile)\/?$/.exec(pathname);
   return match ? { section: match[1] } : null;
 }
 
 /** Маршрут API из адреса: /panel/<раздел>/<имя>. */
 function routeApi(pathname: string): { section: string; name: string } | null {
-  const match = /^\/panel\/(memory|skills|maple)\/([\w-]+)$/.exec(pathname);
+  const match = /^\/panel\/(memory|skills)\/([\w-]+)$/.exec(pathname);
   return match ? { section: match[1], name: match[2] } : null;
 }
 
 /**
- * Разделы панели у этого человека: математика — только там, где настроен Maple,
- * ключи — только у админа. Остальных разделов не прячем: это его собственные
- * память, скиллы и настройки.
+ * Разделы панели у этого человека: ключи — только у админа. Остальных разделов
+ * не прячем: это его собственные память, скиллы и настройки.
  */
 function sectionsFor(config: IcarusConfig, user: UserConfig | undefined): { id: string; label: string }[] {
-  return SECTIONS.filter(
-    (section) => (section.id !== 'maple' || Boolean(config.mcp?.maple)) && (section.adminOnly !== true || isAdmin(user)),
-  ).map(({ id, label }) => ({ id, label }));
+  return SECTIONS.filter((section) => section.adminOnly !== true || isAdmin(user)).map(({ id, label }) => ({
+    id,
+    label,
+  }));
 }
 
 async function sectionPage(
@@ -612,7 +584,7 @@ async function handleApi(
       return;
     }
   }
-  // Раздел в адресе старше области: /panel/maple/… — это математика, каким бы
+  // Раздел в адресе старше области: /panel/skills/… — это скиллы, каким бы
   // ни был scope в запросе, а /panel/memory/… — только память.
   const scope = scopeFor(route?.section, url.searchParams.get('scope') ?? body.scope);
   const mode = modeFor(scope);
@@ -622,19 +594,10 @@ async function handleApi(
     return;
   }
   const { root, allowed } = resolved;
-  // Maple выключили из конфига, а старые файлы на диске остались. Раздел ему не
-  // показывается — значит, и через API его не должно быть видно.
-  if (scope === 'maple' && !config.mcp?.maple) {
-    json(res, 404, errorBody('раздел математики выключен: в конфиге нет mcp.maple'));
-    return;
-  }
 
   if (req.method === 'GET' && name === 'files') {
-    // Память и скиллы — под git (их правки в панели откатываются коммитами),
-    // математика — просто каталог, который надо завести, если человек ещё ничего
-    // не считал.
-    if (mode === 'maple') fs.mkdirSync(root, { recursive: true });
-    else await ensureRepo(root);
+    // Память и скиллы — под git: их правки в панели откатываются коммитами.
+    await ensureRepo(root);
     // У скиллов «файлы» — это сами скиллы: каталог с SKILL.md внутри и его бандл.
     // Панель показывает их списком, а не россыпью файлов, из которых они собраны.
     if (mode === 'skills') {
@@ -903,11 +866,6 @@ async function handleApi(
     }
     logger.info('панель: удаление файла', { user: userId, scope, ok: result.ok });
     json(res, result.ok ? 200 : 400, result);
-    return;
-  }
-
-  if (mode === 'maple' && req.method === 'POST' && ['revert', 'forget', 'forget-many', 'delete'].includes(name)) {
-    json(res, 400, errorBody('математика только для чтения: журналы и графики создаёт Maple', 'invalid_request_error'));
     return;
   }
 
