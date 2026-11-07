@@ -135,9 +135,11 @@ test('страница ключей рисует маршрутизацию по
         { id: 'brave', label: 'Brave', keyName: 'BRAVE_API_KEY', present: true, current: false,
           bannedUntil, banReason: 'credits', broken: false, fails: 3, lastError: 'HTTP 429', lastErrorAt: null },
         { id: 'you', label: 'You.com', keyName: 'YOU_API_KEY', present: false, current: false,
+          optional: true, note: 'Ключа нет, и он не нужен: поиск идёт через бесплатный MCP.',
           bannedUntil: null, banReason: null, broken: true, fails: 60, lastError: null, lastErrorAt: null },
-        { id: 'you-free', label: 'You.com · MCP без ключа', keyName: '', keyless: true, present: true,
-          current: false, bannedUntil: null, banReason: null, broken: false, fails: 0,
+        { id: 'you-free', label: 'You.com · бесплатный MCP', keyName: '', keyless: true, present: true,
+          current: false, optional: false, note: '100 поисков в сутки без регистрации.',
+          bannedUntil: null, banReason: null, broken: false, fails: 0,
           lastError: null, lastErrorAt: null },
       ],
       fetch: {
@@ -175,7 +177,10 @@ test('страница ключей рисует маршрутизацию по
   assert.match(content, /data-edit-key="SERPAPI_API_KEY"/, 'из сводки можно задать ключ');
   assert.match(content, /data-edit-key="YOU_API_KEY">Задать/, 'у отсутствующего ключа кнопка «Задать»');
   assert.match(content, /data-check="you-free"/, 'провайдера без ключа тоже можно проверить');
-  assert.match(content, /без ключа/, 'вместо пустого имени ключа — «без ключа»');
+  assert.match(content, /<code>без ключа<\/code><span class="pill own">работает<\/span>/, 'статус бесплатного — «работает», а не второе «без ключа»');
+  assert.match(content, /100 поисков в сутки/, 'под названием видно, чем провайдер ограничен');
+  assert.match(content, /<span class="pill env">необязателен<\/span>/, 'You.com без ключа — не «нет ключа», а «необязателен»');
+  assert.match(content, /он не нужен: поиск идёт через бесплатный MCP/, 'и объяснено почему');
   assert.doesNotMatch(content, /data-edit-key=""/, 'у провайдера без ключа нечего задавать');
 
   // «Задать» открывает форму ввода в строке ключа, а не молчит.

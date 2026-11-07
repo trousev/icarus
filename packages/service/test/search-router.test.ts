@@ -443,6 +443,25 @@ test('панель видит провайдера без ключа: keyless, p
   assert.equal(row?.keyless, true);
   assert.equal(row?.present, true);
   assert.equal(row?.keyName, '');
+  assert.match(row?.note ?? '', /100 поисков в сутки/);
+});
+
+test('You.com без ключа подписан «необязателен», пока работает бесплатный MCP', () => {
+  const on = searchStatus(makeConfig({ env: { ICARUS_SEARCH_FREE: 'on' } }));
+  const you = on.providers.find((provider) => provider.id === 'you');
+  assert.equal(you?.present, false);
+  assert.equal(you?.optional, true, 'ключа нет, но роутер и без него ищет');
+  assert.match(you?.note ?? '', /через бесплатный MCP/);
+
+  const off = searchStatus(makeConfig({ env: { ICARUS_SEARCH_FREE: 'off' } }));
+  const alone = off.providers.find((provider) => provider.id === 'you');
+  assert.equal(alone?.optional, false, 'бесплатный выключен — ключ снова нужен');
+  assert.equal(alone?.note, null);
+
+  const keyed = searchStatus(makeConfig({ env: { ICARUS_SEARCH_FREE: 'on' }, secretEnv: { YOU_API_KEY: 'k' } }));
+  const withKey = keyed.providers.find((provider) => provider.id === 'you');
+  assert.equal(withKey?.present, true);
+  assert.equal(withKey?.optional, false, 'ключ есть — подсказка не нужна');
 });
 
 test('проверка из панели зовёт провайдера без ключа, а не отказывает', async () => {

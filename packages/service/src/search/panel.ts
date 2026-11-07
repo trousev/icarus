@@ -25,6 +25,13 @@ export type SearchProviderStatus = {
   keyName: string;
   /** Ключ этому провайдеру не нужен: он доступен всегда. */
   keyless: boolean;
+  /**
+   * Ключа нет, но он и не нужен: тот же поиск уже работает через провайдера
+   * без ключа (You.com MCP). Панель показывает это вместо «нет ключа».
+   */
+  optional: boolean;
+  /** Пояснение под названием: чем провайдер хорош и чего не умеет. */
+  note: string | null;
   present: boolean;
   current: boolean;
   bannedUntil: string | null;
@@ -46,7 +53,17 @@ export type SearchStatus = {
   };
 };
 
-type RowProvider = { id: ProviderId; label: string; keyNames: string[]; keyless?: boolean };
+type RowProvider = {
+  id: ProviderId;
+  label: string;
+  keyNames: string[];
+  keyless?: boolean;
+  keylessTwin?: ProviderId;
+};
+
+/** Что показать под названием: у бесплатного провайдера — его лимит и пределы. */
+const KEYLESS_NOTE = '100 поисков в сутки без регистрации; страницы читать не умеет.';
+const OPTIONAL_NOTE = 'Ключа нет, и он не нужен: поиск идёт через бесплатный MCP. Ключ даёт больше квоты и чтение страниц.';
 
 function rows(
   config: IcarusConfig,
@@ -62,12 +79,17 @@ function rows(
     .map((provider) => {
       const state = saved[provider.id];
       const banned = state !== undefined && isBanned(state, now);
+      const present = providerEnabled(config, provider);
+      const twin = provider.keylessTwin === undefined ? undefined : providers[provider.keylessTwin];
+      const optional = !present && twin !== undefined && providerEnabled(config, twin);
       return {
         id: provider.id,
         label: provider.label,
         keyName: provider.keyNames[0] ?? '',
         keyless: provider.keyless === true,
-        present: providerEnabled(config, provider),
+        optional,
+        note: provider.keyless === true ? KEYLESS_NOTE : optional ? OPTIONAL_NOTE : null,
+        present,
         current: current === provider.id,
         bannedUntil: banned ? (state?.bannedUntil ?? null) : null,
         banReason: banned ? (state?.banReason ?? null) : null,
