@@ -74,18 +74,38 @@ export type RouteOptions = {
   deadlineMs?: number;
 };
 
-/** Ключ провайдера: панель (secretEnv) сильнее .env, .env сильнее окружения. */
+/** Значение настройки: панель (secretEnv) сильнее .env, .env сильнее окружения. */
+function nameValue(config: IcarusConfig, name: string): string {
+  return config.secretEnv?.[name]?.trim() || config.env[name]?.trim() || process.env[name]?.trim() || '';
+}
+
+/** Ключ провайдера — первая непустая переменная из его списка. */
 export function keyFor(config: IcarusConfig, provider: { keyNames: string[] }): string {
   for (const name of provider.keyNames) {
-    const value = config.secretEnv?.[name]?.trim() || config.env[name]?.trim() || process.env[name]?.trim();
+    const value = nameValue(config, name);
     if (value) return value;
   }
   return '';
 }
 
-/** Провайдеры, у которых есть ключ. Без ключа пробовать нечего — не бан, а пропуск. */
+/** Как выключить бесплатного провайдера без ключа. */
+const FREE_OFF = /^(off|false|no|none|0)$/i;
+
+/**
+ * Участвует ли провайдер в ротации.
+ *
+ * Обычному нужен ключ: без ключа пробовать нечего — это не бан, а пропуск.
+ * Бесплатный MCP You.com ключа не требует и включён по умолчанию — поиск
+ * работает даже на пустом .env. Выключается одной строкой: ICARUS_SEARCH_FREE=off.
+ */
+export function providerEnabled(config: IcarusConfig, provider: { keyless?: boolean; keyNames: string[] }): boolean {
+  if (provider.keyless === true) return !FREE_OFF.test(nameValue(config, 'ICARUS_SEARCH_FREE'));
+  return keyFor(config, provider) !== '';
+}
+
+/** Провайдеры, которых можно звать: с ключом или без него, если так задумано. */
 export function configuredProviders(config: IcarusConfig): SearchProvider[] {
-  return RATING.map((id) => PROVIDERS[id]).filter((provider) => keyFor(config, provider) !== '');
+  return RATING.map((id) => PROVIDERS[id]).filter((provider) => providerEnabled(config, provider));
 }
 
 type Candidate = { id: ProviderId };
@@ -132,9 +152,11 @@ function chooseAttempt(
   return free[0] ?? null;
 }
 
-function banFor(kind: SearchFailure['kind']): { reason: BanReason; ms: number } {
-  if (kind === 'credits') return { reason: 'credits', ms: CREDIT_BAN_MS };
-  return { reason: 'error', ms: ERROR_BAN_MS };
+function banFor(kind: SearchFailure['kind'], id: ProviderId, now: number): { reason: BanReason; ms: number } {
+  if (kind !== 'credits') return { reason: 'error', ms: ERROR_BAN_MS };
+  // Суточную квоту незачем держать ровные сутки: ждём её сброса по календарю.
+  const reset = PROVIDERS[id]?.creditsResetAt?.(now);
+  return { reason: 'credits', ms: reset === undefined ? CREDIT_BAN_MS : Math.max(60_000, reset - now) };
 }
 
 function iso(ms: number): string {
@@ -173,7 +195,7 @@ export function applyFailure(
     provider.banReason = 'broken';
     provider.bannedUntil = iso(now + BROKEN_BAN_MS);
   } else {
-    const ban = banFor(failure.kind);
+    const ban = banFor(failure.kind, id, now);
     provider.banReason = ban.reason;
     provider.bannedUntil = iso(now + ban.ms);
   }
@@ -265,7 +287,7 @@ export async function routeSearch(
 
     const provider = PROVIDERS[id];
     const key = keyFor(config, provider);
-    if (key === '') {
+    if (key === '' && provider.keyless !== true) {
       tried.push({ provider: id, reason: 'нет ключа' });
       continue;
     }

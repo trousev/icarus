@@ -4,13 +4,12 @@
 // формах ответов, не поднимая ни сервера, ни сети. Сам запрос — тонкий слой поверх
 // fetch: ключ, заголовки, тело, таймаут приходит снаружи.
 import {
-  SearchFailure,
-  classifyFailure,
-  type ProviderContext,
   type ProviderId,
   type SearchProvider,
   type SearchResult,
 } from './types.ts';
+import { requestJson } from './request.ts';
+import { nextUtcMidnight, youFreeSearch } from './you-mcp.ts';
 
 /** Выдержка в списке результатов — одна строка: переводы строк только путают. */
 const SNIPPET_LIMIT = 500;
@@ -43,43 +42,6 @@ function resultOf(row: unknown, urlKeys: string[], titleKeys: string[], textKeys
   if (!url || !title) return null;
   const text = textKeys.map((key) => asText(item[key])).find((value) => value !== null);
   return { title, url, ...(text ? { snippet: squash(text) } : {}) };
-}
-
-/**
- * Общий HTTP-вызов: сеть, статус, JSON.
- *
- * Отказ провайдера — это SearchFailure с телом ответа: по нему router решает,
- * банить на пять минут или на сутки, а панель показывает причину человеку.
- */
-async function requestJson(url: string, init: RequestInit, ctx: ProviderContext): Promise<unknown> {
-  let response: Response;
-  try {
-    response = await ctx.fetch(url, { ...init, signal: ctx.signal });
-  } catch (error) {
-    const name = error instanceof Error ? error.name : '';
-    if (name === 'TimeoutError' || name === 'AbortError') {
-      throw new SearchFailure('timeout', 'провайдер не ответил вовремя');
-    }
-    throw new SearchFailure('network', error instanceof Error ? error.message : String(error));
-  }
-
-  let body = '';
-  try {
-    body = await response.text();
-  } catch {
-    // Тело не дочиталось — статус уже всё сказал.
-  }
-  if (!response.ok) {
-    throw new SearchFailure(classifyFailure(response.status, body), `HTTP ${response.status}`, {
-      status: response.status,
-      body: body.slice(0, 400),
-    });
-  }
-  try {
-    return JSON.parse(body) as unknown;
-  } catch {
-    throw new SearchFailure('http', 'ответ провайдера не разобрался как JSON');
-  }
 }
 
 // --- разбор выдачи ------------------------------------------------------------
@@ -159,7 +121,11 @@ export function parseFirecrawl(payload: unknown, limit = 6): SearchResult[] {
     .slice(0, limit);
 }
 
-/** You.com: results.web[].description или первая snippets[]. */
+/**
+ * You.com: results.web[].description, иначе первая snippets[], иначе первый
+ * contents.highlights. У бесплатного MCP нет snippets, зато есть highlights —
+ * куски самой страницы по запросу; для агента это полезнее короткого описания.
+ */
 export function parseYou(payload: unknown, limit = 6): SearchResult[] {
   const rows = asList(asRecord(asRecord(payload)?.results)?.web);
   return rows
@@ -168,7 +134,9 @@ export function parseYou(payload: unknown, limit = 6): SearchResult[] {
       if (!item) return null;
       const result = resultOf(item, ['url'], ['title'], ['description']);
       if (!result || result.snippet) return result;
-      const snippet = asList(item.snippets).map(asText).find((value) => value !== null);
+      const snippet =
+        asList(item.snippets).map(asText).find((value) => value !== null) ??
+        asList(asRecord(item.contents)?.highlights).map(asText).find((value) => value !== null);
       return snippet ? { ...result, snippet: squash(snippet) } : result;
     })
     .filter((item): item is SearchResult => item !== null)
@@ -306,6 +274,23 @@ const you: SearchProvider = {
   },
 };
 
+/**
+ * You.com без ключа: их бесплатный профиль живёт только по MCP (100 запросов в
+ * сутки на IP). Авторизации нет, поэтому провайдер доступен всегда — и остаётся
+ * последней страховкой, когда ключей нет вовсе или все они в карантине.
+ */
+const youFree: SearchProvider = {
+  id: 'you-free',
+  label: 'You.com · MCP без ключа',
+  keyNames: [],
+  keyless: true,
+  creditsResetAt: nextUtcMidnight,
+  async search(query, limit, ctx) {
+    const payload = await youFreeSearch(query, limit, ctx);
+    return parseYou(payload, limit);
+  },
+};
+
 const linkup: SearchProvider = {
   id: 'linkup',
   label: 'Linkup',
@@ -336,5 +321,7 @@ export const PROVIDERS: Record<ProviderId, SearchProvider> = {
   tavily,
   firecrawl,
   you,
+  // Ключ с дефисом — это и есть id провайдера: он уезжает в ответ /search и в состояние.
+  'you-free': youFree,
   linkup,
 };

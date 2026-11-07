@@ -22,6 +22,12 @@
 | **Brave** | ❌ | — | — | — | — |
 | **Serpstack** | ❌ | — | — | — | — |
 
+**Бесплатный MCP You.com для fetch не годится** (проверено вживую 2026-11-07): в
+`profile=free` доступны только `you-search` и `you-discover`, вызов `you-contents`
+отвечает `-32602 "Tool you-contents not found"`, а `you-search` с `extraction:
+"full_page"` — `result.isError: "Free tier limit exceeded"`. Так что «100 запросов/день
+без ключа» — это только поиск; за страницы платит ключ (`/v1/contents`, $0.001).
+
 ## Нюансы, которые важнее цены
 
 **Квоты общие с поиском у всех шести.** Нет ни одного провайдера, у которого fetch был бы

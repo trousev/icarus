@@ -7,12 +7,12 @@ import {
   SearchFailure,
   classifyFailure,
   type FailureKind,
-  type FetchContext,
   type FetchProvider,
   type FetchResult,
   type ProviderId,
 } from './types.ts';
 import { RATING } from './router.ts';
+import { requestJson } from './request.ts';
 
 /** Сколько знаков страницы отдаём модели: больше всё равно не влезет. */
 export const FETCH_MAX_CHARS = 20_000;
@@ -56,37 +56,6 @@ function truncate(text: string, maxChars: number): string {
 export function classifyFetchStatus(status: number, body: string): FailureKind {
   if (status === 400 || status === 404 || status === 410 || status === 422) return 'page';
   return classifyFailure(status, body);
-}
-
-async function requestJson(url: string, init: RequestInit, ctx: FetchContext): Promise<unknown> {
-  let response: Response;
-  try {
-    response = await ctx.fetch(url, { ...init, signal: ctx.signal });
-  } catch (error) {
-    const name = error instanceof Error ? error.name : '';
-    if (name === 'TimeoutError' || name === 'AbortError') {
-      throw new SearchFailure('timeout', 'провайдер не ответил вовремя');
-    }
-    throw new SearchFailure('network', error instanceof Error ? error.message : String(error));
-  }
-
-  let body = '';
-  try {
-    body = await response.text();
-  } catch {
-    // Статус уже всё сказал.
-  }
-  if (!response.ok) {
-    throw new SearchFailure(classifyFetchStatus(response.status, body), `HTTP ${response.status}`, {
-      status: response.status,
-      body: body.slice(0, 400),
-    });
-  }
-  try {
-    return JSON.parse(body) as unknown;
-  } catch {
-    throw new SearchFailure('http', 'ответ провайдера не разобрался как JSON');
-  }
 }
 
 function pageFailure(detail: string): SearchFailure {
@@ -166,6 +135,7 @@ const exa: FetchProvider = {
         body: JSON.stringify({ ids: [url], text: { maxCharacters: ctx.maxChars } }),
       },
       ctx,
+      classifyFetchStatus,
     );
     const result = parseExaContents(payload, ctx.maxChars);
     if (!result) {
@@ -189,6 +159,7 @@ const tavily: FetchProvider = {
         body: JSON.stringify({ urls: [url], format: 'markdown', extract_depth: 'basic' }),
       },
       ctx,
+      classifyFetchStatus,
     );
     const result = parseTavilyExtract(payload, ctx.maxChars);
     if (!result) throw pageFailure(tavilyFailureDetail(payload));
@@ -209,6 +180,7 @@ const linkup: FetchProvider = {
         body: JSON.stringify({ url, mode: 'standard', renderJs: false }),
       },
       ctx,
+      classifyFetchStatus,
     );
     const result = parseLinkupFetch(payload, ctx.maxChars, url);
     if (!result) throw pageFailure('страница без текста');
@@ -229,6 +201,7 @@ const you: FetchProvider = {
         body: JSON.stringify({ urls: [url], formats: ['markdown'] }),
       },
       ctx,
+      classifyFetchStatus,
     );
     const result = parseYouContents(payload, ctx.maxChars);
     if (!result) throw pageFailure('страница без текста');

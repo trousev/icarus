@@ -75,6 +75,11 @@
   }
 
   function searchPill(provider) {
+    if (provider.keyless) {
+      return provider.present
+        ? '<span class="pill own">без ключа</span>'
+        : '<span class="pill none">выключен</span>';
+    }
     if (!provider.present) return '<span class="pill none">нет ключа</span>';
     if (provider.broken) return '<span class="pill off">ключ сломан</span>';
     if (provider.bannedUntil) return '<span class="pill warn">карантин ' + esc(untilText(provider.bannedUntil)) + '</span>';
@@ -89,17 +94,22 @@
     const fails = provider.fails > 0
       ? '<span class="keys-apply">отказов подряд: ' + provider.fails + '</span>'
       : '';
+    // Провайдеру без ключа нечего задавать: вместо кнопки — только проверка.
+    const edit = provider.keyless
+      ? ''
+      : '<button class="btn primary" data-edit-key="' + esc(provider.keyName) + '">' +
+          (provider.present ? 'Изменить' : 'Задать') +
+        '</button>';
     return (
       '<div class="keys-row search-row">' +
         '<div class="keys-main">' +
-          '<div class="keys-top"><code>' + esc(provider.keyName) + '</code>' + searchPill(provider) + current + fails + '</div>' +
+          '<div class="keys-top"><code>' + esc(provider.keyless ? 'без ключа' : provider.keyName) + '</code>' +
+            searchPill(provider) + current + fails + '</div>' +
           '<div class="keys-label">' + esc(provider.label) + '</div>' +
           why +
         '</div>' +
         '<div class="keys-actions">' +
-          '<button class="btn primary" data-edit-key="' + esc(provider.keyName) + '">' +
-            (provider.present ? 'Изменить' : 'Задать') +
-          '</button>' +
+          edit +
           '<button class="btn" data-check="' + esc(provider.id) + '" data-capability="' + esc(capability) + '"' +
             (provider.present ? '' : ' disabled') + '>Проверить</button>' +
         '</div>' +

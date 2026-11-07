@@ -7,7 +7,7 @@ import type { IcarusConfig } from '../config.ts';
 import { FETCH_PROVIDERS, FETCH_RATING } from './fetch-providers.ts';
 import { FETCH_ATTEMPT_TIMEOUT_MS, configuredFetchProviders } from './fetch-router.ts';
 import { PROVIDERS } from './providers.ts';
-import { ATTEMPT_TIMEOUT_MS, RATING, applyFailure, applySuccess, configuredProviders, keyFor } from './router.ts';
+import { ATTEMPT_TIMEOUT_MS, RATING, applyFailure, applySuccess, configuredProviders, keyFor, providerEnabled } from './router.ts';
 import {
   isBanned,
   mutateRouterState,
@@ -23,6 +23,8 @@ export type SearchProviderStatus = {
   label: string;
   /** Первое имя переменной — то, что человек ищет глазами в списке ключей. */
   keyName: string;
+  /** Ключ этому провайдеру не нужен: он доступен всегда. */
+  keyless: boolean;
   present: boolean;
   current: boolean;
   bannedUntil: string | null;
@@ -44,7 +46,7 @@ export type SearchStatus = {
   };
 };
 
-type RowProvider = { id: ProviderId; label: string; keyNames: string[] };
+type RowProvider = { id: ProviderId; label: string; keyNames: string[]; keyless?: boolean };
 
 function rows(
   config: IcarusConfig,
@@ -64,7 +66,8 @@ function rows(
         id: provider.id,
         label: provider.label,
         keyName: provider.keyNames[0] ?? '',
-        present: keyFor(config, provider) !== '',
+        keyless: provider.keyless === true,
+        present: providerEnabled(config, provider),
         current: current === provider.id,
         bannedUntil: banned ? (state?.bannedUntil ?? null) : null,
         banReason: banned ? (state?.banReason ?? null) : null,
@@ -131,7 +134,7 @@ export async function checkProvider(
   const key = keyFor(config, provider);
   const now = options.now ?? (() => Date.now());
   const started = now();
-  if (key === '') {
+  if (key === '' && provider.keyless !== true) {
     return { ok: false, provider: id, ms: 0, results: 0, error: 'ключ не задан' };
   }
   try {

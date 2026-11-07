@@ -28,7 +28,9 @@ export function makeConfig(overrides: Partial<IcarusConfig> = {}): IcarusConfig 
       { provider: PROVIDER, id: MODEL_ID, thinking: 'medium', tier: 'strong' },
     ],
     auth: {},
-    env: {},
+    // Бесплатный MCP You.com в тестах выключен: сценарии не должны внезапно
+    // ходить в чужую сеть. Кому он нужен — включает его в своём конфиге.
+    env: { ICARUS_SEARCH_FREE: 'off' },
     mcp: {},
     // Telegram-бот в тестах выключен: сеть и Bot API тут ни к чему.
     telegram: null,
