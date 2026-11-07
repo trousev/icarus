@@ -26,7 +26,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import fs from 'node:fs';
 import { handleWorkspacesApi } from './workspaces.ts';
-import { findUser, userPaths, type IcarusConfig } from '../config.ts';
+import { findUser, isAdmin, userPaths, type IcarusConfig, type UserConfig } from '../config.ts';
 import { LANGUAGE_LABELS, LANGUAGES, languageOf, writeProfile, type Language } from '../profile.ts';
 import { readJsonBody } from '../http/openai.ts';
 import { errorBody } from '../http/sse.ts';
@@ -59,6 +59,8 @@ import {
 } from './skills.ts';
 import { panelHtml, type PanelPage, type PanelSession } from './ui.ts';
 import { chatPage } from './chat-ui.ts';
+import { handleKeysApi } from './keys.ts';
+import { keysPage } from './keys-ui.ts';
 import { handleMcpApi, handleMcpPublic } from './mcp.ts';
 import { mcpPage } from './mcp-ui.ts';
 import { countVisible } from '../mcp/registry.ts';
@@ -85,14 +87,15 @@ export type PanelContext = {
 };
 
 /** Разделы панели: порядок здесь — порядок в сайдбаре. */
-export const SECTIONS: { id: string; label: string }[] = [
+export const SECTIONS: { id: string; label: string; adminOnly?: boolean }[] = [
   { id: 'memory', label: 'Память' },
   { id: 'skills', label: 'Скиллы' },
   { id: 'mcp', label: 'MCP' },
   { id: 'maple', label: 'Математика' },
-  // «Пользователь» — единственный раздел про самого человека, а не про то, что
-  // лежит у него на диске. Поэтому и стоит он последним: остальное — содержимое,
-  // а это настройка.
+  // Ключи — настройка инсталляции, а не человека: раздел видят и открывают только
+  // админы. Стоит он перед «Пользователем»: остальное — про содержимое, это — про
+  // доступы, а последним идёт личная настройка.
+  { id: 'keys', label: 'Ключи', adminOnly: true },
   { id: 'profile', label: 'Пользователь' },
 ];
 
@@ -377,22 +380,43 @@ export async function handlePanel(
       res.end();
       return true;
     }
-    const html = access.ok
-      ? await sectionPage(
-          config,
-          access.identity.userId,
-          page,
-          url,
-          typeof ctx.draft === 'function',
-          Boolean(ctx.registry),
-        )
-      : panelHtml(access.denial);
-    res.writeHead(access.ok ? 200 : access.denial.status, { 'content-type': 'text/html; charset=utf-8' });
+    let html: string;
+    let status: number;
+    if (!access.ok) {
+      html = panelHtml(access.denial);
+      status = access.denial.status;
+    } else if (page.section === 'keys' && !isAdmin(findUser(config, access.identity.userId))) {
+      // Раздел не прячем в 404: человек пришёл по ссылке из закладки и должен
+      // понять, что дело в правах, а не в сломанной панели.
+      html = panelHtml({
+        status: 403,
+        message: 'Ключи правит только админ',
+        hint: 'Флаг admin: true выдаётся человеку в users: config.yaml (на проде — правкой конфига на хосте).',
+      });
+      status = 403;
+    } else {
+      html = await sectionPage(
+        config,
+        access.identity.userId,
+        page,
+        url,
+        typeof ctx.draft === 'function',
+        Boolean(ctx.registry),
+      );
+      status = 200;
+    }
+    res.writeHead(status, { 'content-type': 'text/html; charset=utf-8' });
     res.end(html);
     return true;
   }
 
   if (url.pathname === '/panel/mcp' || url.pathname.startsWith('/panel/mcp/')) {
+    await handleApi(req, res, url, ctx, access);
+    return true;
+  }
+
+  // Ключи — свой префикс, как у MCP: страница и API живут под одним разделом.
+  if (url.pathname === '/panel/keys/api' || url.pathname.startsWith('/panel/keys/api/')) {
     await handleApi(req, res, url, ctx, access);
     return true;
   }
@@ -412,10 +436,10 @@ export async function handlePanel(
   return false;
 }
 
-/** Раздел из адреса: /panel/chat, /panel/memory, /panel/skills, /panel/mcp, /panel/maple и /panel/profile. */
+/** Раздел из адреса: /panel/chat, /panel/memory, /panel/skills, /panel/mcp, /panel/maple, /panel/keys и /panel/profile. */
 function routePage(pathname: string): PanelPage | null {
   if (pathname === '/panel/chat' || pathname === '/panel/chat/') return { section: 'chat' };
-  const match = /^\/panel\/(memory|skills|maple|mcp|profile)\/?$/.exec(pathname);
+  const match = /^\/panel\/(memory|skills|maple|mcp|keys|profile)\/?$/.exec(pathname);
   return match ? { section: match[1] } : null;
 }
 
@@ -425,9 +449,15 @@ function routeApi(pathname: string): { section: string; name: string } | null {
   return match ? { section: match[1], name: match[2] } : null;
 }
 
-/** Разделы панели у этого человека: математика есть только там, где настроен Maple. */
-function sectionsFor(config: IcarusConfig): { id: string; label: string }[] {
-  return SECTIONS.filter((section) => section.id !== 'maple' || Boolean(config.mcp?.maple));
+/**
+ * Разделы панели у этого человека: математика — только там, где настроен Maple,
+ * ключи — только у админа. Остальных разделов не прячем: это его собственные
+ * память, скиллы и настройки.
+ */
+function sectionsFor(config: IcarusConfig, user: UserConfig | undefined): { id: string; label: string }[] {
+  return SECTIONS.filter(
+    (section) => (section.id !== 'maple' || Boolean(config.mcp?.maple)) && (section.adminOnly !== true || isAdmin(user)),
+  ).map(({ id, label }) => ({ id, label }));
 }
 
 async function sectionPage(
@@ -442,12 +472,13 @@ async function sectionPage(
   const user = findUser(config, userId);
   const session: PanelSession = {
     user: userId,
-    sections: sectionsFor(config),
+    sections: sectionsFor(config, user),
     scopes: scopesFor(),
     scopeLabels: SCOPE_LABELS,
     model: config.models[0]?.id ?? '—',
     storage: 'git · local',
     draftSkills,
+    admin: isAdmin(user),
     // Язык ответов: панель показывает его в разделе «Пользователь» и подсвечивает
     // выбранный. Он же уезжает в AGENTS.md человека (см. workspace.ts).
     ...(user ? { language: languageOf(config, user) } : {}),
@@ -460,6 +491,9 @@ async function sectionPage(
   }
   if (page.section === 'mcp') {
     return mcpPage(session, { embed: url.searchParams.get('embed') === '1' });
+  }
+  if (page.section === 'keys') {
+    return keysPage(session);
   }
   return panelHtml(session, {
     ...page,
@@ -496,6 +530,13 @@ async function handleApi(
   }
 
   const userId = access.identity.userId;
+
+  // Ключи — только админ: проверка живёт в обработчике, рядом с записью файлов,
+  // чтобы её не обошёл ни один новый маршрут раздела.
+  if (url.pathname === '/panel/keys/api' || url.pathname.startsWith('/panel/keys/api/')) {
+    await handleKeysApi(req, res, url, { config, userId, bump: ctx.bump });
+    return;
+  }
 
   // MCP — отдельный раздел со своими маршрутами; в общий разбор областей он не
   // заходит, иначе «файлы» памяти попытались бы открыть MCP-сервер.
@@ -540,7 +581,7 @@ async function handleApi(
     const scopes = scopesFor();
     json(res, 200, {
       user: userId,
-      sections: sectionsFor(config),
+      sections: sectionsFor(config, user),
       scopes: Object.keys(scopes),
       modes: scopes,
       labels: SCOPE_LABELS,

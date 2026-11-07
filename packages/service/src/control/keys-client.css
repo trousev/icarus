@@ -1,0 +1,44 @@
+/* Раздел «Ключи»: список секретов и форма правки. */
+.keys-intro { color: var(--dim); max-width: 700px; margin: 0 0 6px; }
+.keys-meta { color: var(--dim); font-size: 12px; margin: 0 0 18px; }
+.keys-notice { margin: 0 0 16px; padding: 11px 14px; border-radius: 9px; border: 1px solid var(--line);
+               background: var(--panel); font-size: 13px; }
+.keys-notice.ok { border-color: #2f6b45; background: #14251b; color: #b7e4c7; }
+.keys-notice.warn { border-color: #6b5a2f; background: #261f12; color: #f3d9a4; }
+.keys-notice.bad { border-color: #6b2f3a; background: #261215; color: #f7b6c1; }
+.keys-group { margin: 0 0 22px; }
+.keys-group h2 { font-size: 11px; letter-spacing: .14em; color: var(--dim); margin: 0 0 8px; font-weight: 500;
+                 display: flex; gap: 8px; align-items: center; }
+.keys-group h2 span { font-size: 10px; background: var(--raise); border-radius: 5px; padding: 1px 6px; }
+.keys-row { background: var(--panel); border: 1px solid var(--line); border-radius: 11px; padding: 14px 16px;
+            margin: 0 0 8px; display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
+.keys-row.open { border-color: var(--accent); }
+.keys-main { flex: 1; min-width: 260px; }
+.keys-top { display: flex; gap: 9px; align-items: center; flex-wrap: wrap; }
+.keys-top code { font-family: ui-monospace, monospace; font-size: 13px; color: var(--text); }
+.keys-label { color: var(--text); margin-top: 4px; }
+.keys-desc { color: var(--dim); font-size: 12px; margin-top: 4px; max-width: 720px; }
+.keys-where { color: var(--accent); text-decoration: none; }
+.keys-where:hover { text-decoration: underline; }
+.keys-value { margin-top: 6px; font-size: 12px; color: var(--dim); }
+.keys-hint { font-family: ui-monospace, monospace; }
+.keys-hint.dim { font-family: inherit; }
+.keys-apply { color: var(--dim); font-size: 11px; }
+.pill { font-size: 10px; letter-spacing: .06em; border-radius: 999px; padding: 2px 9px; border: 1px solid var(--line);
+        color: var(--dim); white-space: nowrap; }
+.pill.own { border-color: #2f6b45; color: #9ece6a; }
+.pill.env { border-color: var(--accent); color: var(--accent); }
+.pill.off { border-color: #6b2f3a; color: var(--danger); }
+.keys-actions { display: flex; gap: 8px; align-items: center; }
+.keys-form { flex: 0 0 100%; border-top: 1px solid var(--line); margin-top: 6px; padding-top: 12px; }
+.keys-form label { display: block; color: var(--dim); font-size: 10px; letter-spacing: .14em; margin: 0 0 6px; }
+.keys-form label.keys-show { display: flex; align-items: center; gap: 6px; margin: 0; letter-spacing: 0;
+                             font-size: 12px; white-space: nowrap; }
+.keys-form .keys-line { display: flex; gap: 8px; align-items: center; margin: 0 0 12px; flex-wrap: wrap; }
+.keys-form input[type=password], .keys-form input[type=text] {
+  flex: 1; min-width: 220px; background: var(--bg); border: 1px solid var(--line); border-radius: 9px;
+  color: var(--text); font: 13px/1.6 ui-monospace, monospace; padding: 9px 12px; }
+.keys-form input:focus { outline: none; border-color: var(--accent); }
+.keys-form.add { background: var(--bg); border: 1px solid var(--line); border-radius: 11px; padding: 14px 16px; }
+.keys-empty { color: var(--dim); padding: 12px; }
+.keys-empty.bad { color: var(--danger); }

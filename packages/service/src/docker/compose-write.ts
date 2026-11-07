@@ -8,7 +8,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { DEFAULT_CONFIG_PATH, ENV_FILE, loadConfig, loadEnvFile, publicHost, REPO_ROOT, userContainer } from '../config.ts';
+import { DEFAULT_CONFIG_PATH, ENV_FILE, loadConfig, publicHost, REPO_ROOT, userContainer } from '../config.ts';
+import { syncEnvFile } from '../keys.ts';
+import { loadRuntimeEnv } from '../runtime.ts';
 import { prepareUser } from '../workspace.ts';
 import { COMPOSE_PROJECT, DEFAULT_SERVICE_IMAGE, renderCompose, type ComposeOptions } from './compose.ts';
 import { sourceRevision } from './revision.ts';
@@ -123,9 +125,15 @@ export function socketGroups(socketGid: number, ownGid: number, groupFile = '/et
 function main(): void {
   const args = parseArgs(process.argv.slice(2));
   // Ключи читаем до конфига: провайдерские подхватываются в auth.json (его пишет
-  // prepareUser ниже), остальные compose отдаёт контейнерам через env_file.
-  loadEnvFile();
-  const config = loadConfig(args.config);
+  // prepareUser ниже), остальные compose отдаёт контейнерам через env_file. Настройки
+  // панели (keys.json) сильнее .env, поэтому и здесь идём общим загрузчиком.
+  const runtimeEnv = loadRuntimeEnv();
+  // Настройки панели сильнее .env, а деплой вливает в .env секреты GitHub. Перед
+  // сборкой приводим файл к тому, что уедет контейнерам: иначе новый контейнер
+  // получил бы старое значение, а сервис внутри — новое из keys.json.
+  syncEnvFile(runtimeEnv.store, ENV_FILE);
+  const config = loadConfig(args.config, runtimeEnv.env);
+  config.secretEnv = runtimeEnv.secrets;
   const docker = resolveDocker(config);
 
   // Каталоги и файлы людей готовим на хосте и до docker: иначе docker создаст

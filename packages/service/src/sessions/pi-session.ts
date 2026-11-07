@@ -152,6 +152,10 @@ export class PiSession {
       {
         ICARUS_CHANNEL: channel,
         ...modelEnv(config),
+        // Ключи из .env и настроек панели: контейнер получил их при создании, но
+        // сохранённый в панели ключ должен доехать до следующего разговора без
+        // пересоздания контейнера. Здесь они перекрывают окружение контейнера.
+        ...(config.secretEnv ?? {}),
         ICARUS_WORKSPACE: workspace,
         ...(workspace === PRIVATE_WORKSPACE ? { ICARUS_PRIVATE: '1' } : {}),
       },

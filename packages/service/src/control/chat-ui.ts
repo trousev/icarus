@@ -60,6 +60,9 @@ export function chatPage(session: PanelSession, options: ChatPageOptions): strin
       <a class="side-link" href="/panel/skills" data-settings="skills"><span>Скиллы</span><em id="count-skills">…</em></a>
       <a class="side-link" href="/panel/mcp" data-settings="mcp"><span>MCP</span><em id="count-mcp">…</em></a>
       <a class="side-link" href="/panel/maple" id="maple-link" data-settings="maple" hidden><span>Математика</span><em id="count-maple">…</em></a>
+      <!-- Ключи — настройка инсталляции: у неадмина ссылки нет вовсе, а не «есть,
+           но откажет». На проде прятать бесполезно: сервер всё равно проверит флаг. -->
+      ${session.admin ? '<a class="side-link" href="/panel/keys" data-settings="keys"><span>Ключи</span></a>' : ''}
       <!-- Настройки человека — последними: выше содержимое, а это про самого человека. -->
       <a class="side-link" href="/panel/profile" data-settings="profile"><span>Пользователь</span></a>
     </div>

@@ -13,7 +13,8 @@
 //     не повод трогать работающий стек.
 //
 // Отсюда и цена: разговора тут нет — Икар отвечает только в настоящем сервисе.
-import { DEFAULT_CONFIG_PATH, findUser, loadConfig, loadEnvFile, type IcarusConfig } from './config.ts';
+import { DEFAULT_CONFIG_PATH, findUser, loadConfig, type IcarusConfig } from './config.ts';
+import { loadRuntimeEnv } from './runtime.ts';
 import { log } from './log.ts';
 import { prepareUser } from './workspace.ts';
 import { backfillChats } from './sessions/chats.ts';
@@ -52,8 +53,9 @@ function parseArgs(argv: string[]): Args {
 const args = parseArgs(process.argv.slice(2));
 if (args.port !== undefined && !Number.isInteger(args.port)) throw new Error('порт должен быть числом');
 
-loadEnvFile();
-const config: IcarusConfig = loadConfig(args.configPath);
+const runtimeEnv = loadRuntimeEnv();
+const config: IcarusConfig = loadConfig(args.configPath, runtimeEnv.env);
+config.secretEnv = runtimeEnv.secrets;
 const user = findUser(config, args.user ?? process.env.ICARUS_PANEL_USER ?? config.users[0]?.id);
 if (!user) {
   throw new Error(`человека «${args.user ?? ''}» нет в ${args.configPath}: в конфиге — ${config.users.map((item) => item.id).join(', ')}`);
