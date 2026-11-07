@@ -5,7 +5,10 @@
 // рейтинг, текущий провайдер) живёт в state.ts и router.ts.
 export type SearchResult = { title: string; url: string; snippet?: string };
 
-/** Порядок в этом списке — он же рейтинг: первый доступный становится текущим. */
+/**
+ * Все провайдеры, которых знает роутер. Поисковый рейтинг задаётся отдельно
+ * (router.ts): cloudflare умеет только извлекать страницы и в поиске не участвует.
+ */
 export const PROVIDER_IDS = [
   'serpapi',
   'serpstack',
@@ -16,9 +19,13 @@ export const PROVIDER_IDS = [
   'you',
   'you-free',
   'linkup',
+  'cloudflare',
 ] as const;
 
 export type ProviderId = (typeof PROVIDER_IDS)[number];
+
+/** Поисковые провайдеры: все, кроме cloudflare — он умеет только страницы. */
+export type SearchProviderId = Exclude<ProviderId, 'cloudflare'>;
 
 export function isProviderId(value: string): value is ProviderId {
   return (PROVIDER_IDS as readonly string[]).includes(value);
@@ -59,7 +66,8 @@ export class SearchFailure extends Error {
 const CREDIT_HINTS = /\bcredits?\b|\bquota\b|insufficient|out of credits|no credits|run out|out of searches|exhausted|billing|payment required|plan limit|usage limit|\bbalance\b/i;
 
 export function classifyFailure(status: number, body: string): FailureKind {
-  if (status === 402 || status === 432) return 'credits';
+  // 402/432 — деньги по стандарту и у Tavily; 433 — её же «pay-as-you-go limit».
+  if (status === 402 || status === 432 || status === 433) return 'credits';
   // Кто-то шлёт «кончились поиски» под 401/403 — это не мёртвый ключ, а деньги.
   if ((status === 401 || status === 403 || status === 429) && CREDIT_HINTS.test(body)) return 'credits';
   if (status === 429) return 'rate';
@@ -96,11 +104,17 @@ export type SearchProvider = {
 /** Страница, вытащенная провайдером: текст уже обрезан по maxChars. */
 export type FetchResult = { url: string; title?: string; text: string };
 
-export type FetchContext = ProviderContext & { maxChars: number };
+export type FetchContext = ProviderContext & {
+  maxChars: number;
+  /** Доступ к любому секрету: у Cloudflare нужны и аккаунт, и токен. */
+  secret: (name: string) => string;
+};
 
 export type FetchProvider = {
   id: ProviderId;
   label: string;
   keyNames: string[];
+  /** Секреты, без которых провайдер не готов (проверяются все). */
+  requires?: string[];
   fetch(url: string, ctx: FetchContext): Promise<FetchResult>;
 };

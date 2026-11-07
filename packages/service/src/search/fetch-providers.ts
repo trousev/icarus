@@ -2,7 +2,9 @@
 //
 // Brave и Serpstack не умеют, Firecrawl и SerpApi намеренно не подключены:
 // Firecrawl дорогой по кредитам, а SerpApi ест те же 250, что и поиск, и
-// соблюдает robots.txt. Остаются четыре: Exa, Tavily, Linkup, You.com.
+// соблюдает robots.txt. Умеющие: Cloudflare Browser Run, Exa, Tavily, Linkup,
+// You.com. Cloudflare дешевле всех (время браузера) и потому «сверхлипкий»:
+// пока не в бане, он всегда текущий.
 import {
   SearchFailure,
   classifyFailure,
@@ -10,6 +12,7 @@ import {
   type FetchProvider,
   type FetchResult,
   type ProviderId,
+  type SearchProviderId,
 } from './types.ts';
 import { RATING } from './router.ts';
 import { requestJson } from './request.ts';
@@ -18,18 +21,20 @@ import { requestJson } from './request.ts';
 export const FETCH_MAX_CHARS = 20_000;
 
 /** Кто из провайдеров умеет извлекать страницы (Firecrawl и SerpApi — нет). */
-const FETCH_CAPABLE: readonly ProviderId[] = ['exa', 'tavily', 'linkup', 'you'];
+const FETCH_CAPABLE: readonly SearchProviderId[] = ['exa', 'tavily', 'linkup', 'you'];
 
 /**
- * Рейтинг извлечения — обратный рейтингу поиска.
+ * Рейтинг извлечения — обратный рейтингу поиска, но Cloudflare всегда первый.
  *
- * Страницы гоняем через тех, кем не жалко потратить квоту (Linkup, You.com),
- * а Exa и Tavily бережём для поиска, где они полезнее. Порядок выводится из
- * RATING, чтобы обращения не разъезжались при правке поискового рейтинга.
+ * Он платит за время браузера, а не за страницы, поэтому выгоднее всех; пока
+ * не в карантине, fetch делает его текущим принудительно (см. fetch-router).
+ * Дальше — обратный поисковому порядок: сначала Linkup и You.com, а Exa и
+ * Tavily бережём для поиска.
  */
-export const FETCH_RATING: readonly ProviderId[] = [...FETCH_CAPABLE].sort(
-  (a, b) => RATING.indexOf(b) - RATING.indexOf(a),
-);
+export const FETCH_RATING: readonly ProviderId[] = [
+  'cloudflare',
+  ...[...FETCH_CAPABLE].sort((a, b) => RATING.indexOf(b) - RATING.indexOf(a)),
+];
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -56,6 +61,15 @@ function truncate(text: string, maxChars: number): string {
 export function classifyFetchStatus(status: number, body: string): FailureKind {
   if (status === 400 || status === 404 || status === 410 || status === 422) return 'page';
   return classifyFailure(status, body);
+}
+
+/**
+ * Cloudflare отдаёт дневной лимит браузерного времени как 429 с таким текстом.
+ * Это не «темп», а квота: до следующего UTC-дня делать нечего.
+ */
+function classifyCloudflare(status: number, body: string): FailureKind {
+  if (status === 429 && /browser time limit/i.test(body)) return 'credits';
+  return classifyFetchStatus(status, body);
 }
 
 function pageFailure(detail: string): SearchFailure {
@@ -118,6 +132,24 @@ export function parseYouContents(payload: unknown, maxChars: number): FetchResul
     ...(asText(first.title) ? { title: String(first.title) } : {}),
     text: truncate(text, maxChars),
   };
+}
+
+/** Cloudflare Browser Run: { success, result } — markdown отдаётся сразу. */
+export function parseCloudflareMarkdown(
+  payload: unknown,
+  maxChars: number,
+  requestedUrl: string,
+): FetchResult | null {
+  const root = asRecord(payload);
+  const text = asText(root?.result);
+  if (!root || root.success === false || !text) return null;
+  return { url: requestedUrl, text: truncate(text, maxChars) };
+}
+
+/** Причина отказа Cloudflare: errors[].message, а не HTTP-статус. */
+export function cloudflareFailureDetail(payload: unknown): string {
+  const error = asRecord(asList(asRecord(payload)?.errors)[0]);
+  return asText(error?.message) ?? 'Cloudflare не отдал markdown';
 }
 
 // --- провайдеры --------------------------------------------------------------
@@ -209,5 +241,31 @@ const you: FetchProvider = {
   },
 };
 
+const cloudflare: FetchProvider = {
+  id: 'cloudflare',
+  label: 'Cloudflare Browser Run',
+  keyNames: ['CLOUDFLARE_API_TOKEN'],
+  requires: ['CLOUDFLARE_ACCOUNT_ID'],
+  async fetch(url, ctx) {
+    const account = ctx.secret('CLOUDFLARE_ACCOUNT_ID');
+    if (!account) throw new SearchFailure('http', 'не задан CLOUDFLARE_ACCOUNT_ID');
+    const payload = await requestJson(
+      `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(account)}/browser-run/markdown`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json', authorization: `Bearer ${ctx.key}` },
+        // Без gotoOptions: дефолтная загрузка дешевле по времени браузера, а
+        // тяжёлым SPA хватает того, что страница успевает отрендериться.
+        body: JSON.stringify({ url }),
+      },
+      ctx,
+      classifyCloudflare,
+    );
+    const result = parseCloudflareMarkdown(payload, ctx.maxChars, url);
+    if (!result) throw pageFailure(cloudflareFailureDetail(payload));
+    return result;
+  },
+};
+
 /** Только умеющие fetch — по рейтингу роутера. */
-export const FETCH_PROVIDERS: Record<string, FetchProvider> = { exa, tavily, linkup, you };
+export const FETCH_PROVIDERS: Record<string, FetchProvider> = { cloudflare, exa, tavily, linkup, you };

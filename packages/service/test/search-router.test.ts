@@ -25,7 +25,7 @@ import { isInternalAddress } from '../src/search/http.ts';
 import { checkProvider, searchStatus } from '../src/search/panel.ts';
 import { SearchFailure, classifyFailure, type ProviderId } from '../src/search/types.ts';
 
-const KEY_ENV: Record<ProviderId, string> = {
+const KEY_ENV: Record<string, string> = {
   serpapi: 'SERPAPI_API_KEY',
   serpstack: 'SERPSTACK_API_KEY',
   brave: 'BRAVE_API_KEY',
@@ -242,6 +242,7 @@ test('429 про кредиты — сутки, 429 про темп — пять
   assert.equal(classifyFailure(401, 'invalid api key'), 'http');
   assert.equal(classifyFailure(401, 'Your account has run out of searches'), 'credits');
   assert.equal(classifyFailure(432, 'plan limit reached'), 'credits');
+  assert.equal(classifyFailure(433, 'This request exceeds the pay-as-you-go limit'), 'credits');
 });
 
 test('429 с текстом про кредиты банит на сутки', async () => {
@@ -635,7 +636,7 @@ test('битые выдачи не ломают разбор и уважают l
 });
 
 test('каждый адаптер шлёт ключ туда, куда надо, и разбирает ответ', async () => {
-  const responses: Record<ProviderId, unknown> = {
+  const responses: Record<string, unknown> = {
     serpapi: { organic_results: [{ title: 'S', link: 'https://s.dev', snippet: 'x' }] },
     serpstack: { organic_results: [{ title: 'S', url: 'https://s.dev', description: 'x' }] },
     brave: { web: { results: [{ title: 'B', url: 'https://b.dev', description: 'x' }] } },

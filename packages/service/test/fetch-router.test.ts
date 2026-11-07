@@ -10,13 +10,14 @@ import { makeConfig } from './fixtures.ts';
 import type { IcarusConfig } from '../src/config.ts';
 import {
   classifyFetchStatus,
+  parseCloudflareMarkdown,
   parseExaContents,
   parseLinkupFetch,
   parseTavilyExtract,
   parseYouContents,
   FETCH_RATING,
 } from '../src/search/fetch-providers.ts';
-import { checkFetchProvider, searchStatus } from '../src/search/panel.ts';
+import { checkFetchProvider, providerForKey, searchStatus } from '../src/search/panel.ts';
 import { routeFetch } from '../src/search/fetch-router.ts';
 import { routeSearch } from '../src/search/router.ts';
 import { mutateRouterState, readRouterState, stateFile } from '../src/search/state.ts';
@@ -28,6 +29,7 @@ const KEY_ENV: Record<string, string> = {
   tavily: 'TAVILY_API_KEY',
   linkup: 'LINKUP_API_KEY',
   you: 'YOU_API_KEY',
+  cloudflare: 'CLOUDFLARE_API_TOKEN',
 };
 
 const HOSTS: Record<string, ProviderId> = {
@@ -36,6 +38,7 @@ const HOSTS: Record<string, ProviderId> = {
   'api.tavily.com': 'tavily',
   'api.linkup.so': 'linkup',
   'ydc-index.io': 'you',
+  'api.cloudflare.com': 'cloudflare',
 };
 
 function configWith(keys: Record<string, string>): IcarusConfig {
@@ -44,6 +47,13 @@ function configWith(keys: Record<string, string>): IcarusConfig {
     if (value !== undefined) secretEnv[KEY_ENV[id] as string] = value;
   }
   return makeConfig({ secretEnv });
+}
+
+/** Cloudflare без account id не готов — добавляем его отдельно. */
+function configWithCloudflare(extra: Record<string, string> = {}): IcarusConfig {
+  const config = configWith({ cloudflare: 'cf-token', ...extra });
+  config.secretEnv = { ...(config.secretEnv ?? {}), CLOUDFLARE_ACCOUNT_ID: 'acc-1' };
+  return config;
 }
 
 function json(body: unknown, status = 200): Response {
@@ -55,6 +65,7 @@ const PAGES: Record<string, unknown> = {
   tavily: { results: [{ url: 'https://example.com', raw_content: 'текст от Tavily' }] },
   linkup: { markdown: 'текст от Linkup' },
   you: [{ url: 'https://example.com', title: 'Пример', markdown: 'текст от You.com' }],
+  cloudflare: { success: true, result: 'текст от Cloudflare' },
 };
 
 type Handler = () => Response | Promise<Response>;
@@ -72,6 +83,7 @@ function fakeFetch(handlers: Partial<Record<ProviderId, Handler>>): typeof fetch
 
 function okAll(): typeof fetch {
   return fakeFetch({
+    cloudflare: () => json(PAGES.cloudflare),
     exa: () => json(PAGES.exa),
     tavily: () => json(PAGES.tavily),
     linkup: () => json(PAGES.linkup),
@@ -107,10 +119,15 @@ test('каждый fetch-адаптер разбирает свой ответ',
     title: 'Пример',
     text: 'текст от You.com',
   });
+  assert.deepEqual(parseCloudflareMarkdown(PAGES.cloudflare, 100, 'https://example.com'), {
+    url: 'https://example.com',
+    text: 'текст от Cloudflare',
+  });
   assert.equal(parseExaContents({ results: [] }, 100), null);
   assert.equal(parseTavilyExtract({ results: [] }, 100), null);
   assert.equal(parseLinkupFetch({}, 100, 'https://example.com'), null);
   assert.equal(parseYouContents([], 100), null);
+  assert.equal(parseCloudflareMarkdown({ success: false, errors: [] }, 100, 'https://example.com'), null);
 });
 
 test('длинная страница обрезается по maxChars', () => {
@@ -130,10 +147,10 @@ test('отказ страницы не путается с отказом клю
 
 // --- роутер ------------------------------------------------------------------
 
-test('рейтинг извлечения обратный поисковому: Linkup, You, Tavily, Exa', () => {
-  assert.deepEqual(FETCH_RATING, ['linkup', 'you', 'tavily', 'exa']);
-  // Обратность выводится из поискового рейтинга, а не задана вторым списком.
-  assert.deepEqual([...FETCH_RATING].reverse(), ['exa', 'tavily', 'you', 'linkup']);
+test('рейтинг извлечения: Cloudflare первым, дальше обратный поисковому', () => {
+  assert.deepEqual(FETCH_RATING, ['cloudflare', 'linkup', 'you', 'tavily', 'exa']);
+  // Обратность остальных выводится из поискового рейтинга, а не задана списком.
+  assert.deepEqual([...FETCH_RATING.slice(1)].reverse(), ['exa', 'tavily', 'you', 'linkup']);
 });
 
 test('без ключей — no-keys, а не поход в сеть', async () => {
@@ -156,6 +173,83 @@ test('текущий у извлечения свой и не трогает п�
   const state = readRouterState(stateFile(config));
   assert.equal(state.current, 'exa', 'поисковый текущий не изменился');
   assert.equal(state.fetch?.current, 'linkup', 'у извлечения свой текущий');
+});
+
+test('Cloudflare сверхлипкий: пока не в бане, он всегда становится текущим', async () => {
+  const config = configWithCloudflare({ exa: 'e' });
+  const clock = clockAt();
+  await mutateRouterState(stateFile(config), (state) => {
+    state.fetch = { current: 'exa', providers: {} };
+  });
+
+  const result = await routeFetch(config, 'https://example.com', { fetch: okAll(), now: clock.now });
+  assert.equal(result.ok && result.provider, 'cloudflare');
+  assert.equal(readRouterState(stateFile(config)).fetch?.current, 'cloudflare', 'перетёр текущего');
+});
+
+test('в карантине Cloudflare уступает, а после разбана снова становится текущим', async () => {
+  const config = configWithCloudflare({ exa: 'e' });
+  const clock = clockAt();
+  await mutateRouterState(stateFile(config), (state) => {
+    state.fetch = {
+      current: 'exa',
+      providers: {
+        cloudflare: {
+          fails: 1,
+          bannedUntil: new Date(clock.now() + 5 * 60_000).toISOString(),
+          banReason: 'error',
+          lastError: 'HTTP 500',
+          lastErrorAt: null,
+          broken: false,
+          brokenAt: null,
+        },
+      },
+    };
+  });
+
+  const first = await routeFetch(config, 'https://example.com', { fetch: okAll(), now: clock.now });
+  assert.equal(first.ok && first.provider, 'exa', 'пока Cloudflare в бане — обычный порядок');
+
+  clock.advance(5 * 60_000 + 1000);
+  const second = await routeFetch(config, 'https://example.com', { fetch: okAll(), now: clock.now });
+  assert.equal(second.ok && second.provider, 'cloudflare', 'разбан — и он снова липкий');
+  assert.equal(readRouterState(stateFile(config)).fetch?.current, 'cloudflare');
+});
+
+test('без account id Cloudflare не считается настроенным и не банится', async () => {
+  const config = configWith({ cloudflare: 'cf-token', exa: 'e' });
+  const clock = clockAt();
+  const fetch = fakeFetch({ exa: () => json(PAGES.exa) });
+
+  const result = await routeFetch(config, 'https://example.com', { fetch, now: clock.now });
+  assert.equal(result.ok && result.provider, 'exa');
+  const state = readRouterState(stateFile(config));
+  assert.equal(state.fetch?.providers.cloudflare, undefined, 'провайдер просто пропущен');
+});
+
+test('дневной лимит Browser Run — сутки карантина, а не пять минут', async () => {
+  const config = configWithCloudflare({ exa: 'e' });
+  const clock = clockAt();
+  const fetch = fakeFetch({
+    cloudflare: () =>
+      json({ success: false, errors: [{ message: 'Browser time limit exceeded for today' }] }, 429),
+    exa: () => json(PAGES.exa),
+  });
+
+  const result = await routeFetch(config, 'https://example.com', { fetch, now: clock.now });
+  assert.equal(result.ok && result.provider, 'exa');
+  const state = readRouterState(stateFile(config));
+  const provider = state.fetch?.providers.cloudflare;
+  assert.equal(provider?.banReason, 'credits');
+  assert.equal(Date.parse(provider?.bannedUntil ?? ''), clock.now() + 24 * 60 * 60_000);
+  assert.equal(state.providers.cloudflare, undefined, 'поисковых провайдеров это не касается');
+});
+
+test('правка любого секрета Cloudflare находит провайдера', () => {
+  assert.equal(providerForKey('CLOUDFLARE_API_TOKEN'), 'cloudflare');
+  assert.equal(providerForKey('CLOUDFLARE_ACCOUNT_ID'), 'cloudflare');
+  assert.equal(providerForKey('YOU_API_KEY'), 'you');
+  assert.equal(providerForKey('НЕТ_ТАКОГО'), null);
 });
 
 test('отказ провайдера — пять минут карантина и переход к следующему', async () => {
@@ -275,7 +369,9 @@ test('панель показывает извлечение отдельным 
   await routeFetch(config, 'https://example.com', { fetch, now: clock.now });
 
   const status = searchStatus(config, clock.now());
-  assert.equal(status.fetch.providers.length, 4);
+  assert.equal(status.fetch.providers.length, 5);
+  assert.equal(status.fetch.providers[0]?.id, 'cloudflare', 'Cloudflare первым в списке');
+  assert.equal(status.fetch.providers[0]?.present, false, 'без account id он не готов');
   assert.equal(status.fetch.current, 'exa');
   const exa = status.fetch.providers.find((provider) => provider.id === 'exa');
   assert.equal(exa?.present, true);

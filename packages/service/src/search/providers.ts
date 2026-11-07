@@ -4,7 +4,7 @@
 // формах ответов, не поднимая ни сервера, ни сети. Сам запрос — тонкий слой поверх
 // fetch: ключ, заголовки, тело, таймаут приходит снаружи.
 import {
-  type ProviderId,
+  type SearchProviderId,
   type SearchProvider,
   type SearchResult,
 } from './types.ts';
@@ -312,10 +312,11 @@ const linkup: SearchProvider = {
 };
 
 /**
- * Все провайдеры по id. Рейтинг (в каком порядке пробовать) живёт в router.ts:
- * здесь только сами адаптеры, чтобы рейтинг можно было менять, не трогая запросы.
+ * Все поисковые провайдеры по id. Cloudflare сюда не входит: он умеет только
+ * извлекать страницы, поэтому и тип у карты — SearchProviderId, а не ProviderId.
+ * Рейтинг (в каком порядке пробовать) живёт в router.ts.
  */
-export const PROVIDERS: Record<ProviderId, SearchProvider> = {
+export const PROVIDERS: Record<SearchProviderId, SearchProvider> = {
   serpapi,
   serpstack,
   brave,
