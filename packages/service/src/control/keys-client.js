@@ -75,11 +75,15 @@
   }
 
   function searchPill(provider) {
+    // Бесплатный провайдер: «без ключа» уже написано в колонке ключа, статус
+    // должен говорить о работе, а не повторять это же слово.
     if (provider.keyless) {
       return provider.present
-        ? '<span class="pill own">без ключа</span>'
+        ? '<span class="pill own">работает</span>'
         : '<span class="pill none">выключен</span>';
     }
+    // Ключа нет, но его отсутствие ничего не ломает — есть бесплатный двойник.
+    if (provider.optional) return '<span class="pill env">необязателен</span>';
     if (!provider.present) return '<span class="pill none">нет ключа</span>';
     if (provider.broken) return '<span class="pill off">ключ сломан</span>';
     if (provider.bannedUntil) return '<span class="pill warn">карантин ' + esc(untilText(provider.bannedUntil)) + '</span>';
@@ -91,6 +95,7 @@
     const why = provider.lastError
       ? '<div class="keys-desc search-error">последний отказ: ' + esc(provider.lastError) + '</div>'
       : '';
+    const note = provider.note ? '<div class="keys-desc">' + esc(provider.note) + '</div>' : '';
     const fails = provider.fails > 0
       ? '<span class="keys-apply">отказов подряд: ' + provider.fails + '</span>'
       : '';
@@ -106,6 +111,7 @@
           '<div class="keys-top"><code>' + esc(provider.keyless ? 'без ключа' : provider.keyName) + '</code>' +
             searchPill(provider) + current + fails + '</div>' +
           '<div class="keys-label">' + esc(provider.label) + '</div>' +
+          note +
           why +
         '</div>' +
         '<div class="keys-actions">' +

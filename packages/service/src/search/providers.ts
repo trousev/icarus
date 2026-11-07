@@ -260,6 +260,8 @@ const you: SearchProvider = {
   id: 'you',
   label: 'You.com',
   keyNames: ['YOU_API_KEY', 'YDC_API_KEY'],
+  // Без ключа поиск всё равно идёт — через бесплатный MCP, см. you-free.
+  keylessTwin: 'you-free',
   async search(query, limit, ctx) {
     const payload = await requestJson(
       'https://ydc-index.io/v1/search',
@@ -281,7 +283,7 @@ const you: SearchProvider = {
  */
 const youFree: SearchProvider = {
   id: 'you-free',
-  label: 'You.com · MCP без ключа',
+  label: 'You.com · бесплатный MCP',
   keyNames: [],
   keyless: true,
   creditsResetAt: nextUtcMidnight,
