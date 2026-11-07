@@ -1107,6 +1107,7 @@ function handleEvent(box, event) {
     if (step) {
       step.status = event.status;
       step.result = event.result;
+      if (event.detail !== undefined) step.detail = event.detail;
       if (event.subagents) step.subagents = event.subagents;
       renderLive(box);
     }

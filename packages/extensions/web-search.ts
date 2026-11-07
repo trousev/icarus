@@ -187,8 +187,30 @@ export function parseRouter(payload: unknown, limit = 6): SearchResult[] {
     }));
 }
 
-async function searchRouter(query: string, limit: number, signal?: AbortSignal): Promise<string> {
-  if (!ROUTER_URL) return "Поиск не настроен: нет ICARUS_SEARCH_URL.";
+/** Кто на самом деле ответил и кого пришлось обойти — из ответа сервиса. */
+export function parseRouterMeta(payload: unknown): { upstream?: string; tried?: Array<{ provider: string; reason: string }> } {
+  const root = payload as { provider?: unknown; tried?: unknown } | null;
+  const upstream = typeof root?.provider === "string" ? root.provider : undefined;
+  const tried = (Array.isArray(root?.tried) ? root.tried : [])
+    .map((item) => {
+      const row = item as { provider?: unknown; reason?: unknown };
+      return typeof row?.provider === "string"
+        ? { provider: row.provider, reason: typeof row.reason === "string" ? row.reason : "" }
+        : null;
+    })
+    .filter((item): item is { provider: string; reason: string } => item !== null);
+  return { ...(upstream ? { upstream } : {}), ...(tried.length > 0 ? { tried } : {}) };
+}
+
+/** Что вернул поиск: текст для модели и, если знаем, кто ответил. */
+type SearchOutcome = {
+  text: string;
+  upstream?: string;
+  tried?: Array<{ provider: string; reason: string }>;
+};
+
+async function searchRouter(query: string, limit: number, signal?: AbortSignal): Promise<SearchOutcome> {
+  if (!ROUTER_URL) return { text: "Поиск не настроен: нет ICARUS_SEARCH_URL." };
   let response: Response;
   try {
     response = await fetch(`${ROUTER_URL}/search?q=${encodeURIComponent(query)}&limit=${limit}`, {
@@ -197,45 +219,47 @@ async function searchRouter(query: string, limit: number, signal?: AbortSignal):
     });
   } catch (error) {
     if (signal?.aborted) throw error;
-    return `Поиск не удался: ${networkErrorText(error)}`;
+    return { text: `Поиск не удался: ${networkErrorText(error)}` };
   }
-  if (!response.ok) return httpError(response);
+  if (!response.ok) return { text: await httpError(response) };
 
   let payload: unknown;
   try {
     payload = await response.json();
   } catch {
-    return "Поиск не удался: сервис вернул неразбираемый ответ.";
+    return { text: "Поиск не удался: сервис вернул неразбираемый ответ." };
   }
-  return format(parseRouter(payload, limit));
+  return { text: format(parseRouter(payload, limit)), ...parseRouterMeta(payload) };
 }
 
-async function search(query: string, limit: number, signal?: AbortSignal): Promise<string> {
+async function search(query: string, limit: number, signal?: AbortSignal): Promise<SearchOutcome> {
   if (PROVIDER === "router") return searchRouter(query, limit, signal);
 
-  if (PROVIDER === "tavily") return searchTavily(query, limit, signal);
+  if (PROVIDER === "tavily") return { text: await searchTavily(query, limit, signal) };
 
   if (PROVIDER === "brave") {
-    if (!BRAVE_KEY) return "Поиск не настроен: нет BRAVE_API_KEY.";
+    if (!BRAVE_KEY) return { text: "Поиск не настроен: нет BRAVE_API_KEY." };
     const response = await fetch(
       `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${limit}`,
       { headers: { accept: "application/json", "x-subscription-token": BRAVE_KEY }, signal },
     );
-    if (!response.ok) return httpError(response);
-    return format(parseBrave(await response.json(), limit));
+    if (!response.ok) return { text: await httpError(response) };
+    return { text: format(parseBrave(await response.json(), limit)) };
   }
 
   if (PROVIDER === "searxng") {
-    if (!SEARXNG_URL) return "Поиск не настроен: нет ICARUS_SEARXNG_URL.";
+    if (!SEARXNG_URL) return { text: "Поиск не настроен: нет ICARUS_SEARXNG_URL." };
     const response = await fetch(
       `${SEARXNG_URL.replace(/\/$/, "")}/search?q=${encodeURIComponent(query)}&format=json`,
       { headers: { accept: "application/json" }, signal },
     );
-    if (!response.ok) return httpError(response);
-    return format(parseSearxng(await response.json(), limit));
+    if (!response.ok) return { text: await httpError(response) };
+    return { text: format(parseSearxng(await response.json(), limit)) };
   }
 
-  return `Поиск не настроен: провайдер «${PROVIDER}» неизвестен — жду router, tavily, brave, searxng или none.`;
+  return {
+    text: `Поиск не настроен: провайдер «${PROVIDER}» неизвестен — жду router, tavily, brave, searxng или none.`,
+  };
 }
 
 async function fetchPage(url: string, signal?: AbortSignal): Promise<string> {
@@ -262,8 +286,15 @@ export default function (pi: ExtensionAPI) {
       }),
       async execute(_toolCallId, params, signal) {
         const limit = Math.min(Math.max(Number(params.limit ?? 5), 1), 10);
-        const text = await search(String(params.query), limit, signal);
-        return { content: [{ type: "text", text }], details: { provider: PROVIDER } };
+        const outcome = await search(String(params.query), limit, signal);
+        return {
+          content: [{ type: "text", text: outcome.text }],
+          details: {
+            provider: PROVIDER,
+            ...(outcome.upstream ? { upstream: outcome.upstream } : {}),
+            ...(outcome.tried ? { tried: outcome.tried } : {}),
+          },
+        };
       },
     });
   }
