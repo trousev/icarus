@@ -104,6 +104,23 @@ test('люди в файле заменяются, а не дописывают�
   assert.equal(/\n\s+- old\b/.test(result.text), false);
 });
 
+test('флаг админа: миграция выдаёт его trousev, а выданный руками переживает деплой', () => {
+  // Старый конфиг — люди строками. Деплой с ICARUS_USERS пишет флаг явно: у trousev
+  // он есть по миграции, у остальных нет.
+  const migrated = renderConfig(EXAMPLE, { users: 'trousev, vita' });
+  assert.deepEqual(load(migrated.text).users, [{ id: 'trousev', admin: true }, { id: 'vita' }]);
+
+  // Админ, выданный на хосте, не пропадает при следующем деплое: пользователь
+  // остался в списке — значит его флаг сохраняется.
+  const custom = migrated.text.replace('  - vita', '  - id: vita\n    admin: true');
+  const kept = renderConfig(custom, { users: 'trousev, vita' });
+  assert.deepEqual(load(kept.text).users, [{ id: 'trousev', admin: true }, { id: 'vita', admin: true }]);
+
+  // Убрали человека из ICARUS_USERS — вместе с ним уходит и его флаг.
+  const removed = renderConfig(custom, { users: 'trousev' });
+  assert.deepEqual(load(removed.text).users, [{ id: 'trousev', admin: true }]);
+});
+
 test('docker.dns приезжает из ICARUS_DNS, none убирает его, пусто — не трогает', () => {
   const withDns = renderConfig(EXAMPLE, { users: 'probe', dns: '1.1.1.1, 8.8.8.8' });
   assert.deepEqual(withDns.dns, ['1.1.1.1', '8.8.8.8']);

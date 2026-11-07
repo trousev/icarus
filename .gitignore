@@ -6,6 +6,9 @@ __pycache__/
 .env
 .env.*
 !.env.example
+# настройки панели «Ключи»: сильнее .env и переживают деплой
+keys.json
+keys.json.bak
 .pytest_cache/
 dist/
 build/

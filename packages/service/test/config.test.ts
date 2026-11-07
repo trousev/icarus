@@ -338,9 +338,28 @@ test('без людей не стартуем', () => {
   assert.throws(() => loadConfig(file, {}), /ни одного человека/);
 });
 
-test('старый формат людей с объектами объясняет, как надо', () => {
-  const file = writeConfig('apiKey: token\nmodels: [{ provider: d, id: m }]\nusers:\n  - id: probe\n');
-  assert.throws(() => loadConfig(file, {}), /users\[0\].*id строкой/);
+test('флаг админа: старый конфиг получает его по миграции, новый — явно', () => {
+  // Миграция: до появления флага ключи правил один trousev. Конфиг, написанный
+  // строками, продолжает работать — админом становится ровно он.
+  const legacy = writeConfig('apiKey: token\nmodels: [{ provider: d, id: m }]\nusers: [trousev, probe]\n');
+  assert.deepEqual(loadConfig(legacy, {}).users, [{ id: 'trousev', admin: true }, { id: 'probe' }]);
+
+  // Явные объекты: флаг выдают и забирают, не трогая остальных. false в модели не
+  // хранится: «нет флага» и «флаг снят» — одно и то же.
+  const explicit = writeConfig(
+    'apiKey: token\nmodels: [{ provider: d, id: m }]\nusers:\n' +
+      '  - id: trousev\n    admin: false\n  - id: vita\n    admin: true\n  - id: probe\n',
+  );
+  assert.deepEqual(loadConfig(explicit, {}).users, [{ id: 'trousev' }, { id: 'vita', admin: true }, { id: 'probe' }]);
+
+  assert.throws(
+    () => loadConfig(writeConfig('apiKey: token\nmodels: [{ provider: d, id: m }]\nusers:\n  - id: probe\n    admin: да\n'), {}),
+    /users\[0\]\.admin: ожидалось true или false/,
+  );
+  assert.throws(
+    () => loadConfig(writeConfig('apiKey: token\nmodels: [{ provider: d, id: m }]\nusers:\n  - admin: true\n'), {}),
+    /users\[0\]\.id: не задано/,
+  );
 });
 
 test('id человека проверяем: он идёт в имя контейнера и в путь на диске', () => {

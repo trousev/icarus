@@ -62,8 +62,25 @@ export function mcpLifecycle(server: McpServerConfig): NonNullable<McpServerConf
   return server.lifecycle ?? DEFAULT_MCP_LIFECYCLE;
 }
 
-/** Человек: пока только id, всё остальное — общее (см. IcarusConfig). */
-export type UserConfig = { id: string };
+/**
+ * Человек: id и признак админа. Всё остальное — общее (см. IcarusConfig).
+ *
+ * Админ правит секреты инсталляции в панели (раздел «Ключи»). Флаг необязателен:
+ * у конфига, написанного до его появления, админом считается один trousev — так
+ * прошла миграция, и старый config.yaml продолжает работать без правок (см.
+ * parseUsers). `admin` в объекте человека сильнее этого умолчания.
+ */
+export type UserConfig = { id: string; admin?: boolean };
+
+/**
+ * Кому достался флаг при миграции: до появления раздела «Ключи» ключи правил
+ * руками один человек, и это был trousev. Новым людям флаг выдают явно.
+ */
+export const LEGACY_ADMIN_ID = 'trousev';
+
+export function isAdmin(user: UserConfig | undefined): boolean {
+  return user?.admin === true;
+}
 
 /**
  * Telegram-бот: основной вход к тому же Икару. Человека узнаём по username в
@@ -157,6 +174,22 @@ export type IcarusConfig = {
   /** Распознавание голосовых: null — выключено (нет ключа провайдера или отключено в конфиге). */
   speech: SpeechConfig | null;
   users: UserConfig[];
+  /**
+   * Откуда прочитан конфиг. Нужен, чтобы панель могла перечитать его после
+   * сохранения ключей, не спрашивая путь у того, кто её позвал (см. runtime.ts).
+   */
+  configPath?: string;
+  /** Рабочий файл ключей: по умолчанию .env в корне (подменяется в тестах). */
+  envFile?: string;
+  /** Настройки панели: по умолчанию keys.json в корне (подменяется в тестах). */
+  keysFile?: string;
+  /**
+   * Ключи и переменные из .env и настроек панели — ровно то, что должно уехать
+   * в процесс pi. Контейнер получает их при создании, но новый ключ из панели
+   * должен доехать до следующего разговора без пересоздания контейнера: сервис
+   * передаёт этот набор в `docker exec -e` (см. sessions/pi-session.ts).
+   */
+  secretEnv?: Record<string, string>;
 };
 
 /** Подставляет ~ и значения вида env:VAR_NAME / ${VAR_NAME}. */
@@ -270,7 +303,7 @@ function stringMap(value: unknown, what: string, env: NodeJS.ProcessEnv): Record
  * принимает ещё ANTHROPIC_AUTH_TOKEN и ANTHROPIC_OAUTH_TOKEN, amazon-bedrock
  * обходится AWS-кредами, google-vertex — Application Default Credentials.
  */
-const PROVIDER_ENV: Record<string, string> = {
+export const PROVIDER_ENV: Record<string, string> = {
   anthropic: 'ANTHROPIC_API_KEY',
   openai: 'OPENAI_API_KEY',
   deepinfra: 'DEEPINFRA_API_KEY',
@@ -481,16 +514,42 @@ function parseLanguage(value: unknown): Language | undefined {
   return undefined;
 }
 
+/**
+ * Люди. Два написания: строка (как было) и объект с флагом админа.
+ *
+ *   users:
+ *     - trousev            # админ по миграции: до флага ключи правил он один
+ *     - id: vita
+ *       admin: true        # явно выданный флаг
+ *
+ * Флаг админа — не косметика: он открывает раздел «Ключи», то есть доступ ко всем
+ * секретам инсталляции. Поэтому его выдают явно, а не «всем, кто первый попался»:
+ * у старого конфига без объектов админ ровно один — trousev (LEGACY_ADMIN_ID).
+ * Явное `admin: false` это умолчание перекрывает: забрать флаг у основателя можно.
+ */
 function parseUsers(value: unknown): UserConfig[] {
   const users = asArray(value, 'users').map((item, index) => {
-    if (typeof item !== 'string') {
-      throw new Error(`users[${index}]: человек — это просто его id строкой, например "- probe"`);
+    const where = `users[${index}]`;
+    if (typeof item === 'string') {
+      const id = item.trim();
+      if (!USER_ID.test(id)) {
+        throw new Error(`${where}: id «${id}» не годится — буквы, цифры, точка, дефис, подчёркивание`);
+      }
+      return id === LEGACY_ADMIN_ID ? { id, admin: true } : { id };
     }
-    const id = item.trim();
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) {
+      throw new Error(`${where}: человек — это его id строкой или объект с id и admin`);
+    }
+    const record = item as Record<string, unknown>;
+    const id = requiredString(record.id, `${where}.id`);
     if (!USER_ID.test(id)) {
-      throw new Error(`users[${index}]: id «${id}» не годится — буквы, цифры, точка, дефис, подчёркивание`);
+      throw new Error(`${where}.id: «${id}» не годится — буквы, цифры, точка, дефис, подчёркивание`);
     }
-    return { id };
+    const admin = record.admin;
+    if (admin !== undefined && typeof admin !== 'boolean') {
+      throw new Error(`${where}.admin: ожидалось true или false`);
+    }
+    return admin === true ? { id, admin: true } : { id };
   });
   if (users.length === 0) throw new Error('в конфиге нет ни одного человека (users)');
   const seen = new Set<string>();
@@ -701,6 +760,9 @@ export function loadConfig(file: string, env: NodeJS.ProcessEnv = process.env): 
     telegram: parseTelegram(raw.telegram, raw.telegram_mapping, env, users),
     speech: parseSpeech(raw.speech, env, auth),
     users,
+    // Путь — не секрет и не настройка, но панели он нужен, чтобы перечитать файл
+    // после сохранения ключей (см. runtime.ts).
+    configPath: resolved,
   };
 }
 

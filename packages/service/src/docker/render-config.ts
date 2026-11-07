@@ -19,7 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
-import { DEFAULT_CONFIG_PATH, REPO_ROOT } from '../config.ts';
+import { DEFAULT_CONFIG_PATH, LEGACY_ADMIN_ID, REPO_ROOT } from '../config.ts';
 
 /** Образец, с которого начинается config.yaml, если рабочего файла ещё нет. */
 const EXAMPLE_CONFIG = path.join(REPO_ROOT, 'config.example.yaml');
@@ -69,14 +69,35 @@ function asRecord(value: unknown, what: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-/** Люди в config.yaml — простые строки (см. parseUsers в config.ts). */
-function existingUsers(value: unknown): string[] {
+/** Человек в config.yaml: id строкой или объект с флагом админа (см. parseUsers). */
+type UserEntry = { id: string; admin?: boolean };
+
+/** Флаг по миграции: у конфига без явных админов админ — trousev. */
+function legacyAdmin(id: string): boolean | undefined {
+  return id === LEGACY_ADMIN_ID ? true : undefined;
+}
+
+/**
+ * Люди из прежнего конфига. Строка — старый формат, объект — новый. Флаг админа
+ * переживает деплой: иначе выданный руками доступ пропадал бы при каждом push.
+ */
+function existingUsers(value: unknown): UserEntry[] {
   if (!Array.isArray(value)) return [];
-  return value.map((item) => {
-    if (typeof item !== 'string') {
-      throw new Error('users: человек — это просто его id строкой (например "- trousev")');
+  return value.map((item, index) => {
+    if (typeof item === 'string') {
+      const id = item.trim();
+      const admin = legacyAdmin(id);
+      return admin === undefined ? { id } : { id, admin };
     }
-    return item.trim();
+    const where = `users[${index}]`;
+    const record = asRecord(item, where);
+    const id = typeof record.id === 'string' ? record.id.trim() : '';
+    if (id === '') throw new Error(`${where}: у человека нужен id`);
+    if (record.admin !== undefined && typeof record.admin !== 'boolean') {
+      throw new Error(`${where}.admin: ожидалось true или false`);
+    }
+    const admin = record.admin === undefined ? legacyAdmin(id) : record.admin;
+    return admin === undefined ? { id } : { id, admin };
   });
 }
 
@@ -95,6 +116,12 @@ function checkUsers(ids: string[]): string[] {
 
 function splitUsers(value: string): string[] {
   return checkUsers(value.split(/[\s,]+/));
+}
+
+/** Как записать человека в YAML: флаг — только когда он явно задан. */
+function userToYaml(entry: UserEntry): string | { id: string; admin: boolean } {
+  if (entry.admin === undefined) return entry.id;
+  return { id: entry.id, admin: entry.admin };
 }
 
 function parsePort(value: string): number {
@@ -191,11 +218,20 @@ export function renderConfig(
 ): RenderResult {
   const doc = asRecord(parseYaml(sourceText), 'config');
 
-  const users = overrides.users?.trim() ? splitUsers(overrides.users) : checkUsers(existingUsers(doc.users));
+  // Люди из ICARUS_USERS приезжают без флагов: админ — по миграции (trousev),
+  // а уже выданные на хосте флаги сохраняем за теми, кто остался в списке.
+  const previous = existingUsers(doc.users);
+  const entries: UserEntry[] = overrides.users?.trim()
+    ? splitUsers(overrides.users).map((id) => {
+        const admin = previous.find((entry) => entry.id === id)?.admin ?? legacyAdmin(id);
+        return admin === undefined ? { id } : { id, admin };
+      })
+    : previous;
+  const users = checkUsers(entries.map((entry) => entry.id));
   if (users.length === 0) {
     throw new Error('в конфиге нет ни одного человека: задай ICARUS_USERS (например trousev,vita,julia)');
   }
-  doc.users = users;
+  doc.users = entries.map(userToYaml);
 
   if (overrides.port?.trim()) doc.port = parsePort(overrides.port);
   const port = Number(doc.port ?? 8081);

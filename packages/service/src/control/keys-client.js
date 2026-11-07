@@ -1,0 +1,278 @@
+// Клиент раздела «Ключи». Живёт отдельным файлом, как MCP: в TypeScript не нужно
+// экранировать бэктики и скобки, а браузер получает тот же JS и локально, и на проде.
+(function () {
+  'use strict';
+  const cfg = window.__KEYS_CFG__ || {};
+  const el = (id) => document.getElementById(id);
+
+  const esc = (value) =>
+    String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+
+  const api = async (path, options = {}) => {
+    const response = await fetch(path, {
+      ...options,
+      headers: { 'content-type': 'application/json', ...(options.headers || {}) },
+    });
+    const type = response.headers.get('content-type') || '';
+    if (!response.ok || !type.includes('application/json')) {
+      const message = type.includes('application/json')
+        ? (await response.json().catch(() => ({}))).error?.message || response.statusText
+        : 'сессия входа истекла — обнови страницу';
+      throw new Error(message);
+    }
+    return response.json();
+  };
+
+  let data = null;
+  let notice = null;
+  let editing = null;
+  let adding = false;
+  let pendingRemove = null;
+
+  const APPLY_LABELS = {
+    session: 'со следующего ответа',
+    restart: 'после перезапуска сервиса',
+    compose: 'после пересборки стека',
+  };
+
+  function showNotice(text, kind) {
+    notice = { text, kind: kind || 'ok' };
+    renderNotice();
+  }
+
+  function renderNotice() {
+    const box = el('keys-notice');
+    if (!box) return;
+    if (!notice) {
+      box.hidden = true;
+      box.textContent = '';
+      return;
+    }
+    box.hidden = false;
+    box.className = 'keys-notice ' + notice.kind;
+    box.textContent = notice.text;
+  }
+
+  function statusPill(key) {
+    const cls = key.present ? (key.source === 'settings' ? 'own' : 'env') : key.source === 'removed' ? 'off' : 'none';
+    const text = key.present ? (key.source === 'settings' ? 'задан в панели' : 'из .env') : key.source === 'removed' ? 'убран' : 'не задан';
+    return '<span class="pill ' + cls + '">' + esc(text) + '</span>';
+  }
+
+  function row(key) {
+    const open = editing === key.name;
+    const hint = key.present
+      ? '<span class="keys-hint">' + esc(key.hint) + '</span>'
+      : key.plain
+        ? '<span class="keys-hint dim">не задано</span>'
+        : '';
+    const where = key.where
+      ? '<a class="keys-where" href="' + esc(key.where.startsWith('http') ? key.where : '#') + '" target="_blank" rel="noreferrer noopener">' + esc(key.where) + '</a>'
+      : '';
+    const apply = key.present && key.apply && APPLY_LABELS[key.apply]
+      ? '<span class="keys-apply">' + esc(APPLY_LABELS[key.apply]) + '</span>'
+      : '';
+    const remove = key.present
+      ? '<button class="btn danger" data-remove="' + esc(key.name) + '">' +
+          (pendingRemove === key.name ? 'Точно убрать?' : 'Убрать') +
+        '</button>'
+      : '';
+
+    return (
+      '<div class="keys-row' + (open ? ' open' : '') + '" data-key="' + esc(key.name) + '">' +
+        '<div class="keys-main">' +
+          '<div class="keys-top"><code>' + esc(key.name) + '</code>' + statusPill(key) + apply + '</div>' +
+          '<div class="keys-label">' + esc(key.label) + '</div>' +
+          '<div class="keys-desc">' + esc(key.description) + ' ' + where + '</div>' +
+          (hint ? '<div class="keys-value">' + hint + '</div>' : '') +
+        '</div>' +
+        '<div class="keys-actions">' +
+          '<button class="btn" data-edit="' + esc(key.name) + '">' + (key.present ? 'Изменить' : 'Задать') + '</button>' +
+          remove +
+        '</div>' +
+        (open ? editForm(key) : '') +
+      '</div>'
+    );
+  }
+
+  function editForm(key) {
+    return (
+      '<form class="keys-form" data-form="' + esc(key.name) + '">' +
+        '<label for="value-' + esc(key.name) + '">НОВОЕ ЗНАЧЕНИЕ' +
+          (key.plain ? '' : ' — оно не показывается и не уходит из панели обратно') +
+        '</label>' +
+        '<div class="keys-line">' +
+          '<input id="value-' + esc(key.name) + '" name="value" type="' + (key.plain ? 'text' : 'password') + '"' +
+            ' autocomplete="off" spellcheck="false" placeholder="' + (key.plain ? '' : 'вставь ключ') + '" required>' +
+          (key.plain ? '' : '<label class="keys-show"><input type="checkbox" data-show> показать</label>') +
+          '<button class="btn primary" type="submit">Сохранить</button>' +
+          '<button class="btn" type="button" data-cancel>Отмена</button>' +
+        '</div>' +
+      '</form>'
+    );
+  }
+
+  function renderList() {
+    const box = el('keys-list');
+    if (!data) {
+      box.innerHTML = '<p class="keys-empty">Читаю…</p>';
+      return;
+    }
+    const groups = data.groups || [];
+    box.innerHTML = groups
+      .map((group) => {
+        const keys = data.keys.filter((key) => key.group === group.id);
+        if (keys.length === 0) return '';
+        return (
+          '<section class="keys-group">' +
+            '<h2>' + esc(group.label) + '<span>' + keys.length + '</span></h2>' +
+            keys.map(row).join('') +
+          '</section>'
+        );
+      })
+      .join('');
+
+    box.querySelectorAll('[data-edit]').forEach((button) => {
+      button.onclick = () => {
+        editing = button.dataset.edit;
+        pendingRemove = null;
+        renderList();
+        const input = el('value-' + editing);
+        if (input) input.focus();
+      };
+    });
+    box.querySelectorAll('[data-cancel]').forEach((button) => {
+      button.onclick = () => {
+        editing = null;
+        renderList();
+      };
+    });
+    box.querySelectorAll('[data-show]').forEach((checkbox) => {
+      checkbox.onchange = () => {
+        const input = checkbox.closest('.keys-form').querySelector('input[name=value]');
+        input.type = checkbox.checked ? 'text' : 'password';
+      };
+    });
+    box.querySelectorAll('form[data-form]').forEach((form) => {
+      form.onsubmit = async (event) => {
+        event.preventDefault();
+        await save(form.dataset.form, form.querySelector('input[name=value]').value);
+      };
+    });
+    box.querySelectorAll('[data-remove]').forEach((button) => {
+      button.onclick = async () => {
+        const name = button.dataset.remove;
+        if (pendingRemove !== name) {
+          pendingRemove = name;
+          renderList();
+          return;
+        }
+        pendingRemove = null;
+        await save(name, null, 'remove');
+      };
+    });
+  }
+
+  async function save(name, value, action) {
+    try {
+      const result = await api('/panel/keys/api', {
+        method: 'POST',
+        body: JSON.stringify({ name, value, action }),
+      });
+      data = result;
+      editing = null;
+      pendingRemove = null;
+      renderList();
+      const warning = result.warning ? ' ' + result.warning : '';
+      const warnings = result.reloaded && result.reloaded.warnings && result.reloaded.warnings.length
+        ? ' Не доехало до: ' + result.reloaded.warnings.join('; ')
+        : '';
+      showNotice((result.message || 'Сохранено.') + warnings + warning, warning || warnings ? 'warn' : 'ok');
+    } catch (error) {
+      showNotice('Не сохранилось: ' + error.message, 'bad');
+    }
+  }
+
+  function renderAdd() {
+    const box = el('keys-add');
+    if (!adding) {
+      box.hidden = true;
+      box.innerHTML = '';
+      return;
+    }
+    const suggestions = (data ? data.keys : []).filter((key) => !key.present).map((key) => key.name);
+    box.hidden = false;
+    box.innerHTML =
+      '<form class="keys-form add" id="add-form">' +
+        '<label for="add-name">ИМЯ ПЕРЕМЕННОЙ</label>' +
+        '<div class="keys-line">' +
+          '<input id="add-name" name="name" list="key-names" placeholder="НАПРИМЕР, OPENAI_API_KEY" autocomplete="off" spellcheck="false" required>' +
+          '<datalist id="key-names">' + [...new Set(suggestions)].map((name) => '<option value="' + esc(name) + '">').join('') + '</datalist>' +
+        '</div>' +
+        '<label for="add-value">ЗНАЧЕНИЕ</label>' +
+        '<div class="keys-line">' +
+          '<input id="add-value" name="value" type="password" autocomplete="off" spellcheck="false" placeholder="вставь ключ" required>' +
+          '<label class="keys-show"><input type="checkbox" id="add-show"> показать</label>' +
+          '<button class="btn primary" type="submit">Добавить</button>' +
+          '<button class="btn" type="button" id="add-cancel">Отмена</button>' +
+        '</div>' +
+      '</form>';
+    el('add-form').onsubmit = async (event) => {
+      event.preventDefault();
+      const name = el('add-name').value.trim().toUpperCase();
+      await save(name, el('add-value').value);
+      if (!notice || notice.kind !== 'bad') adding = false;
+      renderAdd();
+    };
+    el('add-cancel').onclick = () => {
+      adding = false;
+      renderAdd();
+    };
+    el('add-show').onchange = () => {
+      el('add-value').type = el('add-show').checked ? 'text' : 'password';
+    };
+    el('add-name').focus();
+  }
+
+  async function load() {
+    try {
+      data = await api('/panel/keys/api');
+      el('keys-meta').textContent =
+        (data.secrets || 0) + ' ' + ((data.secrets || 0) === 1 ? 'ключ' : 'ключей') +
+        (data.updatedBy ? ' · последняя правка: ' + data.updatedBy : '');
+      renderList();
+      renderAdd();
+    } catch (error) {
+      el('keys-list').innerHTML = '<p class="keys-empty bad">' + esc(error.message) + '</p>';
+    }
+  }
+
+  const addButton = el('keys-add-button');
+  if (addButton) {
+    addButton.onclick = () => {
+      adding = !adding;
+      renderAdd();
+    };
+  }
+
+  // «Перечитать» — для правок .env руками: файл мог поменять человек или деплой.
+  const reloadButton = el('keys-reload-button');
+  if (reloadButton) {
+    reloadButton.onclick = async () => {
+      reloadButton.disabled = true;
+      try {
+        const result = await api('/panel/keys/api', { method: 'POST', body: JSON.stringify({ action: 'reload' }) });
+        data = result;
+        renderList();
+        showNotice(result.message || 'Перечитано.', 'ok');
+      } catch (error) {
+        showNotice('Не перечиталось: ' + error.message, 'bad');
+      } finally {
+        reloadButton.disabled = false;
+      }
+    };
+  }
+
+  document.title = 'Icarus Control Panel · Ключи · ' + (cfg.user || '');
+  load();
+})();

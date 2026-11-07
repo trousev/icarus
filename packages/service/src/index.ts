@@ -1,5 +1,6 @@
 // Точка входа icarus.
-import { DEFAULT_CONFIG_PATH, loadConfig, loadEnvFile } from './config.ts';
+import { DEFAULT_CONFIG_PATH, loadConfig } from './config.ts';
+import { loadRuntimeEnv } from './runtime.ts';
 import { log } from './log.ts';
 import { prepareUser } from './workspace.ts';
 import { backfillChats } from './sessions/chats.ts';
@@ -10,12 +11,17 @@ import { createServer } from './http/server.ts';
 
 const configPath = process.argv[2] ?? process.env.ICARUS_CONFIG ?? DEFAULT_CONFIG_PATH;
 
-// Ключи читаем до конфига: из .env подставляются ключи провайдеров в auth.json.
-// В контейнеры значения едут отдельно — compose подключает .env как env_file; а этот
-// вызов нужен, когда сервис запущен прямо на хосте, без compose.
-loadEnvFile();
-const config = loadConfig(configPath);
-log.info('конфиг загружен', { path: configPath, users: config.users.map((user) => user.id) });
+// Ключи читаем до конфига: из .env и keys.json подставляются ключи провайдеров в
+// auth.json. В контейнеры значения едут отдельно: compose подключает .env как
+// env_file, а панель передаёт свежие значения в процесс pi сама (см. runtime.ts).
+const runtimeEnv = loadRuntimeEnv();
+const config = loadConfig(configPath, runtimeEnv.env);
+config.secretEnv = runtimeEnv.secrets;
+log.info('конфиг загружен', {
+  path: configPath,
+  users: config.users.map((user) => user.id),
+  admins: config.users.filter((user) => user.admin === true).map((user) => user.id),
+});
 
 if (Object.keys(config.auth).length === 0) {
   log.warn('ни одного ключа провайдера: положи их в .env (образец .env.example) или в auth: config.yaml');
