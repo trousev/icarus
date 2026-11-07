@@ -3,6 +3,7 @@
 // Сеть и часы подменяются: пятиминутный карантин проверяется мгновенно.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { createServer } from '../src/http/server.ts';
 import { makeConfig } from './fixtures.ts';
@@ -129,8 +130,10 @@ test('отказ страницы не путается с отказом клю
 
 // --- роутер ------------------------------------------------------------------
 
-test('рейтинг извлечения: Exa, Tavily, Linkup, You; Firecrawl и SerpApi не участвуют', () => {
-  assert.deepEqual(FETCH_RATING, ['exa', 'tavily', 'linkup', 'you']);
+test('рейтинг извлечения обратный поисковому: Linkup, You, Tavily, Exa', () => {
+  assert.deepEqual(FETCH_RATING, ['linkup', 'you', 'tavily', 'exa']);
+  // Обратность выводится из поискового рейтинга, а не задана вторым списком.
+  assert.deepEqual([...FETCH_RATING].reverse(), ['exa', 'tavily', 'you', 'linkup']);
 });
 
 test('без ключей — no-keys, а не поход в сеть', async () => {
@@ -140,70 +143,103 @@ test('без ключей — no-keys, а не поход в сеть', async ()
 });
 
 test('текущий у извлечения свой и не трогает поисковый', async () => {
-  const config = configWith({ exa: 'e', tavily: 't' });
+  const config = configWith({ linkup: 'l', exa: 'e' });
   const clock = clockAt();
   await mutateRouterState(stateFile(config), (state) => {
-    state.current = 'tavily';
+    state.current = 'exa';
   });
 
   const result = await routeFetch(config, 'https://example.com', { fetch: okAll(), now: clock.now });
   assert.equal(result.ok, true);
-  assert.equal(result.ok && result.provider, 'exa');
+  assert.equal(result.ok && result.provider, 'linkup', 'страницы идут через слабейшего для поиска');
 
   const state = readRouterState(stateFile(config));
-  assert.equal(state.current, 'tavily', 'поисковый текущий не изменился');
-  assert.equal(state.fetch?.current, 'exa', 'у извлечения свой текущий');
+  assert.equal(state.current, 'exa', 'поисковый текущий не изменился');
+  assert.equal(state.fetch?.current, 'linkup', 'у извлечения свой текущий');
 });
 
 test('отказ провайдера — пять минут карантина и переход к следующему', async () => {
-  const config = configWith({ exa: 'e', tavily: 't' });
+  const config = configWith({ linkup: 'l', exa: 'e' });
   const clock = clockAt();
   const fetch = fakeFetch({
-    exa: () => json({ error: 'boom' }, 500),
-    tavily: () => json(PAGES.tavily),
+    linkup: () => json({ error: 'boom' }, 500),
+    exa: () => json(PAGES.exa),
   });
 
   const result = await routeFetch(config, 'https://example.com', { fetch, now: clock.now });
-  assert.equal(result.ok && result.provider, 'tavily');
-  assert.deepEqual(result.tried.map((item) => item.provider), ['exa']);
+  assert.equal(result.ok && result.provider, 'exa');
+  assert.deepEqual(result.tried.map((item) => item.provider), ['linkup']);
   const state = readRouterState(stateFile(config));
-  assert.equal(state.fetch?.providers.exa?.banReason, 'error');
-  assert.equal(state.fetch?.current, 'tavily');
+  assert.equal(state.fetch?.providers.linkup?.banReason, 'error');
+  assert.equal(state.fetch?.current, 'exa');
 });
 
 test('404 страницы не банит провайдера: это свойство URL, а не ключа', async () => {
-  const config = configWith({ exa: 'e', tavily: 't' });
+  const config = configWith({ linkup: 'l', exa: 'e' });
   const clock = clockAt();
   const fetch = fakeFetch({
-    exa: () => json({ error: 'not found' }, 404),
-    tavily: () => json(PAGES.tavily),
+    linkup: () => json({ error: 'not found' }, 404),
+    exa: () => json(PAGES.exa),
   });
 
   const result = await routeFetch(config, 'https://example.com/missing', { fetch, now: clock.now });
-  assert.equal(result.ok && result.provider, 'tavily');
+  assert.equal(result.ok && result.provider, 'exa');
   const state = readRouterState(stateFile(config));
-  assert.equal(state.fetch?.providers.exa, undefined, 'у Exa не появилось отказов');
+  assert.equal(state.fetch?.providers.linkup, undefined, 'у Linkup не появилось отказов');
 });
 
 test('402 банит и извлечение, и поиск: кредиты общие', async () => {
-  const config = configWith({ exa: 'e', tavily: 't' });
+  const config = configWith({ linkup: 'l', exa: 'e' });
   const clock = clockAt();
   const fetch = fakeFetch({
-    exa: () => json({ error: 'Payment Required' }, 402),
-    tavily: () => json(PAGES.tavily),
+    linkup: () => json({ error: 'Payment Required' }, 402),
+    exa: () => json(PAGES.exa),
   });
 
   const result = await routeFetch(config, 'https://example.com', { fetch, now: clock.now });
-  assert.equal(result.ok && result.provider, 'tavily');
+  assert.equal(result.ok && result.provider, 'exa');
   const state = readRouterState(stateFile(config));
-  assert.equal(state.fetch?.providers.exa?.banReason, 'credits');
-  assert.equal(state.providers.exa?.banReason, 'credits', 'поиск тоже не должен биться в тот же ключ');
+  assert.equal(state.fetch?.providers.linkup?.banReason, 'credits');
+  assert.equal(state.providers.linkup?.banReason, 'credits', 'поиск тоже не должен биться в тот же ключ');
+});
+
+test('файл v1 сбрасывает старый fetch.current, но оставляет карантины', () => {
+  const config = configWith({});
+  const file = stateFile(config);
+  fs.writeFileSync(
+    file,
+    JSON.stringify({
+      version: 1,
+      current: 'serpapi',
+      providers: {},
+      fetch: {
+        current: 'exa',
+        providers: {
+          exa: {
+            fails: 2,
+            bannedUntil: null,
+            banReason: 'error',
+            lastError: 'HTTP 500',
+            lastErrorAt: null,
+            broken: false,
+            brokenAt: null,
+          },
+        },
+      },
+    }),
+  );
+
+  const state = readRouterState(file);
+  assert.equal(state.version, 2);
+  assert.equal(state.current, 'serpapi', 'поисковый текущий не тронут');
+  assert.equal(state.fetch?.current, null, 'старый текущий сброшен: рейтинг сменился');
+  assert.equal(state.fetch?.providers.exa?.fails, 2, 'история отказов осталась');
 });
 
 test('все в карантине — all-banned с ближайшим разбаном', async () => {
-  const config = configWith({ exa: 'e' });
+  const config = configWith({ linkup: 'l' });
   const clock = clockAt();
-  const fetch = fakeFetch({ exa: () => json({}, 500) });
+  const fetch = fakeFetch({ linkup: () => json({}, 500) });
 
   await routeFetch(config, 'https://example.com', { fetch, now: clock.now });
   const second = await routeFetch(config, 'https://example.com', { fetch, now: clock.now });
@@ -213,21 +249,21 @@ test('все в карантине — all-banned с ближайшим разб
 });
 
 test('поиск и извлечение могут жить на разных провайдерах одновременно', async () => {
-  const config = configWith({ serpapi: 's', exa: 'e' });
+  const config = configWith({ serpapi: 's', linkup: 'l' });
   const clock = clockAt();
   const fetch = fakeFetch({
     serpapi: () => json({ organic_results: [{ title: 'S', link: 'https://s.dev', snippet: 'x' }] }),
-    exa: () => json(PAGES.exa),
+    linkup: () => json(PAGES.linkup),
   });
 
   const search = await routeSearch(config, 'запрос', 2, { fetch, now: clock.now });
   assert.equal(search.ok && search.provider, 'serpapi', 'поиск выбрал SerpApi');
   const page = await routeFetch(config, 'https://example.com', { fetch, now: clock.now });
-  assert.equal(page.ok && page.provider, 'exa', 'извлечение выбрало Exa');
+  assert.equal(page.ok && page.provider, 'linkup', 'извлечение выбрало Linkup');
 
   const state = readRouterState(stateFile(config));
   assert.equal(state.current, 'serpapi');
-  assert.equal(state.fetch?.current, 'exa');
+  assert.equal(state.fetch?.current, 'linkup');
 });
 
 // --- панель ------------------------------------------------------------------

@@ -33,7 +33,7 @@ export type ScopeState = {
 };
 
 export type RouterState = {
-  version: 1;
+  version: 2;
   /**
    * Поиск. Верхние поля оставлены именно поиску, чтобы файлы состояния,
    * записанные до появления /fetch, читались без миграции.
@@ -58,7 +58,7 @@ export function emptyProviderState(): ProviderState {
 }
 
 export function emptyRouterState(): RouterState {
-  return { version: 1, current: null, providers: {}, updatedAt: new Date().toISOString() };
+  return { version: 2, current: null, providers: {}, updatedAt: new Date().toISOString() };
 }
 
 /** Файл состояния: по умолчанию рядом с данными, в тестах подменяется. */
@@ -129,13 +129,22 @@ export function readRouterState(file: string): RouterState {
   const root = asRecord(parsed);
   if (!root) return emptyRouterState();
 
+  // v1 → v2: у извлечения сменился рейтинг (теперь он обратный поисковому),
+  // поэтому старый fetch.current сбрасывается — иначе он жил бы вечно и
+  // приоритет никогда бы не применился. Карантины при этом сохраняем.
+  const migrated = root.version !== 2;
   const fetchRaw = asRecord(root.fetch);
   return {
-    version: 1,
+    version: 2,
     current: readCurrent(root.current),
     providers: readProviders(root.providers),
     ...(fetchRaw
-      ? { fetch: { current: readCurrent(fetchRaw.current), providers: readProviders(fetchRaw.providers) } }
+      ? {
+          fetch: {
+            current: migrated ? null : readCurrent(fetchRaw.current),
+            providers: readProviders(fetchRaw.providers),
+          },
+        }
       : {}),
     updatedAt: asIsoOrNull(root.updatedAt) ?? new Date().toISOString(),
   };

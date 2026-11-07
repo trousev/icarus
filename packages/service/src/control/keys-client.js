@@ -154,7 +154,7 @@
     if (!fetchStatus) return '';
     return routingSection(
       'СТРАНИЦЫ: ИЗВЛЕЧЕНИЕ',
-      'Роутер тянет страницы через Exa, Tavily, Linkup и You.com; Firecrawl и SerpApi сюда не входят.',
+      'Сначала Linkup и You.com: Exa и Tavily бережём для поиска. Firecrawl и SerpApi сюда не входят.',
       fetchStatus,
       'fetch',
     );
