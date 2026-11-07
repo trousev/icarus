@@ -59,6 +59,78 @@
     return '<span class="pill ' + cls + '">' + esc(text) + '</span>';
   }
 
+  // --- поисковый роутер -------------------------------------------------------
+  // Над списком ключей — короткая сводка: кто сейчас отвечает, кто в карантине
+  // и у кого «ключ сломан». Кнопка «Проверить» делает настоящий поиск: успех
+  // снимает карантин, отказ ставит заново.
+
+  function untilText(iso) {
+    const stamp = new Date(iso).getTime();
+    if (!isFinite(stamp)) return '';
+    const minutes = Math.round((stamp - Date.now()) / 60000);
+    if (minutes <= 90) return 'ещё ' + Math.max(1, minutes) + ' мин';
+    const hours = Math.round(minutes / 60);
+    if (hours <= 48) return 'ещё ' + hours + ' ч';
+    return 'до ' + new Date(iso).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+  }
+
+  function searchPill(provider) {
+    if (!provider.present) return '<span class="pill none">нет ключа</span>';
+    if (provider.broken) return '<span class="pill off">ключ сломан</span>';
+    if (provider.bannedUntil) return '<span class="pill warn">карантин ' + esc(untilText(provider.bannedUntil)) + '</span>';
+    return '<span class="pill own">работает</span>';
+  }
+
+  function searchRow(provider) {
+    const current = provider.current ? '<span class="pill env">текущий</span>' : '';
+    const why = provider.lastError
+      ? '<div class="keys-desc search-error">последний отказ: ' + esc(provider.lastError) + '</div>'
+      : '';
+    const fails = provider.fails > 0
+      ? '<span class="keys-apply">отказов подряд: ' + provider.fails + '</span>'
+      : '';
+    return (
+      '<div class="keys-row search-row">' +
+        '<div class="keys-main">' +
+          '<div class="keys-top"><code>' + esc(provider.keyName) + '</code>' + searchPill(provider) + current + fails + '</div>' +
+          '<div class="keys-label">' + esc(provider.label) + '</div>' +
+          why +
+        '</div>' +
+        '<div class="keys-actions">' +
+          '<button class="btn primary" data-edit-key="' + esc(provider.keyName) + '">' +
+            (provider.present ? 'Изменить' : 'Задать') +
+          '</button>' +
+          '<button class="btn" data-check="' + esc(provider.id) + '"' + (provider.present ? '' : ' disabled') + '>Проверить</button>' +
+        '</div>' +
+      '</div>'
+    );
+  }
+
+  function searchSection() {
+    const search = data && data.search;
+    if (!search || !search.providers || search.providers.length === 0) return '';
+    const broken = search.providers.filter((provider) => provider.broken).length;
+    const banned = search.providers.filter((provider) => provider.bannedUntil).length;
+    const configured = search.providers.filter((provider) => provider.present).length;
+    const summary = configured === 0
+      ? 'Ключей поиска нет — задай хотя бы один, иначе роутеру некуда идти.'
+      : !search.current
+        ? 'Текущий ещё не выбран: им станет первый по рейтингу при первом поиске.'
+        : broken > 0
+          ? 'Есть сломанный ключ — проверь его.'
+          : banned > 0
+            ? 'Часть провайдеров в карантине, роутер обходит их сам.'
+            : 'Карантинов нет: роутер работает штатно.';
+    return (
+      '<section class="keys-group search-health">' +
+        '<h2>ПОИСК: МАРШРУТИЗАЦИЯ<span>' + search.providers.length + '</span></h2>' +
+        '<p class="keys-intro small">Роутер пробует провайдеров по рейтингу и обходит упавших. ' +
+          '50 отказов подряд — «ключ сломан»: такой ключ стоит проверить. ' + esc(summary) + '</p>' +
+        search.providers.map(searchRow).join('') +
+      '</section>'
+    );
+  }
+
   function row(key) {
     const open = editing === key.name;
     const hint = key.present
@@ -119,7 +191,7 @@
       return;
     }
     const groups = data.groups || [];
-    box.innerHTML = groups
+    box.innerHTML = searchSection() + groups
       .map((group) => {
         const keys = data.keys.filter((key) => key.group === group.id);
         if (keys.length === 0) return '';
@@ -131,6 +203,43 @@
         );
       })
       .join('');
+
+    box.querySelectorAll('[data-edit-key]').forEach((button) => {
+      button.onclick = () => {
+        // Форма живёт в строке ключа ниже: открываем её и подводим к ней экран,
+        // чтобы «Задать» из сводки не выглядел кнопкой в пустоту.
+        editing = button.dataset.editKey;
+        pendingRemove = null;
+        renderList();
+        const input = el('value-' + editing);
+        if (input) input.focus();
+        const row = box.querySelector('[data-key="' + editing + '"]');
+        if (row && typeof row.scrollIntoView === 'function') {
+          row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      };
+    });
+
+    box.querySelectorAll('[data-check]').forEach((button) => {
+      button.onclick = async () => {
+        const id = button.dataset.check;
+        button.disabled = true;
+        button.textContent = 'Проверяю…';
+        try {
+          const result = await api('/panel/keys/api', {
+            method: 'POST',
+            body: JSON.stringify({ action: 'check', provider: id }),
+          });
+          data = result;
+          renderList();
+          showNotice(result.message || 'Проверено.', result.check && result.check.ok ? 'ok' : 'bad');
+        } catch (error) {
+          showNotice('Проверка не удалась: ' + error.message, 'bad');
+          button.disabled = false;
+          button.textContent = 'Проверить';
+        }
+      };
+    });
 
     box.querySelectorAll('[data-edit]').forEach((button) => {
       button.onclick = () => {

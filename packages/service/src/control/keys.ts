@@ -32,6 +32,8 @@ import { reloadRuntime, previewEnv } from '../runtime.ts';
 import { readJsonBody } from '../http/openai.ts';
 import { errorBody } from '../http/sse.ts';
 import { log } from '../log.ts';
+import { PROVIDERS } from '../search/providers.ts';
+import { asProviderId, checkProvider, clearProviderState, providerForKey, searchStatus } from '../search/panel.ts';
 
 export type KeysContext = {
   config: IcarusConfig;
@@ -91,6 +93,10 @@ function keysView(config: IcarusConfig, userId: string) {
     groups: Object.entries(GROUP_LABELS).map(([id, label]) => ({ id: id as KeyGroup, label })),
     keys,
     secrets: Object.keys(secrets).length,
+    // Поисковый роутер: кто текущий, кто в карантине и у кого «ключ сломан».
+    // Страница показывает это над списком ключей, чтобы человек сразу видел,
+    // что именно проверять.
+    search: searchStatus(config),
   };
 }
 
@@ -191,6 +197,16 @@ async function saveKey(
   }
 
   applyToUsers(ctx);
+  // Сменили ключ поисковика — старые карантины к нему больше не относятся:
+  // человек мог починить именно то, из-за чего роутер его выключил.
+  const provider = providerForKey(name);
+  if (provider !== null) {
+    try {
+      await clearProviderState(ctx.config, provider);
+    } catch (error) {
+      log.warn('ключ сохранён, но карантин поисковика не снялся', { key: name, error: String(error) });
+    }
+  }
   json(res, 200, {
     ...keysView(config, ctx.userId),
     reloaded,
@@ -244,8 +260,32 @@ export async function handleKeysApi(
   }
 
   const action = body.action;
-  if (action !== undefined && action !== 'reload' && action !== 'remove' && action !== 'set') {
-    json(res, 400, errorBody(`действие «${String(action)}» не понимаю: reload, set или remove`, 'invalid_request_error'));
+  if (action !== undefined && action !== 'reload' && action !== 'remove' && action !== 'set' && action !== 'check') {
+    json(
+      res,
+      400,
+      errorBody(`действие «${String(action)}» не понимаю: reload, set, remove или check`, 'invalid_request_error'),
+    );
+    return;
+  }
+
+  // «Проверить»: настоящий поиск через выбранного провайдера. Успех снимает
+  // карантин и флаг «ключ сломан», отказ — ставит заново. Это единственный
+  // способ проверить ключ, не дожидаясь, пока роутер сам до него дойдёт.
+  if (action === 'check') {
+    const provider = asProviderId(typeof body.provider === 'string' ? body.provider : '');
+    if (provider === null) {
+      json(res, 400, errorBody(`неизвестный провайдер «${String(body.provider)}»`, 'invalid_request_error'));
+      return;
+    }
+    const check = await checkProvider(ctx.config, provider);
+    json(res, 200, {
+      ...keysView(ctx.config, ctx.userId),
+      check,
+      message: check.ok
+        ? `${PROVIDERS[provider].label}: ответил за ${check.ms} мс, результатов ${check.results}`
+        : `${PROVIDERS[provider].label}: не ответил — ${check.error ?? 'без причины'}`,
+    });
     return;
   }
 

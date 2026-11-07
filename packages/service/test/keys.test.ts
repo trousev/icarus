@@ -21,6 +21,9 @@ import {
   syncEnvFile,
   type KeysStore,
 } from '../src/keys.ts';
+import { applyFailure } from '../src/search/router.ts';
+import { mutateRouterState, readRouterState, stateFile } from '../src/search/state.ts';
+import { SearchFailure } from '../src/search/types.ts';
 import { PANEL_USER_HEADER } from './fixtures.ts';
 
 const ADMIN = 'trousev';
@@ -282,5 +285,25 @@ test('страница «Ключи» и её скрипт компилирую�
     }
     assert.match(html, /id="keys-list"/);
     assert.match(html, /id="keys-add-button"/);
+  });
+});
+
+test('смена ключа поисковика снимает карантин: человек мог починить именно это', async () => {
+  await withServer(async (box) => {
+    const file = stateFile(box.config);
+    await mutateRouterState(file, (state) => {
+      applyFailure(state, 'serpapi', new SearchFailure('http', 'boom'), Date.now(), []);
+    });
+    assert.ok(readRouterState(file).providers.serpapi?.bannedUntil, 'карантин поставлен');
+
+    const response = await save(box, ADMIN, { name: 'SERPAPI_API_KEY', value: 'новый-ключ' });
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as { search?: { providers: Array<{ id: string; bannedUntil: string | null }> } };
+    assert.equal(body.search?.providers.find((provider) => provider.id === 'serpapi')?.bannedUntil, null);
+
+    const state = readRouterState(file);
+    assert.equal(state.providers.serpapi?.bannedUntil, null);
+    assert.equal(state.providers.serpapi?.broken, false);
+    assert.equal(box.config.secretEnv?.SERPAPI_API_KEY, 'новый-ключ', 'ключ доехал до окружения');
   });
 });
