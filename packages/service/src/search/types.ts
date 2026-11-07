@@ -27,9 +27,11 @@ export function isProviderId(value: string): value is ProviderId {
  * Почему провайдер отвалился. От этого зависит длина карантина:
  *  - credits — кончились кредиты/квота, сутки;
  *  - rate — превышен темп, пять минут;
+ *  - page — страница не отдалась (404, robots, пейволл): это свойство URL, а не
+ *    здоровье ключа, поэтому провайдера за такое не баним;
  *  - http/network/timeout — обычный сбой, пять минут.
  */
-export type FailureKind = 'credits' | 'rate' | 'http' | 'network' | 'timeout';
+export type FailureKind = 'credits' | 'rate' | 'page' | 'http' | 'network' | 'timeout';
 
 export class SearchFailure extends Error {
   readonly kind: FailureKind;
@@ -76,4 +78,16 @@ export type SearchProvider = {
   /** Переменные окружения, в которых ищется ключ (первая непустая побеждает). */
   keyNames: string[];
   search(query: string, limit: number, ctx: ProviderContext): Promise<SearchResult[]>;
+};
+
+/** Страница, вытащенная провайдером: текст уже обрезан по maxChars. */
+export type FetchResult = { url: string; title?: string; text: string };
+
+export type FetchContext = ProviderContext & { maxChars: number };
+
+export type FetchProvider = {
+  id: ProviderId;
+  label: string;
+  keyNames: string[];
+  fetch(url: string, ctx: FetchContext): Promise<FetchResult>;
 };

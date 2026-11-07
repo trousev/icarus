@@ -1,4 +1,4 @@
-// HTTP-вход роутера: GET/POST /search.
+// HTTP-вход роутера: GET/POST /search и /fetch.
 //
 // Изнутри docker-сети токен не нужен: контейнер pi ходит сюда напрямую. Снаружи
 // (если порт случайно оказался наружу) — только с обычным токеном сервиса.
@@ -9,6 +9,8 @@ import type { IcarusConfig } from '../config.ts';
 import { errorBody } from '../http/sse.ts';
 import { readJsonBody } from '../http/openai.ts';
 import { log } from '../log.ts';
+import { FETCH_MAX_CHARS } from './fetch-providers.ts';
+import { routeFetch } from './fetch-router.ts';
 import { routeSearch } from './router.ts';
 
 export type SearchHttpOptions = {
@@ -18,6 +20,7 @@ export type SearchHttpOptions = {
 
 /** Пределы как у инструмента web_search: больше десяти ссылок агенту не нужно. */
 const MAX_LIMIT = 10;
+const MAX_FETCH_CHARS = 50_000;
 
 function json(res: ServerResponse, status: number, payload: unknown): void {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
@@ -65,6 +68,53 @@ function clampLimit(raw: unknown): number {
   return Math.min(Math.max(Math.trunc(value), 1), MAX_LIMIT);
 }
 
+function clampChars(raw: unknown): number {
+  const value = Number(raw ?? FETCH_MAX_CHARS);
+  if (!Number.isFinite(value)) return FETCH_MAX_CHARS;
+  return Math.min(Math.max(Math.trunc(value), 1_000), MAX_FETCH_CHARS);
+}
+
+/** Вход: пусто — пускать, строка — причина отказа. */
+function authorize(req: IncomingMessage, config: IcarusConfig): string | null {
+  const token = bearer(req);
+  if (token !== '') return token === config.apiKey ? null : 'неверный токен';
+  return isInternalAddress(req.socket.remoteAddress) ? null : 'нужен токен: запрос пришёл не из внутренней сети';
+}
+
+/**
+ * Адрес, который нельзя отдавать провайдеру: петля, локалка, метаданные облака.
+ *
+ * Провайдеры качают страницу у себя, поэтому до нашей сети им не достать, но
+ * запрос «прочитай http://192.168.1.1» всё равно выглядит как ошибка, а не как
+ * работа. Заодно это защита, если когда-нибудь появится локальный fallback.
+ */
+export function isBlockedHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (host === '') return true;
+  if (host === 'localhost' || host.endsWith('.localhost')) return true;
+  if (host.endsWith('.local') || host.endsWith('.internal') || host.endsWith('.home.arpa')) return true;
+  if (host === 'metadata' || host === 'metadata.google.internal' || host === 'instance-data') return true;
+  if (host === '0.0.0.0' || host === '::') return true;
+  return isInternalAddress(host);
+}
+
+/** Проверить URL до похода к провайдеру: только http(s) и не внутрь сети. */
+export function targetUrl(raw: string): { url: string } | { error: string } {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return { error: 'нужен обычный http(s)-адрес' };
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return { error: 'умею только http и https' };
+  }
+  if (isBlockedHost(parsed.hostname)) {
+    return { error: 'внутренние адреса не открываем' };
+  }
+  return { url: parsed.toString() };
+}
+
 async function readRequest(req: IncomingMessage, url: URL): Promise<{ query: string; limit: unknown }> {
   const fromUrl = url.searchParams.get('limit');
   if (req.method === 'GET') {
@@ -98,14 +148,9 @@ export async function handleSearch(
   }
 
   // Токен присылают снаружи; изнутри сети он не нужен вовсе (см. isInternalAddress).
-  const token = bearer(req);
-  if (token !== '') {
-    if (token !== config.apiKey) {
-      json(res, 401, errorBody('неверный токен', 'authentication_error'));
-      return;
-    }
-  } else if (!isInternalAddress(req.socket.remoteAddress)) {
-    json(res, 401, errorBody('нужен токен: запрос пришёл не из внутренней сети', 'authentication_error'));
+  const denied = authorize(req, config);
+  if (denied !== null) {
+    json(res, 401, errorBody(denied, 'authentication_error'));
     return;
   }
 
@@ -155,5 +200,104 @@ export async function handleSearch(
   } catch (error) {
     log.error('поиск упал целиком', { error: String(error) });
     json(res, 500, errorBody('поиск сломался', 'server_error'));
+  }
+}
+
+async function readFetchRequest(req: IncomingMessage, url: URL): Promise<{ url: string; maxChars: number }> {
+  const fromUrl = url.searchParams.get('maxChars');
+  if (req.method === 'GET') {
+    return { url: (url.searchParams.get('url') ?? '').trim(), maxChars: clampChars(fromUrl) };
+  }
+  const body = (await readJsonBody(req)) as Record<string, unknown>;
+  const value = body.url;
+  return {
+    url: typeof value === 'string' ? value.trim() : '',
+    maxChars: clampChars(body.maxChars ?? fromUrl),
+  };
+}
+
+/**
+ * POST /fetch {url, maxChars?} или GET /fetch?url=...
+ *
+ * 200 — страница пришла; 400 — не тот адрес; 401 — чужой токен снаружи;
+ * 502 — все провайдеры отказали; 503 — нет ключей или все в карантине.
+ */
+export async function handleFetch(
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL,
+  config: IcarusConfig,
+  options: SearchHttpOptions = {},
+): Promise<void> {
+  if (req.method !== 'GET' && req.method !== 'POST') {
+    json(res, 405, errorBody(`извлечение не умеет ${req.method}: нужен GET или POST`, 'invalid_request_error'));
+    return;
+  }
+
+  const denied = authorize(req, config);
+  if (denied !== null) {
+    json(res, 401, errorBody(denied, 'authentication_error'));
+    return;
+  }
+
+  let requested: string;
+  let maxChars: number;
+  try {
+    const parsed = await readFetchRequest(req, url);
+    requested = parsed.url;
+    maxChars = parsed.maxChars;
+  } catch (error) {
+    json(res, 400, errorBody(`не разобрал запрос: ${error instanceof Error ? error.message : String(error)}`, 'invalid_request_error'));
+    return;
+  }
+  if (requested === '') {
+    json(res, 400, errorBody('пустой адрес: нужен url (GET) или url в теле (POST)', 'invalid_request_error'));
+    return;
+  }
+  const target = targetUrl(requested);
+  if ('error' in target) {
+    json(res, 400, errorBody(target.error, 'invalid_request_error'));
+    return;
+  }
+
+  try {
+    const result = await routeFetch(config, target.url, {
+      fetch: options.fetch,
+      now: options.now,
+      maxChars,
+    });
+    if (result.ok) {
+      res.setHeader('x-fetch-provider', result.provider);
+      json(res, 200, {
+        url: target.url,
+        finalUrl: result.result.url || target.url,
+        ...(result.result.title ? { title: result.result.title } : {}),
+        provider: result.provider,
+        current: result.current,
+        text: result.result.text,
+        ...(result.tried.length > 0 ? { tried: result.tried } : {}),
+      });
+      return;
+    }
+
+    const message =
+      result.reason === 'no-keys'
+        ? 'извлечение страниц не настроено: нет ключа ни у Exa, Tavily, Linkup или You.com'
+        : result.reason === 'all-banned'
+          ? 'все провайдеры извлечения в карантине'
+          : 'ни один провайдер не смог прочитать страницу';
+    const status = result.reason === 'all-failed' ? 502 : 503;
+    if (result.retryAt) {
+      res.setHeader('retry-after', String(Math.max(1, Math.ceil((Date.parse(result.retryAt) - Date.now()) / 1000))));
+    }
+    json(res, status, {
+      ...errorBody(message, result.reason === 'all-failed' ? 'server_error' : 'unavailable'),
+      tried: result.tried,
+      current: result.current,
+      retryAt: result.retryAt,
+    });
+  } catch (error) {
+    log.error('извлечение страницы упало целиком', { error: String(error) });
+    json(res, 500, errorBody('извлечение сломалось', 'server_error'));
   }
 }

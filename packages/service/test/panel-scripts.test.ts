@@ -137,6 +137,15 @@ test('страница ключей рисует маршрутизацию по
         { id: 'you', label: 'You.com', keyName: 'YOU_API_KEY', present: false, current: false,
           bannedUntil: null, banReason: null, broken: true, fails: 60, lastError: null, lastErrorAt: null },
       ],
+      fetch: {
+        current: 'exa',
+        providers: [
+          { id: 'exa', label: 'Exa Contents', keyName: 'EXA_API_KEY', present: true, current: true,
+            bannedUntil: null, banReason: null, broken: false, fails: 0, lastError: null, lastErrorAt: null },
+          { id: 'tavily', label: 'Tavily Extract', keyName: 'TAVILY_API_KEY', present: false, current: false,
+            bannedUntil: null, banReason: null, broken: false, fails: 0, lastError: null, lastErrorAt: null },
+        ],
+      },
     },
   };
   window.fetch = async () => ({ ok: true, headers: { get: () => 'application/json' }, json: async () => payload });
@@ -158,6 +167,8 @@ test('страница ключей рисует маршрутизацию по
   assert.match(content, /ключ сломан/);
   assert.match(content, /data-check="serpapi"/);
   assert.match(content, /data-check="brave"/);
+  assert.match(content, /ИЗВЛЕЧЕНИЕ/, 'блок извлечения страниц нарисован');
+  assert.match(content, /data-check="exa" data-capability="fetch"/, 'проверка извлечения знает свою возможность');
   assert.match(content, /data-edit-key="SERPAPI_API_KEY"/, 'из сводки можно задать ключ');
   assert.match(content, /data-edit-key="YOU_API_KEY">Задать/, 'у отсутствующего ключа кнопка «Задать»');
 

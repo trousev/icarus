@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   htmlToText,
   parseBrave,
+  parseFetchRouter,
   parseRouter,
   parseRouterMeta,
   parseSearxng,
@@ -97,8 +98,7 @@ test('выдача сервисного роутера разбирается к
   assert.equal(parseRouter(payload, 1).length, 1);
 });
 
-test('ответ роутера говорит, кто ответил и кого обошли', () => {
-  assert.deepEqual(parseRouterMeta({ provider: 'brave', results: [] }), { upstream: 'brave' });
+test('ответ роутера говорит, кто ответил и кого обошли', () => {  assert.deepEqual(parseRouterMeta({ provider: 'brave', results: [] }), { upstream: 'brave' });
   assert.deepEqual(
     parseRouterMeta({
       provider: 'tavily',
@@ -119,5 +119,23 @@ test('ответ роутера говорит, кто ответил и ког�
   assert.deepEqual(parseRouterMeta({ results: [] }), {});
   assert.deepEqual(parseRouterMeta(null), {});
   assert.deepEqual(parseRouterMeta({ provider: 42, tried: 'нет' }), {});
+});
+
+test('ответ /fetch разбирается: текст, заголовок и кто прочитал', () => {
+  assert.deepEqual(parseFetchRouter({ text: 'тело страницы', title: 'Заголовок', provider: 'exa' }), {
+    text: 'тело страницы',
+    title: 'Заголовок',
+    upstream: 'exa',
+  });
+  assert.deepEqual(
+    parseFetchRouter({
+      text: 'тело',
+      provider: 'tavily',
+      tried: [{ provider: 'exa', reason: 'HTTP 404' }],
+    }),
+    { text: 'тело', upstream: 'tavily', tried: [{ provider: 'exa', reason: 'HTTP 404' }] },
+  );
+  assert.deepEqual(parseFetchRouter({}), { text: '' });
+  assert.deepEqual(parseFetchRouter(null), { text: '' });
 });
 

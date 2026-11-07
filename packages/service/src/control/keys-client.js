@@ -81,7 +81,7 @@
     return '<span class="pill own">работает</span>';
   }
 
-  function searchRow(provider) {
+  function providerRow(provider, capability) {
     const current = provider.current ? '<span class="pill env">текущий</span>' : '';
     const why = provider.lastError
       ? '<div class="keys-desc search-error">последний отказ: ' + esc(provider.lastError) + '</div>'
@@ -100,34 +100,63 @@
           '<button class="btn primary" data-edit-key="' + esc(provider.keyName) + '">' +
             (provider.present ? 'Изменить' : 'Задать') +
           '</button>' +
-          '<button class="btn" data-check="' + esc(provider.id) + '"' + (provider.present ? '' : ' disabled') + '>Проверить</button>' +
+          '<button class="btn" data-check="' + esc(provider.id) + '" data-capability="' + esc(capability) + '"' +
+            (provider.present ? '' : ' disabled') + '>Проверить</button>' +
         '</div>' +
       '</div>'
     );
   }
 
-  function searchSection() {
-    const search = data && data.search;
-    if (!search || !search.providers || search.providers.length === 0) return '';
-    const broken = search.providers.filter((provider) => provider.broken).length;
-    const banned = search.providers.filter((provider) => provider.bannedUntil).length;
-    const configured = search.providers.filter((provider) => provider.present).length;
+  /**
+   * Сводка роутера: заголовок, вступление и строки провайдеров.
+   * Одна и та же разметка для поиска и для извлечения страниц: отличаются
+   * только набор провайдеров, рейтинг и текст вступления.
+   */
+  function routingSection(title, intro, status, capability) {
+    if (!status || !status.providers || status.providers.length === 0) return '';
+    const broken = status.providers.filter((provider) => provider.broken).length;
+    const banned = status.providers.filter((provider) => provider.bannedUntil).length;
+    const configured = status.providers.filter((provider) => provider.present).length;
+    const what = capability === 'fetch' ? 'извлечении' : 'поиске';
     const summary = configured === 0
-      ? 'Ключей поиска нет — задай хотя бы один, иначе роутеру некуда идти.'
-      : !search.current
-        ? 'Текущий ещё не выбран: им станет первый по рейтингу при первом поиске.'
+      ? capability === 'fetch'
+        ? 'Ключей для извлечения нет — подойдёт любой из Exa, Tavily, Linkup и You.com.'
+        : 'Ключей поиска нет — задай хотя бы один, иначе роутеру некуда идти.'
+      : !status.current
+        ? 'Текущий ещё не выбран: им станет первый по рейтингу при первом ' + what + '.'
         : broken > 0
           ? 'Есть сломанный ключ — проверь его.'
           : banned > 0
             ? 'Часть провайдеров в карантине, роутер обходит их сам.'
-            : 'Карантинов нет: роутер работает штатно.';
+            : 'Карантинов нет: ' + what + ' роутер работает штатно.';
     return (
       '<section class="keys-group search-health">' +
-        '<h2>ПОИСК: МАРШРУТИЗАЦИЯ<span>' + search.providers.length + '</span></h2>' +
-        '<p class="keys-intro small">Роутер пробует провайдеров по рейтингу и обходит упавших. ' +
-          '50 отказов подряд — «ключ сломан»: такой ключ стоит проверить. ' + esc(summary) + '</p>' +
-        search.providers.map(searchRow).join('') +
+        '<h2>' + esc(title) + '<span>' + status.providers.length + '</span></h2>' +
+        '<p class="keys-intro small">' + esc(intro) + ' ' + esc(summary) + '</p>' +
+        status.providers.map((provider) => providerRow(provider, capability)).join('') +
       '</section>'
+    );
+  }
+
+  function searchSection() {
+    const search = data && data.search;
+    if (!search) return '';
+    return routingSection(
+      'ПОИСК: МАРШРУТИЗАЦИЯ',
+      'Роутер пробует провайдеров по рейтингу и обходит упавших. 50 отказов подряд — «ключ сломан».',
+      search,
+      'search',
+    );
+  }
+
+  function fetchSection() {
+    const fetchStatus = data && data.search && data.search.fetch;
+    if (!fetchStatus) return '';
+    return routingSection(
+      'СТРАНИЦЫ: ИЗВЛЕЧЕНИЕ',
+      'Роутер тянет страницы через Exa, Tavily, Linkup и You.com; Firecrawl и SerpApi сюда не входят.',
+      fetchStatus,
+      'fetch',
     );
   }
 
@@ -191,7 +220,7 @@
       return;
     }
     const groups = data.groups || [];
-    box.innerHTML = searchSection() + groups
+    box.innerHTML = searchSection() + fetchSection() + groups
       .map((group) => {
         const keys = data.keys.filter((key) => key.group === group.id);
         if (keys.length === 0) return '';
@@ -223,12 +252,13 @@
     box.querySelectorAll('[data-check]').forEach((button) => {
       button.onclick = async () => {
         const id = button.dataset.check;
+        const capability = button.dataset.capability || 'search';
         button.disabled = true;
         button.textContent = 'Проверяю…';
         try {
           const result = await api('/panel/keys/api', {
             method: 'POST',
-            body: JSON.stringify({ action: 'check', provider: id }),
+            body: JSON.stringify({ action: 'check', provider: id, capability }),
           });
           data = result;
           renderList();

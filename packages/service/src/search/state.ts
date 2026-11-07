@@ -10,6 +10,9 @@ import { isProviderId, type ProviderId } from './types.ts';
 
 export type BanReason = 'error' | 'credits' | 'broken';
 
+/** Две возможности роутера: поиск и извлечение страницы. Баны и «текущий» у них свои. */
+export type Capability = 'search' | 'fetch';
+
 export type ProviderState = {
   /** Сколько отказов подряд: успех обнуляет. */
   fails: number;
@@ -23,11 +26,22 @@ export type ProviderState = {
   brokenAt: string | null;
 };
 
-export type RouterState = {
-  version: 1;
-  /** Текущий провайдер: он пробуется первым. Меняется только при бане. */
+/** Состояние одной возможности: свой текущий и свои карантины. */
+export type ScopeState = {
   current: ProviderId | null;
   providers: Record<string, ProviderState>;
+};
+
+export type RouterState = {
+  version: 1;
+  /**
+   * Поиск. Верхние поля оставлены именно поиску, чтобы файлы состояния,
+   * записанные до появления /fetch, читались без миграции.
+   */
+  current: ProviderId | null;
+  providers: Record<string, ProviderState>;
+  /** Извлечение страниц: свой «текущий», он может не совпадать с поисковым. */
+  fetch?: ScopeState;
   updatedAt: string;
 };
 
@@ -81,6 +95,20 @@ function asProviderState(value: unknown): ProviderState | null {
   };
 }
 
+function readProviders(value: unknown): Record<string, ProviderState> {
+  const providers: Record<string, ProviderState> = {};
+  for (const [id, raw] of Object.entries(asRecord(value) ?? {})) {
+    if (!isProviderId(id)) continue;
+    const state = asProviderState(raw);
+    if (state) providers[id] = state;
+  }
+  return providers;
+}
+
+function readCurrent(value: unknown): ProviderId | null {
+  return typeof value === 'string' && isProviderId(value) ? value : null;
+}
+
 /**
  * Прочитать состояние. Битый файл — не повод падать: роутер начнёт с чистого
  * листа, а не откажет в поиске из-за одной испорченной строки.
@@ -101,17 +129,14 @@ export function readRouterState(file: string): RouterState {
   const root = asRecord(parsed);
   if (!root) return emptyRouterState();
 
-  const providers: Record<string, ProviderState> = {};
-  for (const [id, raw] of Object.entries(asRecord(root.providers) ?? {})) {
-    if (!isProviderId(id)) continue;
-    const state = asProviderState(raw);
-    if (state) providers[id] = state;
-  }
-  const currentRaw = typeof root.current === 'string' ? root.current : null;
+  const fetchRaw = asRecord(root.fetch);
   return {
     version: 1,
-    current: currentRaw !== null && isProviderId(currentRaw) ? currentRaw : null,
-    providers,
+    current: readCurrent(root.current),
+    providers: readProviders(root.providers),
+    ...(fetchRaw
+      ? { fetch: { current: readCurrent(fetchRaw.current), providers: readProviders(fetchRaw.providers) } }
+      : {}),
     updatedAt: asIsoOrNull(root.updatedAt) ?? new Date().toISOString(),
   };
 }
@@ -152,12 +177,33 @@ export function mutateRouterState(file: string, change: (state: RouterState) => 
   });
 }
 
+/** Лениво создать состояние fetch: старый файл его не содержит. */
+export function fetchState(state: RouterState): ScopeState {
+  state.fetch ??= { current: null, providers: {} };
+  return state.fetch;
+}
+
+/** Карта провайдеров нужной возможности. */
+export function scopeProviders(state: RouterState, scope: Capability = 'search'): Record<string, ProviderState> {
+  return scope === 'fetch' ? fetchState(state).providers : state.providers;
+}
+
+export function scopeCurrent(state: RouterState, scope: Capability = 'search'): ProviderId | null {
+  return scope === 'fetch' ? (state.fetch?.current ?? null) : state.current;
+}
+
+export function setScopeCurrent(state: RouterState, scope: Capability, current: ProviderId | null): void {
+  if (scope === 'fetch') fetchState(state).current = current;
+  else state.current = current;
+}
+
 /** Состояние провайдера в карте; отсутствующее — чистый лист. */
-export function providerState(state: RouterState, id: ProviderId): ProviderState {
-  const existing = state.providers[id];
+export function providerState(state: RouterState, id: ProviderId, scope: Capability = 'search'): ProviderState {
+  const providers = scopeProviders(state, scope);
+  const existing = providers[id];
   if (existing) return existing;
   const fresh = emptyProviderState();
-  state.providers[id] = fresh;
+  providers[id] = fresh;
   return fresh;
 }
 
@@ -167,10 +213,16 @@ export function isBanned(provider: ProviderState, now: number): boolean {
 }
 
 /** Ближайший момент, когда хоть кто-то выйдет из карантина: для ответа 503. */
-export function soonestUnban(state: RouterState, ids: Iterable<ProviderId>, now: number): string | null {
+export function soonestUnban(
+  state: RouterState,
+  ids: Iterable<ProviderId>,
+  now: number,
+  scope: Capability = 'search',
+): string | null {
+  const providers = scopeProviders(state, scope);
   let soonest: number | null = null;
   for (const id of ids) {
-    const provider = state.providers[id];
+    const provider = providers[id];
     if (!provider?.bannedUntil) continue;
     const stamp = Date.parse(provider.bannedUntil);
     if (Number.isNaN(stamp) || stamp <= now) continue;
