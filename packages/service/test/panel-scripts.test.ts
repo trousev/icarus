@@ -21,7 +21,6 @@ const SESSION: PanelSession = {
     { id: 'memory', label: 'Память' },
     { id: 'skills', label: 'Скиллы' },
     { id: 'mcp', label: 'MCP' },
-    { id: 'maple', label: 'Математика' },
     { id: 'profile', label: 'Пользователь' },
   ],
   scopes: { personal: 'memory', shared: 'memory' },

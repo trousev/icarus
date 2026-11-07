@@ -14,6 +14,7 @@ import { prepareUser, renderAgentsMd, renderMcpJson } from '../src/workspace.ts'
 import {
   createServer,
   deleteServer,
+  editorOf,
   effectiveServers,
   ensureOAuthProxyKeys,
   listVisible,
@@ -24,6 +25,7 @@ import {
   setShared,
   slugify,
   updateServer,
+  viewOf,
 } from '../src/mcp/registry.ts';
 import { makeConfig, probe } from './fixtures.ts';
 
@@ -224,24 +226,40 @@ test('удаление убирает сервер у всех, а не толь
 });
 
 test('сервер из config.yaml можно выключить себе и не трогать общий конфиг', () => {
-  const config = configWith({ mcp: { maple: { command: 'node', args: ['/opt/maple.mjs'], lifecycle: 'eager' } } });
-  assert.deepEqual(Object.keys(effectiveServers(config, readStore(config), 'probe').servers), ['maple']);
+  const config = configWith({ mcp: { echo: { command: 'node', args: ['/opt/echo.mjs'], lifecycle: 'eager' } } });
+  assert.deepEqual(Object.keys(effectiveServers(config, readStore(config), 'probe').servers), ['echo']);
 
-  setEnabled(config, 'probe', 'maple', false);
+  setEnabled(config, 'probe', 'echo', false);
   assert.deepEqual(Object.keys(effectiveServers(config, readStore(config), 'probe').servers), []);
-  assert.deepEqual(Object.keys(effectiveServers(config, readStore(config), 'probe2').servers), ['maple'], 'у второго не тронуто');
-  assert.ok(config.mcp.maple, 'config.yaml остался как был');
+  assert.deepEqual(Object.keys(effectiveServers(config, readStore(config), 'probe2').servers), ['echo'], 'у второго не тронуто');
+  assert.ok(config.mcp.echo, 'config.yaml остался как был');
 });
 
-test('выключенный себе Maple не обещает модели математику', () => {
-  const config = configWith({ mcp: { maple: { command: 'node', args: ['/opt/maple.mjs'] } } });
-  setEnabled(config, 'probe', 'maple', false);
-  prepareUser(config, probe());
-  const paths = userPaths(config, probe());
-  const agents = fs.readFileSync(paths.agentsMd, 'utf8');
-  assert.doesNotMatch(agents, /Если нужна математика/, 'инструкции про Maple нет');
-  assert.doesNotMatch(agents, /читай и считай через Maple/);
-  assert.equal(fs.existsSync(paths.mapleMd), true, 'файл остаётся: он может быть источником bind-mount, но модель на него не ссылается');
+test('служебный сервер (hidden) не виден в панели и всегда включён', () => {
+  const config = configWith({
+    mcp: { maple: { command: 'node', args: ['/opt/maple.mjs'], lifecycle: 'eager', hidden: true } },
+  });
+  const store = readStore(config);
+  assert.deepEqual(listVisible(config, store, 'probe').servers, [], 'в панели его нет');
+  assert.deepEqual(Object.keys(effectiveServers(config, store, 'probe').servers), ['maple'], 'а в mcp.json — есть');
+  assert.equal(viewOf(config, store, 'probe', 'maple'), null, 'карточки для панели тоже нет');
+  assert.equal(editorOf(config, 'probe', 'maple'), null, 'и редактор его не отдаёт');
+  assert.throws(() => setEnabled(config, 'probe', 'maple', false), /встроен/, 'выключить себе нельзя');
+
+  const json = mcpJson(config);
+  assert.deepEqual(Object.keys(json.mcpServers), ['maple'], 'в mcp.json он есть у каждого');
+  assert.equal(json.mcpServers.maple?.hidden, undefined, 'служебная пометка в pi не уезжает');
+});
+
+test('старая инструкция MAPLE.md убирается при сборке окружения', () => {
+  const config = configWith();
+  const paths = userPaths(config, probe('probe'));
+  fs.mkdirSync(paths.icarus, { recursive: true });
+  fs.writeFileSync(path.join(paths.icarus, 'MAPLE.md'), '# старая инструкция про Maple\n');
+
+  prepareUser(config, probe('probe'));
+
+  assert.equal(fs.existsSync(path.join(paths.icarus, 'MAPLE.md')), false, 'правила живут в описаниях инструментов');
 });
 
 test('mcp.json и AGENTS.md собираются под человека: выключенное не просачивается', () => {

@@ -469,6 +469,15 @@ function isGlobal(config: IcarusConfig, id: string): boolean {
   return Object.hasOwn(config.mcp ?? {}, id);
 }
 
+/**
+ * Служебный сервер: он объявлен в config.yaml с пометкой hidden. В панели его нет,
+ * выключить себе его нельзя — это встроенное умение, а не чужой инструмент.
+ * В mcp.json человека он при этом уезжает всегда.
+ */
+export function isHidden(config: IcarusConfig, id: string): boolean {
+  return config.mcp?.[id]?.hidden === true;
+}
+
 function enabledFor(store: McpStore, userId: string, id: string, fallback: boolean): boolean {
   return store.prefs[userId]?.[id] ?? fallback;
 }
@@ -546,7 +555,7 @@ export function viewOf(
 ): McpView | null {
   if (isGlobal(config, id)) {
     const server = config.mcp[id];
-    if (!server) return null;
+    if (!server || isHidden(config, id)) return null;
     const enabled = enabledFor(store, userId, id, true);
     return {
       id,
@@ -664,7 +673,8 @@ export function effectiveServers(
   const servers: Record<string, McpServerConfig> = {};
   const skipped: string[] = [];
   for (const [id, server] of Object.entries(config.mcp ?? {})) {
-    if (!enabledFor(store, userId, id, true)) {
+    // Служебный сервер выключить нельзя: prefs к нему не применяются вовсе.
+    if (server.hidden !== true && !enabledFor(store, userId, id, true)) {
       skipped.push(id);
       continue;
     }
@@ -904,6 +914,7 @@ export function setShared(config: IcarusConfig, userId: string, id: string, shar
 }
 
 export function setEnabled(config: IcarusConfig, userId: string, id: string, enabled: boolean): void {
+  if (isHidden(config, id)) throw new McpError('служебный MCP встроен: его нельзя выключить', 400);
   const store = readStore(config);
   if (!isVisible(config, store, userId, id)) throw new McpError('такого MCP нет или он не расшарен', 404);
   store.prefs[userId] = { ...(store.prefs[userId] ?? {}), [id]: enabled };
@@ -959,6 +970,8 @@ export function editorOf(
   id: string,
 ): { server: UserMcpServer; credentialHeaders: string[]; credentialEnv: string[]; oauth: McpOAuthCredentials | null; global: boolean } | null {
   if (isGlobal(config, id)) {
+    // Служебный сервер в панели не редактируется и не показывается — как и в списке.
+    if (isHidden(config, id)) return null;
     return { server: {
       id,
       name: id,

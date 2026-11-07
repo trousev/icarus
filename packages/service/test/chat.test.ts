@@ -322,23 +322,30 @@ test('шаги называют то, чем Икар занимался, а н�
   assert.equal(traceDetail('read', { path: 'memory/preferences.md' }), 'memory/preferences.md');
 });
 
-test('картинка из workspace отдаётся только из incoming и maple', () => {
+test('картинка отдаётся из вложений и рабочих папок, и только картинка', () => {
   const { config, user } = fixture();
   const paths = userPaths(config, user);
+  const plots = path.join(paths.workspaces, 'talk', '.maple', 'plots');
   fs.mkdirSync(paths.incoming, { recursive: true });
-  fs.mkdirSync(paths.maple, { recursive: true });
+  fs.mkdirSync(plots, { recursive: true });
   fs.writeFileSync(path.join(paths.incoming, 'kotic.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
-  fs.writeFileSync(path.join(paths.maple, 'plot.gif'), Buffer.from('GIF89a'));
+  fs.writeFileSync(path.join(plots, 'plot.gif'), Buffer.from('GIF89a'));
+  fs.writeFileSync(path.join(plots, 'plot 2.gif'), Buffer.from('GIF89a'));
 
   const incoming = chatImageFile(config, user, '/workspaces/.icarus/incoming/kotic.png');
   assert.equal(incoming?.type, 'image/png');
   assert.match(incoming?.file ?? '', /kotic\.png$/);
 
-  const maple = chatImageFile(config, user, '/workspaces/.icarus/maple/plot.gif');
-  assert.equal(maple?.type, 'image/gif');
+  // График из workspace: MCP кладёт файл рядом с работой человека, а путь отдаёт
+  // в markdown. Абсолютный контейнерный путь и закодированные пробелы — оба.
+  const plot = chatImageFile(config, user, '/workspaces/talk/.maple/plots/plot.gif');
+  assert.equal(plot?.type, 'image/gif');
+  const spaced = chatImageFile(config, user, '/workspaces/talk/.maple/plots/plot%202.gif');
+  assert.equal(spaced?.type, 'image/gif');
 
   assert.equal(chatImageFile(config, user, '/workspaces/.icarus/incoming/../../etc/passwd.png'), null);
   assert.equal(chatImageFile(config, user, '/workspaces/.icarus/icarus.md'), null);
+  assert.equal(chatImageFile(config, user, '/workspaces/talk/.maple/plots/plot.mw'), null, 'не картинка — не отдаём');
   assert.equal(chatImageFile(config, user, '/workspaces/.icarus/incoming/нет-такой.png'), null);
 });
 

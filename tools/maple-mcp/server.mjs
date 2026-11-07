@@ -18,7 +18,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { StringDecoder } from 'node:string_decoder';
 import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 // ─────────────────────────── конфигурация ───────────────────────────
@@ -72,25 +72,16 @@ function resolveUserPath(p) {
 // MAPLE_IDLE_SECONDS простоя. Чтобы «продолжить в другом чате», мы пишем
 // журнал выполненного кода и при первом обращении к сессии проигрываем его
 // в свежее ядро — состояние (переменные, функции, assume) возвращается.
+//
+// Своего хранилища у сервера нет: всё живёт в рабочей папке разговора (pi
+// запускает мост с cwd = workspace), в скрытом каталоге `.maple`. Так файлы
+// расчётов лежат там, где человек и так работает, и не требуют отдельного
+// маунта, раздела панели и миграций.
 
-const SESSION_DIR = (() => {
-  if (process.env.MAPLE_SESSION_DIR) return process.env.MAPLE_SESSION_DIR;
-  // Икар задаёт MAPLE_SESSION_DIR явно (/workspace/.icarus/maple) — там журналы лежат
-  // рядом с памятью и переживают пересборку контейнера. Старый путь в pi-agent
-  // остаётся запасным: по нему лежат расчёты, сделанные до переезда.
-  const home = process.env.HOME || homedir();
-  const piAgent = path.join(home, '.pi', 'agent');
-  if (existsSync(piAgent)) return path.join(piAgent, 'maple-mcp');
-  return path.join(MAPLE_ROOT, '.maple-mcp');
-})();
+const SESSION_DIR = process.env.MAPLE_SESSION_DIR ?? path.join(MAPLE_ROOT, '.maple');
 
+/** Графики кладём рядом с журналами: их отдаёт чат, когда модель вставит путь в ответ. */
 const PLOT_DIR = process.env.MAPLE_PLOT_DIR ?? path.join(SESSION_DIR, 'plots');
-/**
- * Базовый URL, по которому график видно из браузера (его отдаёт icarus:
- * GET /maple/<файл>). Если задан, инструмент возвращает готовую markdown-строку,
- * и картинка доезжает до чата, хотя сам мост pi изображения не пропускает.
- */
-const PLOT_URL_BASE = (process.env.MAPLE_PLOT_URL_BASE ?? '').replace(/\/+$/, '');
 
 const safeName = (name) => String(name).replace(/[^\w.-]+/g, '_').slice(0, 64) || 'default';
 const journalPath = (name) => path.join(SESSION_DIR, `${safeName(name)}.jsonl`);
@@ -932,13 +923,14 @@ async function toolPlot({ expression, format = 'gif', session }) {
   if (!existsSync(file)) return fail(`не удалось экспортировать график (формат ${ext}).\n${res.output}`);
   const data = await readFile(file);
   const mime = ext === 'jpg' ? 'jpeg' : ext;
-  const url = PLOT_URL_BASE ? `${PLOT_URL_BASE}/${name}` : null;
-  const hint = url
-    ? `график ${ext}, ${data.length} байт.\n` +
-      `Вставь следующую строку в ответ человеку ДОСЛОВНО — тогда картинка покажется в чате:\n` +
-      `![график](${url})`
-    : `график ${ext}, ${data.length} байт, файл: ${file}\n` +
-      `(этот мост изображения не пропускает — назови человеку путь к файлу)`;
+  // Путь абсолютный и лежит в workspace: чат сам отдаст его браузеру, когда модель
+  // вставит markdown-строку в ответ. encodeURI — чтобы пробелы в имени папки не
+  // разорвали разметку; сам чат путь раскодирует.
+  const url = encodeURI(file);
+  const hint =
+    `график ${ext}, ${data.length} байт, файл: ${file}\n` +
+    `Вставь следующую строку в ответ человеку ДОСЛОВНО — тогда картинка покажется в чате:\n` +
+    `![график](${url})`;
   return {
     content: [
       { type: 'text', text: hint },
@@ -1051,9 +1043,11 @@ const TOOLS = [
   {
     name: 'maple_evaluate_code',
     description:
-      'Выполнить код на языке Maple в долгоживущей сессии и вернуть текстовый вывод. ' +
-      'Состояние (переменные, функции, assume) сохраняется между вызовами, а после простоя или нового чата ' +
-      'автоматически восстанавливается из журнала сессии. Синтаксис проверяется заранее; ошибки возвращаются как isError.',
+      'Единственный способ считать: любой математический счёт — только здесь. Не решай в голове, не угадывай ' +
+      'и не подменяй задачу более простой. Выполняет код Maple в долгоживущей сессии; состояние (переменные, ' +
+      'функции, assume) сохраняется между вызовами и восстанавливается из журнала после простоя и в новом чате. ' +
+      '«;» печатает результат, «:» — нет. Если Maple вернул выражение без изменений (int как есть) — это «не нашёл»: ' +
+      'так и скажи, не выдавай за ответ и не додумывай «не существует».',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1078,7 +1072,9 @@ const TOOLS = [
   },
   {
     name: 'maple_to_latex',
-    description: 'Преобразовать выражение Maple в LaTeX (latex(..., output=string)).',
+    description:
+      'Выражение Maple → LaTeX (latex(..., output=string)). Формулы человеку — всегда в LaTeX: $…$ в строке, ' +
+      '$$…$$ отдельной строкой. Результат вставляй дословно: перепечатывать формулу руками нельзя.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1092,7 +1088,7 @@ const TOOLS = [
   {
     name: 'maple_plot',
     description:
-      'Построить график (gif по умолчанию, ещё jpeg/bmp; png этот Maple не умеет). ' +
+      'Построить график (gif по умолчанию, ещё jpeg/bmp; png этот Maple не умеет) и сохранить его в рабочую папку. ' +
       'В ответе приходит готовая markdown-строка с картинкой — вставь её в ответ человеку дословно, тогда график покажется в чате.',
     inputSchema: {
       type: 'object',
@@ -1258,8 +1254,10 @@ async function dispatch(msg) {
         capabilities: { tools: {} },
         serverInfo: SERVER_INFO,
         instructions:
-          'Maple на этой машине. Используй maple_evaluate_code для вычислений: код Maple, «;» печатает результат, «:» — нет. ' +
-          'Состояние живёт в сессии. Для воркшитов — maple_worksheet_*.',
+          'Maple 18 на этой машине. Любая математика — только вызовом maple_evaluate_code: не считай в голове, ' +
+          'не угадывай и не подменяй задачу. Не посчиталось — честно скажи «Maple не нашёл» и покажи, что он вернул. ' +
+          'Формулы человеку — всегда в LaTeX (maple_to_latex или latex()). Графики — maple_plot: его markdown-строку ' +
+          'вставляй дословно. Журналы и графики лежат в .maple/ рабочей папки.',
       },
     };
   }

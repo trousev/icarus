@@ -20,7 +20,7 @@ export type PanelDenial = { status: 401 | 403; message: string; hint: string };
 export type PanelSession = {
   user: string;
   sections: PanelSection[];
-  scopes: Record<string, 'memory' | 'skills' | 'maple' | 'profile'>;
+  scopes: Record<string, 'memory' | 'skills' | 'profile'>;
   /** Заголовки областей: у каждой своё имя, и придумывать их в браузере незачем. */
   scopeLabels?: Record<string, string>;
   /** Модель и хранилище — то, чем человек проверяет, что смотрит в ту панель. */
@@ -49,7 +49,6 @@ export type PanelPage = {
 const SCOPE_LABELS: Record<string, string> = {
   personal: 'Личная',
   shared: 'Семейная',
-  maple: 'Математика',
 };
 
 const scopeLabel = (session: PanelSession, scope: string): string =>
@@ -60,8 +59,6 @@ const PANEL_TITLE = 'Icarus Control Panel';
 /** Подписи раздела памяти: они одинаковы для личной и семейной области. */
 const MEMORY_ABOUT =
   'Профиль, предпочтения и распорядок дня — то, что агент учитывает в первую очередь.';
-const MAPLE_ABOUT =
-  'Журналы сессий, воркшиты и графики Maple. Раздел только для чтения: файлы создаёт сам Maple.';
 const PROFILE_ABOUT =
   'Как Икар говорит с тобой. Язык меняет только язык ответов: характер, шутки и память остаются прежними.';
 const SKILLS_ABOUT =
@@ -357,25 +354,23 @@ function sessionPage(session: PanelSession, page: PanelPage): string {
   const scopes = Object.keys(session.scopes);
   const scope = page.scope && session.scopes[page.scope] ? page.scope : scopes[0];
   const skills = page.section === 'skills';
-  const maple = page.section === 'maple';
   // «Пользователь» — не список файлов, а форма. Ему не нужны ни колонка файлов,
   // ни поиск, поэтому он рисуется собственной правой колонкой целиком.
   const profile = page.section === 'profile';
   // Режим — свойство раздела. Он решает, какие маршруты зовёт страница и каким
-  // рендером рисуется правая колонка: память правится построчно, скиллы — файлом,
-  // математика только смотрится.
-  const mode = skills ? 'skills' : maple ? 'maple' : profile ? 'profile' : 'memory';
+  // рендером рисуется правая колонка: память правится построчно, скиллы — файлом.
+  const mode = skills ? 'skills' : profile ? 'profile' : 'memory';
   const sectionLabel = session.sections.find((item) => item.id === page.section)?.label ?? 'Память';
-  const title = skills ? 'Скиллы' : maple ? 'Математика' : profile ? 'Пользователь' : scopeLabel(session, scope);
-  const about = skills ? SKILLS_ABOUT : maple ? MAPLE_ABOUT : profile ? PROFILE_ABOUT : MEMORY_ABOUT;
+  const title = skills ? 'Скиллы' : profile ? 'Пользователь' : scopeLabel(session, scope);
+  const about = skills ? SKILLS_ABOUT : profile ? PROFILE_ABOUT : MEMORY_ABOUT;
   // Крошки не повторяют заголовок, когда раздел назван так же: «Скиллы / Скиллы»
   // не сообщает ничего.
-  const breadcrumbs = [`Icarus`, sectionLabel, ...(maple || skills || profile ? [] : [title])];
+  const breadcrumbs = [`Icarus`, sectionLabel, ...(skills || profile ? [] : [title])];
 
-  // Область в ссылке несёт только память: у скиллов и математики своей области нет,
-  // и `?scope=personal` в их адресе — это ровно та путаница, когда раздел показывал
+  // Область в ссылке несёт только память: у скиллов своей области нет, и
+  // `?scope=personal` в их адресе — это ровно та путаница, когда раздел показывал
   // личную память под своим заголовком.
-  const areas = maple || skills || profile
+  const areas = skills || profile
     ? ''
     : `<nav class="areas">${scopes
         .map(
@@ -410,12 +405,12 @@ ${settingsAside(session, page.section, { scope })}
       )
       .join(' / ')}</div>
     <div class="search">
-      ${profile ? '' : `<input id="q" placeholder="${skills ? 'Поиск по скиллам' : maple ? 'Поиск по математике' : 'Поиск по памяти'}" size="30">`}
+      ${profile ? '' : `<input id="q" placeholder="${skills ? 'Поиск по скиллам' : 'Поиск по памяти'}" size="30">`}
     </div>
     <div class="status"><i></i>Агент активен</div>
   </div>
   <div class="content">
-    <p class="section-title">${skills ? 'СКИЛЛЫ АГЕНТА' : maple ? 'МАТЕМАТИКА' : profile ? 'НАСТРОЙКИ' : 'ПАМЯТЬ АГЕНТА'}</p>
+    <p class="section-title">${skills ? 'СКИЛЛЫ АГЕНТА' : profile ? 'НАСТРОЙКИ' : 'ПАМЯТЬ АГЕНТА'}</p>
     <div class="head">
       <div class="lead">
         <h1>${escapeHtml(title)}</h1>
@@ -425,7 +420,7 @@ ${settingsAside(session, page.section, { scope })}
     </div>
     <div class="cols${profile ? ' single' : ''}">
       ${profile ? '' : `<div class="card">
-        <div class="card-head"><span>${skills ? 'СКИЛЛЫ' : maple ? 'ФАЙЛЫ MAPLE' : 'ФАЙЛЫ'}</span><span id="files-count"></span></div>
+        <div class="card-head"><span>${skills ? 'СКИЛЛЫ' : 'ФАЙЛЫ'}</span><span id="files-count"></span></div>
         <div id="files"><p class="empty">Читаю…</p></div>
       </div>`}
       <div class="card" id="content-card">
@@ -436,7 +431,7 @@ ${settingsAside(session, page.section, { scope })}
           </div>
           <div class="head-actions">
             <div class="tabs" id="tabs" hidden>
-              <a class="tab${config.tab === 'notes' ? ' active' : ''}" href="#" data-tab="notes">${skills ? 'Скилл' : maple ? 'Содержимое' : 'Записи'}</a>
+              <a class="tab${config.tab === 'notes' ? ' active' : ''}" href="#" data-tab="notes">${skills ? 'Скилл' : 'Записи'}</a>
               <a class="tab${config.tab === 'history' ? ' active' : ''}" href="#" data-tab="history">История</a>
             </div>
             <button class="btn" id="download" hidden>Скачать</button>
@@ -558,7 +553,7 @@ function fail(error) {
 async function loadCounts() {
   const state = await api('/panel/api/state');
   const counts = state.counts || {};
-  const targets = Object.assign({}, counts, { memory: counts.personal, maple: counts.maple });
+  const targets = Object.assign({}, counts, { memory: counts.personal });
   for (const [id, value] of Object.entries(targets)) {
     const node = el('count-' + id);
     if (node && typeof value === 'number') node.textContent = String(value);
@@ -570,7 +565,7 @@ async function loadFiles() {
   el('files-count').textContent = data.files.length + ' ' + plural(data.files.length, 'файл', 'файла', 'файлов');
   const box = el('files');
   if (!data.files.length) {
-    box.innerHTML = '<p class="empty">' + (cfg.mode === 'maple' ? 'Расчётов пока нет.' : 'Память пока пуста.') + '</p>';
+    box.innerHTML = '<p class="empty">Память пока пуста.</p>';
     return;
   }
   // Файлы группируем по полкам: в памяти это осмысленные разделы (люди, дела,
@@ -589,7 +584,7 @@ async function loadFiles() {
       const name = folder ? file.path.slice(folder.length) : file.path;
       parts.push('<a class="file' + (file.path === cfg.file ? ' active' : '') + '" href="#" data-path="' + esc(file.path) + '">' +
         '<span class="grow">' + esc(name) + '</span>' +
-        '<small>' + (cfg.mode === 'maple' ? humanSize(file.size) + ' · ' + stamp(file.modified) : humanSize(file.size)) + '</small></a>');
+        '<small>' + humanSize(file.size) + '</small></a>');
     }
   }
   box.innerHTML = '<div class="files">' + parts.join('') + '</div>';
@@ -923,9 +918,8 @@ function showFileHead(path, meta, tabs, download = Boolean(path)) {
   el('file-name').textContent = path || '';
   el('file-meta').textContent = meta || '';
   el('tabs').hidden = !tabs;
-  // Скачать можно любой файл раздела — и память, и график Maple, и SKILL.md: это
-  // чтение, а не правка, и упирается оно в те же проверки пути, что и остальные
-  // запросы.
+  // Скачать можно любой файл раздела — и память, и SKILL.md: это чтение, а не
+  // правка, и упирается оно в те же проверки пути, что и остальные запросы.
   el('download').hidden = !download;
 }
 
@@ -944,16 +938,14 @@ async function renderContent() {
   const path = cfg.file;
   if (!path) {
     showFileHead(null, null, false);
-    el('content').innerHTML = '<p class="empty">' + (cfg.mode === 'maple'
-      ? 'Журналы сессий, воркшиты и графики. Файлы создаёт Maple, здесь они только смотрятся.'
-      : 'Выбери файл слева или найди что-нибудь поиском.') + '</p>';
+    el('content').innerHTML = '<p class="empty">Выбери файл слева или найди что-нибудь поиском.</p>';
     return;
   }
 
   // Картинку тянем байтами и показываем как <img>: base64 в JSON раздул бы ответ
-  // втрое, а графики Maple — это gif на сотни килобайт.
+  // втрое, а картинки бывают на сотни килобайт.
   if (isImage(path)) {
-    showFileHead(path, cfg.mode === 'maple' ? 'график Maple' : 'картинка', false);
+    showFileHead(path, 'картинка', false);
     const response = await fetch(endpoint('file', { path, raw: '1' }));
     if (!response.ok) { el('content').innerHTML = '<p class="empty">Картинка не открылась.</p>'; return; }
     const url = URL.createObjectURL(await response.blob());
@@ -963,24 +955,10 @@ async function renderContent() {
   }
 
   const data = await api(endpoint('entries', { path }));
-  // У математики истории файла нет: журнал — это код, из которого Maple
-  // восстанавливает сессию, и откатывать его из панели нельзя.
   const tells = data.total + ' ' + (data.total === 1 ? 'запись' : 'записей');
-  if (cfg.mode === 'maple') {
-    showFileHead(path, 'только для чтения', false);
-    renderReadOnly(data);
-    return;
-  }
   showFileHead(path, tells, true);
   if (cfg.tab === 'history') await renderHistory();
   else renderEntries(data);
-}
-
-/** Математика: журналы Maple построчно правки не терпят — сессия из них восстанавливается. */
-function renderReadOnly(data) {
-  el('content').innerHTML = '<div class="rows">' + data.entries.map((entry) =>
-    '<div class="row plain"><span class="num">' + entry.line + '</span><span class="row-text">' + esc(entry.text) + '</span></div>',
-  ).join('') + '</div>';
 }
 
 // ── настройки: пользователь ──────────────────────────────────────────────────

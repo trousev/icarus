@@ -2,11 +2,10 @@
 // файла целиком. Всё, что приходит из браузера, проверяется на выход за пределы каталога
 // памяти.
 //
-// Каталогов два, и они разной природы. Память — markdown, который агент правит
-// руками и который панель умеет чистить построчно. Математика — рабочие файлы
-// Maple (журналы сессий, графики, воркшиты): их создаёт сам Maple, и панель
-// показывает их только для чтения, иначе «забудь строку» полезла бы в журнал,
-// из которого сессия восстанавливается, и сломала бы расчёт.
+// Память — markdown, который агент правит руками; у скиллов свой каталог и свое
+// правило (файл целиком). Набор допустимых расширений поэтому передаётся в функцию,
+// а не выбирается по месту: панель не должна открывать .jsonl журнала как память
+// с кнопками, которых там быть не должно.
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -16,31 +15,21 @@ export type SearchHit = { path: string; line: number; text: string };
 /** Расширения памяти: её правит агент, и в панели у неё есть «забыть строку». */
 const MEMORY_EXTENSIONS = new Set(['.md']);
 
-/** Расширения математики: журналы Maple, воркшиты, скрипты, графики. */
-const MAPLE_EXTENSIONS = new Set(['.jsonl', '.mw', '.mpl', '.txt', '.gif', '.jpg', '.jpeg', '.bmp']);
-
 /** Форматы, которые браузер покажет картинкой, а не текстом. */
 const IMAGE_EXTENSIONS = new Set(['.gif', '.jpg', '.jpeg', '.bmp']);
 
 export const memoryExtensions = MEMORY_EXTENSIONS;
-export const mapleExtensions = MAPLE_EXTENSIONS;
 
 /** Считается ли файл картинкой: панель рисует его через <img>, а не как текст. */
 export function isImageFile(relative: string): boolean {
   return IMAGE_EXTENSIONS.has(path.extname(relative).toLowerCase());
 }
 
-/** Все расширения, которые панель вообще готова отдать. */
-export function knownExtension(relative: string): boolean {
-  const ext = path.extname(relative).toLowerCase();
-  return MEMORY_EXTENSIONS.has(ext) || MAPLE_EXTENSIONS.has(ext);
-}
-
 /**
  * Приводит путь к безопасному виду внутри root или возвращает null.
- * allowed — какие расширения пускать: их два набора (память и математика), и
- * смешивать их нельзя, иначе «/file?path=journal.jsonl» открывал бы журнал Maple
- * как память — с кнопками, которых там быть не должно.
+ * allowed — какие расширения пускать: у памяти и скиллов они разные, и смешивать
+ * их нельзя, иначе «/file?path=SKILL.md» открывался бы как память — с кнопками,
+ * которых там быть не должно.
  */
 export function resolveInside(
   root: string,
@@ -101,7 +90,7 @@ export function readMemoryFile(
 export function readImageFile(
   root: string,
   relative: string,
-  allowed: ReadonlySet<string> = MAPLE_EXTENSIONS,
+  allowed: ReadonlySet<string> = IMAGE_EXTENSIONS,
 ): { file: string; type: string } | null {
   if (!isImageFile(relative)) return null;
   const full = resolveInside(root, relative, allowed);
