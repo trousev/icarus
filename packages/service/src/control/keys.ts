@@ -32,8 +32,16 @@ import { reloadRuntime, previewEnv } from '../runtime.ts';
 import { readJsonBody } from '../http/openai.ts';
 import { errorBody } from '../http/sse.ts';
 import { log } from '../log.ts';
+import { FETCH_PROVIDERS } from '../search/fetch-providers.ts';
 import { PROVIDERS } from '../search/providers.ts';
-import { asProviderId, checkProvider, clearProviderState, providerForKey, searchStatus } from '../search/panel.ts';
+import {
+  asProviderId,
+  checkFetchProvider,
+  checkProvider,
+  clearProviderState,
+  providerForKey,
+  searchStatus,
+} from '../search/panel.ts';
 
 export type KeysContext = {
   config: IcarusConfig;
@@ -278,13 +286,31 @@ export async function handleKeysApi(
       json(res, 400, errorBody(`неизвестный провайдер «${String(body.provider)}»`, 'invalid_request_error'));
       return;
     }
+    const label =
+      body.capability === 'fetch'
+        ? (FETCH_PROVIDERS[provider]?.label ?? PROVIDERS[provider].label)
+        : PROVIDERS[provider].label;
+
+    // capability=fetch проверяет извлечение страницы, иначе — обычный поиск.
+    if (body.capability === 'fetch') {
+      const check = await checkFetchProvider(ctx.config, provider);
+      json(res, 200, {
+        ...keysView(ctx.config, ctx.userId),
+        check: { ...check, capability: 'fetch' },
+        message: check.ok
+          ? `${label}: прочитал ${check.chars} знаков за ${check.ms} мс`
+          : `${label}: не смог прочитать — ${check.error ?? 'без причины'}`,
+      });
+      return;
+    }
+
     const check = await checkProvider(ctx.config, provider);
     json(res, 200, {
       ...keysView(ctx.config, ctx.userId),
-      check,
+      check: { ...check, capability: 'search' },
       message: check.ok
-        ? `${PROVIDERS[provider].label}: ответил за ${check.ms} мс, результатов ${check.results}`
-        : `${PROVIDERS[provider].label}: не ответил — ${check.error ?? 'без причины'}`,
+        ? `${label}: ответил за ${check.ms} мс, результатов ${check.results}`
+        : `${label}: не ответил — ${check.error ?? 'без причины'}`,
     });
     return;
   }

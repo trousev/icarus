@@ -12,7 +12,7 @@ import { skillDraftPrompt, SKILL_DRAFT_SYSTEM, SKILL_DRAFT_TIMEOUT_MS } from '..
 import { listManaged } from '../docker/manager.ts';
 import { planReconciliation } from '../docker/reconcile.ts';
 import { handleMcpProxy } from '../mcp/proxy.ts';
-import { handleSearch, type SearchHttpOptions } from '../search/http.ts';
+import { handleFetch, handleSearch, type SearchHttpOptions } from '../search/http.ts';
 
 export const PUBLIC_MODEL_ID = 'icarus';
 
@@ -24,8 +24,8 @@ export type ServerOptions = {
    */
   draftSkills?: boolean;
   /**
-   * Поисковый роутер для /search. В тестах сюда подставляют fetch и часы,
-   * в бою — ничего: роутер возьмёт глобальный fetch и системное время.
+   * Роутеры поиска и извлечения страниц: в тестах сюда подставляют fetch и часы,
+   * в бою — ничего: возьмут глобальный fetch и системное время.
    */
   search?: SearchHttpOptions;
 };
@@ -174,6 +174,23 @@ export function createServer(
         if (!res.headersSent) {
           res.writeHead(500, { 'content-type': 'application/json' });
           res.end(JSON.stringify(errorBody('поиск сломался', 'server_error')));
+        } else {
+          res.end();
+        }
+      }
+      return;
+    }
+
+    // Извлечение страниц: тот же вход, но свой «текущий» провайдер и свои
+    // карантины. Живёт рядом с /search, чтобы клиенту хватало одного адреса.
+    if (url.pathname === '/fetch') {
+      try {
+        await handleFetch(req, res, url, config, options.search ?? {});
+      } catch (error) {
+        log.error('маршрут извлечения упал', { error: redact(String(error)) });
+        if (!res.headersSent) {
+          res.writeHead(500, { 'content-type': 'application/json' });
+          res.end(JSON.stringify(errorBody('извлечение сломалось', 'server_error')));
         } else {
           res.end();
         }

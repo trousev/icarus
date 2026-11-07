@@ -4,9 +4,18 @@
 // она получает готовый список, а кнопка «Проверить» дергает провайдера напрямую и
 // снимает карантин только если тот действительно ответил.
 import type { IcarusConfig } from '../config.ts';
+import { FETCH_PROVIDERS, FETCH_RATING } from './fetch-providers.ts';
+import { FETCH_ATTEMPT_TIMEOUT_MS, configuredFetchProviders } from './fetch-router.ts';
 import { PROVIDERS } from './providers.ts';
 import { ATTEMPT_TIMEOUT_MS, RATING, applyFailure, applySuccess, configuredProviders, keyFor } from './router.ts';
-import { isBanned, mutateRouterState, readRouterState, stateFile, type BanReason } from './state.ts';
+import {
+  isBanned,
+  mutateRouterState,
+  readRouterState,
+  stateFile,
+  type BanReason,
+  type ProviderState,
+} from './state.ts';
 import { SearchFailure, isProviderId, type ProviderId } from './types.ts';
 
 export type SearchProviderStatus = {
@@ -25,33 +34,60 @@ export type SearchProviderStatus = {
 };
 
 export type SearchStatus = {
+  /** Поиск. */
   current: ProviderId | null;
   providers: SearchProviderStatus[];
+  /** Извлечение страниц: свой текущий и свой набор провайдеров. */
+  fetch: {
+    current: ProviderId | null;
+    providers: SearchProviderStatus[];
+  };
 };
 
-/** Состояние для панели. Ключи не отдаём даже частично — только «задан/нет». */
-export function searchStatus(config: IcarusConfig, now: number = Date.now()): SearchStatus {
-  const state = readRouterState(stateFile(config));
-  const providers = Object.values(PROVIDERS)
+type RowProvider = { id: ProviderId; label: string; keyNames: string[] };
+
+function rows(
+  config: IcarusConfig,
+  order: readonly ProviderId[],
+  providers: Record<string, RowProvider | undefined>,
+  current: ProviderId | null,
+  saved: Record<string, ProviderState>,
+  now: number,
+): SearchProviderStatus[] {
+  return order
+    .map((id) => providers[id])
+    .filter((provider): provider is RowProvider => provider !== undefined)
     .map((provider) => {
-      const saved = state.providers[provider.id];
+      const state = saved[provider.id];
+      const banned = state !== undefined && isBanned(state, now);
       return {
         id: provider.id,
         label: provider.label,
         keyName: provider.keyNames[0] ?? '',
         present: keyFor(config, provider) !== '',
-        current: state.current === provider.id,
-        bannedUntil: saved && isBanned(saved, now) ? saved.bannedUntil : null,
-        banReason: saved && isBanned(saved, now) ? saved.banReason : null,
-        broken: saved?.broken === true,
-        fails: saved?.fails ?? 0,
-        lastError: saved?.lastError ?? null,
-        lastErrorAt: saved?.lastErrorAt ?? null,
+        current: current === provider.id,
+        bannedUntil: banned ? (state?.bannedUntil ?? null) : null,
+        banReason: banned ? (state?.banReason ?? null) : null,
+        broken: state?.broken === true,
+        fails: state?.fails ?? 0,
+        lastError: state?.lastError ?? null,
+        lastErrorAt: state?.lastErrorAt ?? null,
       } satisfies SearchProviderStatus;
-    })
+    });
+}
+
+/** Состояние для панели. Ключи не отдаём даже частично — только «задан/нет». */
+export function searchStatus(config: IcarusConfig, now: number = Date.now()): SearchStatus {
+  const state = readRouterState(stateFile(config));
+  return {
+    current: state.current,
     // Рейтинг — порядок, в котором роутер пробует провайдеров: в панели он же.
-    .sort((a, b) => RATING.indexOf(a.id) - RATING.indexOf(b.id));
-  return { current: state.current, providers };
+    providers: rows(config, RATING, PROVIDERS, state.current, state.providers, now),
+    fetch: {
+      current: state.fetch?.current ?? null,
+      providers: rows(config, FETCH_RATING, FETCH_PROVIDERS, state.fetch?.current ?? null, state.fetch?.providers ?? {}, now),
+    },
+  };
 }
 
 /** Провайдер по имени переменной окружения: правка ключа снимает карантин. */
@@ -64,7 +100,11 @@ export function providerForKey(name: string): ProviderId | null {
 
 /** Снять карантин и флаг «сломан»: ключ сменили или панель проверила вручную. */
 export async function clearProviderState(config: IcarusConfig, id: ProviderId): Promise<void> {
-  await mutateRouterState(stateFile(config), (state) => applySuccess(state, id));
+  await mutateRouterState(stateFile(config), (state) => {
+    // Ключ один на обе возможности: починили — снимаем карантин везде.
+    applySuccess(state, id, 'search');
+    applySuccess(state, id, 'fetch');
+  });
 }
 
 export type CheckResult = {
@@ -116,6 +156,59 @@ export async function checkProvider(
 function failureText(failure: SearchFailure): string {
   const body = failure.body.trim();
   return body === '' ? failure.message : `${failure.message}: ${body.slice(0, 200)}`;
+}
+
+export type FetchCheckResult = {
+  ok: boolean;
+  provider: ProviderId;
+  ms: number;
+  /** Сколько знаков пришло: видно, что страница реально прочиталась. */
+  chars: number;
+  error: string | null;
+};
+
+/**
+ * Проверка извлечения: тянем example.com через выбранного провайдера.
+ * Успех снимает карантин; отказ страницы не банит (это свойство URL), а
+ * транспортный или денежный — банит, как обычный запрос.
+ */
+export async function checkFetchProvider(
+  config: IcarusConfig,
+  id: ProviderId,
+  options: { fetch?: typeof fetch; now?: () => number } = {},
+): Promise<FetchCheckResult> {
+  const provider = FETCH_PROVIDERS[id];
+  const now = options.now ?? (() => Date.now());
+  const started = now();
+  if (provider === undefined) {
+    return { ok: false, provider: id, ms: 0, chars: 0, error: 'провайдер не умеет извлекать страницы' };
+  }
+  const key = keyFor(config, provider);
+  if (key === '') {
+    return { ok: false, provider: id, ms: 0, chars: 0, error: 'ключ не задан' };
+  }
+  try {
+    const result = await provider.fetch('https://example.com', {
+      key,
+      fetch: options.fetch ?? fetch,
+      signal: AbortSignal.timeout(FETCH_ATTEMPT_TIMEOUT_MS),
+      maxChars: 2_000,
+    });
+    await mutateRouterState(stateFile(config), (state) => applySuccess(state, id, 'fetch'));
+    return { ok: true, provider: id, ms: now() - started, chars: result.text.length, error: null };
+  } catch (error) {
+    const failure =
+      error instanceof SearchFailure
+        ? error
+        : new SearchFailure('network', error instanceof Error ? error.message : String(error));
+    if (failure.kind !== 'page') {
+      const candidates = configuredFetchProviders(config);
+      await mutateRouterState(stateFile(config), (state) =>
+        applyFailure(state, id, failure, now(), candidates, 'fetch'),
+      );
+    }
+    return { ok: false, provider: id, ms: now() - started, chars: 0, error: failureText(failure) };
+  }
 }
 
 /** Для роутов панели: «это правда id провайдера?». */

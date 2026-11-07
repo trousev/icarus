@@ -273,6 +273,54 @@ async function fetchPage(url: string, signal?: AbortSignal): Promise<string> {
   return text.length > 20_000 ? `${text.slice(0, 20_000)}\n… (обрезано)` : text || "На странице не нашлось текста.";
 }
 
+/** Ответ сервисного /fetch: текст страницы плюс кто её прочитал. */
+export function parseFetchRouter(payload: unknown): {
+  text: string;
+  title?: string;
+  upstream?: string;
+  tried?: Array<{ provider: string; reason: string }>;
+} {
+  const root = payload as { text?: unknown; title?: unknown } | null;
+  const text = typeof root?.text === "string" ? root.text : "";
+  return {
+    text,
+    ...(typeof root?.title === "string" && root.title.trim() !== "" ? { title: root.title } : {}),
+    ...parseRouterMeta(payload),
+  };
+}
+
+async function fetchViaRouter(url: string, signal?: AbortSignal): Promise<{
+  text: string;
+  title?: string;
+  upstream?: string;
+  tried?: Array<{ provider: string; reason: string }>;
+}> {
+  if (!ROUTER_URL) return { text: "Извлечение не настроено: нет ICARUS_SEARCH_URL." };
+  let response: Response;
+  try {
+    response = await fetch(`${ROUTER_URL}/fetch?url=${encodeURIComponent(url)}`, {
+      headers: { accept: "application/json" },
+      signal,
+    });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    return { text: `Страница не открылась: ${networkErrorText(error)}` };
+  }
+  if (!response.ok) {
+    const detail = (await httpError(response)).replace(/^Поиск не удался: /, "");
+    return { text: `Страница не открылась: ${detail}` };
+  }
+
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    return { text: "Страница не открылась: сервис вернул неразбираемый ответ." };
+  }
+  const parsed = parseFetchRouter(payload);
+  return parsed.text.trim() === "" ? { ...parsed, text: "На странице не нашлось текста." } : parsed;
+}
+
 export default function (pi: ExtensionAPI) {
   if (PROVIDER !== "none") {
     pi.registerTool({
@@ -307,8 +355,20 @@ export default function (pi: ExtensionAPI) {
       url: Type.String({ description: "Адрес страницы" }),
     }),
     async execute(_toolCallId, params, signal) {
-      const text = await fetchPage(String(params.url), signal);
-      return { content: [{ type: "text", text }], details: {} };
+      // Через сервис — когда он есть: там свой роутер извлечения (Exa, Tavily,
+      // Linkup, You.com), свои карантины и отдельный «текущий». Без сервиса
+      // остаётся прежний прямой поход из контейнера.
+      const outcome = ROUTER_URL
+        ? await fetchViaRouter(String(params.url), signal)
+        : { text: await fetchPage(String(params.url), signal) };
+      return {
+        content: [{ type: "text", text: outcome.text }],
+        details: {
+          ...(outcome.upstream ? { provider: "router", upstream: outcome.upstream } : {}),
+          ...(outcome.title ? { title: outcome.title } : {}),
+          ...(outcome.tried ? { tried: outcome.tried } : {}),
+        },
+      };
     },
   });
 }

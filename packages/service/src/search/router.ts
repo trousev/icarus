@@ -13,9 +13,13 @@ import {
   mutateRouterState,
   providerState,
   readRouterState,
+  scopeCurrent,
+  scopeProviders,
+  setScopeCurrent,
   soonestUnban,
   stateFile,
   type BanReason,
+  type Capability,
   type RouterState,
 } from './state.ts';
 import {
@@ -71,7 +75,7 @@ export type RouteOptions = {
 };
 
 /** Ключ провайдера: панель (secretEnv) сильнее .env, .env сильнее окружения. */
-export function keyFor(config: IcarusConfig, provider: SearchProvider): string {
+export function keyFor(config: IcarusConfig, provider: { keyNames: string[] }): string {
   for (const name of provider.keyNames) {
     const value = config.secretEnv?.[name]?.trim() || config.env[name]?.trim() || process.env[name]?.trim();
     if (value) return value;
@@ -84,31 +88,47 @@ export function configuredProviders(config: IcarusConfig): SearchProvider[] {
   return RATING.map((id) => PROVIDERS[id]).filter((provider) => keyFor(config, provider) !== '');
 }
 
-function availableIds(state: RouterState, candidates: SearchProvider[], now: number): ProviderId[] {
+type Candidate = { id: ProviderId };
+
+function availableIds(
+  state: RouterState,
+  candidates: readonly Candidate[],
+  now: number,
+  scope: Capability = 'search',
+): ProviderId[] {
+  const providers = scopeProviders(state, scope);
   return candidates
     .map((provider) => provider.id)
-    .filter((id) => !isBanned(state.providers[id] ?? emptyProviderState(), now));
+    .filter((id) => !isBanned(providers[id] ?? emptyProviderState(), now));
 }
 
-function firstAvailable(state: RouterState, candidates: SearchProvider[], now: number): ProviderId | null {
-  return availableIds(state, candidates, now)[0] ?? null;
+function firstAvailable(
+  state: RouterState,
+  candidates: readonly Candidate[],
+  now: number,
+  scope: Capability = 'search',
+): ProviderId | null {
+  return availableIds(state, candidates, now, scope)[0] ?? null;
 }
 
 /** Первый непопробованный и не забаненный: текущий — вперёд, дальше по рейтингу. */
 function chooseAttempt(
   state: RouterState,
-  candidates: SearchProvider[],
+  candidates: readonly Candidate[],
   tried: Set<ProviderId>,
   now: number,
+  scope: Capability = 'search',
 ): ProviderId | null {
-  const free = availableIds(state, candidates, now).filter((id) => !tried.has(id));
+  const free = availableIds(state, candidates, now, scope).filter((id) => !tried.has(id));
   if (free.length === 0) return null;
   // «Сломанный» ключ после семи дней карантина проверяем сами, одним настоящим
   // запросом: ответил — флаг снимается, нет — снова семь дней. Происходит это
   // один раз на провайдера, а не на каждый запрос.
-  const revived = free.find((id) => state.providers[id]?.broken === true);
+  const providers = scopeProviders(state, scope);
+  const revived = free.find((id) => providers[id]?.broken === true);
   if (revived !== undefined) return revived;
-  if (state.current !== null && free.includes(state.current)) return state.current;
+  const current = scopeCurrent(state, scope);
+  if (current !== null && free.includes(current)) return current;
   return free[0] ?? null;
 }
 
@@ -130,15 +150,19 @@ function failureText(failure: SearchFailure): string {
  * Записать отказ: счётчик, карантин, при 50 — «ключ сломан».
  * Если отвалился текущий — сразу выбрать нового текущего, чтобы следующий
  * запрос не начинал с того, кого мы только что отправили в карантин.
+ *
+ * scope нужен, потому что у извлечения страниц свой «текущий» и свои карантины.
+ * Отказ страницы (kind === 'page') сюда не попадает — это свойство URL.
  */
 export function applyFailure(
   state: RouterState,
   id: ProviderId,
   failure: SearchFailure,
   now: number,
-  candidates: SearchProvider[],
+  candidates: readonly Candidate[],
+  scope: Capability = 'search',
 ): void {
-  const provider = providerState(state, id);
+  const provider = providerState(state, id, scope);
   provider.fails += 1;
   provider.lastError = failureText(failure);
   provider.lastErrorAt = iso(now);
@@ -154,15 +178,15 @@ export function applyFailure(
     provider.bannedUntil = iso(now + ban.ms);
   }
 
-  if (state.current === id) {
-    const next = firstAvailable(state, candidates, now);
-    if (next !== null) state.current = next;
+  if (scopeCurrent(state, scope) === id) {
+    const next = firstAvailable(state, candidates, now, scope);
+    if (next !== null) setScopeCurrent(state, scope, next);
   }
 }
 
 /** Успех означает «провайдер жив»: снимаем карантин, флаг и счётчик отказов. */
-export function applySuccess(state: RouterState, id: ProviderId): void {
-  const provider = providerState(state, id);
+export function applySuccess(state: RouterState, id: ProviderId, scope: Capability = 'search'): void {
+  const provider = providerState(state, id, scope);
   provider.fails = 0;
   provider.bannedUntil = null;
   provider.banReason = null;
@@ -179,6 +203,14 @@ function asFailure(error: unknown): SearchFailure {
     return new SearchFailure('timeout', 'провайдер не ответил вовремя');
   }
   return new SearchFailure('network', error instanceof Error ? error.message : String(error));
+}
+
+export { asFailure };
+
+/** Собрать снимок для сравнения: надо ли вообще писать успех в файл. */
+export function hasFaults(state: RouterState, id: ProviderId, scope: Capability = 'search'): boolean {
+  const provider = scopeProviders(state, scope)[id];
+  return !provider || provider.fails > 0 || provider.bannedUntil !== null || provider.broken;
 }
 
 /**
@@ -207,15 +239,16 @@ export async function routeSearch(
 
   // Текущего нет, у него больше нет ключа или он в карантине — выбираем первого
   // живого по рейтингу. Пока он жив, сам по себе текущий не меняется.
+  const knownCurrent = scopeCurrent(state, 'search');
   const known =
-    state.current !== null && candidatesIds.has(state.current)
-      ? (state.providers[state.current] ?? emptyProviderState())
+    knownCurrent !== null && candidatesIds.has(knownCurrent)
+      ? (scopeProviders(state, 'search')[knownCurrent] ?? emptyProviderState())
       : null;
   if (known === null || isBanned(known, start)) {
-    const next = firstAvailable(state, candidates, start);
-    if (next !== null && next !== state.current) {
+    const next = firstAvailable(state, candidates, start, 'search');
+    if (next !== null && next !== knownCurrent) {
       await mutateRouterState(file, (fresh) => {
-        fresh.current = next;
+        setScopeCurrent(fresh, 'search', next);
       });
     }
   }
