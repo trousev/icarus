@@ -397,9 +397,9 @@ export function keyCatalog(): KeyInfo[] {
     },
     {
       name: 'ICARUS_SEARCH_PROVIDER',
-      label: 'Поиск — провайдер (старое)',
+      label: 'Поиск — провайдер',
       description:
-        'tavily, brave, searxng или none — режим одиночного провайдера для расширения web_search. Роутер /search ключи берёт сам и эту переменную не читает.',
+        'router (по умолчанию в контейнере: поиск идёт через сервис) | tavily | brave | searxng | none. Адрес роутера сервис задаёт сам, токен внутри сети не нужен.',
       group: 'search',
       plain: true,
       apply: 'session',

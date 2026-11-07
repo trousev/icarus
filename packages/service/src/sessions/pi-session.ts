@@ -4,6 +4,7 @@ import { RpcClient, type RpcEvent, type Spawner } from './rpc-client.ts';
 import { channelForConversation, sessionIdFor } from './identity.ts';
 import { refreshChatTitle } from './chats.ts';
 import { log } from '../log.ts';
+import { SERVICE_NAME } from '../docker/compose.ts';
 import {
   CONTAINER_PATHS,
   containerWorkspace,
@@ -151,6 +152,9 @@ export class PiSession {
       spawner,
       {
         ICARUS_CHANNEL: channel,
+        // Поисковый роутер живёт в сервисе, а pi — в контейнере на той же
+        // docker-сети: имя compose-сервиса резолвится, токен не нужен.
+        ICARUS_SEARCH_URL: `http://${SERVICE_NAME}:${config.port}`,
         ...modelEnv(config),
         // Ключи из .env и настроек панели: контейнер получил их при создании, но
         // сохранённый в панели ключ должен доехать до следующего разговора без

@@ -1,7 +1,9 @@
 // Веб-поиск и чтение страниц как инструменты Икара.
 //
 // Провайдер выбирается переменной ICARUS_SEARCH_PROVIDER:
-//   tavily (по умолчанию) | brave (BRAVE_API_KEY) | searxng (ICARUS_SEARXNG_URL) | none
+//   router (по умолчанию, если задан ICARUS_SEARCH_URL) | tavily | brave | searxng | none
+// router — поиск через сервис: он держит ключи всех провайдеров, сам выбирает
+// живого и обходит упавших. Контейнер ходит в сервис по docker-сети, без токена.
 // tavily — поисковый API (https://tavily.com), свой ключ TAVILY_API_KEY. Отдельный
 // провайдер здесь потому, что серверного веб-поиска у DeepInfra нет: её модели умеют
 // только клиентские тулы, а поиск надо чем-то обслуживать. Ключ моделей для поиска не
@@ -13,7 +15,8 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-const PROVIDER = (process.env.ICARUS_SEARCH_PROVIDER ?? "tavily").toLowerCase();
+const ROUTER_URL = (process.env.ICARUS_SEARCH_URL ?? "").trim().replace(/\/$/, "");
+const PROVIDER = (process.env.ICARUS_SEARCH_PROVIDER ?? (ROUTER_URL ? "router" : "tavily")).toLowerCase();
 const TAVILY_KEY = process.env.TAVILY_API_KEY ?? "";
 const BRAVE_KEY = process.env.BRAVE_API_KEY ?? "";
 const SEARXNG_URL = process.env.ICARUS_SEARXNG_URL ?? "";
@@ -170,7 +173,46 @@ async function searchTavily(query: string, limit: number, signal?: AbortSignal):
   return format(parseTavily(payload, limit));
 }
 
+/** Выдача сервисного роутера: { results: [{ title, url, snippet }] }. */
+export function parseRouter(payload: unknown, limit = 6): SearchResult[] {
+  const results = (payload as { results?: Array<{ title?: unknown; url?: unknown; snippet?: unknown }> })?.results;
+  if (!Array.isArray(results)) return [];
+  return results
+    .filter((item) => typeof item?.url === "string" && typeof item?.title === "string")
+    .slice(0, limit)
+    .map((item) => ({
+      title: String(item.title),
+      url: String(item.url),
+      ...(typeof item.snippet === "string" && item.snippet.trim() !== "" ? { snippet: snippet(item.snippet) } : {}),
+    }));
+}
+
+async function searchRouter(query: string, limit: number, signal?: AbortSignal): Promise<string> {
+  if (!ROUTER_URL) return "Поиск не настроен: нет ICARUS_SEARCH_URL.";
+  let response: Response;
+  try {
+    response = await fetch(`${ROUTER_URL}/search?q=${encodeURIComponent(query)}&limit=${limit}`, {
+      headers: { accept: "application/json" },
+      signal,
+    });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    return `Поиск не удался: ${networkErrorText(error)}`;
+  }
+  if (!response.ok) return httpError(response);
+
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    return "Поиск не удался: сервис вернул неразбираемый ответ.";
+  }
+  return format(parseRouter(payload, limit));
+}
+
 async function search(query: string, limit: number, signal?: AbortSignal): Promise<string> {
+  if (PROVIDER === "router") return searchRouter(query, limit, signal);
+
   if (PROVIDER === "tavily") return searchTavily(query, limit, signal);
 
   if (PROVIDER === "brave") {
@@ -193,7 +235,7 @@ async function search(query: string, limit: number, signal?: AbortSignal): Promi
     return format(parseSearxng(await response.json(), limit));
   }
 
-  return `Поиск не настроен: провайдер «${PROVIDER}» неизвестен — жду tavily, brave, searxng или none.`;
+  return `Поиск не настроен: провайдер «${PROVIDER}» неизвестен — жду router, tavily, brave, searxng или none.`;
 }
 
 async function fetchPage(url: string, signal?: AbortSignal): Promise<string> {
