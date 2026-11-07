@@ -12,12 +12,24 @@ import {
   type FetchResult,
   type ProviderId,
 } from './types.ts';
+import { RATING } from './router.ts';
 
 /** Сколько знаков страницы отдаём модели: больше всё равно не влезет. */
 export const FETCH_MAX_CHARS = 20_000;
 
-/** Рейтинг извлечения: сначала качество и объём квоты, SerpApi сюда не входит. */
-export const FETCH_RATING: readonly ProviderId[] = ['exa', 'tavily', 'linkup', 'you'];
+/** Кто из провайдеров умеет извлекать страницы (Firecrawl и SerpApi — нет). */
+const FETCH_CAPABLE: readonly ProviderId[] = ['exa', 'tavily', 'linkup', 'you'];
+
+/**
+ * Рейтинг извлечения — обратный рейтингу поиска.
+ *
+ * Страницы гоняем через тех, кем не жалко потратить квоту (Linkup, You.com),
+ * а Exa и Tavily бережём для поиска, где они полезнее. Порядок выводится из
+ * RATING, чтобы обращения не разъезжались при правке поискового рейтинга.
+ */
+export const FETCH_RATING: readonly ProviderId[] = [...FETCH_CAPABLE].sort(
+  (a, b) => RATING.indexOf(b) - RATING.indexOf(a),
+);
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
