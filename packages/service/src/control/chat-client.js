@@ -472,41 +472,6 @@ function rememberChat(chat, liveText) {
   renderChats();
 }
 
-async function loadState() {
-  try {
-    const state = await api('/panel/api/state');
-    el('count-memory').textContent = String((state.counts || {}).personal ?? 0);
-    el('count-skills').textContent = String((state.counts || {}).skills ?? 0);
-    el('count-mcp').textContent = String((state.counts || {}).mcp ?? 0);
-    const maple = state.sections && state.sections.some((section) => section.id === 'maple');
-    el('maple-link').hidden = !maple;
-    el('settings-maple').hidden = !maple;
-    if (maple) el('count-maple').textContent = String((state.counts || {}).maple ?? 0);
-  } catch {
-    /* счётчики — украшение; чат должен открыться и без них */
-  }
-}
-
-function openSettings(section) {
-  if (section === 'maple' && el('settings-maple').hidden) return;
-  el('settings-frame').src = '/panel/' + section + '?embed=1';
-  el('settings-pane').hidden = false;
-  document.querySelectorAll('[data-settings-tab]').forEach((button) => {
-    button.classList.toggle('active', button.dataset.settingsTab === section);
-  });
-  const url = new URL(window.location.href);
-  url.searchParams.set('settings', section);
-  history.replaceState(null, '', url);
-  closeMenu();
-}
-
-function closeSettings() {
-  el('settings-pane').hidden = true;
-  const url = new URL(window.location.href);
-  url.searchParams.delete('settings');
-  history.replaceState(null, '', url);
-}
-
 function baseName(file) {
   return String(file || '').split(/[\\/]/).pop() || 'файл';
 }
@@ -630,7 +595,6 @@ async function selectChat(id) {
   if (!id) return;
   if (liveChatId) detachLive();
   markRead(id);
-  closeSettings();
   endDraft();
   // Из черновика могли остаться экран выбора workspace'а — открытому чату он чужой.
   restoreEmptyState();
@@ -710,7 +674,6 @@ function startDraft(workspace = defaultWorkspace) {
     closeMenu();
     return;
   }
-  closeSettings();
   historyToken += 1;
   draftWorkspace = workspace;
   currentWorkspace = workspace;
@@ -928,7 +891,6 @@ async function submitWorkspace() {
 /** Выбор папки: в черновике просто переключаем её, не покидая новый чат. */
 async function openWorkspace(slug) {
   if (liveChatId) detachLive();
-  closeSettings();
   if (!draft) {
     startDraft(slug);
     return;
@@ -1504,20 +1466,6 @@ el('toggle-side').onclick = () => {
   if (window.matchMedia('(max-width: 900px)').matches) el('chat-app').classList.toggle('side-open');
 };
 el('close-side').onclick = closeMenu;
-document.querySelectorAll('[data-settings]').forEach((link) => {
-  link.onclick = (event) => {
-    event.preventDefault();
-    openSettings(link.dataset.settings);
-  };
-});
-document.querySelectorAll('[data-settings-tab]').forEach((button) => {
-  button.onclick = () => openSettings(button.dataset.settingsTab);
-});
-el('settings-close').onclick = closeSettings;
-document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && !el('settings-pane').hidden) closeSettings();
-});
-
 /* ── ширина панели ────────────────────────────────────────────────────────── */
 /* На широком экране колонку диалогов можно тянуть за правую границу. Ширина
    живёт в localStorage: иначе её пришлось бы подгонять в каждом заходе. */
@@ -1668,9 +1616,7 @@ window.addEventListener('focus', () => {
 });
 
 (async () => {
-  const params = new URLSearchParams(window.location.search);
   loadUnread();
-  await loadState();
   await loadChats(true);
   await loadWorkspaces();
   defaultEmptyHtml = el('chat-empty').innerHTML;
@@ -1681,7 +1627,6 @@ window.addEventListener('focus', () => {
   if (currentId) await selectChat(currentId);
   else startDraft();
   updateComposerHint();
-  if (params.get('settings')) openSettings(params.get('settings'));
   if (writable) el('chat-input').focus();
 })().catch((error) => {
   setNote('чат не открылся: ' + error.message);

@@ -54,17 +54,10 @@ export function chatPage(session: PanelSession, options: ChatPageOptions): strin
 
     <div class="chat-list" id="chat-list"><p class="side-empty">Пока пусто. Начни новый чат.</p></div>
 
+    <!-- Настройки — одна дверь. Сами разделы живут на своей странице, и там же
+         в этой панели появляется их меню: два списка настроек человеку не нужны. -->
     <div class="side-settings">
-      <p class="side-title">НАСТРОЙКИ</p>
-      <a class="side-link" href="/panel/memory" data-settings="memory"><span>Память</span><em id="count-memory">…</em></a>
-      <a class="side-link" href="/panel/skills" data-settings="skills"><span>Скиллы</span><em id="count-skills">…</em></a>
-      <a class="side-link" href="/panel/mcp" data-settings="mcp"><span>MCP</span><em id="count-mcp">…</em></a>
-      <a class="side-link" href="/panel/maple" id="maple-link" data-settings="maple" hidden><span>Математика</span><em id="count-maple">…</em></a>
-      <!-- Ключи — настройка инсталляции: у неадмина ссылки нет вовсе, а не «есть,
-           но откажет». На проде прятать бесполезно: сервер всё равно проверит флаг. -->
-      ${session.admin ? '<a class="side-link" href="/panel/keys" data-settings="keys"><span>Ключи</span></a>' : ''}
-      <!-- Настройки человека — последними: выше содержимое, а это про самого человека. -->
-      <a class="side-link" href="/panel/profile" data-settings="profile"><span>Пользователь</span></a>
+      <a class="side-link" href="/panel/memory"><span>Настройки</span></a>
     </div>
 
     <div class="side-foot">
@@ -120,20 +113,6 @@ export function chatPage(session: PanelSession, options: ChatPageOptions): strin
       </div>
     </div>
   </main>
-
-  <section class="settings-pane" id="settings-pane" hidden>
-    <header class="settings-head">
-      <div class="settings-tabs">
-        <button data-settings-tab="memory" class="active">Память</button>
-        <button data-settings-tab="skills">Скиллы</button>
-        <button data-settings-tab="mcp">MCP</button>
-        <button data-settings-tab="maple" id="settings-maple" hidden>Математика</button>
-        <button data-settings-tab="profile">Пользователь</button>
-      </div>
-      <button class="icon-btn" id="settings-close" aria-label="Закрыть настройки">×</button>
-    </header>
-    <iframe class="settings-frame" id="settings-frame" title="Настройки Икара"></iframe>
-  </section>
 </div>
 <script>window.__CHAT_CFG__ = ${json};</script>
 <script>${CLIENT_MD}</script>

@@ -178,10 +178,17 @@ test('неадмину раздела «Ключи» нет ни страниц�
     };
     assert.equal(adminState.sections.some((section) => section.id === 'keys'), true, 'админу раздел виден');
 
-    // И в чате (главный экран панели) ссылка есть только у админа.
-    assert.match(await (await fetch(`${box.base}/panel/chat`, { headers: headers(ADMIN) })).text(), /href="\/panel\/keys"/);
+    // В чате один вход в настройки: списка разделов там нет ни у админа, ни у остальных.
+    const chatAdmin = await (await fetch(`${box.base}/panel/chat`, { headers: headers(ADMIN) })).text();
+    assert.match(chatAdmin, /href="\/panel\/memory"[^>]*><span>Настройки<\/span>/);
+    assert.doesNotMatch(chatAdmin, /href="\/panel\/keys"/);
+    // А в меню настроек «Ключи» видит только админ.
+    assert.match(
+      await (await fetch(`${box.base}/panel/memory`, { headers: headers(ADMIN) })).text(),
+      /href="\/panel\/keys"/,
+    );
     assert.doesNotMatch(
-      await (await fetch(`${box.base}/panel/chat`, { headers: headers(USER) })).text(),
+      await (await fetch(`${box.base}/panel/memory`, { headers: headers(USER) })).text(),
       /href="\/panel\/keys"/,
     );
   });

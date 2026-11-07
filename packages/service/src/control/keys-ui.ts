@@ -2,41 +2,21 @@
 // файлами: в TypeScript не приходится экранировать бэктики, а тесты могут исполнить
 // тот же скрипт, что получает браузер.
 import fs from 'node:fs';
-import { escapeHtml, shell, type PanelSession } from './ui.ts';
+import { settingsAside, shell, type PanelSession } from './ui.ts';
 
 const CLIENT_CSS = fs.readFileSync(new URL('./keys-client.css', import.meta.url), 'utf8');
 const CLIENT_JS = fs.readFileSync(new URL('./keys-client.js', import.meta.url), 'utf8');
 
 export function keysPage(session: PanelSession): string {
   const json = JSON.stringify({ user: session.user, section: 'keys' }).replaceAll('<', '\\u003c');
-  const nav =
-    '<a href="/panel/chat">Чат</a>' +
-    session.sections
-      .map(
-        (item) =>
-          `<a class="${item.id === 'keys' ? 'active' : ''}" href="/panel/${item.id}">` +
-          `${escapeHtml(item.label)}<em id="count-${item.id}"></em></a>`,
-      )
-      .join('');
-
-  const sidebar = `<aside>
-  <div class="brand">
-    <div class="logo">I</div>
-    <div><b>Icarus</b><span>агент · чат и настройки</span></div>
-  </div>
-  <div>
-    <p class="nav-title">РАБОЧЕЕ ПРОСТРАНСТВО</p>
-    <nav class="nav">${nav}</nav>
-  </div>
-  <div class="foot">
-    <div><span>модель</span><span>${escapeHtml(session.model ?? '—')}</span></div>
-    <div><span>доступ</span><span>админ</span></div>
-  </div>
-</aside>`;
-
   return shell(`<style>${CLIENT_CSS}</style>
 <div class="app">
-${sidebar}
+${settingsAside(session, 'keys', {
+  foot: [
+    ['модель', session.model ?? '—'],
+    ['доступ', 'админ'],
+  ],
+})}
 <div>
   <div class="top">
     <div class="crumbs">Icarus / <b>Ключи</b></div>

@@ -67,10 +67,6 @@
 /* Ровно та же высота, что у кнопки: замена не сдвигает список ни на пиксель. */
 .draft-wrap .chat-item { display: block; height: var(--side-row); margin: 0; }
 
-.side-title {
-  color: var(--dim); font-size: 10px; letter-spacing: .14em;
-  margin: 0 8px 5px;
-}
 .chat-list {
   flex: 1; min-height: 0; overflow: auto;
   /* Список выезжает в padding панели: полоса прокрутки стоит в стык с правой
@@ -130,10 +126,6 @@
   text-decoration: none; padding: 9px 8px; border-radius: 8px; font-size: 13px;
 }
 .side-link:hover { background: var(--raise); color: var(--text); }
-.side-link em {
-  font-style: normal; margin-left: auto; font-size: 11px; color: var(--dim);
-  background: var(--raise); border-radius: 5px; padding: 1px 6px;
-}
 .side-foot { border-top: 1px solid var(--line); margin-top: 12px; padding: 13px 8px 2px; }
 .side-foot div { display: flex; justify-content: space-between; gap: 10px; color: var(--dim); font-size: 11px; margin-bottom: 3px; }
 
@@ -355,30 +347,9 @@
 }
 .composer-locked[hidden] { display: none; }
 
-/* ── настройки поверх чата ───────────────────────────────────────────────── */
-/* Настройки не уводят со страницы: диалоги остаются слева, а панель занимает
-   основную колонку целиком — места хватает и памяти, и редактору скилла. */
-.settings-pane {
-  position: fixed; top: 0; bottom: 0; left: var(--side-w); right: 0; z-index: 35;
-  display: flex; flex-direction: column; background: var(--bg);
-  border-left: 1px solid var(--line);
-}
-.settings-pane[hidden] { display: none; }
-.settings-head {
-  flex: 0 0 auto; display: flex; align-items: center; gap: 12px;
-  padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--side);
-}
-.settings-tabs { display: flex; gap: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 9px; padding: 3px; }
-.settings-tabs button { border: 0; background: none; color: var(--dim); border-radius: 7px; padding: 6px 12px; font-size: 12px; }
-.settings-tabs button:hover { color: var(--text); }
-.settings-tabs button.active { background: var(--accent-soft); color: var(--accent); }
-#settings-close { margin-left: auto; }
-.settings-frame { flex: 1; width: 100%; border: 0; background: var(--bg); }
-
 /* ── адаптив ─────────────────────────────────────────────────────────────── */
 @media (max-width: 900px) {
   .chat-app { grid-template-columns: 1fr; }
-  .settings-pane { left: 0; }
   .chat-side {
     position: fixed; inset: 0 auto 0 0; width: 286px; z-index: 40;
     transform: translateX(-102%); transition: transform .18s ease;
