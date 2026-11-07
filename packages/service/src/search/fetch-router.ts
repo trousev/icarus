@@ -30,6 +30,7 @@ import {
   type RouterState,
 } from './state.ts';
 import { SearchFailure, type FetchProvider, type FetchResult, type ProviderId } from './types.ts';
+import { recordUsage } from './usage.ts';
 
 export const FETCH_ATTEMPT_TIMEOUT_MS = 15_000;
 export const FETCH_DEADLINE_MS = 30_000;
@@ -192,12 +193,15 @@ export async function routeFetch(
       const after = hasFaults(before, id, 'fetch')
         ? await mutateRouterState(file, (next) => applySuccess(next, id, 'fetch'))
         : before;
+      await recordUsage(config, 'fetch', id, true, { now });
       return { ok: true, provider: id, result, tried, current: scopeCurrent(after, 'fetch') };
     } catch (error) {
       if (options.signal?.aborted) break;
       const failure = asFailure(error);
       tried.push({ provider: id, reason: failureText(failure) });
       // Страница не отдалась — не вина провайдера, идём к следующему без бана.
+      // В статистику отказ всё равно попадает: ключ tried, а страницы нет.
+      await recordUsage(config, 'fetch', id, false, { now });
       if (failure.kind === 'page') continue;
 
       // Cloudflare в поиске не участвует: его дневной лимит не должен банить

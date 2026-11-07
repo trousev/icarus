@@ -27,6 +27,7 @@ import {
   type ProviderState,
 } from './state.ts';
 import { SearchFailure, isProviderId, type ProviderId, type SearchProviderId } from './types.ts';
+import { usageReport, type UsageCount } from './usage.ts';
 
 export type SearchProviderStatus = {
   id: ProviderId;
@@ -50,6 +51,8 @@ export type SearchProviderStatus = {
   fails: number;
   lastError: string | null;
   lastErrorAt: string | null;
+  /** Успехи и отказы ключа за окно статистики: панель показывает сумму. */
+  usage: UsageCount;
 };
 
 export type SearchStatus = {
@@ -61,6 +64,8 @@ export type SearchStatus = {
     current: ProviderId | null;
     providers: SearchProviderStatus[];
   };
+  /** Окно статистики: семь дней, включая сегодняшний (по UTC). */
+  usage: { days: number; since: string; through: string };
 };
 
 type RowProvider = {
@@ -82,6 +87,7 @@ function rows(
   providers: Record<string, RowProvider | undefined>,
   current: ProviderId | null,
   saved: Record<string, ProviderState>,
+  usage: Partial<Record<ProviderId, UsageCount>>,
   now: number,
 ): SearchProviderStatus[] {
   return order
@@ -108,6 +114,7 @@ function rows(
         fails: state?.fails ?? 0,
         lastError: state?.lastError ?? null,
         lastErrorAt: state?.lastErrorAt ?? null,
+        usage: usage[provider.id] ?? { ok: 0, fail: 0 },
       } satisfies SearchProviderStatus;
     });
 }
@@ -115,14 +122,24 @@ function rows(
 /** Состояние для панели. Ключи не отдаём даже частично — только «задан/нет». */
 export function searchStatus(config: IcarusConfig, now: number = Date.now()): SearchStatus {
   const state = readRouterState(stateFile(config));
+  const usage = usageReport(config, now);
   return {
     current: state.current,
     // Рейтинг — порядок, в котором роутер пробует провайдеров: в панели он же.
-    providers: rows(config, RATING, PROVIDERS, state.current, state.providers, now),
+    providers: rows(config, RATING, PROVIDERS, state.current, state.providers, usage.search, now),
     fetch: {
       current: state.fetch?.current ?? null,
-      providers: rows(config, FETCH_RATING, FETCH_PROVIDERS, state.fetch?.current ?? null, state.fetch?.providers ?? {}, now),
+      providers: rows(
+        config,
+        FETCH_RATING,
+        FETCH_PROVIDERS,
+        state.fetch?.current ?? null,
+        state.fetch?.providers ?? {},
+        usage.fetch,
+        now,
+      ),
     },
+    usage: { days: usage.days, since: usage.since, through: usage.through },
   };
 }
 
