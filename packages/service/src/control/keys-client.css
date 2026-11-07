@@ -29,6 +29,13 @@
 .pill.own { border-color: #2f6b45; color: #9ece6a; }
 .pill.env { border-color: var(--accent); color: var(--accent); }
 .pill.off { border-color: #6b2f3a; color: var(--danger); }
+.pill.warn { border-color: #6b5a2f; color: #f3d9a4; }
+/* Маршрутизация поиска: строки компактнее ключей — это сводка, а не форма. */
+.search-health { border-bottom: 1px solid var(--line); padding-bottom: 16px; }
+.search-health .keys-intro.small { font-size: 12px; margin-bottom: 10px; }
+.search-row { padding: 11px 14px; }
+.search-row .keys-top code { font-size: 12px; }
+.search-error { color: #d99; overflow-wrap: anywhere; }
 .keys-actions { display: flex; gap: 8px; align-items: center; }
 .keys-form { flex: 0 0 100%; border-top: 1px solid var(--line); margin-top: 6px; padding-top: 12px; }
 .keys-form label { display: block; color: var(--dim); font-size: 10px; letter-spacing: .14em; margin: 0 0 6px; }

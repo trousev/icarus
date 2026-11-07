@@ -13,6 +13,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseHTML } from 'linkedom';
 import { panelHtml, type PanelSession } from '../src/control/ui.ts';
+import { keysPage } from '../src/control/keys-ui.ts';
 
 const SESSION: PanelSession = {
   user: 'probe',
@@ -110,4 +111,61 @@ test('разделы панели переживают запуск скрипт
   });
   assert.equal(result.crashed, null, `скрипт упал: ${result.crashed}`);
   assert.ok(result.calls.some((call) => call.includes('/panel/memory/files')));
+});
+test('страница ключей рисует маршрутизацию поиска и кнопки проверки', async () => {
+  const session: PanelSession = { ...SESSION, sections: [{ id: 'keys', label: 'Ключи' }] };
+  const html = keysPage(session);
+  const { document, window } = parseHTML(html);
+  const scripts = [...document.querySelectorAll('script')].map((node) => node.textContent ?? '').filter(Boolean);
+
+  const bannedUntil = new Date(Date.now() + 3600_000).toISOString();
+  const payload = {
+    user: 'probe',
+    admin: true,
+    groups: [{ id: 'search', label: 'Поиск' }],
+    keys: [
+      { name: 'SERPAPI_API_KEY', label: 'Поиск — SerpApi', description: 'выдача Google', group: 'search',
+        present: false, source: 'none', hint: '' },
+    ],
+    search: {
+      current: 'serpapi',
+      providers: [
+        { id: 'serpapi', label: 'SerpApi', keyName: 'SERPAPI_API_KEY', present: true, current: true,
+          bannedUntil: null, banReason: null, broken: false, fails: 0, lastError: null, lastErrorAt: null },
+        { id: 'brave', label: 'Brave', keyName: 'BRAVE_API_KEY', present: true, current: false,
+          bannedUntil, banReason: 'credits', broken: false, fails: 3, lastError: 'HTTP 429', lastErrorAt: null },
+        { id: 'you', label: 'You.com', keyName: 'YOU_API_KEY', present: false, current: false,
+          bannedUntil: null, banReason: null, broken: true, fails: 60, lastError: null, lastErrorAt: null },
+      ],
+    },
+  };
+  window.fetch = async () => ({ ok: true, headers: { get: () => 'application/json' }, json: async () => payload });
+
+  let crashed: string | null = null;
+  try {
+    const code = scripts.join('\n');
+    const run = new Function('window', 'document', 'fetch', 'URL', 'location', 'history', code);
+    run(window, document, window.fetch, window.URL, { href: 'http://panel/panel/keys', search: '' }, { replaceState() {} });
+  } catch (error) {
+    crashed = error instanceof Error ? error.message : String(error);
+  }
+  await new Promise((resolve) => setTimeout(resolve, 30));
+
+  const content = document.getElementById('keys-list')?.innerHTML ?? '';
+  assert.equal(crashed, null, `скрипт упал: ${crashed}`);
+  assert.match(content, /МАРШРУТИЗАЦИЯ/);
+  assert.match(content, /текущий/);
+  assert.match(content, /ключ сломан/);
+  assert.match(content, /data-check="serpapi"/);
+  assert.match(content, /data-check="brave"/);
+  assert.match(content, /data-edit-key="SERPAPI_API_KEY"/, 'из сводки можно задать ключ');
+  assert.match(content, /data-edit-key="YOU_API_KEY">Задать/, 'у отсутствующего ключа кнопка «Задать»');
+
+  // «Задать» открывает форму ввода в строке ключа, а не молчит.
+  const setButton = [...document.querySelectorAll('[data-edit-key]')].find(
+    (node) => (node as unknown as { dataset: Record<string, string> }).dataset.editKey === 'SERPAPI_API_KEY',
+  ) as unknown as { onclick: () => void };
+  setButton.onclick();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.ok(document.getElementById('value-SERPAPI_API_KEY'), 'форма ввода открылась');
 });
