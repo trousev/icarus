@@ -142,10 +142,15 @@ function subagentsHtml(step, opened) {
 function traceHtml(steps, opened) {
   if (!steps || !steps.length) return '';
   const items = steps
-    .map(
-      (step) =>
+    .map((step) => {
+      // Класс по инструменту: поиск и извлечение страницы красятся по-разному,
+      // иначе в трассировке «ПОИСК» с URL выглядит как поиск по этому URL.
+      const tool = String(step.tool || 'tool').replace(/[^a-z0-9_]/gi, '_');
+      return (
         '<div class="trace-step ' +
         esc(step.status || 'ok') +
+        ' tool-' +
+        tool +
         (step.subagents && step.subagents.length ? ' has-subs' : '') +
         '" title="' +
         esc(step.result || '') +
@@ -155,8 +160,9 @@ function traceHtml(steps, opened) {
         esc(step.detail || step.tool || '') +
         '</span><span class="trace-dot"></span>' +
         subagentsHtml(step, opened) +
-        '</div>',
-    )
+        '</div>'
+      );
+    })
     .join('');
   const word = plural(steps.length, 'шаг', 'шага', 'шагов');
   return (

@@ -315,6 +315,9 @@ test('шаги называют то, чем Икар занимался, а н�
   assert.equal(traceLabel('bash', { command: 'ls /workspaces' }), 'ТЕРМИНАЛ');
   assert.equal(traceLabel('mcp_connect', { name: 'homeassistant' }), 'MCP');
   assert.equal(traceLabel('mcp_homeassistant_llm__GetDateTime'), 'ДОМ');
+  // Поиск и открытие страницы — разные занятия, и подписи у них разные.
+  assert.equal(traceLabel('web_search', { query: 'ёжик' }), 'ПОИСК');
+  assert.equal(traceLabel('web_fetch', { url: 'https://anekdotbar.ru/pro-ezhika/' }), 'СТРАНИЦА');
   assert.equal(traceDetail('mcp_connect', { name: 'homeassistant' }), 'homeassistant');
   assert.equal(traceDetail('read', { path: 'memory/preferences.md' }), 'memory/preferences.md');
 });
