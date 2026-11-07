@@ -90,4 +90,13 @@ test('в бою имя модели приходит из конфига, а н�
   assert.equal(envs[0]?.ICARUS_MODEL_FAST, 'deepinfra/deepseek-ai/DeepSeek-V4.1-Flash');
   assert.equal(envs[0]?.ICARUS_MODEL_STRONG, 'deepinfra/deepseek-ai/DeepSeek-V4.1-Flash');
   assert.ok(envs[0]?.ICARUS_CHANNEL, 'канал разговора тоже передаётся');
+  assert.match(envs[0]?.ICARUS_SEARCH_URL ?? '', /^http:\/\/icarus:\d+$/, 'адрес роутера задан и не требует токена');
+});
+
+test('адрес поискового роутера собирается из порта сервиса', () => {
+  const envs: Array<Record<string, string>> = [];
+  const config = makeConfig({ port: 8081 });
+  const session = new PiSession(config, probe(), 'telegram-1', config.models[0], 'stub', 0, stubSpawner(envs));
+  session.dispose();
+  assert.equal(envs[0]?.ICARUS_SEARCH_URL, 'http://icarus:8081');
 });

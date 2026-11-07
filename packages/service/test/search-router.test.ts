@@ -21,6 +21,7 @@ import {
   routeSearch,
 } from '../src/search/router.ts';
 import { mutateRouterState, readRouterState, stateFile } from '../src/search/state.ts';
+import { isInternalAddress } from '../src/search/http.ts';
 import { checkProvider, searchStatus } from '../src/search/panel.ts';
 import { SearchFailure, classifyFailure, type ProviderId } from '../src/search/types.ts';
 
@@ -396,7 +397,7 @@ function startServer(config: IcarusConfig, fetchImpl?: typeof fetch) {
   });
 }
 
-test('GET /search отдаёт результаты и провайдера, без токена — 401', async () => {
+test('GET /search: изнутри сети без токена, снаружи — только с токеном', async () => {
   const config = configWith({ serpapi: 's' });
   const box = await startServer(config, fakeFetch({ serpapi: okSerpApi }));
   try {
@@ -409,10 +410,35 @@ test('GET /search отдаёт результаты и провайдера, б�
     assert.equal(body.provider, 'serpapi');
     assert.equal(body.results.length, 2);
 
-    const denied = await fetch(`${box.base}/search?q=лиссабон`);
-    assert.equal(denied.status, 401);
+    // Петля — это внутренняя сеть: контейнер pi ходит сюда без всяких токенов.
+    const internal = await fetch(`${box.base}/search?q=лиссабон`);
+    assert.equal(internal.status, 200);
+
+    // А вот чужой токен не принимаем даже изнутри: это уже не «нет токена».
+    const wrong = await fetch(`${box.base}/search?q=лиссабон`, { headers: { authorization: 'Bearer wrong-token' } });
+    assert.equal(wrong.status, 401);
   } finally {
     box.close();
+  }
+});
+
+test('внутренние адреса узнаются, публичные — нет', () => {
+  for (const address of [
+    '127.0.0.1',
+    '::1',
+    '::ffff:127.0.0.1',
+    '10.1.2.3',
+    '172.16.0.1',
+    '172.31.255.255',
+    '192.168.1.10',
+    '169.254.1.1',
+    'fd00::1',
+    'fe80::1',
+  ]) {
+    assert.equal(isInternalAddress(address), true, `${address} должен быть внутренним`);
+  }
+  for (const address of ['8.8.8.8', '172.15.0.1', '172.32.0.1', '11.0.0.1', '2001:db8::1', '', undefined]) {
+    assert.equal(isInternalAddress(address), false, `${String(address)} не должен быть внутренним`);
   }
 });
 
@@ -466,7 +492,7 @@ test('Brave, Exa, Tavily, Firecrawl, You, Linkup разбираются в об�
   );
 
   assert.deepEqual(parseBrave({ web: { results: [{ title: 'B', url: 'https://b.dev', description: '<b>жирно</b>' }] } }), [
-    { title: 'B', url: 'https://b.dev', snippet: '<b>жирно</b>' },
+    { title: 'B', url: 'https://b.dev', snippet: 'жирно' },
   ]);
   assert.deepEqual(parseExa({ results: [{ title: 'E', url: 'https://e.dev', highlights: ['выдержка'] }] }), [
     { title: 'E', url: 'https://e.dev', snippet: 'выдержка' },

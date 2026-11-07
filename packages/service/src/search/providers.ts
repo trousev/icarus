@@ -101,10 +101,25 @@ export function parseSerpStack(payload: unknown, limit = 6): SearchResult[] {
 }
 
 /** Brave: web.results[].description — это HTML с подсветкой, чистим до текста. */
+/** Brave подсвечивает совпадения тегами — агенту нужен текст, а не разметка. */
+function plainText(value: string): string {
+  return value
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'");
+}
+
 export function parseBrave(payload: unknown, limit = 6): SearchResult[] {
   const rows = asList(asRecord(asRecord(payload)?.web)?.results);
   return rows
-    .map((row) => resultOf(row, ['url'], ['title'], ['description']))
+    .map((row) => {
+      const result = resultOf(row, ['url'], ['title'], ['description']);
+      return result?.snippet ? { ...result, snippet: squash(plainText(result.snippet)) } : result;
+    })
     .filter((item): item is SearchResult => item !== null)
     .slice(0, limit);
 }

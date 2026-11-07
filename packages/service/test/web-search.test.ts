@@ -1,7 +1,7 @@
 // Веб-поиск: разбор выдачи провайдеров, превращение HTML в текст и честные отказы.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { htmlToText, parseBrave, parseSearxng, parseTavily } from '../../extensions/web-search.ts';
+import { htmlToText, parseBrave, parseRouter, parseSearxng, parseTavily } from '../../extensions/web-search.ts';
 
 test('скрипты и стили выкидываются, абзацы сохраняются', () => {
   const html = `<html><head><style>p{color:red}</style><script>alert(1)</script></head>
@@ -69,4 +69,23 @@ test('пустая и битая выдача SearXNG и Brave не ломает
   assert.deepEqual(parseSearxng(null), []);
   assert.deepEqual(parseSearxng({ results: 'нет' }), []);
   assert.deepEqual(parseBrave({}), []);
+});
+
+test('выдача сервисного роутера разбирается как обычные результаты', () => {
+  const payload = {
+    query: 'лиссабон',
+    provider: 'serpapi',
+    results: [
+      { title: 'Лиссабон', url: 'https://lisbon.pt', snippet: 'Город\nна семи   холмах' },
+      { title: 'Без выдержки', url: 'https://example.org/second' },
+      { title: 'Без ссылки', snippet: 'мимо' },
+    ],
+  };
+  assert.deepEqual(parseRouter(payload), [
+    { title: 'Лиссабон', url: 'https://lisbon.pt', snippet: 'Город на семи холмах' },
+    { title: 'Без выдержки', url: 'https://example.org/second' },
+  ]);
+  assert.deepEqual(parseRouter(null), []);
+  assert.deepEqual(parseRouter({ results: 'нет' }), []);
+  assert.equal(parseRouter(payload, 1).length, 1);
 });

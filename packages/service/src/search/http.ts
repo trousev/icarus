@@ -1,8 +1,9 @@
 // HTTP-вход роутера: GET/POST /search.
 //
-// Один маршрут, один токен (тот же, что у /v1) и один ответ: кто ответил, что
-// нашёл и кого пришлось обойти. Ошибки — обычным для сервиса телом errorBody,
-// чтобы клиент не разбирал два разных формата.
+// Изнутри docker-сети токен не нужен: контейнер pi ходит сюда напрямую. Снаружи
+// (если порт случайно оказался наружу) — только с обычным токеном сервиса.
+// Ошибки — обычным для сервиса телом errorBody, чтобы клиент не разбирал два
+// разных формата.
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { IcarusConfig } from '../config.ts';
 import { errorBody } from '../http/sse.ts';
@@ -30,6 +31,34 @@ function bearer(req: IncomingMessage): string {
   return match?.[1]?.trim() ?? '';
 }
 
+/**
+ * Частный адрес: петля, docker-сеть или домашняя локалка.
+ *
+ * Токен для /search не нужен, пока запрос идёт изнутри — контейнер pi ходит в
+ * сервис по docker-сети. Но порт сервиса может случайно оказаться наружу,
+ * поэтому с публичного адреса токен всё-таки спрашиваем: тогда утечка порта
+ * не превращается в бесплатный доступ к квотам поисковиков.
+ */
+export function isInternalAddress(address: string | undefined): boolean {
+  if (address === undefined || address === '') return false;
+  // Node отдаёт IPv4 поверх IPv6 как ::ffff:172.18.0.2 — снимаем префикс.
+  const value = address.startsWith('::ffff:') ? address.slice('::ffff:'.length) : address;
+  const lower = value.toLowerCase();
+  if (lower === '::1') return true;
+  // fc00::/7 (unique local) и fe80::/10 (link-local).
+  if (/^f[cd][0-9a-f]{2}:/.test(lower)) return true;
+  if (/^fe[89ab][0-9a-f]:/.test(lower)) return true;
+
+  const octets = value.split('.').map((part) => Number(part));
+  if (octets.length !== 4 || octets.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
+  const [first, second] = octets as [number, number, number, number];
+  if (first === 127 || first === 10) return true;
+  if (first === 192 && second === 168) return true;
+  if (first === 172 && second >= 16 && second <= 31) return true;
+  if (first === 169 && second === 254) return true;
+  return false;
+}
+
 function clampLimit(raw: unknown): number {
   const value = Number(raw ?? 5);
   if (!Number.isFinite(value)) return 5;
@@ -53,7 +82,7 @@ async function readRequest(req: IncomingMessage, url: URL): Promise<{ query: str
  * POST /search {query, limit} или GET /search?q=...&limit=...
  *
  * 200 — кто-то ответил (пустая выдача — тоже ответ);
- * 400 — нет запроса; 401 — чужой токен;
+ * 400 — нет запроса; 401 — чужой токен снаружи;
  * 502 — все настроенные провайдеры отказали; 503 — все в карантине или нет ключей.
  */
 export async function handleSearch(
@@ -68,8 +97,15 @@ export async function handleSearch(
     return;
   }
 
-  if (bearer(req) !== config.apiKey) {
-    json(res, 401, errorBody('неверный токен', 'authentication_error'));
+  // Токен присылают снаружи; изнутри сети он не нужен вовсе (см. isInternalAddress).
+  const token = bearer(req);
+  if (token !== '') {
+    if (token !== config.apiKey) {
+      json(res, 401, errorBody('неверный токен', 'authentication_error'));
+      return;
+    }
+  } else if (!isInternalAddress(req.socket.remoteAddress)) {
+    json(res, 401, errorBody('нужен токен: запрос пришёл не из внутренней сети', 'authentication_error'));
     return;
   }
 
