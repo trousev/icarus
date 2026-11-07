@@ -27,9 +27,9 @@ test('чат — это лента с композером и диалогами
   assert.match(html, /id="chat-list"/);
   assert.match(html, /id="chat-locked"/, 'у внешнего разговора есть плашка «только для чтения»');
   assert.match(html, /id="chat-status"/, 'статус сверху говорит, можно ли писать');
-  assert.match(html, /href="\/panel\/memory"/, 'настройки памяти доступны из чата');
-  assert.match(html, /href="\/panel\/skills"/, 'настройки скиллов тоже');
-  assert.match(html, /id="settings-pane"/, 'настройки открываются поверх чата, не уводя со страницы');
+  assert.match(html, /href="\/panel\/memory"[^>]*><span>Настройки<\/span>/, 'в чате один вход в настройки');
+  assert.doesNotMatch(html, /data-settings=/, 'списка разделов настроек в сайдбаре чата больше нет');
+  assert.doesNotMatch(html, /settings-pane|settings-tabs|settings-frame/, 'настроек поверх чата с табами больше нет');
   assert.match(html, /\/panel\/api\/chat\/image/, 'локальные картинки отдаёт сервер');
   assert.match(html, /md-image/, 'markdown-картинки рисуются');
   // Разметка подключается раньше клиента: `markdown` — обычная глобальная функция.
@@ -40,6 +40,15 @@ test('чат — это лента с композером и диалогами
   assert.match(html, /"chatId":"web-1"/);
   assert.match(html, /"enabled":true/);
   assert.doesNotMatch(html, /демо-режим/i, 'чат настоящий, без имитации');
+});
+
+test('в сайдбаре чата ровно один пункт настроек — без списка разделов', () => {
+  const html = chatPage(SESSION, { enabled: true });
+  // Разделы настроек живут на своей странице: в чате остаётся одна дверь, иначе
+  // в левой панели появляется второй список тех же пунктов.
+  const links = [...html.matchAll(/class="side-link"[^>]*>/g)];
+  assert.equal(links.length, 1, 'единственная ссылка в блоке настроек');
+  assert.doesNotMatch(html, /<p class="side-title">/, 'заголовок списка настроек убран');
 });
 
 test('клик по пустому месту сайдбара не сворачивает колонку диалогов', () => {
@@ -86,11 +95,9 @@ test('скролл в поле ввода — тонкий и в стык с п�
 
 test('ширина сайдбара тянется и запоминается', () => {
   const html = chatPage(SESSION, { enabled: true });
-  // Ручка на правой границе: колонка следует за --side-w, настройки открываются
-  // от её края, на узком экране ручки нет.
+  // Ручка на правой границе: колонка следует за --side-w, на узком экране ручки нет.
   assert.match(html, /id="side-resizer"/, 'у границы есть ручка');
   assert.match(html, /grid-template-columns: var\(--side-w\) minmax\(0, 1fr\)/, 'колонка следует за шириной');
-  assert.match(html, /left: var\(--side-w\)/, 'настройки открываются от края панели');
   assert.match(html, /localStorage\.setItem\(SIDE_WIDTH_KEY/, 'ширина переживает перезагрузку');
   assert.match(html, /\.side-resizer \{ display: none; \}/, 'на узком экране ручки нет');
 });

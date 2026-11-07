@@ -372,6 +372,14 @@ export async function handlePanel(
 
   const page = routePage(url.pathname);
   if (page) {
+    // Старые ссылки открывали настройки поверх чата (?settings=memory). Теперь у
+    // настроек своя страница с меню в левой панели — туда и ведём, не теряя раздел.
+    const legacySettings = page.section === 'chat' ? url.searchParams.get('settings') : null;
+    if (legacySettings && /^(memory|skills|mcp|maple|keys|profile)$/.test(legacySettings)) {
+      res.writeHead(302, { location: `/panel/${legacySettings}` });
+      res.end();
+      return true;
+    }
     // Раздел математики есть только там, где настроен Maple. Прятать его из
     // сайдбара мало: в закладках у людей он остался, и открытая страница молча
     // показывала бы пустой раздел, у которого каждый запрос — отказ.
@@ -490,7 +498,7 @@ async function sectionPage(
     });
   }
   if (page.section === 'mcp') {
-    return mcpPage(session, { embed: url.searchParams.get('embed') === '1' });
+    return mcpPage(session);
   }
   if (page.section === 'keys') {
     return keysPage(session);
@@ -505,7 +513,6 @@ async function sectionPage(
     // «заведи скилл» можно переслать, а «назад» возвращает к списку.
     fresh: url.searchParams.get('new') === '1',
     tab: url.searchParams.get('tab') === 'history' ? 'history' : 'notes',
-    embed: url.searchParams.get('embed') === '1',
   });
 }
 

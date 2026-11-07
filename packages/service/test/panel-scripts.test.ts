@@ -44,8 +44,8 @@ function fakeFetch(url: string, payloads: Record<string, unknown> = {}) {
 type Run = { crashed: string | null; calls: string[]; content: string };
 
 /** Исполнить скрипт страницы в DOM и вернуть, что он сделал с content. */
-async function run(section: string, options: { embed?: boolean; payloads?: Record<string, unknown> } = {}): Promise<Run> {
-  const html = panelHtml(SESSION, { section, embed: options.embed });
+async function run(section: string, options: { payloads?: Record<string, unknown> } = {}): Promise<Run> {
+  const html = panelHtml(SESSION, { section });
   const { document, window } = parseHTML(html);
   const scripts = [...document.querySelectorAll('script')].map((node) => node.textContent ?? '').filter(Boolean);
 
@@ -110,13 +110,4 @@ test('разделы панели переживают запуск скрипт
   });
   assert.equal(result.crashed, null, `скрипт упал: ${result.crashed}`);
   assert.ok(result.calls.some((call) => call.includes('/panel/memory/files')));
-});
-
-test('страница встроенного режима тоже переживает запуск', async () => {
-  // Разделы открываются ещё и панелью поверх чата (?embed=1) — там нет сайдбара,
-  // и любая привязка к его элементам уронила бы скрипт.
-  for (const section of ['profile', 'memory', 'skills', 'maple']) {
-    const result = await run(section, { embed: true, payloads: { '/panel/profile/api': { language: 'ru', languages: ['ru'], labels: {} } } });
-    assert.equal(result.crashed, null, `${section}: скрипт упал — ${result.crashed}`);
-  }
 });

@@ -158,12 +158,19 @@ test('отказ доступа объясняет причину и экран�
   assert.doesNotMatch(html, /class="cols"/, 'пустой панели при отказе не показываем');
 });
 
-test('настройки внутри чата не показывают второй сайдбар и не сужаются', () => {
-  const html = panelHtml(SESSION, { section: 'memory', scope: 'personal', embed: true });
-  assert.doesNotMatch(html, /<aside>/, 'в чате уже есть свой сайдбар — второй не нужен');
-  assert.match(html, /class="app embedded"/);
-  assert.match(html, /id="q"/, 'поиск по настройкам остаётся');
-  assert.match(html, /id="content"/);
-  assert.match(html, /&embed=1/, 'переходы внутри настроек не теряют режим панели');
-  assert.match(html, /"embed":true/);
+test('у настроек одно меню — в левой панели, без горизонтальных табов', () => {
+  // Раньше разделы открывались поверх чата: сверху горизонтальные табы, внутри —
+  // второй сайдбар. Теперь меню настроек одно и живёт в левой панели страницы.
+  for (const section of ['memory', 'maple']) {
+    const html = panelHtml(SESSION, { section });
+    assert.match(html, /<aside>/, 'меню разделов живёт в левой панели');
+    assert.match(html, /<p class="nav-title">НАСТРОЙКИ<\/p>/);
+    assert.match(html, /class="nav-back" href="\/panel\/chat">← Назад в чат<\/a>/, 'из настроек есть выход в чат');
+    assert.match(html, /<hr class="nav-sep">/, 'кнопка возврата отделена от разделов');
+    assert.doesNotMatch(html, /">Чат<\/a>/, '«Чат» больше не выглядит ещё одним разделом настроек');
+    assert.match(html, /id="q"/, 'поиск по разделу остаётся');
+    assert.match(html, /id="content"/);
+    assert.doesNotMatch(html, /embedded|embed=1|"embed"/, 'встроенного режима больше нет');
+    assert.doesNotMatch(html, /settings-tabs|data-settings-tab/, 'горизонтальных табов настроек нет');
+  }
 });

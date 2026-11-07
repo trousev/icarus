@@ -547,3 +547,22 @@ test('без Maple в конфиге раздела математики нет 
     server.close();
   }
 });
+
+test('старая ссылка «настройки поверх чата» ведёт на страницу раздела', async () => {
+  // Настройки больше не открываются в iframe: у них своя страница и своё меню
+  // в левой панели. Закладки со `?settings=` не должны упираться в пустой чат.
+  await withServer(async (base) => {
+    const legacy = await fetch(`${base}/panel/chat?settings=memory`, {
+      headers: asUser('probe'),
+      redirect: 'manual',
+    });
+    assert.equal(legacy.status, 302);
+    assert.equal(legacy.headers.get('location'), '/panel/memory');
+
+    const unknown = await fetch(`${base}/panel/chat?settings=nope`, {
+      headers: asUser('probe'),
+      redirect: 'manual',
+    });
+    assert.equal(unknown.status, 200, 'неизвестный раздел редиректом не притворяемся');
+  });
+});
