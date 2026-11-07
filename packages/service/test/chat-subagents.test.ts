@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { createServer } from '../src/http/server.ts';
-import { finishChat, createChat, readHistory, subagentsOf, traceDetail, traceLabel } from '../src/control/chat.ts';
+import { finishChat, createChat, readHistory, subagentsOf, traceDetail, traceLabel, traceUpstream } from '../src/control/chat.ts';
 import { sessionIdFor } from '../src/sessions/pi-session.ts';
 import { userPaths } from '../src/config.ts';
 import { makeConfig, PANEL_USER_HEADER, probe } from './fixtures.ts';
@@ -28,6 +28,14 @@ test('шаг субагентов подписан по-человечески: 
   assert.equal(traceDetail('subagent', { tasks: TASKS }), '2 задачи · scout, researcher');
   assert.equal(traceDetail('subagent', { tasks: [] }), 'задачи не переданы');
   assert.equal(traceDetail('subagent', { tasks: [...TASKS, TASKS[0]] }).startsWith('3 задачи'), true);
+});
+
+test('в трассировке видно, какой провайдер ответил на поиск', () => {
+  assert.equal(traceUpstream('курс евро', 'brave'), 'курс евро · brave');
+  assert.equal(traceUpstream('', 'brave'), 'brave');
+  assert.equal(traceUpstream('курс евро', ''), 'курс евро');
+  assert.equal(traceUpstream('курс евро', undefined), 'курс евро');
+  assert.equal(traceUpstream('x'.repeat(200), 'exa'), `${'x'.repeat(200)} · exa`.slice(0, 139) + '…');
 });
 
 test('детали субагентов разбираются аккуратно: мусор отбрасывается, поля обрезаются', () => {

@@ -613,6 +613,15 @@ export function traceLabel(tool: string, args: Record<string, unknown> = {}): st
   return 'ТУЛ';
 }
 
+/**
+ * Подпись шага с именем реального провайдера: «курс евро · brave».
+ * Поисковый роутер отвечает чужим именем, и без этого в трассировке висит router.
+ */
+export function traceUpstream(detail: string, upstream: unknown): string {
+  if (typeof upstream !== 'string' || upstream.trim() === '') return detail;
+  return clip(detail ? `${detail} · ${upstream}` : upstream, 140);
+}
+
 /** Строка под ярлыком: команда, путь, запрос или имя MCP-сервера. */
 export function traceDetail(tool: string, args: Record<string, unknown> = {}): string {
   const first = (value: unknown): string => (typeof value === 'string' ? value.split('\n')[0] ?? '' : '');
@@ -966,7 +975,17 @@ async function streamTurn(
           | undefined;
         const states = subagentsOf(details?.subagents);
         if (states.length > 0) step.subagents = states;
-        send({ type: 'step-end', id, status: step.status, result: step.result, subagents: step.subagents });
+        // Поисковый роутер отвечает чужим именем: в трассировке показываем, кто
+        // именно сходил в сеть, иначе в строке шага так и висит «router».
+        step.detail = traceUpstream(step.detail, details?.upstream);
+        send({
+          type: 'step-end',
+          id,
+          status: step.status,
+          result: step.result,
+          detail: step.detail,
+          subagents: step.subagents,
+        });
         break;
       }
       case 'extension_error':

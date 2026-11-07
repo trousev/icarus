@@ -1,7 +1,14 @@
 // Веб-поиск: разбор выдачи провайдеров, превращение HTML в текст и честные отказы.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { htmlToText, parseBrave, parseRouter, parseSearxng, parseTavily } from '../../extensions/web-search.ts';
+import {
+  htmlToText,
+  parseBrave,
+  parseRouter,
+  parseRouterMeta,
+  parseSearxng,
+  parseTavily,
+} from '../../extensions/web-search.ts';
 
 test('скрипты и стили выкидываются, абзацы сохраняются', () => {
   const html = `<html><head><style>p{color:red}</style><script>alert(1)</script></head>
@@ -89,3 +96,28 @@ test('выдача сервисного роутера разбирается к
   assert.deepEqual(parseRouter({ results: 'нет' }), []);
   assert.equal(parseRouter(payload, 1).length, 1);
 });
+
+test('ответ роутера говорит, кто ответил и кого обошли', () => {
+  assert.deepEqual(parseRouterMeta({ provider: 'brave', results: [] }), { upstream: 'brave' });
+  assert.deepEqual(
+    parseRouterMeta({
+      provider: 'tavily',
+      tried: [
+        { provider: 'serpapi', reason: 'HTTP 429: out of credits' },
+        { provider: 'brave', reason: 'провайдер не ответил вовремя' },
+      ],
+    }),
+    {
+      upstream: 'tavily',
+      tried: [
+        { provider: 'serpapi', reason: 'HTTP 429: out of credits' },
+        { provider: 'brave', reason: 'провайдер не ответил вовремя' },
+      ],
+    },
+  );
+  // Обычный ответ без метаданных не должен притворяться роутерным.
+  assert.deepEqual(parseRouterMeta({ results: [] }), {});
+  assert.deepEqual(parseRouterMeta(null), {});
+  assert.deepEqual(parseRouterMeta({ provider: 42, tried: 'нет' }), {});
+});
+
