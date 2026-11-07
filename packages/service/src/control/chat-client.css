@@ -212,6 +212,8 @@
 .trace-dot { width: 6px; height: 6px; border-radius: 50%; background: #4ade80; flex: 0 0 auto; }
 .trace-step.running .trace-dot { background: var(--accent); animation: pulse 1.2s infinite; }
 .trace-step.error .trace-dot { background: var(--danger); }
+/* Извлечение страницы — не поиск: бирюзовая подпись, чтобы шаги не путались. */
+.trace-step.tool-web_fetch .trace-label { color: #5eead4; }
 @keyframes pulse { 50% { opacity: .25; } }
 
 /* Субагенты под шагом: строка на ребёнка, как в трассировке, но с заданием. */

@@ -599,7 +599,10 @@ export function traceLabel(tool: string, args: Record<string, unknown> = {}): st
   // Любой пользовательский MCP: mcp_<сервер>_<инструмент>. Иначе всё, что человек
   // добавил сам, рисовалось бы безликим «ТУЛ».
   if (/^mcp_[a-z0-9]+_/.test(tool)) return 'MCP';
-  if (tool === 'web_search' || tool === 'web_fetch') return 'ПОИСК';
+  if (tool === 'web_search') return 'ПОИСК';
+  // Извлечение страницы — не поиск: в трассировке это разные занятия, и по
+  // подписи должно быть видно, что Икар не искал, а открывал конкретный URL.
+  if (tool === 'web_fetch') return 'СТРАНИЦА';
   if (tool === 'bash') {
     return /memory|journal|identity|preferences|projects/i.test(text) ? 'ПАМЯТЬ' : 'ТЕРМИНАЛ';
   }
