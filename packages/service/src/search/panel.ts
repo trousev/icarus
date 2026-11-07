@@ -7,7 +7,17 @@ import type { IcarusConfig } from '../config.ts';
 import { FETCH_PROVIDERS, FETCH_RATING } from './fetch-providers.ts';
 import { FETCH_ATTEMPT_TIMEOUT_MS, configuredFetchProviders } from './fetch-router.ts';
 import { PROVIDERS } from './providers.ts';
-import { ATTEMPT_TIMEOUT_MS, RATING, applyFailure, applySuccess, configuredProviders, keyFor, providerEnabled } from './router.ts';
+import {
+  ATTEMPT_TIMEOUT_MS,
+  RATING,
+  applyFailure,
+  applySuccess,
+  configuredProviders,
+  keyFor,
+  providerEnabled,
+  providerReady,
+  secretFor,
+} from './router.ts';
 import {
   isBanned,
   mutateRouterState,
@@ -16,7 +26,7 @@ import {
   type BanReason,
   type ProviderState,
 } from './state.ts';
-import { SearchFailure, isProviderId, type ProviderId } from './types.ts';
+import { SearchFailure, isProviderId, type ProviderId, type SearchProviderId } from './types.ts';
 
 export type SearchProviderStatus = {
   id: ProviderId;
@@ -59,6 +69,7 @@ type RowProvider = {
   keyNames: string[];
   keyless?: boolean;
   keylessTwin?: ProviderId;
+  requires?: string[];
 };
 
 /** Что показать под названием: у бесплатного провайдера — его лимит и пределы. */
@@ -79,7 +90,7 @@ function rows(
     .map((provider) => {
       const state = saved[provider.id];
       const banned = state !== undefined && isBanned(state, now);
-      const present = providerEnabled(config, provider);
+      const present = providerReady(config, provider);
       const twin = provider.keylessTwin === undefined ? undefined : providers[provider.keylessTwin];
       const optional = !present && twin !== undefined && providerEnabled(config, twin);
       return {
@@ -117,8 +128,11 @@ export function searchStatus(config: IcarusConfig, now: number = Date.now()): Se
 
 /** Провайдер по имени переменной окружения: правка ключа снимает карантин. */
 export function providerForKey(name: string): ProviderId | null {
-  for (const provider of Object.values(PROVIDERS)) {
+  // Ключи поиска и извлечения пересекаются, а у Cloudflare ещё и account id:
+  // правка любого из них должна снимать карантин с провайдера.
+  for (const provider of [...Object.values(PROVIDERS), ...Object.values(FETCH_PROVIDERS)]) {
     if (provider.keyNames.includes(name)) return provider.id;
+    if ('requires' in provider && provider.requires?.includes(name)) return provider.id;
   }
   return null;
 }
@@ -152,7 +166,10 @@ export async function checkProvider(
   id: ProviderId,
   options: { fetch?: typeof fetch; now?: () => number } = {},
 ): Promise<CheckResult> {
-  const provider = PROVIDERS[id];
+  if (!(id in PROVIDERS)) {
+    return { ok: false, provider: id, ms: 0, results: 0, error: 'провайдер не умеет искать' };
+  }
+  const provider = PROVIDERS[id as SearchProviderId];
   const key = keyFor(config, provider);
   const now = options.now ?? (() => Date.now());
   const started = now();
@@ -209,8 +226,14 @@ export async function checkFetchProvider(
     return { ok: false, provider: id, ms: 0, chars: 0, error: 'провайдер не умеет извлекать страницы' };
   }
   const key = keyFor(config, provider);
-  if (key === '') {
-    return { ok: false, provider: id, ms: 0, chars: 0, error: 'ключ не задан' };
+  if (!providerReady(config, provider)) {
+    return {
+      ok: false,
+      provider: id,
+      ms: 0,
+      chars: 0,
+      error: key === '' ? 'ключ не задан' : `не заданы обязательные секреты: ${(provider.requires ?? []).join(', ')}`,
+    };
   }
   try {
     const result = await provider.fetch('https://example.com', {
@@ -218,6 +241,7 @@ export async function checkFetchProvider(
       fetch: options.fetch ?? fetch,
       signal: AbortSignal.timeout(FETCH_ATTEMPT_TIMEOUT_MS),
       maxChars: 2_000,
+      secret: (name) => secretFor(config, name),
     });
     await mutateRouterState(stateFile(config), (state) => applySuccess(state, id, 'fetch'));
     return { ok: true, provider: id, ms: now() - started, chars: result.text.length, error: null };

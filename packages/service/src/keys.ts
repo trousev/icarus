@@ -406,6 +406,24 @@ export function keyCatalog(): KeyInfo[] {
       apply: 'session',
     },
     {
+      name: 'CLOUDFLARE_ACCOUNT_ID',
+      label: 'Извлечение — Cloudflare (аккаунт)',
+      description: 'ID аккаунта Cloudflare: без него Browser Run не позвать. Не секрет, но нужен вместе с токеном.',
+      group: 'search',
+      plain: true,
+      where: 'https://dash.cloudflare.com → Workers & Pages → Account ID',
+      apply: 'session',
+    },
+    {
+      name: 'CLOUDFLARE_API_TOKEN',
+      label: 'Извлечение — Cloudflare (токен)',
+      description:
+        'API-токен с правом Browser Run - Edit. Дешевле всех для страниц: время браузера, 10 минут в день бесплатно.',
+      group: 'search',
+      where: 'https://dash.cloudflare.com/profile/api-tokens',
+      apply: 'session',
+    },
+    {
       name: 'ICARUS_SEARCH_PROVIDER',
       label: 'Поиск — провайдер',
       description:

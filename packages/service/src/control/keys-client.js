@@ -170,7 +170,7 @@
     if (!fetchStatus) return '';
     return routingSection(
       'СТРАНИЦЫ: ИЗВЛЕЧЕНИЕ',
-      'Сначала Linkup и You.com: Exa и Tavily бережём для поиска. Firecrawl и SerpApi сюда не входят.',
+      'Cloudflare идёт первым, пока не в карантине; дальше Linkup и You.com, а Exa и Tavily бережём для поиска.',
       fetchStatus,
       'fetch',
     );

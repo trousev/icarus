@@ -14,6 +14,8 @@ import {
   configuredProviders,
   hasFaults,
   keyFor,
+  providerReady,
+  secretFor,
 } from './router.ts';
 import {
   emptyProviderState,
@@ -61,10 +63,10 @@ export type FetchRouteOptions = {
   maxChars?: number;
 };
 
-/** Провайдеры извлечения, у которых есть ключ. */
+/** Провайдеры извлечения, у которых есть ключ (у Cloudflare — ещё и аккаунт). */
 export function configuredFetchProviders(config: IcarusConfig): FetchProvider[] {
   return FETCH_RATING.map((id) => FETCH_PROVIDERS[id]).filter(
-    (provider): provider is FetchProvider => provider !== undefined && keyFor(config, provider) !== '',
+    (provider): provider is FetchProvider => provider !== undefined && providerReady(config, provider),
   );
 }
 
@@ -124,16 +126,30 @@ export async function routeFetch(
   const state = readRouterState(file);
   const knownIds = new Set(candidates.map((provider) => provider.id));
   const current = scopeCurrent(state, 'fetch');
-  const known =
-    current !== null && knownIds.has(current)
-      ? (scopeProviders(state, 'fetch')[current] ?? emptyProviderState())
-      : null;
-  if (known === null || isBanned(known, start)) {
-    const next = availableIds(state, candidates, start)[0] ?? null;
-    if (next !== null && next !== current) {
+  const providers = scopeProviders(state, 'fetch');
+
+  // Cloudflare — «сверхлипкий»: пока не в карантине, fetch принудительно делает
+  // текущим именно его, даже если до этого текущим был кто-то другой. Он платит
+  // за время браузера, а не за страницы, поэтому должен расходоваться первым.
+  const sticky =
+    candidates.some((provider) => provider.id === 'cloudflare') &&
+    !isBanned(providers.cloudflare ?? emptyProviderState(), start);
+  if (sticky) {
+    if (current !== 'cloudflare') {
       await mutateRouterState(file, (fresh) => {
-        setScopeCurrent(fresh, 'fetch', next);
+        setScopeCurrent(fresh, 'fetch', 'cloudflare');
       });
+    }
+  } else {
+    const known =
+      current !== null && knownIds.has(current) ? (providers[current] ?? emptyProviderState()) : null;
+    if (known === null || isBanned(known, start)) {
+      const next = availableIds(state, candidates, start)[0] ?? null;
+      if (next !== null && next !== current) {
+        await mutateRouterState(file, (fresh) => {
+          setScopeCurrent(fresh, 'fetch', next);
+        });
+      }
     }
   }
 
@@ -165,7 +181,13 @@ export async function routeFetch(
       : AbortSignal.timeout(timeout);
 
     try {
-      const result = await provider.fetch(url, { key, fetch: fetchImpl, signal, maxChars });
+      const result = await provider.fetch(url, {
+        key,
+        fetch: fetchImpl,
+        signal,
+        maxChars,
+        secret: (name) => secretFor(config, name),
+      });
       const before = readRouterState(file);
       const after = hasFaults(before, id, 'fetch')
         ? await mutateRouterState(file, (next) => applySuccess(next, id, 'fetch'))
@@ -178,7 +200,10 @@ export async function routeFetch(
       // Страница не отдалась — не вина провайдера, идём к следующему без бана.
       if (failure.kind === 'page') continue;
 
-      const searchCandidates = sharedWithSearch(failure) ? configuredProviders(config) : [];
+      // Cloudflare в поиске не участвует: его дневной лимит не должен банить
+      // поисковых провайдеров. У остальных ключ и кредиты общие с поиском.
+      const searchCandidates =
+        id !== 'cloudflare' && sharedWithSearch(failure) ? configuredProviders(config) : [];
       await mutateRouterState(file, (next) => {
         applyFailure(next, id, failure, now(), candidates, 'fetch');
         if (searchCandidates.length > 0) {

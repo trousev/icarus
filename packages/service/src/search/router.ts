@@ -23,16 +23,29 @@ import {
   type RouterState,
 } from './state.ts';
 import {
-  PROVIDER_IDS,
   SearchFailure,
   type ProviderId,
   type SearchProvider,
+  type SearchProviderId,
   type SearchResult,
 } from './types.ts';
 import type { IcarusConfig } from '../config.ts';
 
-/** Рейтинг: сверху — те, кто отдаёт выдачу Google или ищет лучше всех. */
-export const RATING: readonly ProviderId[] = PROVIDER_IDS;
+/**
+ * Рейтинг поиска: сверху — те, кто отдаёт выдачу Google или ищет лучше всех.
+ * Cloudflare сюда не входит: он умеет только извлекать страницы.
+ */
+export const RATING: readonly SearchProviderId[] = [
+  'serpapi',
+  'serpstack',
+  'brave',
+  'exa',
+  'tavily',
+  'firecrawl',
+  'you',
+  'you-free',
+  'linkup',
+];
 
 export const ATTEMPT_TIMEOUT_MS = 8_000;
 export const TOTAL_DEADLINE_MS = 20_000;
@@ -75,14 +88,14 @@ export type RouteOptions = {
 };
 
 /** Значение настройки: панель (secretEnv) сильнее .env, .env сильнее окружения. */
-function nameValue(config: IcarusConfig, name: string): string {
+export function secretFor(config: IcarusConfig, name: string): string {
   return config.secretEnv?.[name]?.trim() || config.env[name]?.trim() || process.env[name]?.trim() || '';
 }
 
 /** Ключ провайдера — первая непустая переменная из его списка. */
 export function keyFor(config: IcarusConfig, provider: { keyNames: string[] }): string {
   for (const name of provider.keyNames) {
-    const value = nameValue(config, name);
+    const value = secretFor(config, name);
     if (value) return value;
   }
   return '';
@@ -98,14 +111,29 @@ const FREE_OFF = /^(off|false|no|none|0)$/i;
  * Бесплатный MCP You.com ключа не требует и включён по умолчанию — поиск
  * работает даже на пустом .env. Выключается одной строкой: ICARUS_SEARCH_FREE=off.
  */
-export function providerEnabled(config: IcarusConfig, provider: { keyless?: boolean; keyNames: string[] }): boolean {
-  if (provider.keyless === true) return !FREE_OFF.test(nameValue(config, 'ICARUS_SEARCH_FREE'));
+export function providerEnabled(
+  config: IcarusConfig,
+  provider: { keyless?: boolean; keyNames: string[] },
+): boolean {
+  if (provider.keyless === true) return !FREE_OFF.test(secretFor(config, 'ICARUS_SEARCH_FREE'));
   return keyFor(config, provider) !== '';
+}
+
+/**
+ * Готов ли провайдер: участвует в ротации и все обязательные секреты заданы.
+ * Обязательные нужны там, где одного ключа мало (Cloudflare: аккаунт + токен).
+ */
+export function providerReady(
+  config: IcarusConfig,
+  provider: { keyless?: boolean; keyNames: string[]; requires?: string[] },
+): boolean {
+  if (!providerEnabled(config, provider)) return false;
+  return (provider.requires ?? []).every((name) => secretFor(config, name) !== '');
 }
 
 /** Провайдеры, которых можно звать: с ключом или без него, если так задумано. */
 export function configuredProviders(config: IcarusConfig): SearchProvider[] {
-  return RATING.map((id) => PROVIDERS[id]).filter((provider) => providerEnabled(config, provider));
+  return RATING.map((id) => PROVIDERS[id]).filter((provider) => providerReady(config, provider));
 }
 
 type Candidate = { id: ProviderId };
@@ -155,7 +183,8 @@ function chooseAttempt(
 function banFor(kind: SearchFailure['kind'], id: ProviderId, now: number): { reason: BanReason; ms: number } {
   if (kind !== 'credits') return { reason: 'error', ms: ERROR_BAN_MS };
   // Суточную квоту незачем держать ровные сутки: ждём её сброса по календарю.
-  const reset = PROVIDERS[id]?.creditsResetAt?.(now);
+  const search = id in PROVIDERS ? PROVIDERS[id as SearchProviderId] : undefined;
+  const reset = search?.creditsResetAt?.(now);
   return { reason: 'credits', ms: reset === undefined ? CREDIT_BAN_MS : Math.max(60_000, reset - now) };
 }
 
@@ -285,7 +314,7 @@ export async function routeSearch(
     if (id === null) break;
     triedIds.add(id);
 
-    const provider = PROVIDERS[id];
+    const provider = PROVIDERS[id as SearchProviderId];
     const key = keyFor(config, provider);
     if (key === '' && provider.keyless !== true) {
       tried.push({ provider: id, reason: 'нет ключа' });

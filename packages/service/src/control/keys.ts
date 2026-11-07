@@ -34,6 +34,7 @@ import { errorBody } from '../http/sse.ts';
 import { log } from '../log.ts';
 import { FETCH_PROVIDERS } from '../search/fetch-providers.ts';
 import { PROVIDERS } from '../search/providers.ts';
+import type { SearchProviderId } from '../search/types.ts';
 import {
   asProviderId,
   checkFetchProvider,
@@ -286,10 +287,10 @@ export async function handleKeysApi(
       json(res, 400, errorBody(`неизвестный провайдер «${String(body.provider)}»`, 'invalid_request_error'));
       return;
     }
+    // У Cloudflare подпись только в fetch-карте, у остальных — в поисковой.
     const label =
-      body.capability === 'fetch'
-        ? (FETCH_PROVIDERS[provider]?.label ?? PROVIDERS[provider].label)
-        : PROVIDERS[provider].label;
+      FETCH_PROVIDERS[provider]?.label ??
+      (provider in PROVIDERS ? PROVIDERS[provider as SearchProviderId].label : provider);
 
     // capability=fetch проверяет извлечение страницы, иначе — обычный поиск.
     if (body.capability === 'fetch') {
