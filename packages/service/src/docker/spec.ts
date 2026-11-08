@@ -60,6 +60,9 @@ export function specFor(config: IcarusConfig, user: UserConfig): string {
     layout: CONTAINER_PATHS,
     // Maple — единственное внешнее дерево в контейнере; его путь тоже часть содержимого.
     mapleDir: config.mapleDir ?? null,
+    // Код встроенных MCP монтируется из репозитория: старый контейнер без этого
+    // маунта не запустит сервер артефактов, поэтому список — часть отпечатка.
+    tools: ['artifacts-mcp', ...(config.mapleDir === undefined ? [] : ['maple-mcp'])],
     env: Object.fromEntries(Object.entries(env).sort(([a], [b]) => a.localeCompare(b))),
   });
   return createHash('sha1').update(payload).digest('hex').slice(0, 16);

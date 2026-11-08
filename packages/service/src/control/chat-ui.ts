@@ -55,8 +55,10 @@ export function chatPage(session: PanelSession, options: ChatPageOptions): strin
     <div class="chat-list" id="chat-list"><p class="side-empty">Пока пусто. Начни новый чат.</p></div>
 
     <!-- Настройки — одна дверь. Сами разделы живут на своей странице, и там же
-         в этой панели появляется их меню: два списка настроек человеку не нужны. -->
+         в этой панели появляется их меню: два списка настроек человеку не нужны.
+         Артефакты — не настройка, поэтому стоят рядом с «Настройками», а не внутри. -->
     <div class="side-settings">
+      <a class="side-link" href="/panel/artifacts"><span>Артефакты</span></a>
       <a class="side-link" href="/panel/memory"><span>Настройки</span></a>
     </div>
 

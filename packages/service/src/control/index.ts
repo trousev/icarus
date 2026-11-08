@@ -23,7 +23,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import fs from 'node:fs';
 import { handleWorkspacesApi } from './workspaces.ts';
-import { findUser, isAdmin, userPaths, type IcarusConfig, type UserConfig } from '../config.ts';
+import { DEFAULT_WORKSPACE, findUser, isAdmin, userPaths, type IcarusConfig, type UserConfig } from '../config.ts';
 import { LANGUAGE_LABELS, LANGUAGES, languageOf, writeProfile, type Language } from '../profile.ts';
 import { readJsonBody } from '../http/openai.ts';
 import { errorBody } from '../http/sse.ts';
@@ -61,6 +61,9 @@ import { handleMcpApi, handleMcpPublic } from './mcp.ts';
 import { mcpPage } from './mcp-ui.ts';
 import { countVisible } from '../mcp/registry.ts';
 import { handleChatApi } from './chat.ts';
+import { handleArtifactsApi, handleArtifactsRaw } from './artifacts.ts';
+import { artifactsPage } from './artifacts-ui.ts';
+import { artifactWorkspaces, countArtifacts } from '../artifacts.ts';
 import type { SessionRegistry } from '../sessions/registry.ts';
 import { log as logger } from '../log.ts';
 
@@ -307,6 +310,12 @@ function countsFor(config: IcarusConfig, userId: string): Record<string, number>
     // Сломанное хранилище MCP не должно ронять счётчики всей панели.
     logger.warn('MCP: счётчик не собрался', { user: userId, error: String(error) });
   }
+  try {
+    // Артефакты считаем по всем workspace'ам: раздел один, а лежат они в разных.
+    counts.artifacts = countArtifacts(config, userId);
+  } catch (error) {
+    logger.warn('артефакты: счётчик не собрался', { user: userId, error: String(error) });
+  }
   return counts;
 }
 
@@ -325,6 +334,24 @@ export async function handlePanel(
   }
 
   const access = identifyPanelUser(req, config);
+
+  // Файл артефакта: путь, а не query, чтобы относительные ссылки внутри HTML
+  // (стили, картинки) разрешались сами. SSO тут обязателен: это панель.
+  if (url.pathname.startsWith('/panel/artifacts/raw/')) {
+    if (!access.ok) {
+      json(
+        res,
+        access.denial.status,
+        errorBody(
+          `${access.denial.message}. ${access.denial.hint}`,
+          access.denial.status === 401 ? 'authentication_error' : 'permission_error',
+        ),
+      );
+      return true;
+    }
+    handleArtifactsRaw(req, res, url, config, access.identity.userId);
+    return true;
+  }
 
   // Корень панели — чат: это теперь главный экран, а память и скиллы живут
   // настройками. Старые ссылки на файл памяти по-прежнему ведут в память.
@@ -355,7 +382,7 @@ export async function handlePanel(
     // Старые ссылки открывали настройки поверх чата (?settings=memory). Теперь у
     // настроек своя страница с меню в левой панели — туда и ведём, не теряя раздел.
     const legacySettings = page.section === 'chat' ? url.searchParams.get('settings') : null;
-    if (legacySettings && /^(memory|skills|mcp|keys|profile)$/.test(legacySettings)) {
+    if (legacySettings && /^(artifacts|memory|skills|mcp|keys|profile)$/.test(legacySettings)) {
       res.writeHead(302, { location: `/panel/${legacySettings}` });
       res.end();
       return true;
@@ -390,6 +417,12 @@ export async function handlePanel(
     return true;
   }
 
+  // Артефакты — свой префикс, как у MCP и ключей: страница и API живут вместе.
+  if (url.pathname === '/panel/artifacts/api' || url.pathname.startsWith('/panel/artifacts/api/')) {
+    await handleApi(req, res, url, ctx, access);
+    return true;
+  }
+
   if (url.pathname === '/panel/mcp' || url.pathname.startsWith('/panel/mcp/')) {
     await handleApi(req, res, url, ctx, access);
     return true;
@@ -416,10 +449,10 @@ export async function handlePanel(
   return false;
 }
 
-/** Раздел из адреса: /panel/chat, /panel/memory, /panel/skills, /panel/mcp, /panel/keys и /panel/profile. */
+/** Раздел из адреса: /panel/chat, /panel/artifacts, /panel/memory и остальные. */
 function routePage(pathname: string): PanelPage | null {
   if (pathname === '/panel/chat' || pathname === '/panel/chat/') return { section: 'chat' };
-  const match = /^\/panel\/(memory|skills|mcp|keys|profile)\/?$/.exec(pathname);
+  const match = /^\/panel\/(artifacts|memory|skills|mcp|keys|profile)\/?$/.exec(pathname);
   return match ? { section: match[1] } : null;
 }
 
@@ -475,6 +508,23 @@ async function sectionPage(
   if (page.section === 'keys') {
     return keysPage(session);
   }
+  if (page.section === 'artifacts') {
+    // Workspace — состояние страницы, а не глобальная настройка: артефакты лежат
+    // в рабочей папке, и человек может держать их в любой из своих.
+    const workspaces = artifactWorkspaces(config, userId);
+    const requested = url.searchParams.get('workspace');
+    const workspace =
+      workspaces.find((item) => item.slug === requested)?.slug ??
+      workspaces.find((item) => item.slug === DEFAULT_WORKSPACE)?.slug ??
+      workspaces[0]?.slug ??
+      DEFAULT_WORKSPACE;
+    return artifactsPage(session, {
+      workspace,
+      ...(url.searchParams.get('artifact') ? { artifact: url.searchParams.get('artifact')! } : {}),
+      workspaces: workspaces.map((item) => ({ slug: item.slug, name: item.name })),
+      counts: countsFor(config, userId),
+    });
+  }
   return panelHtml(session, {
     ...page,
     // Область — только у памяти: у скиллов и математики её нет, и тащить туда личную
@@ -509,6 +559,14 @@ async function handleApi(
   }
 
   const userId = access.identity.userId;
+
+  // Артефакты — свой раздел: список, чтение, ссылки и удаление. Его маршруты не
+  // должны попадать в общий разбор памяти, иначе «файл артефакта» искали бы
+  // среди записей памяти.
+  if (url.pathname === '/panel/artifacts/api' || url.pathname.startsWith('/panel/artifacts/api/')) {
+    await handleArtifactsApi(req, res, url, config, userId);
+    return;
+  }
 
   // Ключи — только админ: проверка живёт в обработчике, рядом с записью файлов,
   // чтобы её не обошёл ни один новый маршрут раздела.

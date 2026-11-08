@@ -142,6 +142,38 @@ users: [probe]
   );
 });
 
+test('mcp.hidden: служебный сервер не теряется при разборе и не пускает строку', () => {
+  const file = writeConfig(`${MINIMAL}mcp:
+  artifacts:
+    command: node
+    args: ['/opt/icarus/tools/artifacts-mcp/server.mjs']
+    lifecycle: lazy
+    hidden: true
+    description: Артефакты
+`);
+  const config = loadConfig(file, {} as NodeJS.ProcessEnv);
+  assert.equal(config.mcp.artifacts?.hidden, true, 'hidden должен доезжать из YAML');
+  assert.equal(config.mcp.artifacts?.lifecycle, 'lazy');
+
+  const broken = writeConfig(`${MINIMAL}mcp:
+  artifacts:
+    command: node
+    hidden: 'yes'
+`);
+  assert.throws(() => loadConfig(broken, {} as NodeJS.ProcessEnv), /mcp\.artifacts\.hidden: ожидалось true или false/);
+});
+
+test('в примере конфига артефакты включены, скрыты и ленивы', () => {
+  const config = loadConfig(path.join(REPO_ROOT, 'config.example.yaml'), {
+    DEEPINFRA_API_KEY: 'sk-test',
+  } as NodeJS.ProcessEnv);
+  const artifacts = config.mcp.artifacts;
+  assert.ok(artifacts, 'артефакты должны быть в примере: это встроенное умение');
+  assert.equal(artifacts.hidden, true, 'в панели MCP его нет и выключить нельзя');
+  assert.equal(artifacts.lifecycle, 'lazy', 'инструкции не висят в каждом разговоре');
+  assert.match(artifacts.description ?? '', /артефакт/i);
+});
+
 test('docker.dns: список адресов, опечатка — ошибка с путём до поля', () => {
   const withDns = writeConfig(`apiKey: token
 docker:

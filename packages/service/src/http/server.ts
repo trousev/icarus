@@ -10,6 +10,7 @@ import { skillDraftPrompt, SKILL_DRAFT_SYSTEM, SKILL_DRAFT_TIMEOUT_MS } from '..
 import { listManaged } from '../docker/manager.ts';
 import { planReconciliation } from '../docker/reconcile.ts';
 import { handleMcpProxy } from '../mcp/proxy.ts';
+import { handlePublicArtifact } from '../control/artifacts.ts';
 import { handleFetch, handleSearch, type SearchHttpOptions } from '../search/http.ts';
 
 export const PUBLIC_MODEL_ID = 'icarus';
@@ -50,6 +51,22 @@ export function createServer(
         }
       }
       return;
+    }
+
+    // Публичные артефакты: ссылку открывает любой, у кого она есть, поэтому
+    // маршрут стоит до панели и не требует заголовка SSO. Секрет — случайный
+    // publicId в адресе, а не кука: см. artifacts.ts.
+    if (url.pathname === '/a' || url.pathname.startsWith('/a/')) {
+      try {
+        if (await handlePublicArtifact(req, res, url, config)) return;
+      } catch (error) {
+        log.error('ошибка публичного артефакта', { error: redact(String(error)) });
+        if (!res.headersSent) {
+          res.writeHead(500, { 'content-type': 'application/json' });
+          res.end(JSON.stringify(errorBody('публичный артефакт сломался', 'server_error')));
+        }
+        return;
+      }
     }
 
     // Панель управления — то, ради чего человек вообще открывает этот порт: на проде
