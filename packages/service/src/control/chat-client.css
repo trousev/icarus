@@ -234,20 +234,7 @@
   flex: 0 0 auto; color: var(--dim); font-size: 10px; font-style: normal;
   letter-spacing: .06em; text-transform: uppercase; opacity: .75;
 }
-/* Ответ команды: не ответ модели, а служебная плашка. В историю он не пишется,
-   поэтому и выглядит иначе — с именем команды над текстом. */
-.turn.command { display: block; }
-.command-card {
-  max-width: 900px; margin: 0 auto; padding: 10px 14px;
-  background: var(--panel); border: 1px solid var(--line); border-radius: 11px;
-}
-.command-head {
-  color: var(--accent); font-size: 11px; letter-spacing: .04em; margin-bottom: 5px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-.command-text { font-size: 13px; color: var(--text); }
-.turn.command.error .command-head { color: var(--danger); }
-.turn.command.error .command-text { color: var(--danger); }
+/* Ответ команды — в chat-messages.css: команды работают в двух чатах. */
 /* Граница контекста: /clear начинает новый разговор, но старую ленту не прячет. */
 .turn.divider {
   display: flex; align-items: center; gap: 12px; color: var(--dim);
