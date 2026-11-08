@@ -45,6 +45,12 @@ export type ChatRecord = {
   sessions?: SessionEpoch[];
   /** Рабочая папка разговора: разговор навсегда остаётся в своём workspace'е. */
   workspace: string;
+  /**
+   * Артефакт, который правит этот разговор. Обычный чат работает в workspace,
+   * а артефактный — строго в папке артефакта, поэтому одной только workspace
+   * для него мало: папка берётся из сессии pi, а не из рабочего каталога.
+   */
+  artifact?: string;
 };
 
 function chatsFile(config: IcarusConfig, user: UserConfig): string {
@@ -125,6 +131,8 @@ function normalize(value: unknown): ChatRecord | null {
     workspace: typeof item.workspace === 'string' && item.workspace ? item.workspace : DEFAULT_WORKSPACE,
     ...(conversationId ? { conversationId } : {}),
     ...(sessions.length > 0 ? { sessions } : {}),
+    // Пустая строка — это «обычный чат», а не артефакт с пустым именем.
+    ...(typeof item.artifact === 'string' && item.artifact !== '' ? { artifact: item.artifact } : {}),
   };
 }
 
@@ -259,26 +267,51 @@ export function workspaceForConversation(
   )?.workspace;
 }
 
+/** Артефакт разговора: у обычного чата его нет, у правки артефакта — есть. */
+export function artifactForConversation(
+  config: IcarusConfig,
+  user: UserConfig,
+  conversationId: string,
+): string | undefined {
+  return readChats(config, user).find(
+    (chat) => chat.conversationId === conversationId || chat.id === conversationId,
+  )?.artifact;
+}
+
 /** Новый веб-чат: единственный канал, который панель создаёт сама. */
 export function createChatRecord(
   config: IcarusConfig,
   user: UserConfig,
   workspace: string = DEFAULT_WORKSPACE,
   now = new Date(),
+  options: { title?: string; artifact?: string } = {},
 ): ChatRecord {
   const id = `web-${now.getTime().toString(36)}-${crypto.randomBytes(3).toString('hex')}`;
   const chat: ChatRecord = {
     id,
-    title: NEW_CHAT_TITLE,
+    title: options.title?.trim() || NEW_CHAT_TITLE,
     createdAt: now.toISOString(),
     channel: 'web',
     workspace,
     conversationId: id,
+    ...(options.artifact ? { artifact: options.artifact } : {}),
   };
   const chats = readChats(config, user);
   chats.unshift(chat);
   writeChats(config, user, chats);
   return chat;
+}
+
+/**
+ * Разговор, привязанный к артефакту. Один артефакт — один такой чат: человек
+ * возвращается к «той же правке», а не заводит новый диалог каждый раз.
+ */
+export function findArtifactChat(
+  config: IcarusConfig,
+  user: UserConfig,
+  artifact: string,
+): ChatRecord | undefined {
+  return readChats(config, user).find((chat) => chat.channel === 'web' && chat.artifact === artifact);
 }
 
 /**
@@ -293,6 +326,7 @@ export function ensureChat(
   channel: ChatChannel,
   workspace: string = DEFAULT_WORKSPACE,
   now = new Date(),
+  artifact?: string,
 ): ChatRecord {
   const chats = readChats(config, user);
   const sessionId = sessionIdFor(user.id, conversationId);
@@ -309,6 +343,7 @@ export function ensureChat(
       channel,
       workspace,
       conversationId,
+      ...(artifact ? { artifact } : {}),
     };
     chats.unshift(chat);
     writeChats(config, user, chats);
@@ -326,6 +361,12 @@ export function ensureChat(
   }
   if (chat.channel !== channel) {
     chat.channel = channel;
+    changed = true;
+  }
+  // Реестр мог остаться от версии без артефактных чатов: тип разговора
+  // достраиваем при первом же ходе, а не теряем режим правки.
+  if (artifact && chat.artifact !== artifact) {
+    chat.artifact = artifact;
     changed = true;
   }
   if (changed) writeChats(config, user, chats);
@@ -535,6 +576,7 @@ export function renderSessionsMap(config: IcarusConfig, user: UserConfig): strin
       sessionId,
       channel: chat.channel,
       workspace: chat.workspace,
+      ...(chat.artifact ? { artifact: chat.artifact } : {}),
       title: chat.title,
       ...(file ? { file } : {}),
     };

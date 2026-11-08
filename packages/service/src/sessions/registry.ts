@@ -3,9 +3,16 @@
 import { randomUUID } from 'node:crypto';
 import { ensureContainerRunning } from '../docker/manager.ts';
 import { log, redact } from '../log.ts';
-import { COMPACT_TIMEOUT_MS, PiSession, type CompactResult, type PiCommand } from './pi-session.ts';
+import {
+  COMPACT_TIMEOUT_MS,
+  PiSession,
+  type ArtifactSession,
+  type CompactResult,
+  type PiCommand,
+} from './pi-session.ts';
 import {
   appendChatSession,
+  artifactForConversation,
   ensureChat,
   findChatRecord,
   renameChat,
@@ -15,6 +22,7 @@ import {
 import { sessionFileForId } from './files.ts';
 import { channelForConversation } from './identity.ts';
 import { runOneShot, type OneShotOptions } from './one-shot.ts';
+import { inspectArtifact } from '../artifacts.ts';
 import {
   DEFAULT_WORKSPACE,
   userPaths,
@@ -34,6 +42,7 @@ export type SessionFactory = (
   container: string,
   generation: number,
   workspace: string,
+  artifact?: ArtifactSession,
 ) => PiSession;
 
 export type RegistryDeps = {
@@ -121,8 +130,8 @@ export class SessionRegistry {
     this.config = config;
     this.createSession =
       deps.createSession ??
-      ((userConfig, user, conversationId, model, container, generation, workspace) =>
-        new PiSession(userConfig, user, conversationId, model, container, generation, undefined, workspace));
+      ((userConfig, user, conversationId, model, container, generation, workspace, artifact) =>
+        new PiSession(userConfig, user, conversationId, model, container, generation, undefined, workspace, artifact));
     this.ensureContainer = deps.ensureContainer ?? ensureContainerRunning;
     // Тишину проверяем чаще, чем она наступает: сжатие должно случиться «после часа»,
     // а не «когда-нибудь потом». Пять минут — потолок проверки, иначе при часе
@@ -186,11 +195,35 @@ export class SessionRegistry {
     return runOneShot(this.config, container, tier === 'strong' ? this.strongModel() : this.fastModel(), prompt, rest);
   }
 
+  /**
+   * Артефакт для сессии: проверяет, что он есть и что человек вправе его менять.
+   * Права могли поменяться после того, как чат завели, поэтому проверка стоит
+   * на каждом подъёме сессии, а не только на кнопке «Чат».
+   */
+  private artifactSession(user: UserConfig, slug: string | undefined): ArtifactSession | undefined {
+    if (!slug) return undefined;
+    const artifact = inspectArtifact(this.config, slug, user.id);
+    if (!artifact) throw new Error(`артефакт «${slug}» не найден`);
+    if (!artifact.canWrite) throw new Error(`нет права менять артефакт «${slug}»`);
+    return { slug: artifact.name, title: artifact.title, entry: artifact.entry, type: artifact.type };
+  }
+
   /** Находит или поднимает сессию разговора. */
-  async acquire(user: UserConfig, conversationId: string, workspace?: string): Promise<PiSession> {
+  async acquire(
+    user: UserConfig,
+    conversationId: string,
+    workspace?: string,
+    artifact?: string,
+  ): Promise<PiSession> {
     // Разговор помнит свой workspace; явный аргумент нужен там, где запись ещё
     // не создана (новый чат панели) или её только предстоит завести.
     const target = workspace ?? workspaceForConversation(this.config, user, conversationId) ?? DEFAULT_WORKSPACE;
+    // Артефактный разговор работает не в workspace, а в папке артефакта. Имя
+    // берём из аргумента, а если его не передали (второй вход в тот же разговор) —
+    // из реестра: иначе повторный ход открыл бы pi не там.
+    const artifactName =
+      artifact ?? (workspace === undefined ? artifactForConversation(this.config, user, conversationId) : undefined);
+    const artifactSession = this.artifactSession(user, artifactName);
     const key = `${user.id}:${conversationId}`;
     const generation = this.generation(user.id);
 
@@ -201,9 +234,9 @@ export class SessionRegistry {
 
     const existing = this.sessions.get(key);
     if (existing && existing.alive) {
-      // Разговор переехал в другой workspace — старый процесс смотрел не туда,
-      // и продолжать его в новой папке нельзя: перезапускаем.
-      if (existing.workspace !== target) {
+      // Разговор переехал в другой workspace или к другому артефакту — старый
+      // процесс смотрел не туда, продолжать его в новой папке нельзя.
+      if (existing.workspace !== target || existing.artifact?.slug !== artifactSession?.slug) {
         existing.dispose();
         this.sessions.delete(key);
       } else if (existing.generation === generation || existing.busy) {
@@ -240,12 +273,21 @@ export class SessionRegistry {
       container,
       generation,
       target,
+      artifactSession,
     );
     this.sessions.set(key, session);
     // Разговор поднялся — значит, он существует. Реестр ведёт все каналы сразу:
     // панель показывает Telegram и API рядом с веб-чатами, ничего не сканируя.
     try {
-      ensureChat(this.config, user, conversationId, channelForConversation(conversationId), target);
+      ensureChat(
+        this.config,
+        user,
+        conversationId,
+        channelForConversation(conversationId),
+        target,
+        new Date(),
+        artifactSession?.slug,
+      );
     } catch (error) {
       // Реестр — удобство панели, а не условие разговора: его сбой не должен
       // оставить человека без ответа.

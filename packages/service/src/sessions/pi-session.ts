@@ -35,6 +35,18 @@ const PRIVATE_EXTENSIONS = [
 /** Инструменты, которыми можно писать. В приватном workspace их не выдаём вовсе. */
 const WRITE_TOOLS = 'write,edit,bash';
 
+/**
+ * Артефакт, который правит разговор. Разговор об артефакте — это сессия pi не в
+ * workspace, а в папке `/artifacts/<slug>`: только так модель работает в
+ * репозитории артефакта, а не где-то рядом.
+ */
+export type ArtifactSession = {
+  slug: string;
+  title: string;
+  entry: string;
+  type: string;
+};
+
 export function piArgsFor(model: ModelConfig, sessionId: string, workspace: string = DEFAULT_WORKSPACE): string[] {
   const isPrivate = workspace === PRIVATE_WORKSPACE;
   return [
@@ -128,6 +140,8 @@ export class PiSession {
   readonly conversationId: string;
   /** В каком workspace'е идёт разговор: он же рабочий каталог процесса pi. */
   readonly workspace: string;
+  /** Артефакт, если разговор открыт из раздела «Артефакты»: он и есть каталог. */
+  readonly artifact?: ArtifactSession;
   private config: IcarusConfig;
   private client: RpcClient;
   private listeners = new Set<(event: RpcEvent) => void>();
@@ -145,11 +159,13 @@ export class PiSession {
     /** Чем запускать pi: в тестах — заглушкой, в бою — docker exec (см. RpcClient). */
     spawner?: Spawner,
     workspace: string = DEFAULT_WORKSPACE,
+    artifact?: ArtifactSession,
   ) {
     this.user = user;
     this.conversationId = conversationId;
     this.config = config;
     this.workspace = workspace;
+    this.artifact = artifact;
     this.key = `${user.id}:${conversationId}`;
     this.container = container;
     this.generation = generation;
@@ -177,9 +193,19 @@ export class PiSession {
         // пересоздания контейнера. Здесь они перекрывают окружение контейнера.
         ...(config.secretEnv ?? {}),
         ICARUS_WORKSPACE: workspace,
+        // Режим правки артефакта: персона по этим переменным собирает отдельный
+        // промпт, а процесс работает прямо в папке артефакта, а не в workspace.
+        ...(artifact
+          ? {
+              ICARUS_ARTIFACT: artifact.slug,
+              ICARUS_ARTIFACT_TITLE: artifact.title,
+              ICARUS_ARTIFACT_ENTRY: artifact.entry,
+              ICARUS_ARTIFACT_TYPE: artifact.type,
+            }
+          : {}),
         ...(workspace === PRIVATE_WORKSPACE ? { ICARUS_PRIVATE: '1' } : {}),
       },
-      containerWorkspace(workspace),
+      artifact ? `${CONTAINER_PATHS.artifacts}/${artifact.slug}` : containerWorkspace(workspace),
     );
     this.detach = this.client.onEvent((event) => {
       // Во время сжатия сессия занята не ходом: `agent_settled` тут ни при чём,
@@ -202,6 +228,7 @@ export class PiSession {
       user: user.id,
       conversation: conversationId,
       model: `${model.provider}/${model.id}`,
+      ...(artifact ? { artifact: artifact.slug } : {}),
     });
   }
 

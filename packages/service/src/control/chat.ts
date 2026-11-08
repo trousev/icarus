@@ -906,7 +906,7 @@ async function streamTurn(
 
   let session;
   try {
-    session = await registry.acquire(user, chatId, chat.workspace);
+    session = await registry.acquire(user, chatId, chat.workspace, chat.artifact);
   } catch (error) {
     json(res, 503, errorBody(`сессия недоступна: ${String(error)}`, 'server_error'));
     return;

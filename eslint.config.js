@@ -48,6 +48,7 @@ export default tseslint.config(
       'packages/service/src/control/keys-client.js',
       'packages/service/src/control/artifacts-client.js',
       'packages/service/src/control/artifacts-markdown.js',
+      'packages/service/src/control/artifacts-chat.js',
     ],
     languageOptions: {
       sourceType: 'script',

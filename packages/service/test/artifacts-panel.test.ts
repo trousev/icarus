@@ -11,6 +11,7 @@ import type { AddressInfo } from 'node:net';
 import { createServer } from '../src/http/server.ts';
 import { DEFAULT_ACL, artifactsRoot, writeAcl } from '../src/artifacts.ts';
 import { commitArtifact, ensureArtifactRepos } from '../src/artifacts-git.ts';
+import { updateChatTitles } from '../src/sessions/chats.ts';
 import type { FolderAcl } from '../src/artifacts.ts';
 import type { IcarusConfig } from '../src/config.ts';
 import { makeConfig, PANEL_USER_HEADER, probe } from './fixtures.ts';
@@ -92,7 +93,7 @@ test('страница раздела: глобальный список, пои
     assert.match(html, /<p class="nav-title">НАСТРОЙКИ<\/p>/);
     assert.doesNotMatch(html, /БИБЛИОТЕКА/);
     assert.match(html, /id="art-list"/);
-    assert.match(html, /id="art-acl"/, 'права доступны из панели');
+    assert.match(html, /id="art-share"/, 'права и ссылка доступны из панели');
     assert.match(html, /id="art-history"/, 'история версий доступна из панели');
     assert.match(html, /id="art-history-panel"/);
     assert.match(html, /id="art-preview"/);
@@ -403,5 +404,40 @@ test('предпросмотр HTML-версии отдаёт index и отно�
     const css = await fetch(`${base}${basePath}style.css`, { headers: asUser() });
     assert.equal(css.status, 200);
     assert.equal(await css.text(), 'body { color: red }');
+  });
+});
+
+
+test('чат правки: один разговор на артефакт и только с правом записи', async () => {
+  await withServer(async (base, config) => {
+    const first = await post(base, 'chat', { artifact: 'plan' });
+    assert.equal(first.status, 200);
+    const one = (await first.json()) as { chatId: string; title: string };
+    assert.match(one.chatId, /^web-/);
+    assert.match(one.title, /Правка · План на четверг/);
+
+    // Повторное открытие возвращает тот же разговор, а не заводит второй.
+    const again = (await (await post(base, 'chat', { artifact: 'plan' })).json()) as { chatId: string };
+    assert.equal(again.chatId, one.chatId);
+
+    // /rename в общем чате не должен откатываться при следующем открытии панели.
+    updateChatTitles(config, probe(), new Map([[one.chatId, 'Налоги']]));
+    const renamed = (await (await post(base, 'chat', { artifact: 'plan' })).json()) as { title: string };
+    assert.equal(renamed.title, 'Налоги', 'ручное имя служебного чата переживает повторное открытие');
+
+    const chats = JSON.parse(
+      fs.readFileSync(path.join(config.dataDir, 'users', 'probe', 'chats.json'), 'utf8'),
+    ) as { chats: Array<{ id: string; artifact?: string; workspace: string }> };
+    const record = chats.chats.find((chat) => chat.id === one.chatId);
+    assert.equal(record?.artifact, 'plan');
+    assert.equal(record?.workspace, 'talk');
+
+    // Права проверяются на входе: read-only артефакт чат не открывает.
+    item(config, 'viewonly', { 'index.md': '# Только смотреть\n', 'index.ai.md': '# Только смотреть\n' }, {
+      me: 'read',
+      family: 'read',
+    });
+    assert.equal((await post(base, 'chat', { artifact: 'viewonly' })).status, 403);
+    assert.equal((await post(base, 'chat', { artifact: 'nope' })).status, 404);
   });
 });
