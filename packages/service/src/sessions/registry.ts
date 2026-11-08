@@ -1,18 +1,25 @@
 // Реестр сессий: (пользователь, разговор) → живой процесс pi.
 // Держит контейнеры тёплыми, гасит простаивающие сессии, защищает от параллельных ходов.
-import fs from 'node:fs';
-import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { ensureContainerRunning } from '../docker/manager.ts';
 import { log, redact } from '../log.ts';
 import {
   COMPACT_TIMEOUT_MS,
   PiSession,
-  sessionIdFor,
   type ArtifactSession,
   type CompactResult,
   type PiCommand,
 } from './pi-session.ts';
-import { artifactForConversation, ensureChat, workspaceForConversation } from './chats.ts';
+import {
+  appendChatSession,
+  artifactForConversation,
+  ensureChat,
+  findChatRecord,
+  renameChat,
+  sessionIdOf,
+  workspaceForConversation,
+} from './chats.ts';
+import { sessionFileForId } from './files.ts';
 import { channelForConversation } from './identity.ts';
 import { runOneShot, type OneShotOptions } from './one-shot.ts';
 import { inspectArtifact } from '../artifacts.ts';
@@ -64,6 +71,12 @@ export type ClearOutcome =
   | { status: 'busy' }
   | { status: 'failed'; error: string };
 
+/** Чем кончилось переименование разговора (команда /rename). */
+export type RenameOutcome =
+  | { status: 'renamed'; title: string }
+  | { status: 'empty' }
+  | { status: 'failed'; error: string };
+
 /** Что рассказать человеку про разговор (команда /stats). */
 export type StatsOutcome =
   | { status: 'ok'; stats: Record<string, unknown> }
@@ -87,33 +100,6 @@ async function waitFor(promise: Promise<void>, timeoutMs: number): Promise<void>
   } finally {
     if (timer) clearTimeout(timer);
   }
-}
-
-/**
- * Убирает файлы разговора в `archive/` рядом. pi ищет сессию по id среди файлов
- * каталога (`<когда создан>_<id>.jsonl`), поэтому переименование в подкаталог для
- * него значит «такого разговора нет» — и следующий ход начинается с чистого листа.
- * Историю не удаляем: человек всегда может попросить поднять её из архива.
- */
-async function archiveSessionFiles(dir: string, sessionId: string): Promise<number> {
-  let names: string[];
-  try {
-    names = await fs.promises.readdir(dir);
-  } catch (error) {
-    // Разговора ещё не было — каталога сессий может не быть вовсе.
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0;
-    throw error;
-  }
-
-  const mine = names.filter((name) => name === `${sessionId}.jsonl` || name.endsWith(`_${sessionId}.jsonl`));
-  if (mine.length === 0) return 0;
-
-  const archive = path.join(dir, 'archive');
-  await fs.promises.mkdir(archive, { recursive: true });
-  for (const name of mine) {
-    await fs.promises.rename(path.join(dir, name), path.join(archive, name));
-  }
-  return mine.length;
 }
 
 export class SessionRegistry {
@@ -315,15 +301,16 @@ export class SessionRegistry {
   }
 
   /**
-   * Сжатие по просьбе человека: команда `/compact`. Работает только с живой сессией —
-   * если разговор уже затих и был сжат уборкой, сжимать нечего, и следующая реплика
-   * просто поднимет pi по сжатой истории.
+   * Сжатие по просьбе человека: команда `/compact`. Делает это pi по RPC `compact`.
+   * Если разговор затих и процесса нет, поднимаем его: pi откроет ту же историю и
+   * сожмёт её так же, как в живом разговоре.
    */
   async compact(user: UserConfig, conversationId: string, customInstructions?: string): Promise<CompactOutcome> {
-    const session = this.sessions.get(`${user.id}:${conversationId}`);
-    if (!session || !session.alive) return { status: 'no-session' };
-    if (session.busy || session.compacting) return { status: 'busy' };
+    const live = this.sessions.get(`${user.id}:${conversationId}`);
+    if (live && (live.busy || live.compacting)) return { status: 'busy' };
     try {
+      const session = await this.acquire(user, conversationId);
+      if (session.busy || session.compacting) return { status: 'busy' };
       return await session.compact(customInstructions);
     } catch (error) {
       log.warn('сжатие по команде не вышло', { user: user.id, error: redact(String(error)) });
@@ -386,10 +373,10 @@ export class SessionRegistry {
   }
 
   /**
-   * Новый разговор по просьбе человека: команда `/clear`. Идентификатор разговора
-   * выводится из человека и чата и не меняется, поэтому «начать заново» — это убрать
-   * файл сессии в архив: без этого pi открыл бы прошлую историю. Живой процесс гасим:
-   * он держит разговор в памяти и всё равно дописывал бы старый файл.
+   * Новый разговор по просьбе человека: команда `/clear`. Контекст чистит сам pi —
+   * RPC `new_session` заводит новую сессию, и разговор переезжает на её id. Файл
+   * прошлой сессии остаётся на диске, но разговор на него больше не ссылается:
+   * история открывается пустой, а следующий запуск продолжает уже новую сессию.
    *
    * Память тут ни при чём: она лежит в /workspace/.icarus/memory и `/clear` её не трогает.
    */
@@ -407,21 +394,56 @@ export class SessionRegistry {
     if (busy()) return { status: 'busy' };
 
     const session = this.sessions.get(key);
-    if (session) {
-      session.dispose();
-      if (this.sessions.get(key) === session) this.sessions.delete(key);
+    if (session && session.alive) {
+      try {
+        await session.newSession();
+        return { status: 'started' };
+      } catch (error) {
+        log.warn('pi не начал разговор заново', { user: user.id, error: redact(String(error)) });
+        return { status: 'failed', error: error instanceof Error ? error.message : String(error) };
+      }
     }
 
+    // Процесса нет — значит и чистить в памяти нечего. Переводим разговор на новую
+    // сессию: следующий ход поднимет pi уже с чистого листа. Если истории и так нет,
+    // ничего не выдумываем.
     try {
-      const archived = await archiveSessionFiles(userPaths(this.config, user).sessions, sessionIdFor(user.id, conversationId));
-      log.info('разговор начат заново', {
+      const chat = findChatRecord(this.config, user, conversationId);
+      if (!chat) return { status: 'empty' };
+      const file = sessionFileForId(userPaths(this.config, user).sessions, sessionIdOf(chat, user));
+      if (!file) return { status: 'empty' };
+      const sessionId = randomUUID();
+      appendChatSession(this.config, user, conversationId, sessionId);
+      log.info('разговор переведён на новую сессию', {
         user: user.id,
         conversation: conversationId.slice(0, 8),
-        archived,
+        session: sessionId,
       });
-      return archived > 0 ? { status: 'started' } : { status: 'empty' };
+      return { status: 'started' };
     } catch (error) {
-      log.warn('не удалось убрать прошлый разговор в архив', { user: user.id, error: redact(String(error)) });
+      log.warn('не удалось начать разговор заново', { user: user.id, error: redact(String(error)) });
+      return { status: 'failed', error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  /**
+   * Переименование разговора: имя живёт в chats.json, поэтому его видят и панель,
+   * и Telegram. После этого автоматический заголовок разговор не переписывает
+   * (`isGenericTitle` уже не срабатывает) — имя выбрал человек.
+   */
+  async rename(user: UserConfig, conversationId: string, name: string): Promise<RenameOutcome> {
+    // Имя показывается в списке и в шапке, а у Telegram тема ограничена 128
+    // символами: переводы строк и хвосты там только мешают.
+    const title = name.replace(/\s+/g, ' ').trim().slice(0, 128);
+    if (!title) return { status: 'empty' };
+    try {
+      const workspace = workspaceForConversation(this.config, user, conversationId);
+      ensureChat(this.config, user, conversationId, channelForConversation(conversationId), workspace);
+      const chat = renameChat(this.config, user, conversationId, title);
+      if (!chat) return { status: 'failed', error: 'разговор не найден' };
+      return { status: 'renamed', title: chat.title };
+    } catch (error) {
+      log.warn('не удалось переименовать разговор', { user: user.id, error: redact(String(error)) });
       return { status: 'failed', error: error instanceof Error ? error.message : String(error) };
     }
   }

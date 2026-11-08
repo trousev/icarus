@@ -7,7 +7,7 @@ import type { AddressInfo } from 'node:net';
 import { createServer } from '../src/http/server.ts';
 import { userPaths } from '../src/config.ts';
 import { sessionIdFor } from '../src/sessions/pi-session.ts';
-import { ensureChat } from '../src/sessions/chats.ts';
+import { appendChatSession, ensureChat, findChatRecord, sessionIdsOf } from '../src/sessions/chats.ts';
 import {
   chatImageFile,
   createChat,
@@ -384,4 +384,42 @@ test('след вложений в реплике разбирается обр�
     { path: '/workspaces/.icarus/incoming/a.png', image: true },
     { path: '/workspaces/.icarus/incoming/b.pdf', image: false },
   ]);
+});
+
+
+test('после /clear история склеивается с разделителем, а не обнуляется', () => {
+  const { config, user } = fixture();
+  const chat = createChat(config, user, 'talk', new Date('2026-11-01T10:00:00.000Z'));
+  const firstId = sessionIdFor(user.id, chat.id);
+  putSessionFile(config, user, chat.id, dialog('старый вопрос', 'старый ответ'));
+
+  const secondId = '8d2c4a10-1111-4bbb-8ccc-1234567890ab';
+  appendChatSession(config, user, chat.id, secondId, '2026-11-02T09:00:00.000Z');
+  const dir = userPaths(config, user).sessions;
+  const second = path.join(dir, `2026-11-02T09-00-00-000Z_${secondId}.jsonl`);
+  fs.writeFileSync(
+    second,
+    [
+      { type: 'session', timestamp: '2026-11-02T09:00:00.000Z' },
+      ...dialog('новый вопрос', 'новый ответ', '2026-11-02T09:00:01.000Z'),
+    ]
+      .map((entry) => JSON.stringify(entry))
+      .join('\n'),
+  );
+
+  const record = findChatRecord(config, user, chat.id);
+  assert.ok(record);
+  assert.deepEqual(sessionIdsOf(record, user), [firstId, secondId], 'цепочка сессий на месте');
+
+  const history = readHistory(config, user, chat.id);
+  assert.ok(history);
+  assert.deepEqual(
+    history.messages.map((message) => message.divider ?? message.text),
+    ['старый вопрос', 'старый ответ', 'clear', 'новый вопрос', 'новый ответ'],
+    'старые сообщения остались до разделителя',
+  );
+  assert.equal(history.messages[2]?.timestamp, '2026-11-02T09:00:00.000Z', 'у границы есть время');
+
+  const page = listChatPage(config, user);
+  assert.match(page.chats[0]?.preview ?? '', /новый ответ/, 'в списке — свежая сессия');
 });

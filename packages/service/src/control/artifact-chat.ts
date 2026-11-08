@@ -13,9 +13,12 @@ import {
   type ChatRecord,
 } from '../sessions/chats.ts';
 
+/** Системный заголовок чата правки: по нему видно, что это служебный разговор. */
+export const ARTIFACT_CHAT_TITLE_PREFIX = 'Правка · ';
+
 /** Заголовок разговора: по нему его видно и в общем списке чатов. */
 function chatTitle(title: string): string {
-  const text = `Правка · ${title}`.replace(/\s+/g, ' ').trim();
+  const text = `${ARTIFACT_CHAT_TITLE_PREFIX}${title}`.replace(/\s+/g, ' ').trim();
   return text.length > 80 ? `${text.slice(0, 79).trimEnd()}…` : text;
 }
 
@@ -38,9 +41,10 @@ export function ensureArtifactChat(config: IcarusConfig, user: UserConfig, slug:
     });
   }
 
-  // Артефакт могли переименовать (заголовок в index.ai.md меняется) — заголовок
-  // разговора должен оставаться узнаваемым, а не врать про старое имя.
-  if (existing.title !== title) {
+  // Артефакт могли переименовать (заголовок в index.ai.md меняется) — системный
+  // заголовок обновляем. Имя, выбранное человеком через /rename, не трогаем:
+  // служебный чат живёт в общем списке, и переименование там должно оставаться.
+  if (existing.title !== title && existing.title.startsWith(ARTIFACT_CHAT_TITLE_PREFIX)) {
     updateChatTitles(config, user, new Map([[existing.id, title]]));
     return { ...existing, title };
   }

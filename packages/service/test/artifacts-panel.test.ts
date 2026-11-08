@@ -11,6 +11,7 @@ import type { AddressInfo } from 'node:net';
 import { createServer } from '../src/http/server.ts';
 import { DEFAULT_ACL, artifactsRoot, writeAcl } from '../src/artifacts.ts';
 import { commitArtifact, ensureArtifactRepos } from '../src/artifacts-git.ts';
+import { updateChatTitles } from '../src/sessions/chats.ts';
 import type { FolderAcl } from '../src/artifacts.ts';
 import type { IcarusConfig } from '../src/config.ts';
 import { makeConfig, PANEL_USER_HEADER, probe } from './fixtures.ts';
@@ -418,6 +419,11 @@ test('чат правки: один разговор на артефакт и т
     // Повторное открытие возвращает тот же разговор, а не заводит второй.
     const again = (await (await post(base, 'chat', { artifact: 'plan' })).json()) as { chatId: string };
     assert.equal(again.chatId, one.chatId);
+
+    // /rename в общем чате не должен откатываться при следующем открытии панели.
+    updateChatTitles(config, probe(), new Map([[one.chatId, 'Налоги']]));
+    const renamed = (await (await post(base, 'chat', { artifact: 'plan' })).json()) as { title: string };
+    assert.equal(renamed.title, 'Налоги', 'ручное имя служебного чата переживает повторное открытие');
 
     const chats = JSON.parse(
       fs.readFileSync(path.join(config.dataDir, 'users', 'probe', 'chats.json'), 'utf8'),

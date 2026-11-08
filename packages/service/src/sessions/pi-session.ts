@@ -2,7 +2,7 @@
 // Процесс живёт внутри контейнера пользователя, общение — JSONL по stdio.
 import { RpcClient, type RpcEvent, type Spawner } from './rpc-client.ts';
 import { channelForConversation, sessionIdFor } from './identity.ts';
-import { refreshChatTitle } from './chats.ts';
+import { appendChatSession, findChatRecord, refreshChatTitle, sessionIdOf } from './chats.ts';
 import { log } from '../log.ts';
 import { SERVICE_NAME } from '../docker/compose.ts';
 import {
@@ -119,7 +119,12 @@ export type PiCommand = {
 
 export class PiSession {
   readonly key: string;
-  readonly sessionId: string;
+  /**
+   * id сессии pi. Обычно выводится из разговора, но после `/clear` pi заводит
+   * новую сессию со своим id — тогда он приезжает из `get_state` и запоминается
+   * в chats.json, чтобы история и следующий запуск искали правильный файл.
+   */
+  sessionId: string;
   readonly container: string;
   /**
    * Поколение ресурсов человека на момент запуска процесса (скиллы и всё остальное,
@@ -164,7 +169,10 @@ export class PiSession {
     this.key = `${user.id}:${conversationId}`;
     this.container = container;
     this.generation = generation;
-    this.sessionId = sessionIdFor(user.id, conversationId);
+    // Разговор мог уже начаться заново (`/clear`): тогда pi ждёт id последней
+    // сессии из цепочки, а не выведенный из conversationId.
+    const record = findChatRecord(config, user, conversationId);
+    this.sessionId = record ? sessionIdOf(record, user) : sessionIdFor(user.id, conversationId);
 
     // Канал нужен расширению-персоне: в веб-чате можно показать картинку
     // markdown-ом, в Telegram — нельзя, и учить модель лишнему незачем.
@@ -282,6 +290,45 @@ export class PiSession {
     } finally {
       this.compactingTask = null;
     }
+  }
+
+  /**
+   * Новый разговор внутри той же сессии: pi заводит новую сессию (`new_session`)
+   * и начинает с чистого контекста. Старый файл остаётся на диске, но разговор
+   * переезжает на новый id — его и запоминаем в chats.json.
+   */
+  async newSession(): Promise<string> {
+    const response = await this.client.request({ type: 'new_session' }, 30_000);
+    if (response.success !== true) {
+      throw new Error(`pi не начал разговор заново: ${String(response.error ?? 'без причины')}`);
+    }
+    // Расширение может отменить замену сессии (before_switch): тогда id остался
+    // прежним, и записывать его как новый было бы враньём.
+    if ((response.data as { cancelled?: unknown } | undefined)?.cancelled === true) {
+      throw new Error('pi отменил начало нового разговора');
+    }
+    const state = await this.client.request({ type: 'get_state' }, 20_000);
+    const data = (state.data ?? {}) as { sessionId?: unknown };
+    const next = typeof data.sessionId === 'string' ? data.sessionId : '';
+    if (!next) throw new Error('pi не назвал id новой сессии');
+    this.sessionId = next;
+    try {
+      appendChatSession(this.config, this.user, this.conversationId, next);
+    } catch (error) {
+      // Разговор уже начат заново; не записать id — значит потерять историю при
+      // следующем запуске. Это важнее «команда не сработала», поэтому пишем в лог.
+      log.warn('новая сессия не записалась', {
+        user: this.user.id,
+        conversation: this.conversationId,
+        error: String(error),
+      });
+    }
+    log.info('разговор начат заново через pi', {
+      user: this.user.id,
+      conversation: this.conversationId,
+      session: next,
+    });
+    return next;
   }
 
   private async runCompact(customInstructions?: string): Promise<CompactResult> {

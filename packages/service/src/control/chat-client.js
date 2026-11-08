@@ -189,6 +189,11 @@ function assistantHtml(message) {
   );
 }
 
+/** Граница «контекст очищен»: не реплика, а разделитель между сессиями pi. */
+function clearDividerHtml() {
+  return '<div class="turn divider"><hr><span>Контекст очищен</span></div>';
+}
+
 /* ── состояние ────────────────────────────────────────────────────────────── */
 let chats = [];
 let currentId = cfg.chatId || null;
@@ -346,6 +351,19 @@ function setComposer(readOnly) {
 function setTitle(title) {
   el('chat-title').textContent = title || 'Новый чат';
   document.title = 'Icarus · ' + (title || 'Новый чат');
+}
+
+/** /rename: новое имя сразу в шапке и в сайдбаре, без перезагрузки ленты. */
+function applyChatTitle(chatId, title) {
+  if (currentChat && currentChat.id === chatId) {
+    currentChat.title = title;
+    setTitle(title);
+  }
+  const known = chats.find((chat) => chat.id === chatId);
+  if (known && known.title !== title) {
+    known.title = title;
+    renderChats();
+  }
 }
 
 /**
@@ -588,9 +606,10 @@ function renderHistory(messages) {
   }
   showEmpty(false);
   el('chat-messages').innerHTML = messages
-    .map((message) =>
-      message.role === 'user' ? userHtml(message) : assistantHtml(message),
-    )
+    .map((message) => {
+      if (message.divider === 'clear') return clearDividerHtml();
+      return message.role === 'user' ? userHtml(message) : assistantHtml(message);
+    })
     .join('');
   scrollToBottom(true);
 }
@@ -1961,12 +1980,17 @@ function handleEvent(box, event) {
 }
 
 async function sendText(forced) {
-  // Отказ только от СВОЕГО занятого разговора: чужие ходы отправке не мешают.
-  if (!writable || (currentId && busyChats.has(currentId))) return;
   const input = el('chat-input');
   const text = String(forced ?? input.value).trim();
   const files = pending.slice();
   if (!text && files.length === 0) return;
+  // Команду разбираем до проверки занятости: /stop и /stats нужны именно
+  // во время хода, а обычную реплику в занятый разговор отправлять нельзя.
+  if (text.startsWith('/') && files.length === 0) {
+    if (await runCommand(text)) return;
+  }
+  // Отказ только от СВОЕГО занятого разговора: чужие ходы отправке не мешают.
+  if (!writable || (currentId && busyChats.has(currentId))) return;
   if (!currentId) {
     try {
       await createChat();
@@ -2245,6 +2269,302 @@ async function stopStream() {
   }
 }
 
+/* ── команды ─────────────────────────────────────────────────────────────────
+   В Telegram команды разбирает бот, а в веб-чате их не было вовсе: строка
+   «/compact» уезжала в pi обычной репликой. Теперь разбор общий и живёт на
+   сервере (`/panel/api/chat/command`), а палитра показывает, что можно позвать:
+   команды самого чата — из конфига страницы, команды pi — из `get_commands`. */
+
+/** Команды, которые чат разбирает сам. Приезжают в странице, запрос не нужен. */
+const WEB_COMMANDS = Array.isArray(cfg.commands) ? cfg.commands : [];
+/** Команды pi по разговорам: список спрашиваем один раз на чат. */
+const piCommands = new Map();
+const piRequested = new Set();
+let commandBusy = false;
+let paletteOpen = false;
+let paletteRows = [];
+let paletteIndex = 0;
+
+/** Подпись источника: по ней видно, что команда пришла от pi, а не от чата. */
+function sourceLabel(source) {
+  if (source === 'skill') return 'скилл';
+  if (source === 'prompt') return 'шаблон';
+  if (source === 'extension') return 'расширение';
+  return '';
+}
+
+/** Всё, что можно позвать с косой черты: сначала свои команды, потом pi. */
+function paletteCandidates() {
+  const list = WEB_COMMANDS.map((command) => ({
+    name: command.name,
+    description: command.description || '',
+    source: 'chat',
+  }));
+  const extra = currentId ? piCommands.get(currentId) || [] : [];
+  for (const command of extra) {
+    if (list.some((item) => item.name === command.name)) continue;
+    list.push({
+      name: command.name,
+      description: command.description || '',
+      source: command.source || 'pi',
+    });
+  }
+  return list;
+}
+
+function closePalette() {
+  if (!paletteOpen) return;
+  paletteOpen = false;
+  paletteRows = [];
+  paletteIndex = 0;
+  const box = el('cmd-palette');
+  box.hidden = true;
+  box.innerHTML = '';
+}
+
+/**
+ * Палитра открывается только на один токен: «/» или «/com». Как только человек
+ * написал пробел, это уже реплика с аргументами — список ему больше не нужен.
+ */
+function renderPalette() {
+  const input = el('chat-input');
+  const box = el('cmd-palette');
+  const match = writable && input ? /^\/([^\s]*)$/.exec(input.value) : null;
+  if (!match) {
+    closePalette();
+    return;
+  }
+  const prefix = match[1].toLowerCase();
+  paletteRows = paletteCandidates().filter((command) => command.name.toLowerCase().startsWith(prefix));
+  if (!paletteRows.length) {
+    closePalette();
+    return;
+  }
+  if (paletteIndex >= paletteRows.length) paletteIndex = 0;
+  box.innerHTML = paletteRows
+    .map((row, index) => {
+      const label = sourceLabel(row.source);
+      return (
+        '<button type="button" class="cmd-row' +
+        (index === paletteIndex ? ' active' : '') +
+        '" data-index="' +
+        index +
+        '" role="option" aria-selected="' +
+        (index === paletteIndex ? 'true' : 'false') +
+        '">' +
+        '<code>/' +
+        esc(row.name) +
+        '</code><span class="cmd-desc">' +
+        esc(row.description) +
+        '</span>' +
+        (label ? '<em class="cmd-src">' + esc(label) + '</em>' : '') +
+        '</button>'
+      );
+    })
+    .join('');
+  box.hidden = false;
+  paletteOpen = true;
+}
+
+/** Список команд pi: лениво, по первому «/» в этом разговоре. */
+async function ensurePiCommands() {
+  const id = currentId;
+  if (!id || piCommands.has(id) || piRequested.has(id)) return;
+  piRequested.add(id);
+  try {
+    const data = await api('/panel/api/chat/commands?id=' + encodeURIComponent(id));
+    piCommands.set(id, Array.isArray(data.commands) ? data.commands : []);
+  } catch {
+    // Список команд — подсказка, а не условие чата: не вышло — покажем свои.
+    piCommands.set(id, []);
+  }
+  if (currentId === id) renderPalette();
+}
+
+/** Ввод в поле: тянем высоту и, если это начало команды, обновляем палитру. */
+function onComposerInput() {
+  growInput();
+  // Новый символ — новый фильтр: выбор начинается с первой строки.
+  paletteIndex = 0;
+  renderPalette();
+  if (paletteOpen) void ensurePiCommands();
+}
+
+function movePalette(delta) {
+  if (!paletteRows.length) return;
+  paletteIndex = (paletteIndex + delta + paletteRows.length) % paletteRows.length;
+  renderPalette();
+}
+
+/** Выбор строки — вставка, а не отправка: аргументы человек допишет сам. */
+function choosePalette() {
+  const row = paletteRows[paletteIndex];
+  if (!row) return false;
+  const input = el('chat-input');
+  input.value = '/' + row.name + ' ';
+  composerCaret = input.value.length;
+  closePalette();
+  input.focus();
+  growInput();
+  return true;
+}
+
+/**
+ * Клавиши палитры. Возвращает true, если событие уже обработано и отправлять
+ * по Enter ничего не нужно.
+ */
+function paletteKeydown(event) {
+  if (!paletteOpen) return false;
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    movePalette(1);
+    return true;
+  }
+  if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    movePalette(-1);
+    return true;
+  }
+  if (event.key === 'Enter') {
+    // Команда уже набрана целиком — Enter её выполняет. Доклеивать пробел
+    // и требовать второго нажатия незачем; выбор нужен только для недописанной.
+    const row = paletteRows[paletteIndex];
+    if (row && el('chat-input').value.trim().toLowerCase() === '/' + row.name.toLowerCase()) {
+      closePalette();
+      return false;
+    }
+    event.preventDefault();
+    choosePalette();
+    return true;
+  }
+  if (event.key === 'Tab') {
+    event.preventDefault();
+    choosePalette();
+    return true;
+  }
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closePalette();
+    return true;
+  }
+  return false;
+}
+
+/** Ответ команды — плашка в ленте. В историю он не попадает: это не ответ pi. */
+function addCommandResult(command, text, failed = false) {
+  showEmpty(false);
+  const node = document.createElement('div');
+  node.className = 'turn command' + (failed ? ' error' : '');
+  const card = document.createElement('div');
+  card.className = 'command-card';
+  const head = document.createElement('div');
+  head.className = 'command-head';
+  head.textContent = command.trim().split(/\s+/)[0] || 'команда';
+  const body = document.createElement('div');
+  body.className = 'md command-text';
+  body.innerHTML = markdown(text || '');
+  card.append(head, body);
+  node.append(card);
+  el('chat-messages').append(node);
+  scrollToBottom(true);
+}
+
+/** Живой /clear: та же плашка, что придёт из истории после перезагрузки. */
+function addClearDivider() {
+  showEmpty(false);
+  const node = document.createElement('div');
+  node.className = 'turn divider';
+  const rule = document.createElement('hr');
+  const label = document.createElement('span');
+  label.textContent = 'Контекст очищен';
+  node.append(rule, label);
+  el('chat-messages').append(node);
+  scrollToBottom(true);
+}
+
+/** Имя команды так, как его разбирает сервер: до пробела и без «/». */
+function commandName(text) {
+  const match = /^\/([a-zA-Z0-9_]+)/.exec(String(text || '').trim());
+  return match ? match[1].toLowerCase() : '';
+}
+
+/**
+ * Выполняет строку с косой черты. false значит «сервер не взял её себе»:
+ * это команда pi, и её нужно отправить в разговор обычной репликой.
+ */
+async function runCommand(text) {
+  if (!writable) return false;
+  // Вторую команду поверх первой не запускаем и не отправляем в pi как текст:
+  // это всё ещё команда, просто её время не пришло.
+  if (commandBusy) {
+    setNote('предыдущая команда ещё выполняется');
+    return true;
+  }
+  const name = commandName(text);
+  if (!name) return false;
+  // Справке разговор не нужен; остальным — нужен, как и обычной реплике.
+  if (!currentId && name !== 'help') {
+    try {
+      await createChat();
+    } catch (error) {
+      setNote('не удалось создать чат: ' + error.message);
+      return true;
+    }
+  }
+  commandBusy = true;
+  // Чей это ход: пока команда идёт (/compact — это вызов модели), человек может
+  // уйти в другой разговор, и ответ не должен упасть в чужую ленту.
+  const chatId = currentId;
+  setNote('выполняю ' + text.trim().split(/\s+/)[0] + '…');
+  try {
+    const result = await api('/panel/api/chat/command', {
+      method: 'POST',
+      body: JSON.stringify({ chatId: chatId || undefined, text }),
+    });
+    if (!result || !result.handled) {
+      setNote('');
+      // Ушли в другой разговор, пока сервер думал: отправлять команду уже не туда.
+      return currentId !== chatId;
+    }
+    if (currentId === chatId) {
+      const input = el('chat-input');
+      if (input.value.trim() === text.trim()) {
+        input.value = '';
+        growInput();
+      }
+      closePalette();
+    }
+    // /clear начинает новый контекст, но старую ленту не выбрасывает: рисуем
+    // разделитель, ровно как он придёт из истории после перезагрузки.
+    if (result.cleared && currentId === chatId) {
+      addClearDivider();
+    } else if (currentId === chatId) {
+      addCommandResult(text, result.text || '', Boolean(result.failed));
+    }
+    // /rename присылает новое имя: шапка и сайдбар обновляются без перезагрузки.
+    if (result.title && currentId === chatId) applyChatTitle(chatId, String(result.title));
+    setNote('');
+    return true;
+  } catch (error) {
+    if (currentId === chatId) addCommandResult(text, 'не получилось: ' + error.message, true);
+    setNote('');
+    return true;
+  } finally {
+    commandBusy = false;
+  }
+}
+
+/** Клик по строке палитры: фокус остаётся в поле, выбор — как с клавиатуры. */
+el('cmd-palette').addEventListener('mousedown', (event) => event.preventDefault());
+el('cmd-palette').addEventListener('click', (event) => {
+  const row = event.target.closest('.cmd-row');
+  if (!row) return;
+  const index = Number(row.dataset.index);
+  if (!Number.isFinite(index)) return;
+  paletteIndex = index;
+  choosePalette();
+});
+
 /* ── композер и меню ──────────────────────────────────────────────────────── */
 function growInput() {
   const input = el('chat-input');
@@ -2370,16 +2690,23 @@ el('chat-app').addEventListener('drop', (event) => {
   event.preventDefault();
   addFiles(event.dataTransfer.files);
 });
-el('chat-input').addEventListener('input', growInput);
+el('chat-input').addEventListener('input', onComposerInput);
 // Каретка нужна кнопке «В чат» из панели файлов: путь вставляется на её место.
 for (const type of ['click', 'keyup', 'select', 'input']) {
   el('chat-input').addEventListener(type, rememberComposerCaret);
 }
 el('chat-input').addEventListener('keydown', (event) => {
+  // Пока открыта палитра, Enter выбирает команду, а не отправляет реплику.
+  if (paletteKeydown(event)) return;
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
     sendText().catch(() => {});
   }
+});
+el('chat-input').addEventListener('blur', () => {
+  // Клик по строке палитры не уводит фокус (mousedown отменён), а уход из
+  // поля ввода должен убрать список.
+  setTimeout(closePalette, 120);
 });
 el('chat-send').onclick = () => {
   sendText().catch(() => {});

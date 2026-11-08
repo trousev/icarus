@@ -4,9 +4,13 @@
 // и в локальной панели, и в сервисе на проде.
 import fs from 'node:fs';
 import { DEFAULT_WORKSPACE } from '../config.ts';
+import { WEB_COMMANDS } from '../sessions/commands.ts';
 import { escapeHtml, shell, type PanelSession } from './ui.ts';
 
 const CLIENT_CSS = fs.readFileSync(new URL('./chat-client.css', import.meta.url), 'utf8');
+// Сообщения (пузыри, трассировка, .md) — общий файл с боковым чатом артефактов:
+// один и тот же ответ должен выглядеть одинаково в обоих местах.
+const MESSAGES_CSS = fs.readFileSync(new URL('./chat-messages.css', import.meta.url), 'utf8');
 // Разметку держим отдельным файлом: её разбирает тест, а клиенту она нужна раньше
 // самого чата — функции разметки подключаются как обычные глобальные.
 const CLIENT_MD = fs.readFileSync(new URL('./chat-markdown.js', import.meta.url), 'utf8');
@@ -27,11 +31,15 @@ export function chatPage(session: PanelSession, options: ChatPageOptions): strin
     storage: session.storage ?? 'git · local',
     enabled: options.enabled,
     defaultWorkspace: DEFAULT_WORKSPACE,
+    // Команды, которые чат разбирает сам: палитра показывает их сразу, не дожидаясь
+    // ответа pi. Команды pi (скиллы, шаблоны, расширения) приезжают отдельно.
+    commands: WEB_COMMANDS,
   };
   // JSON уезжает в <script>: экранируем «<», иначе значение с </script> закроет тег.
   const json = JSON.stringify(config).replaceAll('<', '\\u003c');
 
-  return shell(`<style>${CLIENT_CSS}</style>
+  return shell(`<style>${MESSAGES_CSS}</style>
+<style>${CLIENT_CSS}</style>
 <div class="chat-app" id="chat-app">
   <aside class="chat-side" id="chat-side">
     <div class="side-brand">
@@ -103,6 +111,9 @@ export function chatPage(session: PanelSession, options: ChatPageOptions): strin
       <div class="pending" id="chat-pending" hidden></div>
       <div class="composer-locked" id="chat-locked" hidden></div>
       <div class="composer-box">
+        <!-- Палитра команд: всплывает над полем, как только человек набрал «/».
+             Список команд чата известен сразу, команды pi подгружаются следом. -->
+        <div class="cmd-palette" id="cmd-palette" role="listbox" aria-label="Команды чата" hidden></div>
         <button class="icon-btn attach" id="chat-attach" aria-label="Приложить файл" title="Приложить файл"${options.enabled ? '' : ' disabled'}><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
         <input id="chat-files" type="file" multiple hidden>
         <textarea id="chat-input" rows="1" placeholder="Написать Icarus..."${options.enabled ? '' : ' disabled'}></textarea>
@@ -114,7 +125,7 @@ export function chatPage(session: PanelSession, options: ChatPageOptions): strin
              (шаги, команды, субагенты) живёт в трассировке ответа: дублировать
              его мелким текстом снизу незачем. -->
         <span id="chat-note">${options.enabled ? '' : 'чат недоступен: панель поднята без контейнера с pi'}</span>
-        <span>Enter — отправить · Shift+Enter — перенос строки</span>
+        <span>Enter — отправить · Shift+Enter — перенос строки · / — команды</span>
       </div>
     </div>
   </main>
