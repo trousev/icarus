@@ -11,6 +11,9 @@ import { escapeHtml, shell, type PanelSession } from './ui.ts';
 const CLIENT_CSS = fs.readFileSync(new URL('./artifacts-client.css', import.meta.url), 'utf8');
 const CLIENT_MD = fs.readFileSync(new URL('./artifacts-markdown.js', import.meta.url), 'utf8');
 const CLIENT_JS = fs.readFileSync(new URL('./artifacts-client.js', import.meta.url), 'utf8');
+// Чат правки — отдельным файлом: у него свой поток и своя лента, и вместе с
+// клиентом раздела это был бы один нечитаемый скрипт.
+const CLIENT_CHAT = fs.readFileSync(new URL('./artifacts-chat.js', import.meta.url), 'utf8');
 
 export type ArtifactsPageOptions = {
   artifact?: string;
@@ -71,6 +74,8 @@ export function artifactsPage(session: PanelSession, options: ArtifactsPageOptio
         <button class="btn" id="art-unpublish" hidden>Отозвать ссылку</button>
         <button class="btn" id="art-acl" hidden>Права</button>
         <button class="btn" id="art-history">История</button>
+        <button class="btn" id="art-chat" disabled aria-controls="art-chat-panel" aria-expanded="false"
+                title="Открыть чат правки артефакта">Чат</button>
         <a class="btn" id="art-bare" href="#" target="_blank" rel="noopener" aria-disabled="true">Без панели</a>
         <a class="btn" id="art-download" href="#" aria-disabled="true">Скачать</a>
         <button class="btn danger" id="art-delete" disabled>Удалить</button>
@@ -103,6 +108,23 @@ export function artifactsPage(session: PanelSession, options: ArtifactsPageOptio
       <p class="art-history-note">Нажми на версию, чтобы посмотреть её. Артефакт изменится только после «Вернуть эту версию».</p>
       <div class="art-history-list" id="art-history-list"><p class="art-empty">Читаю…</p></div>
     </aside>
+    <aside class="art-history-panel art-chat-panel" id="art-chat-panel" hidden aria-label="Чат по артефакту">
+      <div class="art-history-head">
+        <div><b>Чат по артефакту</b><span id="art-chat-sub">Правка через ИИ</span></div>
+        <button class="art-icon-btn" id="art-chat-close" title="Закрыть чат" aria-label="Закрыть чат">×</button>
+      </div>
+      <div class="art-chat-log" id="art-chat-log">
+        <div class="art-empty"><b>Скажи, что поправить</b><span>Икар изменит файлы прямо в папке артефакта: «добавь заголовок», «сделай таблицу», «поменяй цвет».</span></div>
+      </div>
+      <div class="art-chat-foot">
+        <div class="art-chat-note" id="art-chat-note"></div>
+        <div class="art-chat-box">
+          <textarea id="art-chat-input" rows="1" placeholder="Что поправить в артефакте?" disabled></textarea>
+          <button class="art-icon-btn art-chat-send" id="art-chat-send" disabled title="Отправить" aria-label="Отправить">↑</button>
+          <button class="art-icon-btn art-chat-stop" id="art-chat-stop" hidden title="Остановить" aria-label="Остановить">■</button>
+        </div>
+      </div>
+    </aside>
   </main>
 </div>
 <div class="art-modal" id="art-acl-modal" hidden>
@@ -119,7 +141,8 @@ export function artifactsPage(session: PanelSession, options: ArtifactsPageOptio
 </div>
 <script>window.__ARTIFACTS_CFG__ = ${json};</script>
 <script>${CLIENT_MD}</script>
-<script>${CLIENT_JS}</script>`);
+<script>${CLIENT_JS}</script>
+<script>${CLIENT_CHAT}</script>`);
 }
 
 /**

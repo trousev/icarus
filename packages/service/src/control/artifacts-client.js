@@ -4,10 +4,16 @@
 // данные приезжают сюда; состояние (открытый артефакт) живёт в адресе.
 // Права: none — не видит ничего, read — смотреть, write — менять файлы,
 // admin — права/удаление/ссылка. По умолчанию семья не видит новый артефакт.
-/* global artifactMarkdown */
+/* global artifactMarkdown, artChatClose */
 
 const artCfg = window.__ARTIFACTS_CFG__;
 const artEl = (id) => document.getElementById(id);
+
+// Чат правки живёт отдельным скриптом и грузится следом. До него функция
+// закрытия ещё не объявлена — тогда закрывать и нечего, поэтому проверяем.
+const closeArtifactChat = () => {
+  if (typeof artChatClose === 'function') artChatClose();
+};
 
 const artApi = async (path, options = {}) => {
   const response = await fetch(path, {
@@ -160,6 +166,9 @@ function artClearView(message) {
   artEl('art-bare').setAttribute('aria-disabled', 'true');
   artEl('art-bare').removeAttribute('href');
   artEl('art-delete').disabled = true;
+  artEl('art-chat').disabled = true;
+  artEl('art-chat').title = 'Выбери артефакт';
+  closeArtifactChat();
   artEl('art-view').innerHTML =
     '<div class="art-placeholder"><div class="art-placeholder-icon">' + artIcon('markdown') +
     '</div><b>' + artEsc(message || 'Выбери артефакт') +
@@ -203,6 +212,13 @@ function artRenderView(data, preview = null) {
     artEl('art-acl').hidden = !item.canManage;
     artEl('art-delete').disabled = !item.canManage;
     if (item.type === 'markdown' && item.urls.bare) artEl('art-bare').href = item.urls.bare;
+    // Чат правки — только тому, кто может писать: остальным он обещал бы
+    // изменение, которого сервер всё равно не разрешит.
+    artEl('art-chat').disabled = !item.canWrite;
+    artEl('art-chat').title = item.canWrite
+      ? 'Открыть чат правки артефакта'
+      : 'Нужно право записи на артефакт';
+    if (!item.canWrite) closeArtifactChat();
   }
   artCrumbs(item.title);
 
@@ -249,6 +265,8 @@ async function artOpen(name, push = true, keepHistory = false) {
   }
   artState.artifact = name;
   artState.deleteArmed = false;
+  // Панели исключают друг друга: чат правки и история занимают одно место.
+  closeArtifactChat();
   if (keepHistory) artHidePreview();
   else artHideHistory();
   artEl('art-delete').textContent = 'Удалить';
@@ -446,6 +464,7 @@ function artRenderHistory(data) {
 
 async function artOpenHistory() {
   if (!artState.selected) return;
+  closeArtifactChat();
   const panel = artEl('art-history-panel');
   if (!panel.hidden) {
     await artCloseHistory();

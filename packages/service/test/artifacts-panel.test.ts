@@ -405,3 +405,33 @@ test('предпросмотр HTML-версии отдаёт index и отно�
     assert.equal(await css.text(), 'body { color: red }');
   });
 });
+
+
+test('чат правки: один разговор на артефакт и только с правом записи', async () => {
+  await withServer(async (base, config) => {
+    const first = await post(base, 'chat', { artifact: 'plan' });
+    assert.equal(first.status, 200);
+    const one = (await first.json()) as { chatId: string; title: string };
+    assert.match(one.chatId, /^web-/);
+    assert.match(one.title, /Правка · План на четверг/);
+
+    // Повторное открытие возвращает тот же разговор, а не заводит второй.
+    const again = (await (await post(base, 'chat', { artifact: 'plan' })).json()) as { chatId: string };
+    assert.equal(again.chatId, one.chatId);
+
+    const chats = JSON.parse(
+      fs.readFileSync(path.join(config.dataDir, 'users', 'probe', 'chats.json'), 'utf8'),
+    ) as { chats: Array<{ id: string; artifact?: string; workspace: string }> };
+    const record = chats.chats.find((chat) => chat.id === one.chatId);
+    assert.equal(record?.artifact, 'plan');
+    assert.equal(record?.workspace, 'talk');
+
+    // Права проверяются на входе: read-only артефакт чат не открывает.
+    item(config, 'viewonly', { 'index.md': '# Только смотреть\n', 'index.ai.md': '# Только смотреть\n' }, {
+      me: 'read',
+      family: 'read',
+    });
+    assert.equal((await post(base, 'chat', { artifact: 'viewonly' })).status, 403);
+    assert.equal((await post(base, 'chat', { artifact: 'nope' })).status, 404);
+  });
+});
