@@ -23,6 +23,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import fs from 'node:fs';
 import { handleWorkspacesApi } from './workspaces.ts';
+import { handleWorkspaceFilesApi } from './files.ts';
 import { findUser, isAdmin, userPaths, type IcarusConfig, type UserConfig } from '../config.ts';
 import { LANGUAGE_LABELS, LANGUAGES, languageOf, writeProfile, type Language } from '../profile.ts';
 import { readJsonBody } from '../http/openai.ts';
@@ -582,6 +583,13 @@ async function handleApi(
   // Workspace'ы — папки, а не контейнеры: отдельная ветка, тот же человек из прокси.
   if (url.pathname === '/panel/api/workspaces' || url.pathname.startsWith('/panel/api/workspaces/')) {
     await handleWorkspacesApi(req, res, url, { config, userId });
+    return;
+  }
+
+  // Файлы рабочей папки для правой панели чата: дерево и предпросмотр. Отдельная
+  // ветка до общего разбора области — иначе «файлы» искались бы в памяти.
+  if (url.pathname === '/panel/api/workspace-files' || url.pathname.startsWith('/panel/api/workspace-files/')) {
+    await handleWorkspaceFilesApi(req, res, url, { config, userId });
     return;
   }
 

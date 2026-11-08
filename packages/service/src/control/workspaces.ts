@@ -32,7 +32,7 @@ function json(res: ServerResponse, status: number, payload: unknown): void {
 }
 
 /** Путь для интерфейса: домашний каталог сокращаем до `~`, как в макете. */
-function displayPath(absolute: string): string {
+export function displayPath(absolute: string): string {
   const home = os.homedir();
   return absolute.startsWith(`${home}/`) ? `~${absolute.slice(home.length)}` : absolute;
 }

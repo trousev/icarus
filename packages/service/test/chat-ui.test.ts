@@ -103,6 +103,36 @@ test('ширина сайдбара тянется и запоминается',
   assert.match(html, /\.side-resizer \{ display: none; \}/, 'на узком экране ручки нет');
 });
 
+test('справа у чата — панель файлов рабочей папки', () => {
+  const html = chatPage(SESSION, { enabled: true });
+  // Панель — третья колонка сетки: дерево, предпросмотр и ручки ширины/высоты.
+  assert.match(html, /id="files-panel"/, 'панель есть в разметке');
+  assert.match(html, /id="toggle-files"/, 'кнопка в шапке открывает её');
+  assert.match(html, /id="files-tree"/, 'дерево файлов');
+  assert.match(html, /id="files-preview"/, 'предпросмотр файла');
+  assert.match(html, /id="files-resizer"/, 'ширина тянется');
+  assert.match(html, /id="files-split"/, 'высота предпросмотра тянется');
+  assert.match(html, /id="files-close"/, 'панель можно закрыть');
+  assert.match(html, /class="fdel"/, 'у каждой строки есть корзина');
+  assert.match(html, /aria-label="Удалить /, 'корзина подписана именем файла');
+  assert.match(html, /function askDeleteEntry/, 'удаление спрашивает подтверждение');
+  assert.match(html, /class="files-send"/, 'рядом со скачиванием есть кнопка «В чат»');
+  assert.match(html, /Послать агенту/, 'кнопка вставки пути подписана');
+  assert.match(html, /function insertPathIntoChat/, 'путь вставляется, а не переписывает поле');
+  assert.match(html, /status === 409/, 'непустая папка подтверждается после ответа сервера');
+  assert.match(
+    html,
+    /\.chat-app\.files-open \{ grid-template-columns: var\(--side-w\) minmax\(0, 1fr\) var\(--files-w\); \}/,
+    'открытая панель занимает третью колонку',
+  );
+  assert.match(html, /\/panel\/api\/workspace-files/, 'дерево и предпросмотр ходят в свой API');
+  assert.match(html, /icarus\.files-open/, 'открытость переживает перезагрузку');
+  assert.match(html, /icarus\.files-w/, 'ширина тоже');
+  assert.match(html, /const FILES_WIDTH_MAX = 1440/, 'потолок вдвое выше: панель можно растянуть на полэкрана');
+  assert.match(html, /aria-valuemax="1440"/, 'ручка знает новый потолок');
+  assert.match(html, /@media \(max-width: 1100px\)/, 'на среднем экране панель выдвигается поверх чата');
+});
+
 test('новый чат — черновик: workspace выбирается прямо в нём', () => {
   const html = chatPage(SESSION, { enabled: true });
   // Кнопка сразу открывает новый чат, а выбор workspace'а живёт в его пустом
@@ -263,8 +293,8 @@ function failedReply(status = 404, body: unknown = {}) {
 async function driveChat(
   options: {
     chatId?: string;
-    /** Что отвечать на маршруты; ключ — подстрока пути. */
-    routes?: Record<string, () => unknown>;
+    /** Что отвечать на маршруты; ключ — подстрока пути, значение получает адрес и init. */
+    routes?: Record<string, (url: string, init?: RequestInit) => unknown>;
   } = {},
 ) {
   const html = chatPage(SESSION, { chatId: options.chatId, enabled: true });
@@ -272,6 +302,7 @@ async function driveChat(
   const scripts = [...document.querySelectorAll('script')].map((node) => node.textContent ?? '').filter(Boolean);
 
   const calls: string[] = [];
+  const requests: { method: string; url: string }[] = [];
   const store = new Map<string, string>();
   const globals = window as unknown as Record<string, unknown>;
   window.URL.createObjectURL = () => 'blob:x';
@@ -285,11 +316,12 @@ async function driveChat(
     removeItem: (key: string) => void store.delete(key),
   };
 
-  window.fetch = async (url: string) => {
+  window.fetch = async (url: string, init?: RequestInit) => {
     const path = String(url);
     calls.push(path);
+    requests.push({ method: init?.method || 'GET', url: path });
     const route = Object.entries(options.routes || {}).find(([key]) => path.includes(key))?.[1];
-    const body = route ? route() : {};
+    const body = route ? route(path, init) : {};
     if (body && typeof body === 'object' && 'stream' in body) {
       const chunks = (body as { stream: string[] }).stream;
       let at = 0;
@@ -346,7 +378,9 @@ async function driveChat(
 
   return {
     document,
+    window,
     calls,
+    requests,
     store,
     /** Проиграть событие сводки, как это сделал бы сервер. */
     event: (payload: Record<string, unknown>) => bulletin?.onmessage?.({ data: JSON.stringify(payload) }),
@@ -556,4 +590,254 @@ test('ход кончился между историей и подпиской 
 
   assert.match(app.messages(), /ответ, который уже записан/, 'записанный ответ подтянулся без F5');
   assert.equal(app.bodies(), 1, 'пустая плашка-пустышка выброшена, остался только ответ');
+});
+
+test('панель файлов: дерево, раскрытие папки и markdown-предпросмотр', async () => {
+  const app = await driveChat({
+    chatId: 'web-1',
+    routes: {
+      // Длинный маршрут идёт первым: короткий ключ иначе перехватил бы и его.
+      '/panel/api/workspace-files/read': () => ({
+        file: {
+          name: 'AGENTS.md',
+          path: 'projects/AGENTS.md',
+          dir: false,
+          size: 42,
+          mtime: '',
+          type: 'MARKDOWN',
+          image: false,
+        },
+        kind: 'markdown',
+        text: '# Проект\n\nВложенные инструкции.',
+        download: '/panel/api/workspace-files/raw?workspace=talk&path=projects%2FAGENTS.md&download=1',
+      }),
+      '/panel/api/workspace-files': (url: string) => {
+        const query = new URLSearchParams(String(url).split('?')[1] || '');
+        const at = query.get('path') || '';
+        return {
+          workspace: { slug: 'talk', name: 'Разговор', path: '~/icarus/workspaces/talk' },
+          path: at,
+          entries:
+            at === 'projects'
+              ? [
+                  {
+                    name: 'AGENTS.md',
+                    path: 'projects/AGENTS.md',
+                    dir: false,
+                    size: 42,
+                    mtime: '',
+                    type: 'MARKDOWN',
+                    image: false,
+                  },
+                ]
+              : [
+                  {
+                    name: 'AGENTS.md',
+                    path: 'AGENTS.md',
+                    dir: false,
+                    size: 12,
+                    mtime: '',
+                    type: 'MARKDOWN',
+                    image: false,
+                  },
+                  { name: 'projects', path: 'projects', dir: true, size: 0, mtime: '', type: '', image: false },
+                ],
+          truncated: false,
+        };
+      },
+      '/panel/api/chat/status': () => ({ busy: [] }),
+      '/panel/api/chat/history': () => ({
+        chat: { id: 'web-1', title: 'Разговор', workspace: 'talk' },
+        messages: [],
+        live: false,
+      }),
+      '/panel/api/chats': () => ({ chats: [{ id: 'web-1', title: 'Разговор' }] }),
+    },
+  });
+
+  app.document.getElementById('toggle-files').onclick?.();
+  await new Promise((resolve) => setTimeout(resolve, 40));
+
+  assert.equal(app.store.get('icarus.files-open'), '1', 'открытость панели запоминается');
+  assert.equal(app.document.getElementById('files-ws').textContent, 'Разговор', 'в шапке имя workspace');
+  assert.match(
+    app.document.getElementById('files-ws-path').textContent || '',
+    /workspaces\/talk/,
+    'и его папка на диске',
+  );
+
+  const tree = app.document.getElementById('files-tree');
+  assert.match(tree.innerHTML, /AGENTS\.md/);
+  assert.match(tree.innerHTML, /projects\//, 'папки видны');
+  assert.match(tree.innerHTML, /class="ftype">MARKDOWN/, 'тип файла подписан');
+
+  const folder = app.document.querySelector('.frow[data-path="projects"]');
+  folder?.dispatchEvent(new app.window.Event('click', { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.match(tree.innerHTML, /projects\/AGENTS\.md/, 'папка раскрылась и подгрузила содержимое');
+
+  const file = app.document.querySelector('.frow[data-path="projects/AGENTS.md"]');
+  file?.dispatchEvent(new app.window.Event('click', { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 40));
+
+  const preview = app.document.getElementById('files-preview');
+  assert.match(preview.innerHTML, /projects\/AGENTS\.md/, 'в предпросмотре видно путь файла');
+  assert.match(preview.innerHTML, /Вложенные инструкции/, 'markdown отрисован, а не лежит текстом');
+  assert.ok(
+    app.document.getElementById('files-panel').classList.contains('has-preview'),
+    'предпросмотр занимает нижнюю половину панели',
+  );
+
+  // «В чат» — вставка, а не отправка: набранное остаётся, путь дописывается.
+  const composer = app.document.getElementById('chat-input');
+  composer.value = 'Проверь ';
+  app.document.querySelector('.files-send')?.dispatchEvent(new app.window.Event('click', { bubbles: true }));
+  assert.equal(composer.value, 'Проверь projects/AGENTS.md', 'путь вставлен, набранное сохранено');
+  app.document.querySelector('.files-send')?.dispatchEvent(new app.window.Event('click', { bubbles: true }));
+  assert.equal(
+    composer.value,
+    'Проверь projects/AGENTS.md projects/AGENTS.md',
+    'повторная вставка не переписывает прошлое',
+  );
+
+  // Повторный клик по выбранному файлу возвращает дереву всю высоту панели.
+  app.document
+    .querySelector('.frow[data-path="projects/AGENTS.md"]')
+    ?.dispatchEvent(new app.window.Event('click', { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(preview.innerHTML, '', 'предпросмотр спрятан');
+  assert.ok(!app.document.getElementById('files-panel').classList.contains('has-preview'));
+
+  app.document.getElementById('files-close').onclick?.();
+  assert.equal(app.store.get('icarus.files-open'), '0', 'закрытие тоже запоминается');
+});
+
+test('удаление: файл спрашивает, пустая папка — нет, непустая — да', async () => {
+  const wait = (ms = 50) => new Promise((resolve) => setTimeout(resolve, ms));
+  const deleted = new Set<string>();
+  const top = [
+    {
+      name: 'AGENTS.md',
+      path: 'AGENTS.md',
+      dir: false,
+      size: 5,
+      mtime: '',
+      type: 'MARKDOWN',
+      image: false,
+      removable: false,
+    },
+    { name: 'empty', path: 'empty', dir: true, size: 0, mtime: '', type: '', image: false },
+    { name: 'plan.txt', path: 'plan.txt', dir: false, size: 3, mtime: '', type: 'TEXT', image: false },
+    { name: 'projects', path: 'projects', dir: true, size: 0, mtime: '', type: '', image: false },
+  ];
+  const nested = [
+    { name: 'AGENTS.md', path: 'projects/AGENTS.md', dir: false, size: 5, mtime: '', type: 'MARKDOWN', image: false },
+  ];
+
+  const app = await driveChat({
+    chatId: 'web-1',
+    routes: {
+      '/panel/api/workspace-files': (url: string, init?: RequestInit) => {
+        const parsed = new URL(String(url), 'http://panel');
+        const at = parsed.searchParams.get('path') || '';
+        if (init?.method === 'DELETE') {
+          // Непустая папка без force отказывает ровно так, как это делает сервер.
+          if (at === 'projects' && parsed.searchParams.get('force') !== '1') {
+            return { failure: { status: 409, body: { error: { message: 'папка не пуста' } } } };
+          }
+          deleted.add(at);
+          return { ok: true };
+        }
+        return {
+          workspace: { slug: 'talk', name: 'Разговор', path: '~/icarus/stand/users/trousev/workspaces/talk' },
+          path: at,
+          entries: (at === 'projects' ? nested : top).filter((entry) => !deleted.has(entry.path)),
+          truncated: false,
+        };
+      },
+      '/panel/api/chat/status': () => ({ busy: [] }),
+      '/panel/api/chat/history': () => ({
+        chat: { id: 'web-1', title: 'Разговор', workspace: 'talk' },
+        messages: [],
+        live: false,
+      }),
+      '/panel/api/chats': () => ({ chats: [{ id: 'web-1', title: 'Разговор' }] }),
+    },
+  });
+
+  const clickDelete = (path: string) => {
+    app.document
+      .querySelector(`.frow[data-path="${path}"] .fdel`)
+      ?.dispatchEvent(new app.window.Event('click', { bubbles: true }));
+  };
+  const deletes = () => app.requests.filter((request) => request.method === 'DELETE');
+
+  app.document.getElementById('toggle-files').onclick?.();
+  await wait();
+
+  // Корневой AGENTS.md — инструкции workspace: корзины у него нет вовсе.
+  assert.ok(app.document.querySelector('.frow[data-path="AGENTS.md"]'), 'AGENTS.md виден в дереве');
+  assert.equal(
+    app.document.querySelector('.frow[data-path="AGENTS.md"] .fdel'),
+    null,
+    'корневой AGENTS.md нельзя удалить — корзины нет',
+  );
+  assert.ok(app.document.querySelector('.frow[data-path="plan.txt"] .fdel'), 'у обычного файла корзина есть');
+
+  // Файл всегда спрашивает. Отмена — ни одного запроса.
+  clickDelete('plan.txt');
+  await wait(20);
+  let modal = app.document.querySelector('.ws-modal');
+  assert.ok(modal, 'перед удалением файла есть подтверждение');
+  assert.match(modal.innerHTML, /Удалить файл\?/);
+  modal.querySelector('[data-cancel]').onclick?.();
+  await wait(20);
+  assert.equal(app.document.querySelector('.ws-modal'), null, 'окно закрылось');
+  assert.equal(deletes().length, 0, 'отмена ничего не удаляет');
+
+  // Подтвердили — файл исчез из дерева и запрос ушёл без force.
+  clickDelete('plan.txt');
+  await wait(20);
+  modal = app.document.querySelector('.ws-modal');
+  modal.querySelector('[data-ok]').onclick?.();
+  await wait(80);
+  assert.ok(deletes().some((request) => request.url.includes('path=plan.txt')));
+  assert.equal(app.document.querySelector('.frow[data-path="plan.txt"]'), null, 'строка файла пропала');
+
+  // Пустая папка удаляется сразу: окна нет, запрос есть.
+  const beforeEmpty = deletes().length;
+  clickDelete('empty');
+  await wait(80);
+  assert.equal(app.document.querySelector('.ws-modal'), null, 'пустую папку не подтверждаем');
+  assert.ok(deletes().length > beforeEmpty, 'запрос на удаление пустой папки ушёл');
+  assert.equal(app.document.querySelector('.frow[data-path="empty"]'), null, 'пустая папка пропала');
+
+  // Непустая папка: сервер отвечает 409, панель спрашивает, потом повторяет с force.
+  clickDelete('projects');
+  await wait(80);
+  modal = app.document.querySelector('.ws-modal');
+  assert.ok(modal, 'непустая папка без подтверждения не удаляется');
+  assert.match(modal.innerHTML, /не пуста/);
+  assert.ok(
+    deletes().some((request) => request.url.includes('path=projects') && !request.url.includes('force=1')),
+    'первый запрос — без force',
+  );
+  modal.querySelector('[data-cancel]').onclick?.();
+  await wait(20);
+  assert.equal(
+    app.document.querySelector('.frow[data-path="projects"]')?.dataset.dir,
+    '1',
+    'после отмены папка на месте',
+  );
+
+  clickDelete('projects');
+  await wait(80);
+  modal = app.document.querySelector('.ws-modal');
+  modal.querySelector('[data-ok]').onclick?.();
+  await wait(100);
+  assert.ok(
+    deletes().some((request) => request.url.includes('path=projects') && request.url.includes('force=1')),
+    'после подтверждения — запрос с force',
+  );
+  assert.equal(app.document.querySelector('.frow[data-path="projects"]'), null, 'непустая папка удалена');
 });
