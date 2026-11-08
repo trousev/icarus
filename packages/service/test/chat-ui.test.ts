@@ -123,7 +123,14 @@ test('справа у чата — панель файлов рабочей па
   assert.match(html, /id="files-preview"/, 'предпросмотр файла');
   assert.match(html, /id="files-resizer"/, 'ширина тянется');
   assert.match(html, /id="files-split"/, 'высота предпросмотра тянется');
-  assert.match(html, /id="files-close"/, 'панель можно закрыть');
+  assert.doesNotMatch(html, /class="files-head"/, 'шапки нет: те же имя и путь дублирует дерево');
+  assert.match(html, /id="files-close"/, 'на узком экране панель закрывается своим крестиком');
+  assert.match(html, /\.files-close \{ display: none; \}/, 'на широком крестик не дублирует шапку');
+  assert.match(
+    html,
+    /@media \(max-width: 1100px\)[\s\S]*?\.files-close \{ display: grid;/,
+    'и появляется только в выдвижном режиме',
+  );
   assert.match(html, /class="fdel"/, 'у каждой строки есть корзина');
   assert.match(html, /aria-label="Удалить /, 'корзина подписана именем файла');
   assert.match(html, /function askDeleteEntry/, 'удаление спрашивает подтверждение');
@@ -698,14 +705,10 @@ test('панель файлов: дерево, раскрытие папки и 
   await new Promise((resolve) => setTimeout(resolve, 40));
 
   assert.equal(app.store.get('icarus.files-open'), '1', 'открытость панели запоминается');
-  assert.equal(app.document.getElementById('files-ws').textContent, 'Разговор', 'в шапке имя workspace');
-  assert.match(
-    app.document.getElementById('files-ws-path').textContent || '',
-    /workspaces\/talk/,
-    'и его папка на диске',
-  );
 
   const tree = app.document.getElementById('files-tree');
+  assert.match(tree.innerHTML, /class="files-root"/, 'над деревом — подпись корня');
+  assert.match(tree.innerHTML, /workspaces\/talk/, 'и его папка на диске');
   assert.match(tree.innerHTML, /AGENTS\.md/);
   assert.match(tree.innerHTML, /projects\//, 'папки видны');
   assert.match(tree.innerHTML, /class="ftype">MARKDOWN/, 'тип файла подписан');
@@ -750,7 +753,7 @@ test('панель файлов: дерево, раскрытие папки и 
   assert.equal(preview.innerHTML, '', 'предпросмотр спрятан');
   assert.ok(!app.document.getElementById('files-panel').classList.contains('has-preview'));
 
-  app.document.getElementById('files-close').onclick?.();
+  app.document.getElementById('toggle-files').onclick?.();
   assert.equal(app.store.get('icarus.files-open'), '0', 'закрытие тоже запоминается');
 });
 
