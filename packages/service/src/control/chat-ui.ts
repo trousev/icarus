@@ -78,6 +78,9 @@ export function chatPage(session: PanelSession, options: ChatPageOptions): strin
       <div class="chat-crumbs">Icarus / <b id="chat-title">Новый чат</b></div>
       <label class="chat-search"><span>⌕</span><input id="chat-search" placeholder="Поиск по названиям" autocomplete="off"></label>
       <div class="top-status"><i></i><span id="chat-status">Агент активен</span></div>
+      <button class="icon-btn files-btn" id="toggle-files" aria-label="Файлы workspace" title="Файлы workspace" aria-pressed="false">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M15 4v16"/></svg>
+      </button>
     </header>
 
     <section class="chat-scroll" id="chat-scroll">
@@ -115,6 +118,23 @@ export function chatPage(session: PanelSession, options: ChatPageOptions): strin
       </div>
     </div>
   </main>
+
+  <!-- Правая панель: файлы рабочей папки открытого разговора. Клиент рисует
+       дерево и предпросмотр; здесь только каркас, иначе страница пухнет вдвое. -->
+  <aside class="files-panel" id="files-panel" aria-label="Файлы workspace">
+    <header class="files-head">
+      <i class="files-dot"></i>
+      <div class="files-id"><b id="files-ws">Разговор</b><span id="files-ws-path"></span></div>
+      <button class="icon-btn files-close" id="files-close" aria-label="Скрыть файлы" title="Скрыть файлы">×</button>
+    </header>
+    <div class="files-tree" id="files-tree"><p class="files-note">Читаю папку…</p></div>
+    <div class="files-split" id="files-split" role="separator" aria-orientation="horizontal"
+         aria-label="Высота предпросмотра" aria-valuemin="90" tabindex="0"><span></span></div>
+    <section class="files-preview" id="files-preview" aria-live="polite"></section>
+    <div class="files-resizer" id="files-resizer" role="separator" aria-orientation="vertical"
+         aria-label="Ширина панели файлов" aria-valuemin="300" aria-valuemax="1440" aria-valuenow="400"
+         tabindex="0"></div>
+  </aside>
 </div>
 <script>window.__CHAT_CFG__ = ${json};</script>
 <script>${CLIENT_MD}</script>

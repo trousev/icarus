@@ -923,6 +923,8 @@ async function startPrompt(prompt) {
 function updateComposerHint() {
   const input = el('chat-input');
   if (input) input.placeholder = 'Написать в «' + wsLabel(currentWorkspace) + '»';
+  // Разговор мог переехать в другую рабочую папку — дерево файлов меняется следом.
+  syncFilesWorkspace();
 }
 
 /** Список папок изменился: перерисовываем выбор, не выкидывая человека из черновика. */
@@ -970,6 +972,792 @@ function askDeleteWorkspace(slug) {
     }
   };
 }
+
+/* ── файлы workspace ────────────────────────────────────────────────────────
+   Правая панель: дерево рабочей папки открытого разговора и предпросмотр файла.
+   Дерево грузится лениво, по папкам; открытые папки и выбранный файл живут в
+   памяти, а ширина панели и её открытость — в localStorage. */
+const FILES_OPEN_KEY = 'icarus.files-open';
+const FILES_WIDTH_KEY = 'icarus.files-w';
+const FILES_PREVIEW_KEY = 'icarus.files-preview-h';
+const FILES_WIDTH_DEFAULT = 400;
+const FILES_WIDTH_MIN = 300;
+/** Потолок вдвое выше прежнего: панель можно растянуть на полэкрана. */
+const FILES_WIDTH_MAX = 1440;
+const FILES_PREVIEW_MIN = 90;
+
+let filesOpen = false;
+/** Slug workspace'а, чьё дерево сейчас нарисовано. */
+let filesWorkspace = null;
+let filesWorkspaceName = '';
+/** Путь для подписи в шапке: `~/icarus/…/workspaces/talk`. */
+let filesRootPath = '';
+/** path → { entries, truncated }; грузим только раскрытые папки. */
+let filesCache = new Map();
+const filesExpanded = new Set();
+let filesSelected = null;
+let filesError = '';
+let filesRootToken = 0;
+let filesPreviewToken = 0;
+let filesPreviewHeight = 0;
+/** Идёт удаление: второй клик по корзине не должен отправить второй запрос. */
+let filesDeleting = false;
+/**
+ * Последняя позиция каретки в поле ввода. Путь из предпросмотра вставляем туда,
+ * а если человек в поле ещё не вставал — в конец: уже набранное не переписываем.
+ */
+let composerCaret = null;
+
+const FOLDER_ICON =
+  '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
+const FILE_ICON =
+  '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>';
+const IMAGE_ICON =
+  '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m21 16-5-5-6 6-3-3-4 4"/></svg>';
+const CARET_ICON =
+  '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>';
+const TRASH_ICON =
+  '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V5h6v2M7 7l1 13h8l1-13"/></svg>';
+const SEND_TO_CHAT_ICON =
+  '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>';
+
+const filesNarrow = () => window.matchMedia('(max-width: 1100px)').matches;
+
+function filesUrl(slug, route, relative = '', extra = {}) {
+  const query = new URLSearchParams({ workspace: slug, path: relative });
+  for (const [key, value] of Object.entries(extra)) query.set(key, value);
+  return '/panel/api/workspace-files' + (route ? '/' + route : '') + '?' + query.toString();
+}
+
+function fetchFileList(slug, relative) {
+  return api(filesUrl(slug, '', relative));
+}
+
+function fetchFilePreview(slug, relative) {
+  return api(filesUrl(slug, 'read', relative));
+}
+
+function storedFilesOpen() {
+  try {
+    return localStorage.getItem(FILES_OPEN_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function saveFilesOpen(open) {
+  try {
+    localStorage.setItem(FILES_OPEN_KEY, open ? '1' : '0');
+  } catch {
+    /* приватный режим — состояние просто не запомнится */
+  }
+}
+
+function storedFilesWidth() {
+  try {
+    const stored = Number(localStorage.getItem(FILES_WIDTH_KEY));
+    return Number.isFinite(stored) && stored > 0 ? stored : FILES_WIDTH_DEFAULT;
+  } catch {
+    return FILES_WIDTH_DEFAULT;
+  }
+}
+
+function saveFilesWidth(width) {
+  try {
+    localStorage.setItem(FILES_WIDTH_KEY, String(width));
+  } catch {
+    /* приватный режим */
+  }
+}
+
+function storedFilesPreviewHeight() {
+  try {
+    const stored = Number(localStorage.getItem(FILES_PREVIEW_KEY));
+    return Number.isFinite(stored) && stored > 0 ? stored : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function saveFilesPreviewHeight(height) {
+  try {
+    localStorage.setItem(FILES_PREVIEW_KEY, String(Math.round(height)));
+  } catch {
+    /* приватный режим */
+  }
+}
+
+/** Потолок ширины зависит от окна: панель не должна съесть ленту целиком. */
+function filesWidthLimit() {
+  const width = window.innerWidth || 1280;
+  return Math.max(FILES_WIDTH_MIN, Math.min(FILES_WIDTH_MAX, width - 720));
+}
+
+function applyFilesWidth(width) {
+  const next = Math.round(Math.max(FILES_WIDTH_MIN, Math.min(filesWidthLimit(), width)));
+  el('chat-app').style.setProperty('--files-w', next + 'px');
+  const handle = el('files-resizer');
+  if (handle) {
+    handle.setAttribute('aria-valuemax', String(Math.round(filesWidthLimit())));
+    handle.setAttribute('aria-valuenow', String(next));
+  }
+  return next;
+}
+
+function setFilesPreviewHeight(height) {
+  const panel = el('files-panel');
+  const max = Math.max(FILES_PREVIEW_MIN, (panel.clientHeight || 720) - 180);
+  const next = Math.round(Math.max(FILES_PREVIEW_MIN, Math.min(max, height)));
+  filesPreviewHeight = next;
+  el('files-preview').style.height = next + 'px';
+  el('files-split').setAttribute('aria-valuenow', String(next));
+  return next;
+}
+
+function updateFilesHead() {
+  el('files-ws').textContent = filesWorkspaceName || wsLabel(currentWorkspace);
+  el('files-ws-path').textContent = filesRootPath;
+}
+
+function hideFilesPreview() {
+  el('files-panel').classList.remove('has-preview');
+  el('files-preview').innerHTML = '';
+}
+
+function showFilesPreview(html) {
+  el('files-preview').innerHTML = html;
+  el('files-panel').classList.add('has-preview');
+  // Первый файл забирает примерно половину панели; дальше помним, что человек выбрал.
+  if (!filesPreviewHeight) {
+    setFilesPreviewHeight(
+      storedFilesPreviewHeight() || Math.round((el('files-panel').clientHeight || 720) * 0.45),
+    );
+  } else {
+    setFilesPreviewHeight(filesPreviewHeight);
+  }
+}
+
+/** Строки дерева: рекурсивно по раскрытым папкам, глубина — отступом. */
+function treeRows(dir, depth, rows) {
+  const list = filesCache.get(dir);
+  if (!list) return;
+  for (const entry of list.entries) {
+    const expanded = entry.dir && filesExpanded.has(entry.path);
+    const active = !entry.dir && filesSelected === entry.path;
+    const classes =
+      'frow' + (entry.dir ? ' dir' : '') + (expanded ? ' open' : '') + (active ? ' active' : '');
+    const icon = entry.dir ? FOLDER_ICON : entry.image ? IMAGE_ICON : FILE_ICON;
+    rows.push(
+      '<div class="' + classes + '" data-path="' + esc(entry.path) + '" data-dir="' +
+        (entry.dir ? '1' : '0') + '" style="--depth:' + depth + '">' +
+        '<button type="button" class="fmain" data-path="' + esc(entry.path) + '" data-dir="' +
+        (entry.dir ? '1' : '0') + '"' +
+        (entry.dir ? ' aria-expanded="' + (expanded ? 'true' : 'false') + '"' : '') + '>' +
+        '<span class="fcaret">' + (entry.dir ? CARET_ICON : '') + '</span>' +
+        '<span class="ficon">' + icon + '</span>' +
+        '<span class="fname">' + esc(entry.name) + (entry.dir ? '/' : '') + '</span>' +
+        (entry.dir ? '' : '<span class="ftype">' + esc(entry.type) + '</span>') +
+        '</button>' +
+        (entry.removable === false
+          ? ''
+          : '<button type="button" class="fdel" data-del="' + esc(entry.path) +
+            '" title="Удалить" aria-label="Удалить ' + esc(entry.name) + '">' + TRASH_ICON + '</button>') +
+        '</div>',
+    );
+    if (!expanded) continue;
+    if (!filesCache.has(entry.path)) {
+      rows.push('<p class="files-note" style="margin-left:' + (16 + depth * 16) + 'px">Читаю…</p>');
+      continue;
+    }
+    treeRows(entry.path, depth + 1, rows);
+  }
+}
+
+function renderFiles() {
+  if (!filesOpen) return;
+  updateFilesHead();
+  const tree = el('files-tree');
+  const keep = tree.scrollTop;
+  const rows = [
+    '<div class="files-root">' + FOLDER_ICON + '<span>' + esc(filesRootPath || '~/workspace') + '</span></div>',
+  ];
+  if (filesError) rows.push('<p class="files-error">' + esc(filesError) + '</p>');
+  const root = filesCache.get('');
+  if (!root) {
+    rows.push('<p class="files-note">Читаю папку…</p>');
+  } else if (!root.entries.length) {
+    rows.push('<p class="files-note">Папка пуста.</p>');
+  } else {
+    treeRows('', 0, rows);
+    if (root.truncated) {
+      rows.push('<p class="files-more">Показаны первые ' + root.entries.length + ' файлов.</p>');
+    }
+  }
+  tree.innerHTML = rows.join('');
+  tree.scrollTop = keep;
+}
+
+/** Корень workspace'а заново: панель открыли или разговор переехал в другую папку. */
+async function loadFilesRoot() {
+  if (!filesOpen) return;
+  const token = ++filesRootToken;
+  const slug = currentWorkspace;
+  filesWorkspace = slug;
+  filesWorkspaceName = wsLabel(slug);
+  filesRootPath = '';
+  filesCache = new Map();
+  filesExpanded.clear();
+  filesSelected = null;
+  filesError = '';
+  hideFilesPreview();
+  renderFiles();
+  try {
+    const data = await fetchFileList(slug, '');
+    if (token !== filesRootToken || filesWorkspace !== slug) return;
+    filesWorkspaceName = data.workspace?.name || filesWorkspaceName;
+    filesRootPath = data.workspace?.path || '';
+    filesCache.set('', { entries: data.entries || [], truncated: Boolean(data.truncated) });
+    renderFiles();
+  } catch (error) {
+    if (token !== filesRootToken) return;
+    filesError = 'не удалось открыть папку: ' + error.message;
+    renderFiles();
+  }
+}
+
+/**
+ * Ход закончился — агент мог написать файлы. Дерево перечитываем, сохраняя
+ * раскрытые папки и выбранный файл: панель не должна схлопываться посреди работы.
+ */
+async function refreshFilesTree() {
+  if (!filesOpen || !filesWorkspace) return;
+  const slug = filesWorkspace;
+  const token = filesRootToken;
+  const paths = ['', ...filesExpanded];
+  const fresh = new Map();
+  let rootFailed = false;
+  await Promise.all(
+    paths.map(async (relative) => {
+      try {
+        const data = await fetchFileList(slug, relative);
+        if (token !== filesRootToken || filesWorkspace !== slug) return;
+        fresh.set(relative, {
+          entries: data.entries || [],
+          truncated: Boolean(data.truncated),
+        });
+        if (!relative) {
+          filesWorkspaceName = data.workspace?.name || filesWorkspaceName;
+          filesRootPath = data.workspace?.path || filesRootPath;
+        }
+      } catch {
+        if (!relative) rootFailed = true;
+      }
+    }),
+  );
+  if (rootFailed || token !== filesRootToken || filesWorkspace !== slug) return;
+  filesCache = fresh;
+  for (const path of [...filesExpanded]) if (!fresh.has(path)) filesExpanded.delete(path);
+  if (filesSelected && !entryAt(filesSelected)) {
+    filesSelected = null;
+    hideFilesPreview();
+  }
+  renderFiles();
+}
+
+/** Запись из уже загруженного дерева: по ней понятно, файл это или папка. */
+function entryAt(relative) {
+  const cut = relative.lastIndexOf('/');
+  const parent = cut === -1 ? '' : relative.slice(0, cut);
+  return filesCache.get(parent)?.entries.find((entry) => entry.path === relative) || null;
+}
+
+function openFilesPanel() {
+  if (filesOpen) return;
+  filesOpen = true;
+  el('chat-app').classList.add('files-open');
+  el('toggle-files').setAttribute('aria-pressed', 'true');
+  saveFilesOpen(true);
+  if (filesWorkspace !== currentWorkspace || !filesCache.has('')) {
+    void loadFilesRoot();
+  } else {
+    renderFiles();
+  }
+}
+
+function closeFilesPanel() {
+  if (!filesOpen) return;
+  filesOpen = false;
+  el('chat-app').classList.remove('files-open');
+  el('toggle-files').setAttribute('aria-pressed', 'false');
+  saveFilesOpen(false);
+}
+
+function toggleFilesPanel() {
+  if (filesOpen) closeFilesPanel();
+  else openFilesPanel();
+}
+
+/** Разговор переехал в другую папку: дерево меняется следом. */
+function syncFilesWorkspace() {
+  if (!filesOpen) return;
+  if (filesWorkspace === currentWorkspace && filesCache.has('')) {
+    updateFilesHead();
+    return;
+  }
+  void loadFilesRoot();
+}
+
+async function toggleFolder(relative) {
+  if (!filesOpen) return;
+  if (filesExpanded.has(relative)) {
+    filesExpanded.delete(relative);
+    renderFiles();
+    return;
+  }
+  filesExpanded.add(relative);
+  if (filesCache.has(relative)) {
+    renderFiles();
+    return;
+  }
+  renderFiles();
+  const slug = filesWorkspace;
+  try {
+    const data = await fetchFileList(slug, relative);
+    if (filesWorkspace !== slug || !filesExpanded.has(relative)) return;
+    filesCache.set(relative, {
+      entries: data.entries || [],
+      truncated: Boolean(data.truncated),
+    });
+    filesError = '';
+  } catch (error) {
+    if (filesWorkspace !== slug) return;
+    filesExpanded.delete(relative);
+    filesError = 'не удалось открыть папку: ' + error.message;
+  }
+  renderFiles();
+}
+
+/** Убирает удалённую запись из локального дерева, не дожидаясь перечитывания. */
+function forgetFilesPath(relative) {
+  const cut = relative.lastIndexOf('/');
+  const parent = cut === -1 ? '' : relative.slice(0, cut);
+  const list = filesCache.get(parent);
+  if (list) list.entries = list.entries.filter((entry) => entry.path !== relative);
+  for (const path of [...filesCache.keys()]) {
+    if (path === relative || path.startsWith(relative + '/')) filesCache.delete(path);
+  }
+  for (const path of [...filesExpanded]) {
+    if (path === relative || path.startsWith(relative + '/')) filesExpanded.delete(path);
+  }
+  if (filesSelected === relative || filesSelected?.startsWith(relative + '/')) {
+    filesSelected = null;
+    filesPreviewToken += 1;
+    hideFilesPreview();
+  }
+}
+
+/**
+ * DELETE отдельным запросом: `api()` рассчитан на JSON-успех, а тут важен
+ * именно 409 «папка не пуста» — по нему панель и спрашивает подтверждение.
+ */
+async function deleteFilesEntryRequest(slug, relative, force) {
+  const query = new URLSearchParams({ workspace: slug, path: relative });
+  if (force) query.set('force', '1');
+  const response = await fetch('/panel/api/workspace-files?' + query.toString(), { method: 'DELETE' });
+  const type = response.headers.get('content-type') || '';
+  const data = type.includes('application/json') ? await response.json().catch(() => ({})) : {};
+  return {
+    ok: response.ok,
+    status: response.status,
+    message: (data.error || {}).message || response.statusText || 'не удалось удалить',
+  };
+}
+
+/** Подтверждение удаления: окно, а не тост — удалённое не вернуть. */
+function askDeleteEntry(entry, nonEmpty) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'ws-modal';
+    const title = entry.dir ? 'Удалить папку?' : 'Удалить файл?';
+    const text = entry.dir
+      ? nonEmpty
+        ? 'Папка «' + esc(entry.name) + '» не пуста. Вместе с ней удалятся все файлы внутри. ' +
+          'Вернуть их будет нельзя.'
+        : 'Папка «' + esc(entry.name) + '» будет удалена.'
+      : 'Файл «' + esc(entry.path) + '» будет удалён. Вернуть его будет нельзя.';
+    overlay.innerHTML =
+      '<div class="ws-modal-card" role="dialog" aria-modal="true">' +
+      '<h2>' + title + '</h2>' +
+      '<p>' + text + '</p>' +
+      '<div class="ws-modal-actions"><button class="ws-ghost" data-cancel>Отмена</button>' +
+      '<button class="ws-danger" data-ok>Удалить</button></div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+    function onKey(event) {
+      if (event.key === 'Escape') close(false);
+    }
+    const close = (value) => {
+      document.removeEventListener('keydown', onKey);
+      overlay.remove();
+      resolve(value);
+    };
+    overlay.querySelector('[data-cancel]').onclick = () => close(false);
+    overlay.querySelector('[data-ok]').onclick = () => close(true);
+    overlay.addEventListener('click', (event) => {
+      if (event.target === overlay) close(false);
+    });
+    document.addEventListener('keydown', onKey);
+    const cancel = overlay.querySelector('[data-cancel]');
+    if (cancel && typeof cancel.focus === 'function') cancel.focus();
+  });
+}
+
+/**
+ * Удаление: файл всегда спрашивает подтверждение; папку сначала пробуем убрать
+ * без force — пустая удаляется сразу, а непустая отвечает 409 и тогда решает
+ * человек. Сервер тоже не удалит непустую папку без явного force.
+ */
+async function deleteFilesEntry(relative) {
+  if (!filesOpen || !filesWorkspace || filesDeleting) return;
+  const entry = entryAt(relative);
+  if (!entry) {
+    filesError = 'файл уже исчез — обновляю список';
+    renderFiles();
+    void refreshFilesTree();
+    return;
+  }
+  if (entry.removable === false) {
+    filesError = 'корневой AGENTS.md удалить нельзя: это инструкции агента в workspace';
+    renderFiles();
+    return;
+  }
+
+  filesDeleting = true;
+  const slug = filesWorkspace;
+  try {
+    if (!entry.dir) {
+      if (!(await askDeleteEntry(entry, false))) return;
+      if (filesWorkspace !== slug) return;
+      const result = await deleteFilesEntryRequest(slug, relative, false);
+      if (!result.ok) throw new Error(result.message);
+      if (filesWorkspace !== slug) return;
+      forgetFilesPath(relative);
+      filesError = '';
+      renderFiles();
+      void refreshFilesTree();
+      return;
+    }
+
+    let result = await deleteFilesEntryRequest(slug, relative, false);
+    if (filesWorkspace !== slug) return;
+    if (result.status === 409) {
+      if (!(await askDeleteEntry(entry, true))) return;
+      if (filesWorkspace !== slug) return;
+      result = await deleteFilesEntryRequest(slug, relative, true);
+    }
+    if (!result.ok) throw new Error(result.message);
+    if (filesWorkspace !== slug) return;
+    forgetFilesPath(relative);
+    filesError = '';
+    renderFiles();
+    void refreshFilesTree();
+  } catch (error) {
+    filesError = 'не удалось удалить: ' + error.message;
+    renderFiles();
+  } finally {
+    filesDeleting = false;
+  }
+}
+
+/** Путь из ссылки/картинки markdown внутрь workspace; `null` — не наш файл. */
+function workspaceRelative(raw) {
+  let value = String(raw || '').trim().replace(/^\/+/, '');
+  if (!value) return null;
+  const own = 'workspaces/' + filesWorkspace + '/';
+  if (value.startsWith(own)) return value.slice(own.length);
+  // Чужие рабочие папки и служебное — не показываем и не открываем.
+  if (/^(?:workspaces|\.icarus|incoming)\//.test(value)) return null;
+  if (/^[a-z]+:\/\//i.test(value) || value.startsWith('data:')) return null;
+  return value;
+}
+
+/** Относительный путь внутри workspace считаем от папки самого markdown-файла. */
+function resolvePreviewPath(basePath, raw) {
+  let href = String(raw || '').trim();
+  if (!href || href.startsWith('#')) return null;
+  // Чужие схемы и адреса панели — не файлы workspace: ссылка должна остаться ссылкой.
+  if (/^[a-z][a-z0-9+.-]*:/i.test(href)) return null;
+  if (href.startsWith('/') && !href.startsWith('/workspaces/')) return null;
+  href = href.split('#')[0].split('?')[0];
+  if (!href) return null;
+  try {
+    href = decodeURIComponent(href);
+  } catch {
+    /* битое кодирование — оставляем как есть */
+  }
+  const local = workspaceRelative(href);
+  if (!local) return null;
+  const cut = basePath.lastIndexOf('/');
+  const parts = cut === -1 ? [] : basePath.slice(0, cut).split('/');
+  for (const segment of local.split('/')) {
+    if (!segment || segment === '.') continue;
+    if (segment === '..') {
+      if (!parts.length) return null;
+      parts.pop();
+      continue;
+    }
+    parts.push(segment);
+  }
+  return parts.join('/');
+}
+
+/** Картинка из markdown: renderer уже завернул её в /chat/image — достаём путь. */
+function markdownImagePath(src) {
+  const value = String(src || '');
+  if (!value.startsWith('/panel/api/chat/image?')) return value;
+  try {
+    return new URLSearchParams(value.slice(value.indexOf('?') + 1)).get('path') || '';
+  } catch {
+    return '';
+  }
+}
+
+function bindPreviewFiles(filePath) {
+  const preview = el('files-preview');
+  preview.querySelectorAll('img[src]').forEach((img) => {
+    const raw = markdownImagePath(img.getAttribute('src'));
+    if (/^(?:https?:|data:)/i.test(raw)) return;
+    const target = resolvePreviewPath(filePath, raw);
+    if (target && filesWorkspace) img.src = filesUrl(filesWorkspace, 'raw', target);
+  });
+  preview.querySelectorAll('a[href]').forEach((link) => {
+    const href = link.getAttribute('href') || '';
+    if (/^https?:/i.test(href)) {
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      return;
+    }
+    const target = resolvePreviewPath(filePath, href);
+    if (!target) return;
+    link.onclick = (event) => {
+      event.preventDefault();
+      openFilesPreview(target);
+    };
+  });
+}
+
+/**
+ * Вставка пути в поле ввода. Именно вставка: уже набранный текст остаётся,
+ * путь встаёт в каретку, а если человек в поле ещё не вставал — в конец.
+ */
+function insertPathIntoChat(relative) {
+  const input = el('chat-input');
+  if (!input || !relative) return;
+  if (!writable || input.disabled) {
+    setNote('в этом разговоре писать нельзя — путь не вставлен');
+    return;
+  }
+  const value = input.value;
+  const at = Math.min(composerCaret ?? value.length, value.length);
+  const before = value.slice(0, at);
+  const after = value.slice(at);
+  // Пробелы по краям — только если без них путь слипнется с соседним текстом.
+  const lead = before && !/\s$/.test(before) ? ' ' : '';
+  const tail = after && !/^\s/.test(after) ? ' ' : '';
+  input.value = before + lead + relative + tail + after;
+  const caret = (before + lead + relative + tail).length;
+  composerCaret = caret;
+  input.focus();
+  if (typeof input.setSelectionRange === 'function') {
+    try {
+      input.setSelectionRange(caret, caret);
+    } catch {
+      /* браузер без поддержки — каретка просто останется где была */
+    }
+  }
+  growInput();
+  setNote('');
+}
+
+/** Запоминаем каретку, пока человек работает с полем ввода. */
+function rememberComposerCaret() {
+  const input = el('chat-input');
+  if (typeof input.selectionStart === 'number') composerCaret = input.selectionStart;
+}
+
+function renderFilePreview(data) {
+  const file = data.file || {};
+  const actions =
+    '<button type="button" class="files-send" data-send="' + esc(file.path || '') +
+    '" title="Послать агенту: вставить путь в чат" aria-label="Послать агенту">' +
+    SEND_TO_CHAT_ICON + '<span>В чат</span></button>' +
+    '<a class="files-dl" href="' + esc(data.download || '#') + '" download title="Скачать файл">↓</a>';
+  const head =
+    '<div class="files-preview-head"><b>' + esc(file.path || '') + '</b>' + actions + '</div>';
+  let body;
+  if (data.kind === 'markdown') {
+    body =
+      (data.truncated ? '<p class="files-truncated">Файл большой — показаны первые 256 КБ.</p>' : '') +
+      '<div class="md files-md">' + markdown(data.text || '') + '</div>';
+  } else if (data.kind === 'text') {
+    body =
+      (data.truncated ? '<p class="files-truncated">Файл большой — показаны первые 256 КБ.</p>' : '') +
+      '<pre class="files-code">' + esc(data.text || '') + '</pre>';
+  } else if (data.kind === 'image') {
+    // Вектор тянем на всю ширину: он не мылится. Растр показываем в натуральную
+    // величину, но не шире панели — иначе маленькая картинка выглядела бы кашей.
+    const vector = file.type === 'SVG' ? ' vector' : '';
+    body =
+      '<div class="files-image' + vector + '"><a href="' + esc(data.url || '#') + '" target="_blank" rel="noopener">' +
+      '<img src="' + esc(data.url || '') + '" alt="' + esc(file.name || '') + '"></a></div>';
+  } else {
+    body =
+      '<div class="files-binary"><p>Двоичный файл — текстом его не показать.</p>' +
+      '<a class="files-dl" href="' + esc(data.download || '#') + '" download>Скачать файл</a></div>';
+  }
+  showFilesPreview(head + body);
+  if (data.kind === 'markdown') bindPreviewFiles(file.path || '');
+}
+
+/** Клик по файлу: первый открывает предпросмотр, повторный его прячет. */
+async function openFilesPreview(relative) {
+  if (!filesOpen || !filesWorkspace) return;
+  if (filesSelected === relative) {
+    filesSelected = null;
+    hideFilesPreview();
+    renderFiles();
+    return;
+  }
+  filesSelected = relative;
+  renderFiles();
+  showFilesPreview('<p class="files-note">Читаю файл…</p>');
+  const token = ++filesPreviewToken;
+  const slug = filesWorkspace;
+  try {
+    const data = await fetchFilePreview(slug, relative);
+    if (!filesOpen || token !== filesPreviewToken || filesWorkspace !== slug) return;
+    renderFilePreview(data);
+  } catch (error) {
+    if (token !== filesPreviewToken) return;
+    showFilesPreview(
+      '<div class="files-binary"><p>' + esc('не удалось открыть файл: ' + error.message) + '</p></div>',
+    );
+  }
+}
+
+applyFilesWidth(storedFilesWidth());
+
+el('toggle-files').onclick = toggleFilesPanel;
+el('files-close').onclick = closeFilesPanel;
+el('files-tree').addEventListener('click', (event) => {
+  const remove = event.target.closest('.fdel');
+  if (remove) {
+    event.preventDefault();
+    event.stopPropagation();
+    void deleteFilesEntry(remove.dataset.del);
+    return;
+  }
+  // Вся строка — цель клика, не только кнопка с именем: в макете строка широкая,
+  // и попадать в неё должно быть просто.
+  const row = event.target.closest('.frow');
+  if (!row) return;
+  if (row.dataset.dir === '1') void toggleFolder(row.dataset.path);
+  else void openFilesPreview(row.dataset.path);
+});
+
+// «В чат» в шапке предпросмотра: путь вставляется в поле ввода, а не отправляется.
+el('files-preview').addEventListener('click', (event) => {
+  const send = event.target.closest('.files-send');
+  if (!send) return;
+  event.preventDefault();
+  const relative = send.dataset.send || '';
+  if (relative) insertPathIntoChat(relative);
+});
+
+/* Ширина панели: тянем за левую границу, стрелками — с клавиатуры. */
+const filesHandle = el('files-resizer');
+let filesDrag = null;
+
+filesHandle.addEventListener('pointerdown', (event) => {
+  if (event.button !== 0 || filesNarrow()) return;
+  filesDrag = { x: event.clientX, width: el('files-panel').getBoundingClientRect().width };
+  filesHandle.setPointerCapture(event.pointerId);
+  el('chat-app').classList.add('files-resizing');
+  event.preventDefault();
+});
+
+filesHandle.addEventListener('pointermove', (event) => {
+  if (!filesDrag) return;
+  applyFilesWidth(filesDrag.width - (event.clientX - filesDrag.x));
+});
+
+function endFilesDrag(event) {
+  if (!filesDrag) return;
+  filesDrag = null;
+  el('chat-app').classList.remove('files-resizing');
+  if (filesHandle.hasPointerCapture(event.pointerId)) filesHandle.releasePointerCapture(event.pointerId);
+  saveFilesWidth(el('files-panel').getBoundingClientRect().width);
+}
+
+filesHandle.addEventListener('pointerup', endFilesDrag);
+filesHandle.addEventListener('pointercancel', endFilesDrag);
+
+filesHandle.addEventListener('keydown', (event) => {
+  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Home') return;
+  event.preventDefault();
+  const current = el('files-panel').getBoundingClientRect().width || storedFilesWidth();
+  const next = event.key === 'Home'
+    ? FILES_WIDTH_DEFAULT
+    : current + (event.key === 'ArrowLeft' ? 16 : -16);
+  saveFilesWidth(applyFilesWidth(next));
+});
+
+/* Высота предпросмотра: тянем за разделитель между деревом и файлом. */
+const filesSplit = el('files-split');
+let filesSplitDrag = null;
+
+filesSplit.addEventListener('pointerdown', (event) => {
+  if (event.button !== 0) return;
+  filesSplitDrag = {
+    y: event.clientY,
+    height: el('files-preview').getBoundingClientRect().height || filesPreviewHeight,
+  };
+  filesSplit.setPointerCapture(event.pointerId);
+  el('chat-app').classList.add('files-split-drag');
+  event.preventDefault();
+});
+
+filesSplit.addEventListener('pointermove', (event) => {
+  if (!filesSplitDrag) return;
+  setFilesPreviewHeight(filesSplitDrag.height - (event.clientY - filesSplitDrag.y));
+});
+
+function endSplitDrag(event) {
+  if (!filesSplitDrag) return;
+  filesSplitDrag = null;
+  el('chat-app').classList.remove('files-split-drag');
+  if (filesSplit.hasPointerCapture(event.pointerId)) filesSplit.releasePointerCapture(event.pointerId);
+  saveFilesPreviewHeight(filesPreviewHeight);
+}
+
+filesSplit.addEventListener('pointerup', endSplitDrag);
+filesSplit.addEventListener('pointercancel', endSplitDrag);
+
+filesSplit.addEventListener('keydown', (event) => {
+  if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown' && event.key !== 'Home') return;
+  event.preventDefault();
+  const current = el('files-preview').getBoundingClientRect().height || filesPreviewHeight || 260;
+  const next = event.key === 'Home'
+    ? Math.round((el('files-panel').clientHeight || 720) * 0.45)
+    : current + (event.key === 'ArrowUp' ? 24 : -24);
+  saveFilesPreviewHeight(setFilesPreviewHeight(next));
+});
+
+/* Окно сузили — подрезаем сохранённые размеры, чтобы чат не пропал. */
+window.addEventListener('resize', () => {
+  if (!filesDrag) applyFilesWidth(storedFilesWidth());
+  if (!filesSplitDrag && filesPreviewHeight) setFilesPreviewHeight(filesPreviewHeight);
+});
 
 /* ── живой ответ ──────────────────────────────────────────────────────────── */
 function scrollToBottom(force = false) {
@@ -1159,6 +1947,8 @@ function handleEvent(box, event) {
       loadChats(true).catch(() => {});
     }
     setNote(stoppedByUser ? 'остановил — можно писать дальше' : '');
+    // Агент мог написать файлы в рабочую папку — дерево справа обновляем сами.
+    if (box.chatId === currentId) void refreshFilesTree();
     return;
   }
   if (event.type === 'error') {
@@ -1372,6 +2162,8 @@ function applyBulletin(event) {
   // Ход доехал, пока мы смотрели другой разговор: ставим зелёную точку.
   markUnread(event.chatId);
   renderChats();
+  // Ход мог оставить файлы в рабочей папке — дереву справа есть что показать.
+  void refreshFilesTree();
 }
 
 async function syncStatus() {
@@ -1579,6 +2371,10 @@ el('chat-app').addEventListener('drop', (event) => {
   addFiles(event.dataTransfer.files);
 });
 el('chat-input').addEventListener('input', growInput);
+// Каретка нужна кнопке «В чат» из панели файлов: путь вставляется на её место.
+for (const type of ['click', 'keyup', 'select', 'input']) {
+  el('chat-input').addEventListener(type, rememberComposerCaret);
+}
 el('chat-input').addEventListener('keydown', (event) => {
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
@@ -1634,6 +2430,9 @@ window.addEventListener('focus', () => {
   if (currentId) await selectChat(currentId);
   else startDraft();
   updateComposerHint();
+  // Панель файлов открывают не каждый раз, но если её оставили открытой —
+  // восстанавливаем вместе с рабочим деревом текущего разговора.
+  if (storedFilesOpen()) openFilesPanel();
   if (writable) el('chat-input').focus();
 })().catch((error) => {
   setNote('чат не открылся: ' + error.message);
