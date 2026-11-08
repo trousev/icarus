@@ -91,3 +91,29 @@ test('реплика человека: HTML экранируется, а адр�
     `вот &lt;b&gt;адрес&lt;/b&gt;: ${link('https://x.com')}.`,
   );
 });
+
+test('таблица из ответа модели — настоящая таблица, а не абзац с палками', () => {
+  assert.equal(
+    markdown('| Кто | Телефон |\n| --- | --- |\n| Plumber | +353 87 123 |'),
+    '<div class="md-table"><table><thead><tr><th>Кто</th><th>Телефон</th></tr></thead>' +
+      '<tbody><tr><td>Plumber</td><td>+353 87 123</td></tr></tbody></table></div>',
+  );
+  // Строка с | без линии-разделителя — обычный текст: пайп встречается и в нём.
+  assert.equal(markdown('a | b'), '<p>a | b</p>');
+});
+
+test('внутри ячейки живёт разметка, а \\| — это литеральная палка', () => {
+  const html = markdown('| **Имя** | Что делал |\n| --- | --- |\n| Аттила | пианино \\| настройка |');
+  assert.match(html, /<th><strong>Имя<\/strong><\/th>/);
+  assert.match(html, /<td>пианино \| настройка<\/td>/);
+  // Слэш съеден: в тексте остаётся палка, а не `\|`.
+  assert.doesNotMatch(html, /\\\|/);
+});
+
+test('недостающие ячейки добиваются пустыми: таблица не разваливается', () => {
+  assert.equal(
+    markdown('| a | b |\n| --- | --- |\n| c |'),
+    '<div class="md-table"><table><thead><tr><th>a</th><th>b</th></tr></thead>' +
+      '<tbody><tr><td>c</td><td></td></tr></tbody></table></div>',
+  );
+});

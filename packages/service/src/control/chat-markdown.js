@@ -119,6 +119,51 @@ function inline(raw) {
   return text.replace(/\uE000(\d+)\uE000/g, (_, index) => slots[Number(index)]);
 }
 
+/**
+ * Есть ли в строке граница таблицы. `\|` — это литерал внутри ячейки, а не
+ * граница: строка без настоящего `|` таблицей не считается.
+ */
+function hasTablePipe(line) {
+  return line.replace(/\\\|/g, '').includes('|');
+}
+
+/** Ячейки строки: `\|` возвращается в текст как обычный символ, обрамление срезаем. */
+function tableCells(line) {
+  let text = line.trim();
+  if (text.startsWith('|')) text = text.slice(1);
+  if (text.endsWith('|') && !text.endsWith('\\|')) text = text.slice(0, -1);
+  const cells = [];
+  let cell = '';
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === '\\' && text[index + 1] === '|') {
+      cell += '|';
+      index += 1;
+      continue;
+    }
+    if (char === '|') {
+      cells.push(cell.trim());
+      cell = '';
+      continue;
+    }
+    cell += char;
+  }
+  cells.push(cell.trim());
+  return cells;
+}
+
+/** Между шапкой и телом: `| --- | --- |`, с двоеточиями выравнивания или без. */
+function isTableDivider(line) {
+  return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
+}
+
+/** Строка короче шапки добивается пустыми ячейками, длиннее — обрезается. */
+function fitCells(cells, width) {
+  const result = cells.slice(0, width);
+  while (result.length < width) result.push('');
+  return result;
+}
+
 function markdown(text) {
   const lines = String(text ?? '').replace(/\r\n?/g, '\n').split('\n');
   const out = [];
@@ -151,7 +196,8 @@ function markdown(text) {
     flushQuote();
   };
 
-  for (const line of lines) {
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
     if (code !== null) {
       if (/^```/.test(line)) {
         out.push('<pre><code>' + escapeHtml(code.join('\n')) + '</code></pre>');
@@ -170,6 +216,41 @@ function markdown(text) {
       flushAll();
       continue;
     }
+
+    // Таблица: строка с `|`, а под ней линия-разделитель. Без разделителя это
+    // обычный абзац — пайп встречается и в тексте, и в командах.
+    if (hasTablePipe(line) && index + 1 < lines.length && isTableDivider(lines[index + 1])) {
+      flushAll();
+      const head = tableCells(line);
+      index += 1;
+      const rows = [];
+      while (
+        index + 1 < lines.length &&
+        hasTablePipe(lines[index + 1]) &&
+        lines[index + 1].trim() !== ''
+      ) {
+        index += 1;
+        rows.push(tableCells(lines[index]));
+      }
+      out.push(
+        '<div class="md-table"><table><thead><tr>' +
+          head.map((cell) => '<th>' + inline(cell) + '</th>').join('') +
+          '</tr></thead><tbody>' +
+          rows
+            .map(
+              (row) =>
+                '<tr>' +
+                fitCells(row, head.length)
+                  .map((cell) => '<td>' + inline(cell) + '</td>')
+                  .join('') +
+                '</tr>',
+            )
+            .join('') +
+          '</tbody></table></div>',
+      );
+      continue;
+    }
+
     if (/^\s*(?:---+|\*\*\*+|___+)\s*$/.test(line)) {
       flushAll();
       out.push('<hr>');
