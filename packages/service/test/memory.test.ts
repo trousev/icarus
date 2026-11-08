@@ -14,7 +14,7 @@ import {
   memoryIndex,
   parseExtraction,
 } from '../../extensions/memory-extractor.ts';
-import { buildMemoryCore } from '../../extensions/lib/memory-core.ts';
+import { buildMemoryCore, memoryPrompt } from '../../extensions/lib/memory-core.ts';
 
 function tempMemory(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-memory-'));
@@ -239,7 +239,7 @@ test('дедупликация работает и при раскладке', (
   assert.equal(fs.readFileSync(path.join(root, 'preferences.md'), 'utf8').split('\n').filter(Boolean).length, 1);
 });
 
-test('ядро памяти собирается из полок и пусто, если памяти нет', () => {
+test('в ядре только личное: люди и проекты читаются по теме', () => {
   const root = tempMemory();
   assert.equal(buildMemoryCore(root), '', 'на пустой памяти ядро не выдумывается');
 
@@ -250,7 +250,32 @@ test('ядро памяти собирается из полок и пусто, 
   const core = buildMemoryCore(root);
   assert.match(core, /Зовут Саня/);
   assert.match(core, /Кофе без сахара/);
-  assert.match(core, /маша/);
+  // Люди в ядро не входят: иначе память сама выбирает тему разговора.
+  assert.doesNotMatch(core, /маша/, 'люди — не ядро');
+});
+
+test('блок памяти прямо запрещает выбирать тему по памяти', () => {
+  const block = memoryPrompt('## Кто это\n- Зовут Саня');
+  assert.match(block, /Зовут Саня/, 'факты остаются в блоке');
+  // Жалоба с прода: ответ по теме заканчивался «кстати, …» из памяти. Правило
+  // должно стоять рядом с фактами, а не только в персоне: соблазн начинается здесь.
+  assert.match(block, /Память отвечает, а не начинает/);
+  assert.match(block, /не делай её темой, вопросом, шуткой или утешением/);
+  assert.match(block, /Для ответа — ищи и используй/, 'искать для ответа разрешено и нужно');
+  assert.match(block, /Советуешь, планируешь или вспоминаешь — сначала `memory_index`/);
+  assert.match(block, /Люди и проекты лежат в памяти, а не здесь/, 'модель знает, где искать людей и проекты');
+
+  assert.equal(memoryPrompt(''), '', 'на пустой памяти блока нет');
+});
+
+test('frontmatter с описанием не попадает в ядро', () => {
+  const root = tempMemory();
+  fs.writeFileSync(path.join(root, 'identity.md'), '---\ndescription: кто он\n---\n- Зовут Саня\n');
+
+  const core = buildMemoryCore(root);
+  assert.match(core, /Зовут Саня/, 'факт на месте');
+  assert.doesNotMatch(core, /description/, 'описание — метаданные индекса, не факт');
+  assert.doesNotMatch(core, /^---$/m, 'frontmatter в ядро не едет');
 });
 
 test('ядро памяти не разрастается бесконечно', () => {

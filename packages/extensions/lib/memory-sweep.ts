@@ -78,6 +78,16 @@ function ensureBullet(text: string): string {
   return /^\s*[-*]\s+/.test(text) ? text : `- ${text}`;
 }
 
+/**
+ * Тело файла без frontmatter. При слиянии описание — метаданные, а не факт:
+ * иначе в целевом файле оказалось бы несколько `description` подряд.
+ */
+function contentLines(lines: string[]): string[] {
+  if (lines[0]?.trim() !== '---') return lines;
+  const end = lines.findIndex((line, index) => index > 0 && line.trim() === '---');
+  return end === -1 ? lines : lines.slice(end + 1);
+}
+
 function monthOf(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 }
@@ -449,7 +459,7 @@ export function applySweepPlan(root: string, plan: SweepPlan, now = new Date()):
       continue;
     }
     for (const lines of sources.values()) {
-      for (const line of lines) {
+      for (const line of contentLines(lines)) {
         if (!line.trim()) continue;
         if (intoLines.some((known) => normalizeLine(known) === normalizeLine(line))) continue;
         // Похожие формулировки — тот же факт: в слитом файле он не нужен дважды.

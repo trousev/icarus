@@ -75,7 +75,7 @@ ageTest('месяц берётся у каждой строки своя', () =>
   assert.match(core, /- \[2026-06\] Работает в банке, в IT/);
 });
 
-ageTest('люди и проекты тоже получают метку', () => {
+ageTest('люди и проекты тоже получают метку, когда их читают', () => {
   const root = tempRepo();
   fs.mkdirSync(path.join(root, 'people'), { recursive: true });
   fs.mkdirSync(path.join(root, 'projects'), { recursive: true });
@@ -84,9 +84,11 @@ ageTest('люди и проекты тоже получают метку', () =>
   commitAt(root, '2026-03-15T12:00:00+00:00', 'memory: март');
   clearMemoryAges();
 
-  const core = buildMemoryCore(root);
-  assert.match(core, /- \[2026-03\] Сестра, живёт в Порту/);
-  assert.match(core, /- \[2026-03\] Строит дом/);
+  // В ядре их нет — их читают по индексу. Метка всё равно считается по git-истории.
+  const people = annotateAges(path.join(root, 'people/маша.md'), fs.readFileSync(path.join(root, 'people/маша.md'), 'utf8'));
+  const projects = annotateAges(path.join(root, 'projects/дом.md'), fs.readFileSync(path.join(root, 'projects/дом.md'), 'utf8'));
+  assert.match(people, /- \[2026-03\] Сестра, живёт в Порту/);
+  assert.match(projects, /- \[2026-03\] Строит дом/);
 });
 
 ageTest('незакоммиченная строка остаётся без метки, соседние — с меткой', () => {

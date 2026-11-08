@@ -1,6 +1,7 @@
-// Ядро памяти: то, что Икар должен знать про человека сразу, без похода в файлы.
-// Работает вторым обработчиком before_agent_start и дописывает блок к промпту,
-// который уже собрала персона.
+// Ядро памяти: то, что Икар знает про человека сразу, без похода в файлы.
+// В ядре только «кто он» и «как с ним говорить». Люди и проекты сюда не входят:
+// сначала `memory_index` отдаёт файлы с описаниями, потом модель читает выбранное.
+// Иначе факты в промпте становятся поводом сменить тему — ровно то, на что жаловались.
 //
 // Каждый пункт несёт метку месяца, когда он появился в памяти: `- [2026-03] текст`
 // из git blame по времени автора строки. По метке видно, что устарело, а что свежее.
@@ -11,6 +12,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { stripFrontmatter } from "./memory-catalog.ts";
 
 const ICARUS = process.env.ICARUS_HOME ?? "/workspaces/.icarus";
 const MEMORY = process.env.ICARUS_MEMORY_DIR ?? `${ICARUS}/memory`;
@@ -113,7 +115,8 @@ function readAnnotated(file: string): string {
   } catch {
     return '';
   }
-  return annotateAges(file, raw).trim();
+  // Описание файла — метаданные для индекса, а не факт о человеке: в ядро не едет.
+  return stripFrontmatter(annotateAges(file, raw)).trim();
 }
 
 function clip(text: string, limit = LIMIT_PER_FILE): string {
@@ -121,20 +124,11 @@ function clip(text: string, limit = LIMIT_PER_FILE): string {
   return `${text.slice(0, limit).trimEnd()}\n… (дальше сам, файл целиком по пути)`;
 }
 
-/** Первые содержательные строки файла: для списков людей и проектов хватает шапки. */
-function headings(dir: string, perFile = 240): string[] {
-  let entries: string[];
-  try {
-    entries = fs.readdirSync(dir).filter((name) => name.endsWith('.md'));
-  } catch {
-    return [];
-  }
-  return entries.sort().map((name) => {
-    const body = clip(readAnnotated(path.join(dir, name)), perFile);
-    return `### ${name.replace(/\.md$/, '')}\n${body}`;
-  });
-}
-
+/**
+ * Ядро — только «кто он» и «как с ним говорить». Люди и проекты сюда не входят:
+ * сначала `memory_index` отдаёт файлы с описаниями, потом модель читает выбранное.
+ * Иначе факты в промпте становятся поводом сменить тему — на это и жаловались.
+ */
 export function buildMemoryCore(root = MEMORY): string {
   const parts: string[] = [];
   const identity = readAnnotated(path.join(root, 'identity.md'));
@@ -143,32 +137,37 @@ export function buildMemoryCore(root = MEMORY): string {
   if (identity) parts.push(`## Кто это\n${clip(identity)}`);
   if (preferences) parts.push(`## Предпочтения\n${clip(preferences)}`);
 
-  const people = headings(path.join(root, 'people'));
-  if (people.length > 0) parts.push(`## Люди\n${people.join('\n\n')}`);
-
-  const projects = headings(path.join(root, 'projects'), 200);
-  if (projects.length > 0) parts.push(`## Темы и дела\n${projects.join('\n\n')}`);
-
   const total = parts.join('\n\n');
   if (!total) return '';
   return clip(total, LIMIT_TOTAL);
 }
 
+/**
+ * Блок «Ядро памяти» для системного промпта. Живёт рядом с самими фактами, потому
+ * что соблазн начинается именно здесь: модель принимает «я это знаю» за повод
+ * сменить разговор («кстати, …»). Память — для ответа на его тему, не для выбора темы.
+ */
+export function memoryPrompt(core: string): string {
+  if (!core) return '';
+  return [
+    '# Ядро памяти',
+    'Это справка о собеседнике, а не тема разговора. Не переспрашивай и не перечитывай файлы без нужды:',
+    'если ответ есть здесь — отвечай им. Советуешь, планируешь или вспоминаешь — сначала `memory_index`, потом читай выбранные файлы.',
+    'Люди и проекты лежат в памяти, а не здесь: выбери их по индексу и прочитай.',
+    '',
+    core,
+    '',
+    `Полная память лежит в ${MEMORY}/, семейная — в ${ICARUS}/shared-memory/.`,
+    // Правило — последним: оно закрывает блок, чтобы факты не читались как приглашение
+    // сменить разговор, но и не запрещало искать память для ответа.
+    'Память отвечает, а не начинает: не делай её темой, вопросом, шуткой или утешением. Для ответа — ищи и используй.',
+  ].join('\n');
+}
+
 export default function (pi: ExtensionAPI) {
   pi.on('before_agent_start', async (event) => {
-    const core = buildMemoryCore();
-    if (!core) return;
-
-    const block = [
-      '# Ядро памяти',
-      'Это ты уже знаешь про собеседника. Не переспрашивай и не перечитывай эти файлы без нужды:',
-      'если ответ есть здесь — отвечай сразу. За деталями (журнал, полные файлы) иди в память сам.',
-      '',
-      core,
-      '',
-      `Полная память лежит в ${MEMORY}/, семейная — в ${ICARUS}/shared-memory/.`,
-    ].join('\n');
-
+    const block = memoryPrompt(buildMemoryCore());
+    if (!block) return;
     return { systemPrompt: `${event.systemPrompt}\n\n---\n\n${block}` };
   });
 }

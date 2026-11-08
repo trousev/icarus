@@ -100,6 +100,7 @@ test('приватная сессия не получает инструмент
   assert.ok(privateArgs.includes('--no-extensions'));
   const loaded = privateArgs.flatMap((arg, index) => (arg === '-e' ? [privateArgs[index + 1]] : []));
   assert.ok(loaded.some((file) => file?.endsWith('/persona.ts')), 'персона остаётся');
+  assert.ok(loaded.some((file) => file?.endsWith('/memory-index.ts')), 'индекс памяти остаётся');
   assert.ok(!loaded.some((file) => file?.endsWith('/memory-extractor.ts')), 'экстрактор памяти выключен');
   assert.ok(!loaded.some((file) => file?.endsWith('/memory-sweeper.ts')), 'уборщик памяти выключен');
 });
