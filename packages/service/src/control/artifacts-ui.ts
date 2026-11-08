@@ -69,6 +69,7 @@ export function artifactsPage(session: PanelSession, options: ArtifactsPageOptio
         </button>
         <button class="btn" id="art-unpublish" hidden>Отозвать ссылку</button>
         <button class="btn" id="art-acl" hidden>Права</button>
+        <button class="btn" id="art-history">История</button>
         <a class="btn" id="art-bare" href="#" target="_blank" rel="noopener" aria-disabled="true">Без панели</a>
         <a class="btn" id="art-download" href="#" aria-disabled="true">Скачать</a>
         <button class="btn danger" id="art-delete" disabled>Удалить</button>
@@ -93,6 +94,16 @@ export function artifactsPage(session: PanelSession, options: ArtifactsPageOptio
     <div class="art-modal-actions">
       <button class="btn" id="acl-cancel">Отмена</button>
       <button class="btn primary" id="acl-save">Сохранить</button>
+    </div>
+  </div>
+</div>
+<div class="art-modal" id="art-history-modal" hidden>
+  <div class="art-modal-card art-history-card" role="dialog" aria-modal="true" aria-labelledby="art-history-title">
+    <h2 id="art-history-title">История версий</h2>
+    <p class="art-modal-note">Икар сохраняет каждое изменение автоматически. Если что-то пошло не так — верни артефакт к любой версии.</p>
+    <div class="art-history-list" id="art-history-list"><p class="art-empty">Читаю…</p></div>
+    <div class="art-modal-actions">
+      <button class="btn" id="history-close">Закрыть</button>
     </div>
   </div>
 </div>

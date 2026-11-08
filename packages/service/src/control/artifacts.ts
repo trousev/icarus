@@ -14,6 +14,7 @@ import {
   displayPath,
   ensurePublicId,
   isAccessLevel,
+  inspectArtifact,
   listArtifacts,
   publicArtifact,
   publicArtifactFile,
@@ -25,6 +26,7 @@ import {
   type FolderAcl,
 } from '../artifacts.ts';
 import type { IcarusConfig } from '../config.ts';
+import { artifactHistory, restoreArtifact } from '../artifacts-git.ts';
 import { readJsonBody } from '../http/openai.ts';
 import { errorBody } from '../http/sse.ts';
 import { log } from '../log.ts';
@@ -129,6 +131,22 @@ export async function handleArtifactsApi(
     return;
   }
 
+  if (req.method === 'GET' && route === 'history') {
+    const name = decode(url.searchParams.get('artifact') ?? '');
+    try {
+      const read = readArtifact(config, userId, name);
+      const history = await artifactHistory(read.dir);
+      json(res, 200, {
+        artifact: read.artifact,
+        history,
+        current: history[0]?.hash ?? null,
+      });
+    } catch (error) {
+      fail(res, error, 'история не прочиталась');
+    }
+    return;
+  }
+
   if (req.method !== 'POST') {
     json(res, 405, errorBody('раздел артефактов так не умеет', 'invalid_request_error'));
     return;
@@ -170,6 +188,24 @@ export async function handleArtifactsApi(
       json(res, 200, { ok: true, trashed: path.basename(target) });
     } catch (error) {
       fail(res, error, 'артефакт не удалился');
+    }
+    return;
+  }
+
+  if (route === 'restore') {
+    const commit = typeof body.commit === 'string' ? body.commit : '';
+    try {
+      const read = readArtifact(config, userId, artifact);
+      if (!read.artifact.canWrite && !read.artifact.canManage) {
+        throw new ArtifactError('вернуть версию может тот, кто может менять артефакт', 403);
+      }
+      await restoreArtifact(read.dir, commit);
+      const next = inspectArtifact(config, artifact, userId);
+      if (!next) throw new ArtifactError('артефакт не найден', 404);
+      json(res, 200, { artifact: next, urls: next.urls });
+    } catch (error) {
+      if (error instanceof ArtifactError) fail(res, error, 'версия не вернулась');
+      else json(res, 400, errorBody(error instanceof Error ? error.message : 'версия не вернулась', 'invalid_request_error'));
     }
     return;
   }
@@ -228,7 +264,7 @@ export function handleArtifactsRaw(
   }
   sendFile(req, res, found.file, found.type, {
     download: url.searchParams.get('download') === '1',
-    cache: 'private, max-age=60',
+    cache: 'no-cache',
     sandbox: /^(text\/html|image\/svg\+xml)/.test(found.type),
   });
 }

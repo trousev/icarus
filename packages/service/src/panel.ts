@@ -17,6 +17,7 @@ import { DEFAULT_CONFIG_PATH, findUser, loadConfig, type IcarusConfig } from './
 import { loadRuntimeEnv } from './runtime.ts';
 import { log } from './log.ts';
 import { prepareUser } from './workspace.ts';
+import { ensureArtifactRepos } from './artifacts-git.ts';
 import { backfillChats } from './sessions/chats.ts';
 import { SessionRegistry } from './sessions/registry.ts';
 import { createServer } from './http/server.ts';
@@ -74,6 +75,11 @@ config.url = `http://${config.host}:${config.port}`;
 for (const person of config.users) {
   prepareUser(config, person);
   backfillChats(config, person);
+}
+try {
+  await ensureArtifactRepos(config);
+} catch (error) {
+  log.warn('локальная панель: история артефактов не завелась', { error: String(error) });
 }
 log.info('локальная панель: данные и git готовы', { dataDir: config.dataDir, user: user.id });
 

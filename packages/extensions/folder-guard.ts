@@ -55,6 +55,13 @@ export function guardToolCall(
   if (!target) return undefined;
   const verdict = folderVerdict(target, options.viewer, required, options.roots);
   if (!verdict.protected) return undefined;
+  const parts = target.replace(/\\/g, "/").split("/");
+  if (parts.includes(".git")) {
+    return { block: true, reason: "История версий артефакта скрыта: не трогай .git, она ведётся сама." };
+  }
+  if (parts.some((part) => part === ".folder-acl.json" || part === ".artifact.json")) {
+    return { block: true, reason: "Права и ссылка артефакта меняются через artifact_new или панель, не файлом." };
+  }
   if (verdict.rootOnly) {
     // Имена артефактов — глобальный листинг, его смотреть можно. Содержимое —
     // только с указанием конкретной папки.

@@ -1,0 +1,97 @@
+// История версий артефакта: маленький git-репозиторий на папку.
+//
+// Проверяем не «git вообще», а обещание человеку: каждое изменение можно
+// вернуть, а права и публичная ссылка при откате не меняются.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {
+  artifactHistory,
+  commitArtifact,
+  ensureArtifactRepo,
+  ensureArtifactRepos,
+  restoreArtifact,
+} from '../src/artifacts-git.ts';
+import { DEFAULT_ACL, artifactsRoot, writeAcl } from '../src/artifacts.ts';
+import { makeConfig, probe } from './fixtures.ts';
+
+function artifact(): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'artifact-git-test-'));
+  fs.writeFileSync(path.join(dir, 'index.md'), '# Первая версия\n');
+  fs.writeFileSync(path.join(dir, 'index.ai.md'), '# Первая версия\n');
+  fs.writeFileSync(path.join(dir, '.folder-acl.json'), JSON.stringify({ owner: 'probe', acl: DEFAULT_ACL }));
+  fs.writeFileSync(path.join(dir, '.artifact.json'), JSON.stringify({ publicId: 'abcdefghijklmnopqrstuvwx' }));
+  return dir;
+}
+
+test('снимок, изменение и возврат к первой версии', async () => {
+  const dir = artifact();
+  await ensureArtifactRepo(dir);
+  assert.equal(await commitArtifact(dir, 'artifact: initial version'), true);
+  assert.equal(await commitArtifact(dir, 'artifact: initial version'), false, 'без изменений коммита нет');
+
+  const initial = (await artifactHistory(dir))[0]!;
+  assert.equal(initial.subject, 'artifact: initial version');
+
+  fs.writeFileSync(path.join(dir, 'index.md'), '# Вторая версия\n');
+  fs.writeFileSync(path.join(dir, 'second.md'), 'лишний файл\n');
+  assert.equal(await commitArtifact(dir, 'artifact: write index.md'), true);
+
+  const before = await artifactHistory(dir);
+  assert.equal(before.length, 2);
+  assert.equal(before[0]!.subject, 'artifact: write index.md');
+
+  const result = await restoreArtifact(dir, initial.hash);
+  assert.equal(result.ok, true);
+  assert.equal(fs.readFileSync(path.join(dir, 'index.md'), 'utf8'), '# Первая версия\n');
+  assert.equal(fs.existsSync(path.join(dir, 'second.md')), false, 'файл, добавленный позже, убран');
+  assert.equal(await commitArtifact(dir, 'artifact: initial version'), false, 'рабочая папка чистая');
+});
+
+test('служебные файлы не версионируются: откат не меняет права и ссылку', async () => {
+  const dir = artifact();
+  await ensureArtifactRepo(dir);
+  await commitArtifact(dir, 'artifact: initial version');
+  const list = await new Promise<string>((resolve, reject) => {
+    import('node:child_process').then(({ execFile }) => {
+      execFile('git', ['-C', dir, 'ls-files'], (error, stdout) => (error ? reject(error) : resolve(String(stdout))));
+    });
+  });
+  assert.doesNotMatch(list, /folder-acl/);
+  assert.doesNotMatch(list, /artifact\.json/);
+
+  fs.writeFileSync(path.join(dir, '.folder-acl.json'), JSON.stringify({ owner: 'probe', acl: { me: 'read', family: 'read' } }));
+  fs.writeFileSync(path.join(dir, 'index.md'), '# Другая\n');
+  await commitArtifact(dir, 'artifact: write index.md');
+  const history = await artifactHistory(dir);
+  const initial = history.find((commit) => commit.subject === 'artifact: initial version')!;
+  await restoreArtifact(dir, initial.hash);
+
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, '.folder-acl.json'), 'utf8')).acl.me, 'read');
+  assert.equal(fs.existsSync(path.join(dir, '.artifact.json')), true);
+});
+
+test('несуществующая версия и мусорный хеш не откатываются', async () => {
+  const dir = artifact();
+  await ensureArtifactRepo(dir);
+  await commitArtifact(dir, 'artifact: initial version');
+  await assert.rejects(() => restoreArtifact(dir, 'deadbeef'), /такой версии нет/);
+  await assert.rejects(() => restoreArtifact(dir, 'не-хеш'), /не похоже/);
+});
+
+test('инициализация всех артефактов: initial-коммит у существующих', async () => {
+  const config = makeConfig({ users: [probe('probe')] });
+  const dir = path.join(artifactsRoot(config), 'plan');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'index.md'), '# План\n');
+  fs.writeFileSync(path.join(dir, 'index.ai.md'), '# План\n');
+  writeAcl(dir, 'probe', DEFAULT_ACL);
+
+  const initialized = await ensureArtifactRepos(config);
+  assert.equal(initialized, 1);
+  const history = await artifactHistory(dir);
+  assert.equal(history[0]!.subject, 'artifact: initial version');
+  assert.equal(await ensureArtifactRepos(config), 0, 'повторный запуск не плодит коммиты');
+});

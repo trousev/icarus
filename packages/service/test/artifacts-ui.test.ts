@@ -43,6 +43,8 @@ test('страница: глобальный список, поиск, прав�
   assert.match(html, /id="art-unpublish"/);
   assert.match(html, /id="art-acl"/);
   assert.match(html, /id="art-acl-modal"/);
+  assert.match(html, /id="art-history"/);
+  assert.match(html, /id="art-history-modal"/);
   assert.match(html, /id="acl-me"/);
   assert.match(html, /id="acl-family"/);
   assert.match(html, /id="art-bare"/);
@@ -61,6 +63,8 @@ test('клиентский скрипт страницы компилирует�
   assert.match(client, /artUnpublish/);
   assert.match(client, /artOpenAcl/);
   assert.match(client, /artSaveAcl/);
+  assert.match(client, /artOpenHistory/);
+  assert.match(client, /artRestore/);
   assert.match(client, /artDelete/);
   assert.match(client, /artifactMarkdown/);
 });
@@ -148,6 +152,14 @@ test('скрипт страницы исполняется: глобальный
   const payloads: Record<string, unknown> = {
     list: { total: 1, items: [item] },
     read: { artifact: item, content: '# План на четверг\n\n1. Стендап\n', aiContent: 'Расписание' },
+    history: {
+      artifact: item,
+      current: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      history: [
+        { hash: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', short: 'bbbbbbb', date: '2026-11-06T22:01:00.000Z', subject: 'artifact: write index.md' },
+        { hash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', short: 'aaaaaaa', date: '2026-11-06T21:01:00.000Z', subject: 'artifact: initial version' },
+      ],
+    },
   };
   window.fetch = async (url: string) => {
     const key = Object.keys(payloads).find((name) => String(url).includes(name));
@@ -174,4 +186,11 @@ test('скрипт страницы исполняется: глобальный
   assert.match(document.getElementById('art-list')?.textContent ?? '', /План на четверг/);
   assert.match(document.getElementById('art-view')?.innerHTML ?? '', /<h1>План на четверг<\/h1>/);
   assert.match(document.getElementById('art-name')?.textContent ?? '', /index\.md/);
+
+  document.getElementById('art-history')?.dispatchEvent(new window.Event('click'));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(document.getElementById('art-history-modal')?.hidden, false);
+  assert.match(document.getElementById('art-history-list')?.textContent ?? '', /запись index\.md/);
+  assert.match(document.getElementById('art-history-list')?.textContent ?? '', /начальная версия/);
+  assert.match(document.getElementById('art-history-list')?.innerHTML ?? '', /art-history-restore/, 'у старой версии есть кнопка возврата');
 });

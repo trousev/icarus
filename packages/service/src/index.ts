@@ -3,6 +3,7 @@ import { DEFAULT_CONFIG_PATH, loadConfig } from './config.ts';
 import { loadRuntimeEnv } from './runtime.ts';
 import { log } from './log.ts';
 import { prepareUser } from './workspace.ts';
+import { ensureArtifactRepos } from './artifacts-git.ts';
 import { backfillChats } from './sessions/chats.ts';
 import { reapStalePi, waitForContainers } from './docker/manager.ts';
 import { SessionRegistry } from './sessions/registry.ts';
@@ -40,6 +41,15 @@ for (const user of config.users) {
   // Один проход по файлам сессий: всё, что уже начато, попадает в chats.json.
   // Дальше панель читает только маленький реестр, а не всю историю.
   backfillChats(config, user);
+}
+
+// История версий артефактов: у каждой папки свой git-репозиторий. Заводим его
+// до первого запроса, чтобы старые артефакты имели снимок «как было».
+try {
+  const initialized = await ensureArtifactRepos(config);
+  if (initialized > 0) log.info('артефакты: история версий заведена', { artifacts: initialized });
+} catch (error) {
+  log.warn('артефакты: история версий не завелась', { error: String(error) });
 }
 
 // Контейнерами владеет docker compose (см. docker/compose.ts): сервис их не создаёт,

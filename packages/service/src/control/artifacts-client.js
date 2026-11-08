@@ -128,6 +128,7 @@ function artRenderList() {
 
 function artClearView(message) {
   artState.selected = null;
+  artEl('art-history-modal').hidden = true;
   artEl('art-name').textContent = '—';
   artEl('art-meta').textContent = '';
   artEl('art-type-icon').innerHTML = '';
@@ -358,6 +359,103 @@ async function artDelete() {
   }
 }
 
+function artHistoryLabel(subject) {
+  const text = String(subject || '');
+  if (text === 'artifact: initial version') return 'начальная версия';
+  if (text === 'artifact: snapshot before change') return 'перед изменением';
+  if (text === 'artifact: update') return 'обновление';
+  if (text === 'artifact: before restore') return 'перед откатом';
+  if (/^artifact: restore [0-9a-f]+$/i.test(text)) return 'возврат к более ранней версии';
+  const write = /^artifact: (write|edit) (.+)$/.exec(text);
+  if (write) return (write[1] === 'write' ? 'запись ' : 'правка ') + write[2];
+  return text.replace(/^artifact:\s*/, '') || 'версия';
+}
+
+function artCanRestore(item) {
+  return Boolean(item?.canWrite || item?.canManage);
+}
+
+function artRenderHistory(data) {
+  const list = artEl('art-history-list');
+  const history = data.history || [];
+  if (history.length === 0) {
+    list.innerHTML =
+      '<div class="art-empty"><b>Пока нет версий</b><span>История появится после первого изменения артефакта.</span></div>';
+    return;
+  }
+  const canRestore = artCanRestore(artState.selected);
+  list.innerHTML = history
+    .map((commit) => {
+      const current = commit.hash === data.current;
+      const action = current
+        ? '<em>текущая</em>'
+        : canRestore
+          ? '<em>Вернуть</em>'
+          : '';
+      return (
+        '<div class="art-history-item' + (current ? ' current' : '') + '">' +
+        '<div class="art-history-text"><b>' + artEsc(artHistoryLabel(commit.subject)) + '</b>' +
+        '<span>' + artEsc(artStamp(commit.date)) + '</span></div>' +
+        (current || !canRestore
+          ? '<span class="art-history-current">' + action + '</span>'
+          : '<button type="button" class="btn art-history-restore" data-commit="' + artEsc(commit.hash) + '">Вернуть</button>') +
+        '</div>'
+      );
+    })
+    .join('');
+}
+
+async function artOpenHistory() {
+  if (!artState.selected) return;
+  artEl('art-history-list').innerHTML = '<p class="art-empty">Читаю историю…</p>';
+  artEl('art-history-modal').hidden = false;
+  try {
+    const data = await artApi(
+      '/panel/artifacts/api/history?artifact=' + encodeURIComponent(artState.selected.name),
+    );
+    artRenderHistory(data);
+  } catch (error) {
+    artEl('art-history-list').innerHTML =
+      '<div class="art-empty bad"><b>История не загрузилась</b><span>' + artEsc(error.message) + '</span></div>';
+  }
+}
+
+function artCloseHistory() {
+  artEl('art-history-modal').hidden = true;
+}
+
+async function artRestore(commit, button) {
+  if (!artState.selected || !commit) return;
+  if (button.dataset.armed !== '1') {
+    button.dataset.armed = '1';
+    button.textContent = 'Точно вернуть?';
+    setTimeout(() => {
+      if (button.isConnected) {
+        button.dataset.armed = '';
+        button.textContent = 'Вернуть';
+      }
+    }, 4000);
+    return;
+  }
+  button.disabled = true;
+  try {
+    await artApi('/panel/artifacts/api/restore', {
+      method: 'POST',
+      body: JSON.stringify({ artifact: artState.selected.name, commit }),
+    });
+    artCloseHistory();
+    artSetStatus('Артефакт возвращён к выбранной версии');
+    const name = artState.selected.name;
+    await artLoadList();
+    await artOpen(name);
+  } catch (error) {
+    artSetStatus('Версия не вернулась: ' + error.message, true);
+    button.disabled = false;
+    button.dataset.armed = '';
+    button.textContent = 'Вернуть';
+  }
+}
+
 /** Числа у остальных разделов приходят с сервера: клиент их только расставляет. */
 function artFillCounts() {
   for (const [id, value] of Object.entries(artCfg.counts || {})) {
@@ -379,14 +477,25 @@ async function artStart() {
   artEl('art-link').addEventListener('click', artMakeLink);
   artEl('art-unpublish').addEventListener('click', artUnpublish);
   artEl('art-acl').addEventListener('click', artOpenAcl);
+  artEl('art-history').addEventListener('click', artOpenHistory);
+  artEl('art-history-list').addEventListener('click', (event) => {
+    const button = event.target.closest('.art-history-restore');
+    if (button) artRestore(button.dataset.commit, button);
+  });
   artEl('art-delete').addEventListener('click', artDelete);
   artEl('acl-cancel').addEventListener('click', artCloseAcl);
   artEl('acl-save').addEventListener('click', artSaveAcl);
+  artEl('history-close').addEventListener('click', artCloseHistory);
   artEl('art-acl-modal').addEventListener('click', (event) => {
     if (event.target === artEl('art-acl-modal')) artCloseAcl();
   });
+  artEl('art-history-modal').addEventListener('click', (event) => {
+    if (event.target === artEl('art-history-modal')) artCloseHistory();
+  });
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && !artEl('art-acl-modal').hidden) artCloseAcl();
+    if (event.key !== 'Escape') return;
+    if (!artEl('art-acl-modal').hidden) artCloseAcl();
+    else if (!artEl('art-history-modal').hidden) artCloseHistory();
   });
   artFillCounts();
   try {

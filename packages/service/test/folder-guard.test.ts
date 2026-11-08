@@ -112,6 +112,20 @@ test('guardToolCall: read/edit разрешены по ACL, write заблоки
   assert.equal(guardToolCall('write', { path: path.join(root, 'plan', 'index.md') }, { viewer: 'probe', roots: [root] }), undefined);
 });
 
+test('guardToolCall: .git и служебные файлы артефакта закрыты', () => {
+  const root = sandbox({ owner: 'probe', me: 'admin', family: 'read' });
+  const options = { viewer: 'probe', roots: [root] };
+  assert.match(guardToolCall('read', { path: path.join(root, 'plan', '.git', 'config') }, options)?.reason ?? '', /История версий/);
+  assert.match(guardToolCall('write', { path: path.join(root, 'plan', '.git', 'config') }, options)?.reason ?? '', /История версий/);
+  assert.match(guardToolCall('write', { path: path.join(root, 'plan', '.folder-acl.json') }, options)?.reason ?? '', /Права и ссылка/);
+  assert.match(guardToolCall('write', { path: path.join(root, 'plan', '.artifact.json') }, options)?.reason ?? '', /Права и ссылка/);
+  assert.equal(
+    guardToolCall('read', { path: '/workspaces/talk/.git/config' }, options),
+    undefined,
+    'обычный git в workspace страж не трогает',
+  );
+});
+
 test('guardToolCall: ls корня можно, ls папки без ACL — нет; bash по /artifacts закрыт', () => {
   const root = sandbox({ owner: 'probe', me: 'admin', family: 'read' });
   assert.equal(guardToolCall('ls', { path: root }, { viewer: 'probe2', roots: [root] }), undefined);
