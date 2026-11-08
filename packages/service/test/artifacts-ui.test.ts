@@ -39,10 +39,10 @@ test('страница: глобальный список, поиск, прав�
   assert.match(html, /<p class="nav-title">НАСТРОЙКИ<\/p>/);
   assert.doesNotMatch(html, /БИБЛИОТЕКА/);
   assert.match(html, /href="\/panel\/memory"/);
-  assert.match(html, /id="art-link"/);
-  assert.match(html, /id="art-unpublish"/);
-  assert.match(html, /id="art-acl"/);
-  assert.match(html, /id="art-acl-modal"/);
+  assert.match(html, /id="art-share"/);
+  assert.match(html, /id="art-share-modal"/);
+  assert.match(html, /id="art-share-link"/);
+  assert.doesNotMatch(html, /id="art-unpublish"/, 'отзыв ссылки живёт в диалоге «Поделиться»');
   assert.match(html, /id="art-history"/);
   assert.match(html, /id="art-history-panel"/);
   assert.match(html, /id="art-chat"/);
@@ -55,6 +55,8 @@ test('страница: глобальный список, поиск, прав�
   assert.match(html, /id="acl-me"/);
   assert.match(html, /id="acl-family"/);
   assert.match(html, /id="acl-family"[^>]*><option value="none">нет доступа<\/option>/, 'нет доступа — уровень по умолчанию');
+  assert.match(html, /id="acl-public"[^>]*><option value="none">нет доступа<\/option><option value="read">чтение<\/option>/, 'публично можно только читать');
+  assert.match(html, /id="acl-copy"[^>]*aria-label="Копировать ссылку"[^>]*><svg/, 'копирование — иконка');
   assert.match(html, /id="art-bare"/);
   assert.match(html, /id="art-download"/);
   assert.match(html, /id="art-delete"/);
@@ -68,10 +70,10 @@ test('клиентский скрипт страницы компилирует�
   const client = scripts.find((script) => script.includes('artLoadList')) ?? '';
   assert.ok(client, 'клиент раздела едет отдельным скриптом');
   assert.match(client, /artLoadList/);
-  assert.match(client, /artMakeLink/);
-  assert.match(client, /artUnpublish/);
-  assert.match(client, /artOpenAcl/);
-  assert.match(client, /artSaveAcl/);
+  assert.match(client, /artOpenShare/);
+  assert.match(client, /artChangeAcl/);
+  assert.match(client, /artChangePublic/);
+  assert.match(client, /artCopyLink/);
   assert.match(client, /artOpenHistory/);
   assert.match(client, /artPreviewVersion/);
   assert.match(client, /artRestorePreview/);
@@ -296,4 +298,93 @@ test('кнопка «Чат» открывает панель и читает и
   const log = document.getElementById('art-chat-log')?.textContent ?? '';
   assert.match(log, /Добавь заголовок/);
   assert.match(log, /Добавил заголовок/);
+});
+
+test('кнопка «Поделиться»: права меняются сразу, публичное чтение даёт ссылку', async () => {
+  const html = artifactsPage(SESSION, OPTIONS);
+  const { document, window } = parseHTML(html);
+  const scripts = [...document.querySelectorAll('script')]
+    .map((node) => node.textContent ?? '')
+    .filter(Boolean);
+  const item = artifact();
+  const calls: Array<{ url: string; body: string }> = [];
+  // linkedom отдаёт select.value только на чтение: для теста даём обычный
+  // сеттер, как в браузере, иначе клиент не может выставить выбранный уровень.
+  for (const id of ['acl-me', 'acl-family', 'acl-public']) {
+    const select = document.getElementById(id);
+    const options = [...select.querySelectorAll('option')];
+    Object.defineProperty(select, 'value', {
+      configurable: true,
+      get: () => options.find((option) => option.selected)?.value ?? '',
+      set: (value: string) => {
+        const chosen = options.find((option) => option.value === value);
+        if (chosen) chosen.selected = true;
+      },
+    });
+  }
+  const answer = (data: unknown) => ({
+    ok: true,
+    headers: { get: () => 'application/json' },
+    json: async () => data,
+  });
+  window.fetch = async (url: string, init?: { body?: string }) => {
+    const path = String(url);
+    calls.push({ url: path, body: String(init?.body ?? '') });
+    if (path.includes('/panel/artifacts/api/list')) return answer({ total: 1, items: [item] });
+    if (path.includes('/panel/artifacts/api/read')) {
+      return answer({ artifact: item, content: '# План на четверг\n', aiContent: 'Расписание дня.' });
+    }
+    if (path.includes('/panel/artifacts/api/link')) {
+      return answer({ artifact: { ...item, publicId: 'abcdefghijklmnopqrstuvwx' }, urls: item.urls });
+    }
+    if (path.includes('/panel/artifacts/api/acl')) {
+      return answer({ artifact: { ...item, acl: { me: 'admin', family: 'write' } }, urls: item.urls });
+    }
+    if (path.includes('/panel/artifacts/api/unpublish')) {
+      const urls = { panel: item.urls.panel, raw: item.urls.raw };
+      return answer({ artifact: { ...item, publicId: undefined, urls }, urls });
+    }
+    return answer({});
+  };
+  const location = { href: 'http://panel/panel/artifacts', pathname: '/panel/artifacts', search: '?artifact=plan' };
+  const history = { replaceState() {} };
+  Object.defineProperty(window, 'location', { value: location, configurable: true });
+
+  const run = new Function('window', 'document', 'fetch', 'URL', 'location', 'history', scripts.join('\n'));
+  run(window, document, window.fetch, window.URL, location, history);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  const share = document.getElementById('art-share');
+  assert.equal(share?.hasAttribute('disabled'), false, 'владелец может поделиться');
+  share?.dispatchEvent(new window.Event('click'));
+  assert.equal(document.getElementById('art-share-modal')?.hidden, false, 'диалог открылся');
+  assert.equal(document.getElementById('acl-me')?.value, 'admin');
+  assert.equal(document.getElementById('acl-family')?.value, 'read');
+  assert.equal(document.getElementById('art-share-link')?.hidden, false, 'ссылка уже есть и показана');
+  assert.match(document.getElementById('acl-link')?.value ?? '', /\/a\/plan\/abcdefghijklmnopqrstuvwx\//);
+  assert.match(document.getElementById('acl-public-hint')?.textContent ?? '', /чтение/);
+
+  const family = document.getElementById('acl-family');
+  family.value = 'write';
+  family.dispatchEvent(new window.Event('change'));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const aclCall = calls.find((call) => call.url.includes('/panel/artifacts/api/acl'));
+  assert.ok(aclCall, 'смена уровня семьи ушла на сервер');
+  assert.deepEqual(JSON.parse(aclCall.body).acl, { me: 'admin', family: 'write' });
+  assert.match(document.getElementById('art-share-note')?.textContent ?? '', /Права сохранены/);
+
+  const isPublic = document.getElementById('acl-public');
+  isPublic.value = 'none';
+  isPublic.dispatchEvent(new window.Event('change'));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.ok(calls.some((call) => call.url.includes('/panel/artifacts/api/unpublish')), 'выключение публики отзывает ссылку');
+  assert.equal(document.getElementById('art-share-link')?.hidden, true, 'без публичного чтения ссылки нет');
+  assert.equal(document.getElementById('acl-public')?.value, 'none');
+
+  isPublic.value = 'read';
+  isPublic.dispatchEvent(new window.Event('change'));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.ok(calls.some((call) => call.url.includes('/panel/artifacts/api/link')), 'включение публики создаёт ссылку');
+  assert.equal(document.getElementById('art-share-link')?.hidden, false);
+  assert.match(document.getElementById('acl-link')?.value ?? '', /\/a\/plan\/abcdefghijklmnopqrstuvwx\//);
 });
