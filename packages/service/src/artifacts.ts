@@ -296,6 +296,15 @@ export function listFiles(dir: string, prefix = ''): string[] {
   return files;
 }
 
+/** Index-файл среди имён: тот же выбор, что и на диске, но для git-дерева версии. */
+export function entryForFiles(files: Iterable<string>): { file: string; type: ArtifactType } | null {
+  const names = new Set(files);
+  for (const candidate of INDEX_FILES) {
+    if (names.has(candidate.file)) return candidate;
+  }
+  return null;
+}
+
 export function detectEntry(dir: string): { file: string; type: ArtifactType } | null {
   let names: Set<string>;
   try {
@@ -303,10 +312,7 @@ export function detectEntry(dir: string): { file: string; type: ArtifactType } |
   } catch {
     return null;
   }
-  for (const candidate of INDEX_FILES) {
-    if (names.has(candidate.file)) return candidate;
-  }
-  return null;
+  return entryForFiles(names);
 }
 
 /** Права папки: null — файла нет или он битый. */

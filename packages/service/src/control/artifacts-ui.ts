@@ -34,7 +34,7 @@ export function artifactsPage(session: PanelSession, options: ArtifactsPageOptio
   const nav = navLinks(session, 'artifacts', options.counts);
 
   return shell(`<style>${CLIENT_CSS}</style>
-<div class="app art-app">
+<div class="app art-app art-panel-app">
   <aside class="art-side">
     <div class="brand">
       <div class="logo">I</div>
@@ -53,6 +53,7 @@ export function artifactsPage(session: PanelSession, options: ArtifactsPageOptio
     </div>
   </aside>
   <main class="art-main">
+    <div class="art-main-body">
     <div class="top">
       <div class="crumbs" id="art-crumbs">Icarus / <b>Артефакты</b></div>
       <div class="search"><input id="q" placeholder="Поиск по артефактам" size="30" autocomplete="off"></div>
@@ -75,6 +76,16 @@ export function artifactsPage(session: PanelSession, options: ArtifactsPageOptio
         <button class="btn danger" id="art-delete" disabled>Удалить</button>
       </div>
     </div>
+    <div class="art-preview" id="art-preview" hidden>
+      <div class="art-preview-text">
+        <b>Предпросмотр версии</b>
+        <span id="art-preview-meta"></span>
+      </div>
+      <div class="art-preview-actions">
+        <button class="btn" id="art-preview-current">К текущей</button>
+        <button class="btn primary" id="art-preview-restore">Вернуть эту версию</button>
+      </div>
+    </div>
     <div class="art-view" id="art-view">
       <div class="art-placeholder"><b>Читаю артефакты…</b></div>
     </div>
@@ -83,6 +94,15 @@ export function artifactsPage(session: PanelSession, options: ArtifactsPageOptio
       <span id="art-note" class="art-note"></span>
       <span id="art-updated"></span>
     </div>
+    </div>
+    <aside class="art-history-panel" id="art-history-panel" hidden>
+      <div class="art-history-head">
+        <div><b>История версий</b><span>Икар сохраняет изменения сам</span></div>
+        <button class="art-icon-btn" id="history-close" title="Закрыть историю" aria-label="Закрыть историю">×</button>
+      </div>
+      <p class="art-history-note">Нажми на версию, чтобы посмотреть её. Артефакт изменится только после «Вернуть эту версию».</p>
+      <div class="art-history-list" id="art-history-list"><p class="art-empty">Читаю…</p></div>
+    </aside>
   </main>
 </div>
 <div class="art-modal" id="art-acl-modal" hidden>
@@ -94,16 +114,6 @@ export function artifactsPage(session: PanelSession, options: ArtifactsPageOptio
     <div class="art-modal-actions">
       <button class="btn" id="acl-cancel">Отмена</button>
       <button class="btn primary" id="acl-save">Сохранить</button>
-    </div>
-  </div>
-</div>
-<div class="art-modal" id="art-history-modal" hidden>
-  <div class="art-modal-card art-history-card" role="dialog" aria-modal="true" aria-labelledby="art-history-title">
-    <h2 id="art-history-title">История версий</h2>
-    <p class="art-modal-note">Икар сохраняет каждое изменение автоматически. Если что-то пошло не так — верни артефакт к любой версии.</p>
-    <div class="art-history-list" id="art-history-list"><p class="art-empty">Читаю…</p></div>
-    <div class="art-modal-actions">
-      <button class="btn" id="history-close">Закрыть</button>
     </div>
   </div>
 </div>

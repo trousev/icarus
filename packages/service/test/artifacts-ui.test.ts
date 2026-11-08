@@ -44,7 +44,9 @@ test('страница: глобальный список, поиск, прав�
   assert.match(html, /id="art-acl"/);
   assert.match(html, /id="art-acl-modal"/);
   assert.match(html, /id="art-history"/);
-  assert.match(html, /id="art-history-modal"/);
+  assert.match(html, /id="art-history-panel"/);
+  assert.match(html, /id="art-preview"/);
+  assert.match(html, /id="art-preview-restore"/);
   assert.match(html, /id="acl-me"/);
   assert.match(html, /id="acl-family"/);
   assert.match(html, /id="art-bare"/);
@@ -64,7 +66,8 @@ test('клиентский скрипт страницы компилирует�
   assert.match(client, /artOpenAcl/);
   assert.match(client, /artSaveAcl/);
   assert.match(client, /artOpenHistory/);
-  assert.match(client, /artRestore/);
+  assert.match(client, /artPreviewVersion/);
+  assert.match(client, /artRestorePreview/);
   assert.match(client, /artDelete/);
   assert.match(client, /artifactMarkdown/);
 });
@@ -160,6 +163,18 @@ test('скрипт страницы исполняется: глобальный
         { hash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', short: 'aaaaaaa', date: '2026-11-06T21:01:00.000Z', subject: 'artifact: initial version' },
       ],
     },
+    preview: {
+      artifact: item,
+      content: '# Старая версия\n\n1. Было раньше\n',
+      aiContent: 'Старое описание',
+      current: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      commit: {
+        hash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        short: 'aaaaaaa',
+        date: '2026-11-06T21:01:00.000Z',
+        subject: 'artifact: initial version',
+      },
+    },
   };
   window.fetch = async (url: string) => {
     const key = Object.keys(payloads).find((name) => String(url).includes(name));
@@ -189,8 +204,15 @@ test('скрипт страницы исполняется: глобальный
 
   document.getElementById('art-history')?.dispatchEvent(new window.Event('click'));
   await new Promise((resolve) => setTimeout(resolve, 20));
-  assert.equal(document.getElementById('art-history-modal')?.hidden, false);
+  assert.equal(document.getElementById('art-history-panel')?.hidden, false);
   assert.match(document.getElementById('art-history-list')?.textContent ?? '', /запись index\.md/);
   assert.match(document.getElementById('art-history-list')?.textContent ?? '', /начальная версия/);
-  assert.match(document.getElementById('art-history-list')?.innerHTML ?? '', /art-history-restore/, 'у старой версии есть кнопка возврата');
+  assert.doesNotMatch(document.getElementById('art-history-list')?.innerHTML ?? '', /art-history-restore/, 'в списке нет кнопок отката');
+
+  document.querySelector('[data-commit="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(document.getElementById('art-preview')?.hidden, false);
+  assert.match(document.getElementById('art-preview-meta')?.textContent ?? '', /начальная версия/);
+  assert.match(document.getElementById('art-view')?.innerHTML ?? '', /Старая версия/);
+  assert.equal(document.getElementById('art-preview-restore')?.hidden, false);
 });

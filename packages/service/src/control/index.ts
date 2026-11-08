@@ -61,7 +61,7 @@ import { handleMcpApi, handleMcpPublic } from './mcp.ts';
 import { mcpPage } from './mcp-ui.ts';
 import { countVisible } from '../mcp/registry.ts';
 import { handleChatApi } from './chat.ts';
-import { handleArtifactsApi, handleArtifactsRaw } from './artifacts.ts';
+import { handleArtifactsApi, handleArtifactsRaw, handleArtifactsVersionRaw } from './artifacts.ts';
 import { artifactsPage } from './artifacts-ui.ts';
 import { countArtifacts } from '../artifacts.ts';
 import type { SessionRegistry } from '../sessions/registry.ts';
@@ -350,6 +350,23 @@ export async function handlePanel(
       return true;
     }
     handleArtifactsRaw(req, res, url, config, access.identity.userId);
+    return true;
+  }
+
+  // Файл конкретной версии — для предпросмотра истории. Тот же SSO, что у панели.
+  if (url.pathname.startsWith('/panel/artifacts/version/')) {
+    if (!access.ok) {
+      json(
+        res,
+        access.denial.status,
+        errorBody(
+          `${access.denial.message}. ${access.denial.hint}`,
+          access.denial.status === 401 ? 'authentication_error' : 'permission_error',
+        ),
+      );
+      return true;
+    }
+    await handleArtifactsVersionRaw(req, res, url, config, access.identity.userId);
     return true;
   }
 
