@@ -10,6 +10,7 @@ import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { createServer } from '../src/http/server.ts';
 import { DEFAULT_ACL, artifactsRoot, writeAcl } from '../src/artifacts.ts';
+import { commitArtifact, ensureArtifactRepos } from '../src/artifacts-git.ts';
 import type { FolderAcl } from '../src/artifacts.ts';
 import type { IcarusConfig } from '../src/config.ts';
 import { makeConfig, PANEL_USER_HEADER, probe } from './fixtures.ts';
@@ -51,6 +52,7 @@ async function withServer(handler: (base: string, config: IcarusConfig) => Promi
   });
   // Без ACL — не артефакт, в глобальный список не попадает.
   seed(path.join(artifactsRoot(config), 'raw'), { 'index.md': '# Без прав', 'index.ai.md': '# Без прав' });
+  await ensureArtifactRepos(config);
 
   const server = createServer(config, {} as never);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -91,6 +93,8 @@ test('страница раздела: глобальный список, пои
     assert.doesNotMatch(html, /БИБЛИОТЕКА/);
     assert.match(html, /id="art-list"/);
     assert.match(html, /id="art-acl"/, 'права доступны из панели');
+    assert.match(html, /id="art-history"/, 'история версий доступна из панели');
+    assert.match(html, /id="art-history-modal"/);
     assert.match(html, /id="art-total"/);
   });
 });
@@ -113,10 +117,11 @@ test('API: глобальный список, чтение и описание �
       content: string;
       aiContent: string;
       path: string;
-      artifact: { urls: { panel: string }; canManage: boolean };
+      artifact: { urls: { panel: string }; canManage: boolean; files: string[] };
     };
     assert.match(read.content, /# План на четверг/);
     assert.match(read.aiContent, /Расписание дня/);
+    assert.equal(read.artifact.files.includes('.git'), false, 'служебный .git не показывается');
     assert.equal(read.path, '/artifacts/plan/index.md');
     assert.match(read.artifact.urls.panel, /\/panel\/artifacts\?artifact=plan$/);
     assert.equal(read.artifact.canManage, true);
@@ -174,6 +179,8 @@ test('публичный HTML живёт в песочнице и отдаёт �
     assert.match(file.headers.get('content-type') ?? '', /text\/html/);
     assert.match(file.headers.get('content-security-policy') ?? '', /sandbox/);
     assert.match(await file.text(), /Атлас/);
+
+    assert.equal((await fetch(`${base}${basePath}.git/config`)).status, 404, '.git не отдаётся публично');
 
     const css = await fetch(`${base}${basePath}style.css`);
     assert.equal(css.status, 200);
@@ -254,6 +261,7 @@ test('файлы панели требуют SSO', async () => {
     const withUser = await fetch(`${base}${raw}`, { headers: asUser() });
     assert.equal(withUser.status, 200);
     assert.match(await withUser.text(), /# План на четверг/);
+    assert.equal((await fetch(`${base}/panel/artifacts/raw/plan/.git/config`, { headers: asUser() })).status, 404);
   });
 });
 
@@ -267,5 +275,55 @@ test('удаление артефакта убирает его из списк�
     const after = (await (await api(base, 'list')).json()) as { items: Array<{ name: string }> };
     assert.equal(after.items.some((item) => item.name === 'gift'), false);
     assert.equal(fs.existsSync(path.join(artifactsRoot(config), '.trash', result.trashed, 'index.svg')), true);
+  });
+});
+
+
+test('история версий: список, откат и права', async () => {
+  await withServer(async (base, config) => {
+    const planDir = path.join(artifactsRoot(config), 'plan');
+    const initial = (await (await api(base, 'history?artifact=plan')).json()) as {
+      current: string;
+      history: Array<{ hash: string; subject: string }>;
+    };
+    assert.equal(initial.history.length, 1);
+    assert.equal(initial.history[0]!.subject, 'artifact: initial version');
+    assert.equal(initial.current, initial.history[0]!.hash);
+
+    fs.writeFileSync(path.join(planDir, 'index.md'), '# План v2\n');
+    fs.writeFileSync(path.join(planDir, 'second.md'), 'потом уберём\n');
+    await commitArtifact(planDir, 'artifact: write index.md');
+
+    const changed = (await (await api(base, 'history?artifact=plan')).json()) as {
+      current: string;
+      history: Array<{ hash: string; subject: string }>;
+    };
+    assert.equal(changed.history.length, 2);
+    assert.equal(changed.history[0]!.subject, 'artifact: write index.md');
+
+    // family read видит историю, но не может вернуть.
+    assert.equal((await api(base, 'history?artifact=plan', {}, 'probe2')).status, 200);
+    const denied = await post(base, 'restore', { artifact: 'plan', commit: initial.current }, 'probe2');
+    assert.equal(denied.status, 403);
+
+    const restored = await post(base, 'restore', { artifact: 'plan', commit: initial.current });
+    assert.equal(restored.status, 200);
+    assert.equal(fs.readFileSync(path.join(planDir, 'index.md'), 'utf8'), '# План на четверг\n\n1. Стендап команды.\n\n> Стоматолог перенесён.\n');
+    assert.equal(fs.existsSync(path.join(planDir, 'second.md')), false);
+
+    const read = (await (await api(base, 'read?artifact=plan')).json()) as { content: string };
+    assert.match(read.content, /Стендап команды/);
+
+    const after = (await (await api(base, 'history?artifact=plan')).json()) as { history: Array<{ subject: string }> };
+    assert.match(after.history[0]!.subject, /^artifact: restore /);
+  });
+});
+
+test('история: мусорный хеш — 400, чужой артефакт — 404', async () => {
+  await withServer(async (base) => {
+    assert.equal((await post(base, 'restore', { artifact: 'plan', commit: 'не-хеш' })).status, 400);
+    assert.equal((await post(base, 'restore', { artifact: 'plan', commit: 'deadbeef' })).status, 400);
+    assert.equal((await api(base, 'history?artifact=nope')).status, 404);
+    assert.equal((await post(base, 'restore', { artifact: 'nope', commit: 'deadbeef' })).status, 404);
   });
 });

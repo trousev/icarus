@@ -131,6 +131,8 @@ mcp:
   # (index.html | index.md | index.png + обязательный index.ai.md) и выдаёт ссылку.
   # Права папки (.folder-acl.json): me/family × read/write/admin, по умолчанию
   # me=admin, family=read; их проверяют панель, MCP и generic folder-guard.
+  # История версий: у папки свой скрытый git, коммиты после каждого write/edit;
+  # в панели — «История» и «Вернуть». Служебные файлы не версионируются.
   #
   # hidden: true убирает сервер из раздела MCP и запрещает его выключать — это
   # встроенное умение. lifecycle: lazy держит инструкции и инструменты вне промпта,
