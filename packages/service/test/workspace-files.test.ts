@@ -12,12 +12,14 @@ import { userPaths } from '../src/config.ts';
 import { ensureWorkspaces } from '../src/workspaces.ts';
 import {
   FilesError,
+  SEARCH_MIN_QUERY,
   handleWorkspaceFilesApi,
   isImageName,
   listWorkspaceEntries,
   previewWorkspaceFile,
   rawWorkspaceFile,
   removeWorkspaceEntry,
+  searchWorkspaceFiles,
   typeLabelOf,
   workspaceTarget,
 } from '../src/control/files.ts';
@@ -325,4 +327,100 @@ test('корневой AGENTS.md не удаляется, вложенный —
 
   removeWorkspaceEntry(root, 'projects/AGENTS.md');
   assert.equal(fs.existsSync(path.join(root, 'projects/AGENTS.md')), false, 'вложенный AGENTS.md удаляется');
+});
+
+test('поиск: находит текст во вложенных файлах и имя файла, мусор пропускает', () => {
+  write('search/code.ts', 'const secret = "needle";\n// и ещё needle в комментарии\n');
+  write('search/notes.md', 'Одна строка\nЗдесь тоже Needle — регистр не важен.\n');
+  write('search/needle-file.txt', 'ничего интересного');
+  // Двоичный файл: needle лежит в нём, но текстом его не показывают.
+  write('search/blob.bin', Buffer.from([0, 1, 2, ...Buffer.from('needle inside binary')]));
+  write('.git/needle.txt', 'needle');
+  write('node_modules/needle/index.js', 'needle');
+
+  const result = searchWorkspaceFiles(root, 'needle');
+  assert.equal(result.query, 'needle');
+  assert.ok(result.scanned > 0, 'поиск действительно обошёл файлы');
+
+  const marks = result.hits.map((hit) => hit.file.path + ':' + hit.line);
+  assert.ok(marks.includes('search/code.ts:1'), 'строка в коде найдена');
+  assert.ok(marks.includes('search/code.ts:2'), 'комментарий тоже ищется');
+  assert.ok(marks.includes('search/notes.md:2'), 'регистр не мешает');
+  assert.ok(marks.includes('search/needle-file.txt:0'), 'имя файла — тоже совпадение');
+  assert.ok(!marks.some((mark) => mark.startsWith('.git/')), 'служебный git не сканируется');
+  assert.ok(!marks.some((mark) => mark.startsWith('node_modules/')), 'зависимости не сканируются');
+  assert.ok(
+    !marks.some((mark) => mark.startsWith('search/blob.bin')),
+    'содержимое двоичного файла не читается',
+  );
+
+  const hit = result.hits.find((item) => item.file.path === 'search/code.ts' && item.line === 1);
+  assert.ok(hit?.match, 'панель знает, что подсветить в куске');
+  assert.equal(hit?.text.slice(hit.match.start, hit.match.start + hit.match.length), 'needle');
+  assert.equal(hit?.file.type, 'TS');
+});
+
+test('поиск: символическая ссылка наружу не открывает чужие файлы', () => {
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-outside-'));
+  fs.writeFileSync(path.join(outside, 'secret.txt'), 'needle в чужой папке');
+  const link = path.join(root, 'search/outside');
+  if (!fs.existsSync(link)) fs.symlinkSync(outside, link);
+
+  const result = searchWorkspaceFiles(root, 'needle');
+  assert.ok(
+    !result.hits.some((hit) => hit.file.path.includes('outside')),
+    'через ссылку поиск не выходит за workspace',
+  );
+});
+
+test('поиск требует хотя бы два символа и не принимает бесконечный запрос', () => {
+  assert.equal(SEARCH_MIN_QUERY, 2);
+  assert.throws(
+    () => searchWorkspaceFiles(root, 'n'),
+    (error: unknown) => error instanceof FilesError && error.status === 400,
+  );
+  assert.throws(() => searchWorkspaceFiles(root, '   '), FilesError);
+  assert.throws(() => searchWorkspaceFiles(root, 'x'.repeat(201)), FilesError);
+});
+
+test('поиск: большой файл проверяется только по имени, содержимое не читается', () => {
+  write('search/needle-huge.txt', 'x'.repeat(1024 * 1024 + 10));
+  const result = searchWorkspaceFiles(root, 'needle');
+  const huge = result.hits.filter((hit) => hit.file.path === 'search/needle-huge.txt');
+  assert.deepEqual(huge.map((hit) => hit.line), [0], 'у огромного файла остаётся только совпадение по имени');
+});
+
+test('API ищет по workspace и отдаёт строку, кусок и позицию совпадения', async () => {
+  const res = fakeResponse();
+  await handleWorkspaceFilesApi(
+    { method: 'GET' } as never,
+    res as never,
+    new URL('http://panel/panel/api/workspace-files/search?workspace=talk&q=needle'),
+    { config, userId: user.id },
+  );
+  assert.equal(res.status, 200);
+  const payload = JSON.parse(res.text) as {
+    query: string;
+    scanned: number;
+    hits: { file: { path: string }; line: number; text: string; match: { start: number; length: number } }[];
+  };
+  assert.equal(payload.query, 'needle');
+  assert.ok(payload.scanned > 0);
+  assert.ok(payload.hits.some((hit) => hit.file.path === 'search/code.ts' && hit.line === 1));
+
+  const short = fakeResponse();
+  await handleWorkspaceFilesApi(
+    { method: 'GET' } as never,
+    short as never,
+    new URL('http://panel/panel/api/workspace-files/search?workspace=talk&q=n'),
+    { config, userId: user.id },
+  );
+  assert.equal(short.status, 400, 'один символ — не запрос');
+});
+
+test('поиск честно говорит, что упёрся в потолок', () => {
+  for (let index = 0; index < 60; index += 1) write('many/f' + index + '.txt', 'needle');
+  const result = searchWorkspaceFiles(root, 'needle');
+  assert.equal(result.hits.length, 50, 'больше потолка не отдаём');
+  assert.equal(result.truncated, true, 'и не делаем вид, что это всё');
 });

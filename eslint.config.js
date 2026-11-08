@@ -44,6 +44,7 @@ export default tseslint.config(
     files: [
       'packages/service/src/control/chat-client.js',
       'packages/service/src/control/chat-markdown.js',
+      'packages/service/src/control/files-highlight.js',
       'packages/service/src/control/mcp-client.js',
       'packages/service/src/control/keys-client.js',
       'packages/service/src/control/artifacts-client.js',

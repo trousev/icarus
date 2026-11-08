@@ -14,6 +14,9 @@ const MESSAGES_CSS = fs.readFileSync(new URL('./chat-messages.css', import.meta.
 // Разметку держим отдельным файлом: её разбирает тест, а клиенту она нужна раньше
 // самого чата — функции разметки подключаются как обычные глобальные.
 const CLIENT_MD = fs.readFileSync(new URL('./chat-markdown.js', import.meta.url), 'utf8');
+// Подсветку кода тоже подключаем раньше клиента: предпросмотр файлов зовёт
+// `highlightCode` как обычную глобальную функцию.
+const CLIENT_HIGHLIGHT = fs.readFileSync(new URL('./files-highlight.js', import.meta.url), 'utf8');
 const CLIENT_JS = fs.readFileSync(new URL('./chat-client.js', import.meta.url), 'utf8');
 
 export type ChatPageOptions = {
@@ -136,6 +139,10 @@ export function chatPage(session: PanelSession, options: ChatPageOptions): strin
     <!-- На узком экране панель выдвигается поверх шапки чата и закрывает кнопку
          «Файлы»: свой крестик остаётся единственным способом её свернуть. -->
     <button class="icon-btn files-close" id="files-close" aria-label="Скрыть файлы" title="Скрыть файлы">×</button>
+    <!-- Поиск по всему workspace, а не по открытой папке: чаще всего файл ищут
+         по куску текста, не зная, в какой он папке. Результаты встают на место
+         дерева, поэтому панель не раздваивается. -->
+    <label class="files-search"><span>⌕</span><input id="files-search" placeholder="Поиск по файлам" autocomplete="off" aria-label="Поиск по файлам workspace"></label>
     <div class="files-tree" id="files-tree"><p class="files-note">Читаю папку…</p></div>
     <div class="files-split" id="files-split" role="separator" aria-orientation="horizontal"
          aria-label="Высота предпросмотра" aria-valuemin="90" tabindex="0"><span></span></div>
@@ -147,5 +154,6 @@ export function chatPage(session: PanelSession, options: ChatPageOptions): strin
 </div>
 <script>window.__CHAT_CFG__ = ${json};</script>
 <script>${CLIENT_MD}</script>
+<script>${CLIENT_HIGHLIGHT}</script>
 <script>${CLIENT_JS}</script>`);
 }

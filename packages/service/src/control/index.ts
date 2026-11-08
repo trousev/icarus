@@ -603,8 +603,8 @@ async function handleApi(
     return;
   }
 
-  // Файлы рабочей папки для правой панели чата: дерево и предпросмотр. Отдельная
-  // ветка до общего разбора области — иначе «файлы» искались бы в памяти.
+  // Файлы рабочей папки для правой панели чата: дерево, поиск и предпросмотр.
+  // Отдельная ветка до общего разбора области — иначе «файлы» искались бы в памяти.
   if (url.pathname === '/panel/api/workspace-files' || url.pathname.startsWith('/panel/api/workspace-files/')) {
     await handleWorkspaceFilesApi(req, res, url, { config, userId });
     return;
