@@ -231,12 +231,28 @@ test('права: family read не управляет, family write пишет, 
 });
 
 test('ACL: владелец меняет me/family, кривой уровень — 400', async () => {
-  await withServer(async (base) => {
+  await withServer(async (base, config) => {
     const saved = await post(base, 'acl', { artifact: 'plan', acl: { me: 'write', family: 'write' } });
     assert.equal(saved.status, 200);
     const body = (await saved.json()) as { artifact: { acl: { me: string; family: string }; canManage: boolean } };
     assert.deepEqual(body.artifact.acl, { me: 'write', family: 'write' });
     assert.equal(body.artifact.canManage, true, 'владелец не теряет управление');
+
+    // none — законный уровень для семьи: артефакт снова становится личным.
+    const hidden = await post(base, 'acl', { artifact: 'plan', acl: { me: 'admin', family: 'none' } });
+    assert.equal(hidden.status, 200);
+    const hiddenBody = (await hidden.json()) as { artifact: { acl: { family: string } } };
+    assert.equal(hiddenBody.artifact.acl.family, 'none');
+    assert.equal((await post(base, 'link', { artifact: 'plan' }, 'probe2')).status, 403);
+    const familyList = (await (await api(base, 'list', {}, 'probe2')).json()) as { items: Array<{ name: string }> };
+    assert.equal(familyList.items.some((item) => item.name === 'plan'), false, 'none скрывает артефакт из чужого списка');
+    assert.equal((await api(base, 'read?artifact=plan', {}, 'probe2')).status, 403);
+    assert.equal((await api(base, 'history?artifact=plan', {}, 'probe2')).status, 403);
+
+    // Владельцу none выставить нельзя, иначе артефакт пропадёт из его списка.
+    const ownerNone = await post(base, 'acl', { artifact: 'plan', acl: { me: 'none', family: 'none' } });
+    assert.equal(ownerNone.status, 400);
+    writeAcl(path.join(artifactsRoot(config), 'plan'), 'probe', DEFAULT_ACL);
 
     const bad = await post(base, 'acl', { artifact: 'plan', acl: { me: 'root', family: 'read' } });
     assert.equal(bad.status, 400);
@@ -303,6 +319,7 @@ test('история версий: список, откат и права', asyn
     assert.equal(changed.history[0]!.subject, 'artifact: write index.md');
 
     // family read видит историю, но не может вернуть.
+    writeAcl(planDir, 'probe', { me: 'admin', family: 'read' });
     assert.equal((await api(base, 'history?artifact=plan', {}, 'probe2')).status, 200);
     const denied = await post(base, 'restore', { artifact: 'plan', commit: initial.current }, 'probe2');
     assert.equal(denied.status, 403);

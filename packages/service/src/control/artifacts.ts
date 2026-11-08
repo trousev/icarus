@@ -255,7 +255,7 @@ export async function handleArtifactsApi(
     }
     const values = raw as { me?: unknown; family?: unknown };
     if (!isAccessLevel(values.me) || !isAccessLevel(values.family)) {
-      json(res, 400, errorBody('уровень прав — read, write или admin', 'invalid_request_error'));
+      json(res, 400, errorBody('уровень прав — none, read, write или admin', 'invalid_request_error'));
       return;
     }
     try {

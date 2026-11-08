@@ -129,8 +129,9 @@ mcp:
   # Артефакты: общая библиотека /artifacts для всей семьи — страницы, документы,
   # картинки. Сервер заводит папку и права через artifact_new, объясняет структуру
   # (index.html | index.md | index.png + обязательный index.ai.md) и выдаёт ссылку.
-  # Права папки (.folder-acl.json): me/family × read/write/admin, по умолчанию
-  # me=admin, family=read; их проверяют панель, MCP и generic folder-guard.
+  # Права папки (.folder-acl.json): me/family × none/read/write/admin, по умолчанию
+  # me=admin, family=none — артефакт личный, семья не видит его до явного открытия;
+  # права проверяют панель, MCP и generic folder-guard.
   # История версий: у папки свой скрытый git, коммиты после каждого write/edit;
   # в панели — «История» и «Вернуть». Служебные файлы не версионируются.
   #

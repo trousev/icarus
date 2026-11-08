@@ -1,7 +1,7 @@
 // Ядро артефактов: глобальная папка, ACL, публичная ссылка и миграция.
 //
 // Артефакт — общий для семьи, поэтому тест смотрит на него глазами разных
-// людей: владельца, «семьи» с read/write/admin и постороннего без ACL.
+// людей: владельца, «семьи» с none/read/write/admin и постороннего без ACL.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -99,6 +99,43 @@ test('ACL: me для владельца, family для остальных, ур�
   const owner = inspectArtifact(box, 'plan', 'probe')!;
   assert.equal(owner.access, 'admin');
   assert.equal(owner.canManage, true);
+});
+
+test('none: артефакт не существует для семьи, но остаётся доступен владельцу', () => {
+  assert.deepEqual(DEFAULT_ACL, { me: 'admin', family: 'none' }, 'по умолчанию артефакт личный');
+  assert.equal(allows('none', 'read'), false);
+  assert.equal(allows('none', 'write'), false);
+  assert.equal(allows('read', 'none'), true, 'read включает none');
+
+  const box = config();
+  artifact(box, 'diary', { 'index.md': '# Дневник', 'index.ai.md': '# Дневник' }, { me: 'admin', family: 'none' });
+  const owner = inspectArtifact(box, 'diary', 'probe')!;
+  assert.equal(owner.access, 'admin');
+  assert.equal(owner.canRead, true);
+  assert.deepEqual(listArtifacts(box, 'probe').map((item) => item.name), ['diary']);
+
+  const family = inspectArtifact(box, 'diary', 'probe2')!;
+  assert.equal(family.access, 'none');
+  assert.equal(family.canRead, false);
+  assert.equal(family.canWrite, false);
+  assert.equal(family.canManage, false);
+  assert.deepEqual(listArtifacts(box, 'probe2'), []);
+  assert.throws(() => readArtifact(box, 'probe2', 'diary'), /нет права читать/);
+  assert.equal(artifactFile(box, 'probe2', 'diary', 'index.md'), null);
+
+  // Владелец может открыть доступ позже, а себе none выставить нельзя.
+  const shared = setAcl(box, 'probe', 'diary', { me: 'admin', family: 'read' });
+  assert.deepEqual(shared.acl, { me: 'admin', family: 'read' });
+  assert.equal(inspectArtifact(box, 'diary', 'probe2')!.canRead, true);
+  assert.throws(() => setAcl(box, 'probe', 'diary', { me: 'none', family: 'read' }), /владельцу нельзя/);
+});
+
+test('family none не мешает публичной ссылке: её открывают осознанно', () => {
+  const box = config({ url: 'https://icarus.example' });
+  artifact(box, 'secret', { 'index.md': '# Секрет', 'index.ai.md': '# Секрет' }, { me: 'admin', family: 'none' });
+  const id = 'abcdefghijklmnopqrstuvwx';
+  fs.writeFileSync(path.join(dirOf(box, 'secret'), META_FILE), JSON.stringify({ version: 1, publicId: id }));
+  assert.equal(publicArtifact(box, 'secret', id)?.artifact.name, 'secret');
 });
 
 test('write даёт чтение и запись, но не управление; admin даёт управление', () => {

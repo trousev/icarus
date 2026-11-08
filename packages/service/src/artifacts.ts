@@ -15,8 +15,11 @@
 //
 //   me     — владелец артефакта;
 //   family — все остальные;
-//   read ⊂ write ⊂ admin.
+//   none ⊂ read ⊂ write ⊂ admin.
 //
+// `none` — артефакта нет в списках панели и MCP, его нельзя прочитать или
+// изменить. Это уровень для очень личных вещей, и он же стоит у семьи по
+// умолчанию: новый артефакт виден только владельцу, пока тот не откроет доступ.
 // Владелец всегда может управлять своим артефактом (иначе можно было бы
 // заблокировать себя), но уровень me управляет тем, что ему позволяет агент.
 // Файл `.folder-acl.json` намеренно общий для любого каталога, а не только
@@ -37,7 +40,7 @@ export const META_FILE = '.artifact.json';
 export const ACL_FILE = '.folder-acl.json';
 
 export type ArtifactType = 'html' | 'markdown' | 'image';
-export type AccessLevel = 'read' | 'write' | 'admin';
+export type AccessLevel = 'none' | 'read' | 'write' | 'admin';
 
 export type FolderAcl = {
   /** Уровень владельца. */
@@ -54,7 +57,8 @@ export type ArtifactAcl = {
   updatedAt: string;
 };
 
-export const DEFAULT_ACL: FolderAcl = { me: 'admin', family: 'read' };
+/** Новый артефакт личный: владелец admin, семья не видит его вовсе. */
+export const DEFAULT_ACL: FolderAcl = { me: 'admin', family: 'none' };
 
 export const ARTIFACT_TYPE_LABELS: Record<ArtifactType, string> = {
   html: 'HTML-страница',
@@ -124,10 +128,10 @@ const PUBLIC_ID = /^[A-Za-z0-9_-]{16,64}$/;
 const NAME_LIMIT = 128;
 const DOC_LIMIT = 256 * 1024;
 const FILE_LIMIT = 400;
-const LEVELS: Record<AccessLevel, number> = { read: 1, write: 2, admin: 3 };
+const LEVELS: Record<AccessLevel, number> = { none: 0, read: 1, write: 2, admin: 3 };
 
 export function isAccessLevel(value: unknown): value is AccessLevel {
-  return value === 'read' || value === 'write' || value === 'admin';
+  return value === 'none' || value === 'read' || value === 'write' || value === 'admin';
 }
 
 export function levelRank(level: AccessLevel): number {
@@ -518,7 +522,10 @@ export function clearPublicId(config: IcarusConfig, viewer: string, slug: string
   return inspectArtifact(config, slug, viewer) ?? artifact;
 }
 
-/** Менять права может владелец или админ; уровни — только read/write/admin. */
+/**
+ * Менять права может владелец или админ. `none` — законный уровень для семьи,
+ * но не для владельца: с ним артефакт пропадает даже из его собственного списка.
+ */
 export function setAcl(
   config: IcarusConfig,
   viewer: string,
@@ -529,7 +536,10 @@ export function setAcl(
   if (!artifact) throw new ArtifactError('артефакт не найден', 404);
   if (!artifact.canManage) throw new ArtifactError('права меняет владелец или админ артефакта', 403);
   if (!isAccessLevel(acl.me) || !isAccessLevel(acl.family)) {
-    throw new ArtifactError('уровень прав — read, write или admin', 400);
+    throw new ArtifactError('уровень прав — none, read, write или admin', 400);
+  }
+  if (acl.me === 'none') {
+    throw new ArtifactError('владельцу нельзя выставить «нет доступа»: он управляет артефактом', 400);
   }
   const dir = artifactDir(config, slug);
   if (!dir) throw new ArtifactError('артефакт не найден', 404);
