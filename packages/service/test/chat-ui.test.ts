@@ -841,3 +841,197 @@ test('удаление: файл спрашивает, пустая папка �
   );
   assert.equal(app.document.querySelector('.frow[data-path="projects"]'), null, 'непустая папка удалена');
 });
+
+/* ── команды в веб-чате ──────────────────────────────────────────────────────
+   Раньше команды разбирал только Telegram, а «/stats» из панели уезжал в pi
+   обычной репликой. Здесь проверяем, что палитра показывает и свои команды,
+   и команды pi, а выполнение не превращается в ход модели. */
+
+/** Синтетическое нажатие: linkedom не умеет KeyboardEvent, а `key` нужен. */
+function pressKey(app: Awaited<ReturnType<typeof driveChat>>, input: unknown, key: string) {
+  const event = app.document.createEvent('Event');
+  event.initEvent('keydown', true, true);
+  Object.defineProperty(event, 'key', { value: key });
+  (input as { dispatchEvent(event: unknown): boolean }).dispatchEvent(event);
+}
+
+test('палитра показывает свои команды сразу, а команды pi — после get_commands', async () => {
+  const app = await driveChat({
+    chatId: 'web-1',
+    routes: {
+      '/panel/api/chat/status': () => ({ busy: [] }),
+      '/panel/api/chat/history': () => ({
+        chat: { id: 'web-1', title: 'Разговор', workspace: 'talk' },
+        messages: [],
+        live: false,
+      }),
+      '/panel/api/chats': () => ({ chats: [{ id: 'web-1', title: 'Разговор' }] }),
+      '/panel/api/chat/commands': () => ({
+        commands: [{ name: 'skill:demo', description: 'демо-скилл', source: 'skill' }],
+      }),
+    },
+  });
+
+  const input = app.document.getElementById('chat-input');
+  input.value = '/';
+  input.dispatchEvent(new app.window.Event('input'));
+  await new Promise((resolve) => setTimeout(resolve, 40));
+
+  const palette = app.document.getElementById('cmd-palette');
+  assert.equal(palette.hidden, false, 'по «/» палитра открывается');
+  assert.match(palette.innerHTML, /\/help/, 'свои команды видны без запроса');
+  assert.match(palette.innerHTML, /\/compact/);
+  assert.match(palette.innerHTML, /\/skill:demo/, 'команда pi приехала из get_commands');
+  assert.match(palette.innerHTML, /скилл/, 'источник команды подписан');
+
+  // Стрелка вниз и Enter дописывают команду, но не отправляют её.
+  pressKey(app, input, 'ArrowDown');
+  pressKey(app, input, 'Enter');
+  assert.equal(input.value, '/compact ');
+  assert.equal(palette.hidden, true, 'выбор закрывает палитру');
+  assert.ok(!app.calls.some((url) => url.includes('/chat/send')), 'отправки не было');
+});
+
+test('команда чата выполняется сервером и отвечает плашкой, а не ходом модели', async () => {
+  const commands: Array<Record<string, unknown>> = [];
+  const app = await driveChat({
+    chatId: 'web-1',
+    routes: {
+      '/panel/api/chat/status': () => ({ busy: [] }),
+      '/panel/api/chat/history': () => ({
+        chat: { id: 'web-1', title: 'Разговор', workspace: 'talk' },
+        messages: [{ role: 'user', text: 'привет' }],
+        live: false,
+      }),
+      '/panel/api/chats': () => ({ chats: [{ id: 'web-1', title: 'Разговор' }] }),
+      '/panel/api/chat/commands': () => ({ commands: [] }),
+      '/panel/api/chat/command': (_url, init) => {
+        commands.push(JSON.parse(String(init?.body)));
+        return { handled: true, text: 'Токенов всего: 150.' };
+      },
+      '/panel/api/chat/send': () => streamReply(JSON.stringify({ type: 'text', text: 'не должно случиться' })),
+    },
+  });
+
+  const input = app.document.getElementById('chat-input');
+  input.value = '/stats';
+  input.dispatchEvent(new app.window.Event('input'));
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  pressKey(app, input, 'Enter');
+  await new Promise((resolve) => setTimeout(resolve, 80));
+
+  assert.equal(commands.length, 1, 'команда ушла на сервер один раз');
+  assert.deepEqual(commands[0], { chatId: 'web-1', text: '/stats' });
+  assert.match(app.messages(), /Токенов всего: 150/, 'ответ команды виден в ленте');
+  assert.match(app.messages(), /\/stats/, 'и подписан самой командой');
+  assert.ok(!app.calls.some((url) => url.includes('/chat/send')), 'в модель команда не уходила');
+  assert.equal(input.value, '', 'поле очищено после выполнения');
+});
+
+test('команда pi не перехватывается: уезжает в разговор обычной репликой', async () => {
+  const commands: Array<Record<string, unknown>> = [];
+  const sent: Array<Record<string, unknown>> = [];
+  const app = await driveChat({
+    chatId: 'web-1',
+    routes: {
+      '/panel/api/chat/status': () => ({ busy: [] }),
+      '/panel/api/chat/history': () => ({
+        chat: { id: 'web-1', title: 'Разговор', workspace: 'talk' },
+        messages: [],
+        live: false,
+      }),
+      '/panel/api/chats': () => ({ chats: [{ id: 'web-1', title: 'Разговор' }] }),
+      '/panel/api/chat/commands': () => ({ commands: [{ name: 'skill:demo', description: 'демо' }] }),
+      '/panel/api/chat/command': (_url, init) => {
+        commands.push(JSON.parse(String(init?.body)));
+        return { handled: false };
+      },
+      '/panel/api/chat/send': (_url, init) => {
+        sent.push(JSON.parse(String(init?.body)));
+        return streamReply(JSON.stringify({ type: 'text', text: 'скилл сработал' }));
+      },
+    },
+  });
+
+  const input = app.document.getElementById('chat-input');
+  input.value = '/skill:demo покажи';
+  input.dispatchEvent(new app.window.Event('input'));
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  pressKey(app, input, 'Enter');
+  await new Promise((resolve) => setTimeout(resolve, 80));
+
+  assert.deepEqual(commands[0], { chatId: 'web-1', text: '/skill:demo покажи' });
+  assert.equal(sent.length, 1, 'после отказа сервера реплика ушла в pi');
+  assert.equal(sent[0]?.text, '/skill:demo покажи');
+  assert.match(app.messages(), /скилл сработал/);
+});
+
+test('/clear оставляет старую ленту и рисует границу контекста', async () => {
+  let historyCalls = 0;
+  const app = await driveChat({
+    chatId: 'web-1',
+    routes: {
+      '/panel/api/chat/status': () => ({ busy: [] }),
+      '/panel/api/chat/history': () => {
+        historyCalls += 1;
+        return {
+          chat: { id: 'web-1', title: 'Разговор', workspace: 'talk' },
+          messages: [{ role: 'user', text: 'старая реплика' }],
+          live: false,
+        };
+      },
+      '/panel/api/chats': () => ({ chats: [{ id: 'web-1', title: 'Разговор' }] }),
+      '/panel/api/chat/commands': () => ({ commands: [] }),
+      '/panel/api/chat/command': () => ({
+        handled: true,
+        text: 'Начали с чистого листа.',
+        cleared: true,
+      }),
+    },
+  });
+
+  const input = app.document.getElementById('chat-input');
+  input.value = '/clear';
+  input.dispatchEvent(new app.window.Event('input'));
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  pressKey(app, input, 'Enter');
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
+  assert.equal(historyCalls, 1, 'ленту не перечитываем: старая история на месте');
+  assert.match(app.messages(), /старая реплика/, 'старое сообщение осталось выше границы');
+  assert.match(app.messages(), /turn divider/, 'нарисована граница контекста');
+  assert.match(app.messages(), /Контекст очищен/);
+});
+
+test('/rename обновляет шапку и сайдбар без перезагрузки ленты', async () => {
+  const app = await driveChat({
+    chatId: 'web-1',
+    routes: {
+      '/panel/api/chat/status': () => ({ busy: [] }),
+      '/panel/api/chat/history': () => ({
+        chat: { id: 'web-1', title: 'Разговор', workspace: 'talk' },
+        messages: [{ role: 'user', text: 'старая реплика' }],
+        live: false,
+      }),
+      '/panel/api/chats': () => ({ chats: [{ id: 'web-1', title: 'Разговор' }] }),
+      '/panel/api/chat/commands': () => ({ commands: [] }),
+      '/panel/api/chat/command': () => ({
+        handled: true,
+        text: 'Теперь этот разговор называется «Налоги».',
+        title: 'Налоги',
+      }),
+    },
+  });
+
+  const input = app.document.getElementById('chat-input');
+  input.value = '/rename Налоги';
+  input.dispatchEvent(new app.window.Event('input'));
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  pressKey(app, input, 'Enter');
+  await new Promise((resolve) => setTimeout(resolve, 80));
+
+  assert.equal(app.document.getElementById('chat-title').textContent, 'Налоги', 'шапка обновилась');
+  assert.match(app.sidebar(), /Налоги/, 'сайдбар тоже');
+  assert.match(app.messages(), /Теперь этот разговор называется «Налоги»/, 'ответ команды виден');
+  assert.match(app.messages(), /старая реплика/, 'лента не перечитывалась');
+});

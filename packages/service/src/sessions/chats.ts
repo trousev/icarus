@@ -23,6 +23,13 @@ import {
 export const NEW_CHAT_TITLE = 'Новый чат';
 export const NEW_CHAT_PREVIEW = 'Расскажи, что нужно сделать.';
 
+/** Одна сессия pi в жизни разговора: /clear начинает новую, старые остаются в истории. */
+export type SessionEpoch = {
+  sessionId: string;
+  /** Когда началась эта сессия: по этой отметке в ленте рисуется разделитель. */
+  startedAt: string;
+};
+
 export type ChatRecord = {
   id: string;
   title: string;
@@ -30,6 +37,12 @@ export type ChatRecord = {
   channel: ChatChannel;
   /** Разговор в терминах pi: по нему находится файл истории. */
   conversationId?: string;
+  /**
+   * Цепочка сессий pi: первая — как разговор начался, каждая следующая — после
+   * `/clear`. Старые сессии не удаляем: по ним собирается история до разделителя.
+   * Поля нет у старых записей — тогда сессия одна и выводится из разговора.
+   */
+  sessions?: SessionEpoch[];
   /** Рабочая папка разговора: разговор навсегда остаётся в своём workspace'е. */
   workspace: string;
 };
@@ -86,15 +99,32 @@ function normalize(value: unknown): ChatRecord | null {
     : item.id.startsWith('session:')
       ? undefined
       : item.id;
+  const createdAt = typeof item.createdAt === 'string' ? item.createdAt : new Date(0).toISOString();
+  const sessions: SessionEpoch[] = Array.isArray(item.sessions)
+    ? item.sessions
+        .map((entry) => {
+          if (!entry || typeof entry !== 'object') return null;
+          const epoch = entry as Record<string, unknown>;
+          const sessionId = typeof epoch.sessionId === 'string' ? epoch.sessionId.trim() : '';
+          const startedAt = typeof epoch.startedAt === 'string' ? epoch.startedAt : '';
+          return sessionId ? { sessionId, startedAt: startedAt || createdAt } : null;
+        })
+        .filter((epoch): epoch is SessionEpoch => epoch !== null)
+    : [];
+  // Запись могли успеть записать с одиночным sessionId (промежуточный формат):
+  // не теряем сессию, а разворачиваем её в цепочку.
+  const legacySessionId = typeof item.sessionId === 'string' && item.sessionId.trim() ? item.sessionId : '';
+  if (sessions.length === 0 && legacySessionId) sessions.push({ sessionId: legacySessionId, startedAt: createdAt });
 
   return {
     id: item.id,
     title: typeof item.title === 'string' && item.title.trim() ? item.title : defaultTitle(channel),
-    createdAt: typeof item.createdAt === 'string' ? item.createdAt : new Date(0).toISOString(),
+    createdAt,
     channel,
     // Записи до появления workspace'ов все жили в «Разговоре».
     workspace: typeof item.workspace === 'string' && item.workspace ? item.workspace : DEFAULT_WORKSPACE,
     ...(conversationId ? { conversationId } : {}),
+    ...(sessions.length > 0 ? { sessions } : {}),
   };
 }
 
@@ -136,11 +166,70 @@ export function writeChats(config: IcarusConfig, user: UserConfig, chats: ChatRe
   fs.renameSync(tmp, file);
 }
 
-/** id сессии pi, к которой относится запись: по нему ищется файл истории. */
+/** Сессии разговора по порядку: у старых записей она одна и выводится из id. */
+export function sessionEpochsOf(chat: ChatRecord, user: UserConfig): SessionEpoch[] {
+  if (chat.sessions && chat.sessions.length > 0) return chat.sessions;
+  return [{ sessionId: derivedSessionId(chat, user), startedAt: chat.createdAt }];
+}
+
+/** Все сессии разговора — по ним история собирается с разделителями после /clear. */
+export function sessionIdsOf(chat: ChatRecord, user: UserConfig): string[] {
+  return sessionEpochsOf(chat, user).map((epoch) => epoch.sessionId);
+}
+
+/** id текущей (последней) сессии pi: по нему продолжаем разговор и ищем свежий файл. */
 export function sessionIdOf(chat: ChatRecord, user: UserConfig): string {
+  const epochs = sessionEpochsOf(chat, user);
+  return epochs.at(-1)?.sessionId ?? derivedSessionId(chat, user);
+}
+
+/** id сессии, выведенный из разговора: так жили записи до цепочки сессий. */
+function derivedSessionId(chat: ChatRecord, user: UserConfig): string {
   if (chat.conversationId) return sessionIdFor(user.id, chat.conversationId);
   if (chat.id.startsWith('session:')) return chat.id.slice('session:'.length);
   return sessionIdFor(user.id, chat.id);
+}
+
+/**
+ * Добавляет разговору новую сессию pi. `/clear` заводит её в pi, а мы дописываем
+ * в цепочку: старые файлы остаются историей до разделителя, новый — текущим
+ * контекстом. Первую сессию выводим из conversationId, если цепочки ещё нет.
+ */
+export function appendChatSession(
+  config: IcarusConfig,
+  user: UserConfig,
+  conversationId: string,
+  sessionId: string,
+  startedAt = new Date().toISOString(),
+): ChatRecord | null {
+  const chats = readChats(config, user);
+  const chat = chats.find((item) => item.conversationId === conversationId || item.id === conversationId);
+  if (!chat) return null;
+
+  const epochs = sessionEpochsOf(chat, user).slice();
+  if (epochs.at(-1)?.sessionId !== sessionId) epochs.push({ sessionId, startedAt });
+  chat.sessions = epochs;
+  writeChats(config, user, chats);
+  return chat;
+}
+
+/** Человек переименовал разговор: имя больше не выводится из первой реплики. */
+export function renameChat(
+  config: IcarusConfig,
+  user: UserConfig,
+  conversationId: string,
+  title: string,
+): ChatRecord | null {
+  const name = title.trim();
+  if (!name) return null;
+  const chats = readChats(config, user);
+  const chat = chats.find((item) => item.conversationId === conversationId || item.id === conversationId);
+  if (!chat) return null;
+  if (chat.title !== name) {
+    chat.title = name;
+    writeChats(config, user, chats);
+  }
+  return chat;
 }
 
 /**

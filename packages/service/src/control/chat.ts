@@ -30,12 +30,27 @@ import {
   findChatRecord,
   isGenericTitle,
   readChats,
-  sessionIdOf,
+  sessionEpochsOf,
+  sessionIdsOf,
   updateChatTitles,
   type ChatRecord,
 } from '../sessions/chats.ts';
 import { sessionFileForId, sessionFilesFor, textOfContent as textOf, type FileSession } from '../sessions/files.ts';
 import type { SessionRegistry } from '../sessions/registry.ts';
+import {
+  clearText,
+  compactText,
+  parseCommand,
+  REMOVED_COMMANDS,
+  renameText,
+  skillsText,
+  statsText,
+  stopText,
+  TOPICS_REMOVED,
+  UNKNOWN_COMMAND,
+  WEB_COMMAND_NAMES,
+  WEB_HELP,
+} from '../sessions/commands.ts';
 import { mcpReauthNotice } from '../mcp/reauth.ts';
 import { broadcast, emit, finishTurn, liveTurn, runningTurn, startTurn, subscribe, watchAll } from './chat-live.ts';
 import { log } from '../log.ts';
@@ -139,6 +154,8 @@ export type ChatMessage = {
   thinking?: string;
   trace?: ChatTraceStep[];
   attachments?: ChatAttachment[];
+  /** Не реплика, а граница между сессиями: после /clear контекст начат заново. */
+  divider?: 'clear';
 };
 
 export type ChatSummary = {
@@ -499,8 +516,7 @@ function summaryOf(chat: ChatRecord, digest: SessionDigest | null): ChatSummary 
 }
 
 /** Находит файл сессии для записи реестра: список и история ходят разными путями. */
-function sessionForChat(config: IcarusConfig, user: UserConfig, chat: ChatRecord): FileSession | null {
-  const sessionId = sessionIdOf(chat, user);
+function sessionForId(config: IcarusConfig, user: UserConfig, sessionId: string): FileSession | null {
   const file = sessionFileForId(userPaths(config, user).sessions, sessionId);
   if (!file) return null;
   try {
@@ -510,6 +526,7 @@ function sessionForChat(config: IcarusConfig, user: UserConfig, chat: ChatRecord
     return null;
   }
 }
+
 
 /**
  * Страница списка. Сортируем по createdAt — время создания не меняется, поэтому
@@ -535,12 +552,18 @@ export function listChatPage(
   const offset = pageOffset(cursor);
   const size = pageLimit(limit);
   const page = records.slice(offset, offset + size);
-  const wanted = new Set(page.map((chat) => sessionIdOf(chat, user)));
+  // У разговора после /clear несколько сессий: берём самую свежую непустую,
+  // чтобы превью и время не обнулялись от одного очищенного контекста.
+  const wanted = new Set(page.flatMap((chat) => sessionIdsOf(chat, user)));
   const sessions = sessionFilesFor(userPaths(config, user).sessions, wanted);
   const titles = new Map<string, string>();
   const chats = page.map((chat) => {
-    const session = sessions.get(sessionIdOf(chat, user));
-    const digest = session ? digestSessionFile(session) : null;
+    let digest: SessionDigest | null = null;
+    for (const sessionId of [...sessionIdsOf(chat, user)].reverse()) {
+      const session = sessions.get(sessionId);
+      digest = session ? digestSessionFile(session) : null;
+      if (digest) break;
+    }
     if (digest?.title && isGenericTitle(chat)) titles.set(chat.id, digest.title);
     return summaryOf(chat, digest);
   });
@@ -800,8 +823,16 @@ export function readHistory(config: IcarusConfig, user: UserConfig, chatId: stri
   const chat = findChatRecord(config, user, chatId);
   if (!chat) return null;
 
-  const session = sessionForChat(config, user, chat);
-  const messages = session ? readMessages(session.file, user, chat.id) : [];
+  // Сессий может быть несколько (после /clear): старые остаются историей,
+  // новая — текущим контекстом. Между ними — разделитель, а не потерянная лента.
+  const messages: ChatMessage[] = [];
+  for (const [index, epoch] of sessionEpochsOf(chat, user).entries()) {
+    if (index > 0) {
+      messages.push({ role: 'assistant', text: '', timestamp: epoch.startedAt, divider: 'clear' });
+    }
+    const session = sessionForId(config, user, epoch.sessionId);
+    if (session) messages.push(...readMessages(session.file, user, chat.id));
+  }
   const firstUser = messages.find((message) => message.role === 'user' && message.text.trim())?.text ?? '';
   if (firstUser && isGenericTitle(chat)) {
     const clean = firstUser.replace(/^\[(?:голосовое|voice)[^\]]*\]\s*/i, '');
@@ -1162,6 +1193,121 @@ export async function handleChatApi(
 
     if (!ctx.registry) {
       json(res, 501, errorBody('чат недоступен: панель поднята без контейнера с pi', 'invalid_request_error'));
+      return true;
+    }
+
+    // Команды pi: скиллы, промпт-шаблоны и команды расширений. Их список знает
+    // только сам pi, поэтому палитра спрашивает его лениво — когда человек уже
+    // набрал «/». Команды самого чата приезжают в странице, без запроса.
+    if (pathname === '/panel/api/chat/commands' && req.method === 'GET') {
+      const id = chatIdOf(url.searchParams.get('id'));
+      if (!id) {
+        json(res, 400, errorBody('не указан разговор'));
+        return true;
+      }
+      const chat = findChatRecord(ctx.config, user, id);
+      if (!chat) {
+        json(res, 404, errorBody('разговор не найден'));
+        return true;
+      }
+      // Чужой вход в палитре не нужен: там команды всё равно не отправить.
+      if (chat.channel !== 'web') {
+        json(res, 200, { commands: [] });
+        return true;
+      }
+      const outcome = await ctx.registry.commands(user, id);
+      json(res, 200, { commands: outcome.status === 'ok' ? outcome.commands : [] });
+      return true;
+    }
+
+    // Команда в веб-чате: разбираем её здесь, а не в браузере, — один разбор и
+    // один набор текстов на все входы. `handled: false` значит «это команда pi»,
+    // и клиент отправит её обычной репликой.
+    if (pathname === '/panel/api/chat/command' && req.method === 'POST') {
+      const body = await bodyOf(req);
+      const text = typeof body.text === 'string' ? body.text.trim() : '';
+      if (text.length > 16_000) {
+        json(res, 400, errorBody('реплика слишком длинная'));
+        return true;
+      }
+      const command = parseCommand(text);
+      if (!command) {
+        json(res, 200, { handled: false });
+        return true;
+      }
+      // Справка не зависит от разговора: её можно спросить и до первого сообщения.
+      if (command.name === 'help') {
+        json(res, 200, { handled: true, text: WEB_HELP });
+        return true;
+      }
+      // Убранные команды объясняем сами, а не отправляем их в pi репликой.
+      if (REMOVED_COMMANDS.has(command.name)) {
+        json(res, 200, { handled: true, text: TOPICS_REMOVED });
+        return true;
+      }
+      // Незнакомая команда без аргументов — опечатка; с аргументами это уже
+      // реплика для pi (его шаблоны и команды расширений).
+      if (!WEB_COMMAND_NAMES.has(command.name)) {
+        json(res, 200, command.args === '' ? { handled: true, text: UNKNOWN_COMMAND } : { handled: false });
+        return true;
+      }
+
+      const chatId = chatIdOf(body.chatId);
+      if (!chatId) {
+        json(res, 400, errorBody('нужен chatId'));
+        return true;
+      }
+      const chat = findChatRecord(ctx.config, user, chatId);
+      if (!chat) {
+        json(res, 404, errorBody('разговор не найден'));
+        return true;
+      }
+      // Команды пишут в разговор, поэтому чужие входы здесь так же закрыты, как
+      // и `chat/send`: продолжать разговор можно только там, где он начат.
+      if (chat.channel !== 'web') {
+        json(res, 403, errorBody('разговор начат не в панели: здесь он только для чтения', 'permission_error'));
+        return true;
+      }
+
+      if (command.name === 'compact') {
+        const outcome = await ctx.registry.compact(user, chatId, command.args || undefined);
+        json(res, 200, { handled: true, text: compactText(outcome) });
+        return true;
+      }
+      if (command.name === 'stop') {
+        json(res, 200, { handled: true, text: stopText(await ctx.registry.abort(user, chatId)) });
+        return true;
+      }
+      if (command.name === 'stats') {
+        json(res, 200, { handled: true, text: statsText(await ctx.registry.stats(user, chatId)) });
+        return true;
+      }
+      if (command.name === 'clear') {
+        const outcome = await ctx.registry.clear(user, chatId);
+        // Ленту не перечитываем: старые сообщения остаются, клиент рисует
+        // разделитель «контекст очищен». `cleared` говорит, что он уместен.
+        json(res, 200, {
+          handled: true,
+          text: clearText(outcome),
+          ...(outcome.status === 'started' ? { cleared: true } : {}),
+        });
+        return true;
+      }
+      if (command.name === 'rename') {
+        const outcome = await ctx.registry.rename(user, chatId, command.args);
+        json(res, 200, {
+          handled: true,
+          text: renameText(outcome),
+          // Клиент обновляет заголовок и сайдбар сразу, без перезагрузки ленты.
+          ...(outcome.status === 'renamed' ? { title: outcome.title } : {}),
+        });
+        return true;
+      }
+      if (command.name === 'skills') {
+        json(res, 200, { handled: true, text: skillsText(await ctx.registry.commands(user, chatId)) });
+        return true;
+      }
+      json(res, 200, { handled: true, text: UNKNOWN_COMMAND });
       return true;
     }
 
