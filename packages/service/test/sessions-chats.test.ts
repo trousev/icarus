@@ -17,6 +17,7 @@ import {
   refreshChatTitle,
   renderSessionsMap,
   sessionIdOf,
+  setChatArchived,
   type ChatRecord,
 } from '../src/sessions/chats.ts';
 import { makeConfig, probe } from './fixtures.ts';
@@ -340,4 +341,36 @@ test('карта разговоров: пустой реестр даёт пус
   const { config, user } = fixture();
   const map = JSON.parse(renderSessionsMap(config, user)) as { sessions: unknown[] };
   assert.deepEqual(map.sessions, []);
+});
+
+test('архив — это отметка в реестре: файл сессии и запись остаются на месте', () => {
+  const { config, user } = fixture();
+  const { file } = putSession(config, user, 'telegram-42', 'Отчёт для мамы');
+  ensureChat(config, user, 'telegram-42', 'telegram');
+  const sessionFile = fs.readdirSync(userPaths(config, user).sessions)[0];
+  assert.ok(sessionFile, 'история лежит в общей папке сессий');
+
+  const archived = setChatArchived(config, user, 'telegram-42', true, new Date('2026-11-02T12:00:00.000Z'));
+  assert.equal(archived?.archivedAt, '2026-11-02T12:00:00.000Z');
+  assert.ok(fs.existsSync(file), 'архив не трогает файл разговора');
+  assert.equal(readChats(config, user)[0]?.archivedAt, '2026-11-02T12:00:00.000Z');
+
+  // Повторный уход в архив не двигает отметку: порядок в архиве не прыгает.
+  setChatArchived(config, user, 'telegram-42', true, new Date('2026-11-03T12:00:00.000Z'));
+  assert.equal(readChats(config, user)[0]?.archivedAt, '2026-11-02T12:00:00.000Z');
+});
+
+test('архив переживает пересборку реестра, а возврат снимает отметку', () => {
+  const { config, user } = fixture();
+  putSession(config, user, 'telegram-42', 'Старый разговор');
+  ensureChat(config, user, 'telegram-42', 'telegram');
+  setChatArchived(config, user, 'telegram-42', true, new Date('2026-11-02T12:00:00.000Z'));
+
+  backfillChats(config, user);
+  assert.equal(readChats(config, user)[0]?.archivedAt, '2026-11-02T12:00:00.000Z', 'backfill не выбрасывает архив');
+
+  const restored = setChatArchived(config, user, 'telegram-42', false);
+  assert.equal(restored?.archivedAt, undefined);
+  assert.equal(readChats(config, user)[0]?.archivedAt, undefined, 'вернулся в обычный реестр');
+  assert.equal(setChatArchived(config, user, 'нет-такого', true), null);
 });

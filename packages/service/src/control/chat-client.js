@@ -262,6 +262,27 @@ const CHAT_PAGE_SIZE = 30;
 const MAX_FILES = 8;
 const MAX_TOTAL_BYTES = 10 * 1024 * 1024;
 const UNREAD_KEY = 'icarus.unread';
+/** Развёрнут ли архив: свёрнутое состояние переживает перезагрузку. */
+const ARCHIVE_OPEN_KEY = 'icarus.archive-open';
+/** Архив — отдельный список того же чата: разговор ушёл с глаз, но не удалён. */
+let archivedChats = [];
+let archiveOpen = false;
+
+function storedArchiveOpen() {
+  try {
+    return localStorage.getItem(ARCHIVE_OPEN_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function saveArchiveOpen(open) {
+  try {
+    localStorage.setItem(ARCHIVE_OPEN_KEY, open ? '1' : '0');
+  } catch {
+    /* приватный режим — состояние просто не запомнится */
+  }
+}
 
 /**
  * Непрочитанное живёт только в браузере: серверу оно ни к чему, а лишний
@@ -809,6 +830,120 @@ function openChatMenu(chatId, anchor) {
 }
 
 /**
+ * Строка архива: тот же разговор, но без времени и с кнопкой возврата справа —
+ * её видно сразу, потому что в архив заходят редко и ищут именно её.
+ */
+function archivedRowHtml(chat) {
+  const tag = channelTag(chat);
+  return (
+    '<div class="chat-row">' +
+    '<button class="chat-item' +
+    (chat.id === currentId ? ' active' : '') +
+    (chat.readOnly ? ' read-only' : '') +
+    '" data-id="' +
+    esc(chat.id) +
+    '"><div class="chat-item-top"><span class="chat-item-title">' +
+    esc(chat.title) +
+    '</span>' +
+    (tag ? '<span class="chat-item-tag">' + esc(tag) + '</span>' : '') +
+    '</div><div class="chat-item-preview">' +
+    esc(cleanPreview(chat.preview || '')) +
+    '</div></button>' +
+    '<button class="chat-row-action" type="button" data-restore="' +
+    esc(chat.id) +
+    '" title="Вернуть из архива" aria-label="Вернуть из архива">↩</button>' +
+    '</div>'
+  );
+}
+
+/**
+ * Архив в сайдбаре: свёрнутая секция под списком. Счётчик виден и в свёрнутом
+ * виде — иначе человек не узнает, что там что-то есть, не открыв её.
+ */
+function renderArchive() {
+  const count = el('archive-count');
+  count.textContent = String(archivedChats.length);
+  count.hidden = archivedChats.length === 0;
+  el('archive-toggle').setAttribute('aria-expanded', archiveOpen ? 'true' : 'false');
+  const box = el('archive-list');
+  box.hidden = !archiveOpen;
+  if (!archiveOpen) return;
+  if (!archivedChats.length) {
+    box.innerHTML = '<p class="side-empty">Архив пуст.</p>';
+    return;
+  }
+  box.innerHTML = archivedChats.map(archivedRowHtml).join('');
+  box.querySelectorAll('.chat-item').forEach((node) => {
+    node.onclick = () => selectChat(node.dataset.id);
+  });
+  box.querySelectorAll('[data-restore]').forEach((node) => {
+    node.onclick = () => restoreArchived(node.dataset.restore);
+  });
+}
+
+async function loadArchived() {
+  try {
+    const data = await api('/panel/api/chats?archived=1&limit=100');
+    archivedChats = data.chats || [];
+    renderArchive();
+  } catch (error) {
+    el('archive-list').innerHTML = '<p class="side-empty">Архив не загрузился: ' + esc(error.message) + '</p>';
+  }
+}
+
+/** Кнопка в шапке говорит, что произойдёт: «В архив» или «Вернуть». */
+function setArchiveState(chat) {
+  const archived = Boolean(chat && chat.archived);
+  const button = el('toggle-archive');
+  button.disabled = !chat;
+  button.setAttribute('aria-pressed', archived ? 'true' : 'false');
+  button.title = archived ? 'Вернуть из архива' : 'В архив';
+  el('archive-button-label').textContent = archived ? 'Вернуть' : 'В архив';
+  el('chat-archived-tag').hidden = !archived;
+}
+
+/**
+ * Двигает разговор между списком и архивом. Списки перечитываем с сервера:
+ * порядок, превью и total — его дело, а не наша догадка.
+ */
+async function setArchived(chatId, archived) {
+  await api('/panel/api/chat/archive', {
+    method: 'POST',
+    body: JSON.stringify({ chatId, archived }),
+  });
+  if (currentChat && currentChat.id === chatId) {
+    currentChat.archived = archived;
+    setArchiveState(currentChat);
+  }
+  await loadChats(true);
+  await loadArchived();
+}
+
+async function toggleArchive() {
+  if (!currentId) return;
+  const archived = !(currentChat && currentChat.archived);
+  try {
+    await setArchived(currentId, archived);
+    setNote(
+      archived
+        ? 'Разговор в архиве. Из списка он ушёл, история и файлы остались на месте.'
+        : 'Разговор вернулся в список.',
+    );
+  } catch (error) {
+    setNote('не удалось изменить архив: ' + error.message);
+  }
+}
+
+async function restoreArchived(chatId) {
+  try {
+    await setArchived(chatId, false);
+    setNote('Разговор вернулся из архива.');
+  } catch (error) {
+    setNote('не удалось вернуть из архива: ' + error.message);
+  }
+}
+
+/**
  * Страница списка. reset — новый поиск или первый вход; иначе догружаем
  * следующую страницу и дописываем её к уже показанным диалогам.
  */
@@ -866,6 +1001,15 @@ function rememberChat(chat, liveText) {
     preview: cleanPreview(chat.preview || liveText || ''),
     updatedAt: chat.updatedAt || new Date().toISOString(),
   };
+  // Архивный разговор ответом не возвращается в общий список: иначе архив
+  // переставал бы значить «не вижу каждый день».
+  if (merged.archived) {
+    const at = archivedChats.findIndex((item) => item.id === merged.id);
+    if (at >= 0) archivedChats[at] = merged;
+    else archivedChats.unshift(merged);
+    renderArchive();
+    return;
+  }
   chats = chats.filter((item) => item.id !== merged.id);
   chats.unshift(merged);
   renderChats();
@@ -1012,11 +1156,16 @@ async function selectChat(id) {
     currentWorkspace = data.chat.workspace || 'talk';
     updateComposerHint();
     history.replaceState(null, '', '/panel/chat?chat=' + encodeURIComponent(currentId));
-    if (!chats.some((chat) => chat.id === currentId)) {
+    // Архивный разговор открывается из своей секции и в общий список не попадает.
+    if (data.chat.archived) {
+      if (!archivedChats.some((chat) => chat.id === currentId)) archivedChats.unshift(data.chat);
+    } else if (!chats.some((chat) => chat.id === currentId)) {
       chats.unshift(data.chat);
     }
     renderChats();
+    renderArchive();
     setTitle(currentChat.title);
+    setArchiveState(currentChat);
     setComposer(Boolean(currentChat.readOnly));
     setNote(chatHint(currentChat));
     renderVia(currentChat);
@@ -1063,6 +1212,7 @@ async function createChat() {
   rememberChat(data.chat);
   el('chat-list').scrollTop = 0;
   history.replaceState(null, '', '/panel/chat?chat=' + encodeURIComponent(currentId));
+  setArchiveState(currentChat);
   setComposer(false);
   updateComposerHint();
   setNote('');
@@ -1083,6 +1233,7 @@ function startDraft(workspace = defaultWorkspace) {
   currentId = null;
   currentChat = null;
   setDraft(true);
+  setArchiveState(null);
   setComposer(false);
   setTitle('Новый чат');
   renderVia(null);
@@ -3272,6 +3423,15 @@ el('toggle-side').onclick = () => {
   if (window.matchMedia('(max-width: 900px)').matches) el('chat-app').classList.toggle('side-open');
 };
 el('close-side').onclick = closeMenu;
+/* Архив: секция в сайдбаре сворачивается, состояние помним между заходами. */
+el('archive-toggle').onclick = () => {
+  archiveOpen = !archiveOpen;
+  saveArchiveOpen(archiveOpen);
+  renderArchive();
+};
+el('toggle-archive').onclick = () => {
+  toggleArchive().catch(() => {});
+};
 /* ── ширина панели ────────────────────────────────────────────────────────── */
 /* На широком экране колонку диалогов можно тянуть за правую границу. Ширина
    живёт в localStorage: иначе её пришлось бы подгонять в каждом заходе. */
@@ -3434,11 +3594,13 @@ window.addEventListener('focus', () => {
 });
 
 (async () => {
+  archiveOpen = storedArchiveOpen();
   loadUnread();
   await loadChats(true);
   // Папки — до первого показа списка как раз нет: они лишь группируют уже
   // загруженные разговоры, поэтому грузим их следом и перерисовываем.
   await loadFolders();
+  await loadArchived();
   await loadWorkspaces();
   defaultEmptyHtml = el('chat-empty').innerHTML;
   startBulletin();

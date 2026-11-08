@@ -35,6 +35,7 @@ import {
   recordTurn,
   sessionEpochsOf,
   sessionIdsOf,
+  setChatArchived,
   setChatFolder,
   updateChatTitles,
   type ChatRecord,
@@ -184,6 +185,8 @@ export type ChatSummary = {
   readOnly: boolean;
   /** Откуда пришла последняя реплика: этим подписывается шапка разговора. */
   lastTurn?: ChatTurn;
+  /** Разговор убран в архив: он живёт в своей секции, а не в общем списке. */
+  archived: boolean;
 };
 
 export type ChatHistory = { chat: ChatSummary; messages: ChatMessage[] };
@@ -503,6 +506,7 @@ function summaryOf(chat: ChatRecord, digest: SessionDigest | null): ChatSummary 
     ...(chat.folder ? { folder: chat.folder } : {}),
     readOnly: !panelCanWrite(chat),
     ...(chat.lastTurn ? { lastTurn: chat.lastTurn } : {}),
+    archived: Boolean(chat.archivedAt),
   };
 }
 
@@ -523,6 +527,9 @@ function sessionForId(config: IcarusConfig, user: UserConfig, sessionId: string)
  * Страница списка. Сортируем по createdAt — время создания не меняется, поэтому
  * страницы не прыгают от нового сообщения. Превью и время последнего сообщения
  * читаются только для показанной страницы; stat — тоже только для неё.
+ *
+ * Архив — отдельная страница того же списка (`archived`): обычный сайдбар его
+ * не показывает, иначе «убрать с глаз» ничего бы не меняло.
  */
 export function listChatPage(
   config: IcarusConfig,
@@ -531,9 +538,11 @@ export function listChatPage(
   limit: unknown = DEFAULT_PAGE_SIZE,
   cursor?: string | null,
   workspace?: string | null,
+  archived = false,
 ): ChatPage {
   const needle = query.trim().toLocaleLowerCase('ru');
   const records = readChats(config, user)
+    .filter((chat) => Boolean(chat.archivedAt) === archived)
     .filter((chat) => !workspace || chat.workspace === workspace)
     .filter(
       (chat) => !needle || `${chat.title}\n${chat.conversationId ?? ''}`.toLocaleLowerCase('ru').includes(needle),
@@ -580,6 +589,7 @@ export function summaryAfterTurn(chat: ChatRecord, userText: string, assistantTe
     channel: chat.channel,
     readOnly: !panelCanWrite(chat),
     ...(chat.lastTurn ? { lastTurn: chat.lastTurn } : {}),
+    archived: Boolean(chat.archivedAt),
   };
 }
 
@@ -849,6 +859,7 @@ export function readHistory(config: IcarusConfig, user: UserConfig, chatId: stri
       channel: chat.channel,
       readOnly: !panelCanWrite(chat),
       ...(chat.lastTurn ? { lastTurn: chat.lastTurn } : {}),
+      archived: Boolean(chat.archivedAt),
     },
     messages,
   };
@@ -1107,6 +1118,7 @@ export async function handleChatApi(
         url.searchParams.get('limit'),
         url.searchParams.get('cursor'),
         url.searchParams.get('workspace'),
+        url.searchParams.get('archived') === '1',
       );
       json(res, 200, page);
       return true;
@@ -1120,6 +1132,25 @@ export async function handleChatApi(
         return true;
       }
       json(res, 200, { chat: createChat(ctx.config, user, workspace) });
+      return true;
+    }
+
+    // Архив — это отметка в реестре, а не удаление: файл сессии и вложения
+    // остаются на месте, поэтому маршрут только двигает разговор между списками.
+    if (pathname === '/panel/api/chat/archive' && req.method === 'POST') {
+      const body = await bodyOf(req);
+      const chatId = chatIdOf(body.chatId);
+      if (!chatId) {
+        json(res, 400, errorBody('нужен chatId'));
+        return true;
+      }
+      const archived = body.archived !== false;
+      const chat = setChatArchived(ctx.config, user, chatId, archived);
+      if (!chat) {
+        json(res, 404, errorBody('разговор не найден'));
+        return true;
+      }
+      json(res, 200, { chat: { id: chat.id, archived: Boolean(chat.archivedAt) } });
       return true;
     }
 

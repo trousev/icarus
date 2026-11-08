@@ -70,6 +70,12 @@ export type ChatRecord = {
   artifact?: string;
   /** Откуда пришла последняя реплика: по ней панель подписывает шапку. */
   lastTurn?: ChatTurn;
+  /**
+   * Когда разговор убран в архив. Архив — это «не вижу каждый день», а не
+   * удаление: запись остаётся в chats.json, файл сессии и вложения целы,
+   * разговор можно вернуть. Поэтому здесь отметка, а не флаг «удалён».
+   */
+  archivedAt?: string;
 };
 
 function chatsFile(config: IcarusConfig, user: UserConfig): string {
@@ -173,6 +179,7 @@ function normalize(value: unknown): ChatRecord | null {
     // Пустая строка — это «обычный чат», а не артефакт с пустым именем.
     ...(typeof item.artifact === 'string' && item.artifact !== '' ? { artifact: item.artifact } : {}),
     ...(lastTurn ? { lastTurn } : {}),
+    ...(typeof item.archivedAt === 'string' && item.archivedAt !== '' ? { archivedAt: item.archivedAt } : {}),
   };
 }
 
@@ -277,6 +284,33 @@ export function renameChat(
     chat.title = name;
     writeChats(config, user, chats);
   }
+  return chat;
+}
+
+/**
+ * Убирает разговор в архив или возвращает обратно. Меняется только отметка
+ * в реестре: история, файлы сессии и вложения остаются на месте, поэтому
+ * архив не путается с удалением. Повторный уход в архив отметку не двигает —
+ * так порядок в архиве не прыгает от лишнего клика.
+ */
+export function setChatArchived(
+  config: IcarusConfig,
+  user: UserConfig,
+  conversationId: string,
+  archived: boolean,
+  now = new Date(),
+): ChatRecord | null {
+  const chats = readChats(config, user);
+  const chat = chats.find((item) => item.conversationId === conversationId || item.id === conversationId);
+  if (!chat) return null;
+  if (archived) {
+    if (chat.archivedAt) return chat;
+    chat.archivedAt = now.toISOString();
+  } else {
+    if (!chat.archivedAt) return chat;
+    delete chat.archivedAt;
+  }
+  writeChats(config, user, chats);
   return chat;
 }
 
