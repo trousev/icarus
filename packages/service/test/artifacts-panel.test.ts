@@ -94,7 +94,8 @@ test('страница раздела: глобальный список, пои
     assert.match(html, /id="art-list"/);
     assert.match(html, /id="art-acl"/, 'права доступны из панели');
     assert.match(html, /id="art-history"/, 'история версий доступна из панели');
-    assert.match(html, /id="art-history-modal"/);
+    assert.match(html, /id="art-history-panel"/);
+    assert.match(html, /id="art-preview"/);
     assert.match(html, /id="art-total"/);
   });
 });
@@ -325,5 +326,65 @@ test('история: мусорный хеш — 400, чужой артефак
     assert.equal((await post(base, 'restore', { artifact: 'plan', commit: 'deadbeef' })).status, 400);
     assert.equal((await api(base, 'history?artifact=nope')).status, 404);
     assert.equal((await post(base, 'restore', { artifact: 'nope', commit: 'deadbeef' })).status, 404);
+  });
+});
+
+
+test('предпросмотр версии: контент и ассеты без отката', async () => {
+  await withServer(async (base, config) => {
+    const planDir = path.join(artifactsRoot(config), 'plan');
+    const initial = (await (await api(base, 'history?artifact=plan')).json()) as { current: string };
+    fs.writeFileSync(path.join(planDir, 'index.md'), '# План v2\n');
+    await commitArtifact(planDir, 'artifact: write index.md');
+
+    const preview = (await (await api(base, `preview?artifact=plan&commit=${initial.current}`)).json()) as {
+      content: string;
+      aiContent: string;
+      artifact: { title: string; urls: { raw: string }; files: string[] };
+      commit: { hash: string; subject: string };
+    };
+    assert.equal(preview.commit.hash, initial.current);
+    assert.match(preview.artifact.title, /План на четверг/);
+    assert.match(preview.content, /Стендап команды/);
+    assert.match(preview.aiContent, /Расписание дня/);
+    assert.equal(preview.artifact.files.includes('.git'), false);
+
+    // Предпросмотр ничего не откатывает.
+    const current = (await (await api(base, 'read?artifact=plan')).json()) as { content: string };
+    assert.match(current.content, /План v2/);
+
+    const rawPath = pathOf(preview.artifact.urls.raw);
+    assert.equal((await fetch(`${base}${rawPath}`)).status, 401, 'версия тоже за SSO');
+    const raw = await fetch(`${base}${rawPath}`, { headers: asUser() });
+    assert.equal(raw.status, 200);
+    assert.match(raw.headers.get('content-type') ?? '', /text\/markdown/);
+    assert.match(await raw.text(), /Стендап команды/);
+
+    const versionBase = `/panel/artifacts/version/plan/${initial.current}/`;
+    assert.equal((await fetch(`${base}${versionBase}.git/config`, { headers: asUser() })).status, 404);
+    assert.equal((await api(base, `preview?artifact=plan&commit=deadbeef`)).status, 400);
+  });
+});
+
+
+test('предпросмотр HTML-версии отдаёт index и относительные ассеты', async () => {
+  await withServer(async (base) => {
+    const hist = (await (await api(base, 'history?artifact=report')).json()) as {
+      current: string;
+      history: Array<{ hash: string }>;
+    };
+    const commit = hist.history[0]!.hash;
+    const preview = (await (await api(base, `preview?artifact=report&commit=${commit}`)).json()) as {
+      artifact: { type: string; entry: string; urls: { raw: string } };
+    };
+    assert.equal(preview.artifact.type, 'html');
+    assert.equal(preview.artifact.entry, 'index.html');
+    const basePath = pathOf(preview.artifact.urls.raw).replace(/index\.html$/, '');
+    const page = await fetch(`${base}${basePath}index.html`, { headers: asUser() });
+    assert.equal(page.status, 200);
+    assert.match(await page.text(), /Атлас/);
+    const css = await fetch(`${base}${basePath}style.css`, { headers: asUser() });
+    assert.equal(css.status, 200);
+    assert.equal(await css.text(), 'body { color: red }');
   });
 });

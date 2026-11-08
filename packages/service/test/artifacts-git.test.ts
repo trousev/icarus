@@ -9,6 +9,8 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   artifactHistory,
+  artifactVersion,
+  artifactVersionFile,
   commitArtifact,
   ensureArtifactRepo,
   ensureArtifactRepos,
@@ -94,4 +96,34 @@ test('инициализация всех артефактов: initial-комм
   const history = await artifactHistory(dir);
   assert.equal(history[0]!.subject, 'artifact: initial version');
   assert.equal(await ensureArtifactRepos(config), 0, 'повторный запуск не плодит коммиты');
+});
+
+
+test('предпросмотр версии читает содержимое и ассеты, не меняя файлы', async () => {
+  const dir = artifact();
+  await ensureArtifactRepo(dir);
+  await commitArtifact(dir, 'artifact: initial version');
+  const initial = (await artifactHistory(dir))[0]!;
+  fs.writeFileSync(path.join(dir, 'index.md'), '# Вторая версия\n');
+  await commitArtifact(dir, 'artifact: write index.md');
+
+  const config = makeConfig({ url: 'https://icarus.example' });
+  const version = await artifactVersion(config, dir, initial.hash);
+  assert.equal(version.artifact.title, 'Первая версия');
+  assert.equal(version.artifact.type, 'markdown');
+  assert.equal(version.artifact.entry, 'index.md');
+  assert.match(version.content ?? '', /Первая версия/);
+  assert.match(version.aiContent ?? '', /Первая версия/);
+  assert.match(version.artifact.urls.raw, new RegExp(`/panel/artifacts/version/[^/]+/${initial.hash}/index.md$`));
+  assert.equal(version.artifact.files.some((file) => file.startsWith('.')), false);
+  assert.equal(version.commit.hash, initial.hash);
+
+  const text = await artifactVersionFile(dir, initial.hash, 'index.md');
+  assert.equal(text.type, 'text/markdown; charset=utf-8');
+  assert.match(text.content.toString('utf8'), /Первая версия/);
+  assert.equal(fs.readFileSync(path.join(dir, 'index.md'), 'utf8'), '# Вторая версия\n', 'просмотр не меняет файл');
+
+  await assert.rejects(() => artifactVersionFile(dir, initial.hash, '../secret'), /недоступен/);
+  await assert.rejects(() => artifactVersionFile(dir, initial.hash, '.git/config'), /недоступен/);
+  await assert.rejects(() => artifactVersionFile(dir, initial.hash, 'index.ai.md'), /недоступен/);
 });

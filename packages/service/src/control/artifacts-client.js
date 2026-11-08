@@ -58,11 +58,14 @@ const artIcon = (type) => {
   return '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/><path d="M9 12h6M9 16h6"/></svg>';
 };
 
+let artPreviewToken = 0;
+
 const artState = {
   artifact: artCfg.artifact || null,
   items: [],
   query: '',
   selected: null,
+  preview: null,
   deleteArmed: false,
 };
 
@@ -126,17 +129,31 @@ function artRenderList() {
     .join('');
 }
 
+function artHidePreview() {
+  artPreviewToken += 1;
+  artState.preview = null;
+  artEl('art-preview').hidden = true;
+  artSyncHistoryState(null);
+}
+
+function artHideHistory() {
+  artEl('art-history-panel').hidden = true;
+  artHidePreview();
+}
+
 function artClearView(message) {
   artState.selected = null;
-  artEl('art-history-modal').hidden = true;
+  artHideHistory();
   artEl('art-name').textContent = '—';
   artEl('art-meta').textContent = '';
   artEl('art-type-icon').innerHTML = '';
   artEl('art-path').textContent = '';
   artEl('art-updated').textContent = '';
+  artEl('art-link').hidden = false;
   artEl('art-link').disabled = true;
   artEl('art-unpublish').hidden = true;
   artEl('art-acl').hidden = true;
+  artEl('art-delete').hidden = false;
   artEl('art-download').setAttribute('aria-disabled', 'true');
   artEl('art-download').removeAttribute('href');
   artEl('art-bare').setAttribute('aria-disabled', 'true');
@@ -153,25 +170,39 @@ function artRawDir(url) {
   return String(url || '').replace(/[^/]*$/, '');
 }
 
-function artRenderView(data) {
+function artRenderView(data, preview = null) {
   const item = data.artifact;
-  artState.selected = item;
+  if (!preview) artState.selected = item;
   artEl('art-name').textContent = item.entry;
   artEl('art-type-icon').innerHTML = artIcon(item.type);
-  artEl('art-meta').textContent =
-    item.typeLabel + ' · ' + artHumanSize(item.size) +
-    ' · владелец ' + item.owner + ' · ' + ART_LEVELS[item.access];
+  artEl('art-meta').textContent = preview
+    ? item.typeLabel + ' · ' + artHumanSize(item.size) + ' · версия от ' + artStamp(preview.date)
+    : item.typeLabel + ' · ' + artHumanSize(item.size) +
+      ' · владелец ' + item.owner + ' · ' + ART_LEVELS[item.access];
   artEl('art-path').textContent = '/artifacts/' + item.name + '/' + item.entry;
-  artEl('art-updated').textContent = 'Обновлено ' + artStamp(item.updatedAt);
-  artEl('art-link').disabled = !item.canManage;
-  artEl('art-unpublish').hidden = !item.publicId || !item.canManage;
-  artEl('art-acl').hidden = !item.canManage;
-  artEl('art-delete').disabled = !item.canManage;
-  artEl('art-download').href = item.urls.raw + '?download=1';
+  artEl('art-updated').textContent = preview
+    ? 'Версия от ' + artStamp(preview.date)
+    : 'Обновлено ' + artStamp(item.updatedAt);
+  artEl('art-link').hidden = true;
+  artEl('art-link').disabled = true;
+  artEl('art-unpublish').hidden = true;
+  artEl('art-acl').hidden = true;
+  artEl('art-delete').hidden = true;
+  artEl('art-delete').disabled = true;
+  artEl('art-download').href = item.urls.raw + (item.urls.raw.includes('?') ? '&' : '?') + 'download=1';
   artEl('art-download').removeAttribute('aria-disabled');
-  artEl('art-bare').href =
-    item.type === 'markdown' && item.urls.bare ? item.urls.bare : item.urls.raw;
+  artEl('art-bare').href = item.urls.raw;
   artEl('art-bare').removeAttribute('aria-disabled');
+
+  if (!preview) {
+    artEl('art-link').hidden = false;
+    artEl('art-delete').hidden = false;
+    artEl('art-link').disabled = !item.canManage;
+    artEl('art-unpublish').hidden = !item.publicId || !item.canManage;
+    artEl('art-acl').hidden = !item.canManage;
+    artEl('art-delete').disabled = !item.canManage;
+    if (item.type === 'markdown' && item.urls.bare) artEl('art-bare').href = item.urls.bare;
+  }
   artCrumbs(item.title);
 
   const view = artEl('art-view');
@@ -208,7 +239,7 @@ async function artLoadList() {
   if (total) total.textContent = String(data.total ?? artState.items.length);
 }
 
-async function artOpen(name, push = true) {
+async function artOpen(name, push = true, keepHistory = false) {
   if (!name) {
     artClearView();
     artState.artifact = null;
@@ -217,6 +248,8 @@ async function artOpen(name, push = true) {
   }
   artState.artifact = name;
   artState.deleteArmed = false;
+  if (keepHistory) artHidePreview();
+  else artHideHistory();
   artEl('art-delete').textContent = 'Удалить';
   artRenderList();
   artEl('art-view').innerHTML = '<div class="art-placeholder"><b>Открываю…</b></div>';
@@ -375,6 +408,15 @@ function artCanRestore(item) {
   return Boolean(item?.canWrite || item?.canManage);
 }
 
+function artSyncHistoryState(hash) {
+  for (const row of document.querySelectorAll('.art-history-item')) {
+    const selected = row.dataset.commit === hash;
+    row.classList.toggle('selected', selected);
+    const state = row.querySelector('.art-history-current');
+    if (state && !row.classList.contains('current')) state.textContent = selected ? 'смотришь' : '';
+  }
+}
+
 function artRenderHistory(data) {
   const list = artEl('art-history-list');
   const history = data.history || [];
@@ -383,23 +425,19 @@ function artRenderHistory(data) {
       '<div class="art-empty"><b>Пока нет версий</b><span>История появится после первого изменения артефакта.</span></div>';
     return;
   }
-  const canRestore = artCanRestore(artState.selected);
+  const previewHash = artState.preview?.commit?.hash;
   list.innerHTML = history
     .map((commit) => {
       const current = commit.hash === data.current;
-      const action = current
-        ? '<em>текущая</em>'
-        : canRestore
-          ? '<em>Вернуть</em>'
-          : '';
+      const selected = commit.hash === previewHash;
+      const state = current ? 'текущая' : selected ? 'смотришь' : '';
       return (
-        '<div class="art-history-item' + (current ? ' current' : '') + '">' +
-        '<div class="art-history-text"><b>' + artEsc(artHistoryLabel(commit.subject)) + '</b>' +
-        '<span>' + artEsc(artStamp(commit.date)) + '</span></div>' +
-        (current || !canRestore
-          ? '<span class="art-history-current">' + action + '</span>'
-          : '<button type="button" class="btn art-history-restore" data-commit="' + artEsc(commit.hash) + '">Вернуть</button>') +
-        '</div>'
+        '<button type="button" class="art-history-item' +
+        (current ? ' current' : '') + (selected ? ' selected' : '') +
+        '" data-commit="' + artEsc(commit.hash) + '">' +
+        '<span class="art-history-text"><b>' + artEsc(artHistoryLabel(commit.subject)) + '</b>' +
+        '<span>' + artEsc(artStamp(commit.date)) + '</span></span>' +
+        '<span class="art-history-current">' + state + '</span></button>'
       );
     })
     .join('');
@@ -407,8 +445,13 @@ function artRenderHistory(data) {
 
 async function artOpenHistory() {
   if (!artState.selected) return;
+  const panel = artEl('art-history-panel');
+  if (!panel.hidden) {
+    await artCloseHistory();
+    return;
+  }
+  panel.hidden = false;
   artEl('art-history-list').innerHTML = '<p class="art-empty">Читаю историю…</p>';
-  artEl('art-history-modal').hidden = false;
   try {
     const data = await artApi(
       '/panel/artifacts/api/history?artifact=' + encodeURIComponent(artState.selected.name),
@@ -420,19 +463,69 @@ async function artOpenHistory() {
   }
 }
 
-function artCloseHistory() {
-  artEl('art-history-modal').hidden = true;
+function artPreviewMeta(data) {
+  return 'Версия от ' + artStamp(data.commit.date) + ' · ' + artHistoryLabel(data.commit.subject);
 }
 
-async function artRestore(commit, button) {
+function artShowPreview(data) {
+  artState.preview = data;
+  artRenderView(data, data.commit);
+  artEl('art-preview').hidden = false;
+  artEl('art-preview-meta').textContent = artPreviewMeta(data);
+  artEl('art-preview-restore').hidden = !artCanRestore(artState.selected);
+  artEl('art-preview-restore').disabled = false;
+  artEl('art-preview-restore').textContent = 'Вернуть эту версию';
+  artEl('art-preview-restore').dataset.armed = '';
+  artSyncHistoryState(data.commit.hash);
+}
+
+async function artPreviewVersion(commit) {
   if (!artState.selected || !commit) return;
+  const token = ++artPreviewToken;
+  try {
+    const data = await artApi(
+      '/panel/artifacts/api/preview?artifact=' +
+        encodeURIComponent(artState.selected.name) +
+        '&commit=' +
+        encodeURIComponent(commit),
+    );
+    if (token !== artPreviewToken) return;
+    if (data.current === commit) {
+      await artShowCurrent();
+      return;
+    }
+    artShowPreview(data);
+  } catch (error) {
+    artSetStatus('Версия не открылась: ' + error.message, true);
+  }
+}
+
+async function artShowCurrent() {
+  const name = artState.selected?.name;
+  if (!name) return;
+  artHidePreview();
+  await artOpen(name, true, true);
+}
+
+async function artCloseHistory() {
+  const hadPreview = Boolean(artState.preview);
+  const name = artState.selected?.name;
+  artHideHistory();
+  if (hadPreview && name) await artOpen(name);
+}
+
+async function artRestorePreview() {
+  const preview = artState.preview;
+  const name = artState.selected?.name;
+  if (!preview || !name || !artCanRestore(artState.selected)) return;
+  const button = artEl('art-preview-restore');
   if (button.dataset.armed !== '1') {
     button.dataset.armed = '1';
     button.textContent = 'Точно вернуть?';
     setTimeout(() => {
-      if (button.isConnected) {
+      if (button.isConnected && button.dataset.armed === '1') {
         button.dataset.armed = '';
-        button.textContent = 'Вернуть';
+        button.textContent = 'Вернуть эту версию';
       }
     }, 4000);
     return;
@@ -441,18 +534,17 @@ async function artRestore(commit, button) {
   try {
     await artApi('/panel/artifacts/api/restore', {
       method: 'POST',
-      body: JSON.stringify({ artifact: artState.selected.name, commit }),
+      body: JSON.stringify({ artifact: name, commit: preview.commit.hash }),
     });
-    artCloseHistory();
+    artHideHistory();
     artSetStatus('Артефакт возвращён к выбранной версии');
-    const name = artState.selected.name;
     await artLoadList();
     await artOpen(name);
   } catch (error) {
     artSetStatus('Версия не вернулась: ' + error.message, true);
     button.disabled = false;
     button.dataset.armed = '';
-    button.textContent = 'Вернуть';
+    button.textContent = 'Вернуть эту версию';
   }
 }
 
@@ -479,9 +571,11 @@ async function artStart() {
   artEl('art-acl').addEventListener('click', artOpenAcl);
   artEl('art-history').addEventListener('click', artOpenHistory);
   artEl('art-history-list').addEventListener('click', (event) => {
-    const button = event.target.closest('.art-history-restore');
-    if (button) artRestore(button.dataset.commit, button);
+    const button = event.target.closest('[data-commit]');
+    if (button) artPreviewVersion(button.dataset.commit);
   });
+  artEl('art-preview-current').addEventListener('click', artShowCurrent);
+  artEl('art-preview-restore').addEventListener('click', artRestorePreview);
   artEl('art-delete').addEventListener('click', artDelete);
   artEl('acl-cancel').addEventListener('click', artCloseAcl);
   artEl('acl-save').addEventListener('click', artSaveAcl);
@@ -489,13 +583,10 @@ async function artStart() {
   artEl('art-acl-modal').addEventListener('click', (event) => {
     if (event.target === artEl('art-acl-modal')) artCloseAcl();
   });
-  artEl('art-history-modal').addEventListener('click', (event) => {
-    if (event.target === artEl('art-history-modal')) artCloseHistory();
-  });
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;
     if (!artEl('art-acl-modal').hidden) artCloseAcl();
-    else if (!artEl('art-history-modal').hidden) artCloseHistory();
+    else if (!artEl('art-history-panel').hidden) artCloseHistory();
   });
   artFillCounts();
   try {

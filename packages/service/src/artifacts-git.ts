@@ -12,7 +12,17 @@
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { ensureArtifactsRoot, readAcl } from './artifacts.ts';
+import {
+  AI_FILE,
+  ARTIFACT_TYPE_LABELS,
+  ensureArtifactsRoot,
+  entryForFiles,
+  mimeOf,
+  readAcl,
+  summaryOf,
+  titleOf,
+  type ArtifactType,
+} from './artifacts.ts';
 import type { IcarusConfig } from './config.ts';
 import { log } from './log.ts';
 
@@ -26,6 +36,26 @@ export type ArtifactCommit = {
   short: string;
   date: string;
   subject: string;
+};
+
+/** Версия артефакта для предпросмотра: всё, что нужно панели, без правки файлов. */
+export type ArtifactVersion = {
+  artifact: {
+    name: string;
+    title: string;
+    type: ArtifactType;
+    typeLabel: string;
+    entry: string;
+    size: number;
+    updatedAt: string;
+    summary: string;
+    ai: boolean;
+    files: string[];
+    urls: { raw: string };
+  };
+  content: string | null;
+  aiContent: string | null;
+  commit: ArtifactCommit;
 };
 
 type GitResult = { code: number; stdout: string; stderr: string };
@@ -43,6 +73,26 @@ function git(dir: string, args: string[]): Promise<GitResult> {
             : 1
           : 0;
         resolve({ code, stdout: String(stdout ?? ''), stderr: String(stderr ?? '') });
+      },
+    );
+  });
+}
+
+/** Бинарное чтение: `git show` для картинок и других файлов версии. */
+function gitBuffer(dir: string, args: string[]): Promise<{ code: number; stdout: Buffer; stderr: string }> {
+  return new Promise((resolve) => {
+    execFile(
+      'git',
+      ['-C', dir, ...args],
+      { timeout: GIT_TIMEOUT, maxBuffer: MAX_BUFFER, encoding: 'buffer', env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } },
+      (error, stdout, stderr) => {
+        const code = error
+          ? typeof (error as { code?: unknown }).code === 'number'
+            ? Number((error as { code?: number }).code)
+            : 1
+          : 0;
+        const buffer = Buffer.isBuffer(stdout) ? stdout : Buffer.from(String(stdout ?? ''));
+        resolve({ code, stdout: buffer, stderr: String(stderr ?? '') });
       },
     );
   });
@@ -161,6 +211,105 @@ export async function restoreArtifact(
 
   const changed = await commitArtifact(dir, `artifact: restore ${commit.slice(0, 8)}`);
   return { ok: true, changed, subject: `artifact: restore ${commit.slice(0, 8)}` };
+}
+
+/** Коммит-метаданные для предпросмотра: hash, короткий hash, дата и subject. */
+async function commitInfo(dir: string, commit: string): Promise<ArtifactCommit | null> {
+  const result = await git(dir, [
+    'show',
+    '-s',
+    '--date=iso-strict',
+    '--pretty=format:%H%x1f%h%x1f%ad%x1f%s',
+    commit,
+  ]);
+  if (result.code !== 0) return null;
+  const [hash, short, date, subject] = result.stdout.trim().split('\u001f');
+  if (!hash || !HASH.test(hash)) return null;
+  return { hash, short: short ?? hash.slice(0, 7), date: date ?? '', subject: subject ?? '' };
+}
+
+async function showText(dir: string, commit: string, file: string): Promise<string | null> {
+  const result = await git(dir, ['show', `${commit}:${file}`]);
+  return result.code === 0 ? result.stdout : null;
+}
+
+async function versionFiles(dir: string, commit: string): Promise<string[]> {
+  const result = await git(dir, ['ls-tree', '-r', '--name-only', '--full-tree', commit]);
+  if (result.code !== 0) return [];
+  return result.stdout
+    .split('\n')
+    .filter(Boolean)
+    .filter((name) => !name.split('/').some((part) => part.startsWith('.')));
+}
+
+function encodedPath(relative: string): string {
+  return relative.split('/').map(encodeURIComponent).join('/');
+}
+
+/**
+ * Собрать версию для предпросмотра. Ничего не меняет: читает дерево коммита через
+ * `git show`. Именно это позволяет «тыкнуть и посмотреть», не нажимая «Вернуть».
+ */
+export async function artifactVersion(
+  config: IcarusConfig,
+  dir: string,
+  commit: string,
+): Promise<ArtifactVersion> {
+  if (!HASH.test(commit)) throw new Error('не похоже на версию артефакта');
+  if (!gitDirOk(dir)) throw new Error('у артефакта ещё нет истории');
+  const info = await commitInfo(dir, commit);
+  if (!info) throw new Error('такой версии нет');
+
+  const files = await versionFiles(dir, info.hash);
+  const entry = entryForFiles(files);
+  if (!entry) throw new Error('в этой версии нет index-файла');
+  const ai = await showText(dir, info.hash, AI_FILE);
+  const document =
+    entry.type === 'html' || entry.type === 'markdown'
+      ? await showText(dir, info.hash, entry.file)
+      : null;
+  const sizeResult = await git(dir, ['cat-file', '-s', `${info.hash}:${entry.file}`]);
+  const size = sizeResult.code === 0 ? Number(sizeResult.stdout.trim()) : Buffer.byteLength(document ?? '');
+  const slug = path.basename(dir);
+  const base = config.url.replace(/\/+$/, '');
+  const rawRoot = `${base}/panel/artifacts/version/${encodeURIComponent(slug)}/${info.hash}/`;
+
+  return {
+    artifact: {
+      name: slug,
+      title: titleOf(slug, ai, document),
+      type: entry.type,
+      typeLabel: ARTIFACT_TYPE_LABELS[entry.type],
+      entry: entry.file,
+      size: Number.isFinite(size) ? size : 0,
+      updatedAt: info.date,
+      summary: summaryOf(ai),
+      ai: ai !== null,
+      files: files.filter((file) => file !== AI_FILE),
+      urls: { raw: `${rawRoot}${encodedPath(entry.file)}` },
+    },
+    content: entry.type === 'markdown' ? document : null,
+    aiContent: ai,
+    commit: info,
+  };
+}
+
+/** Файл конкретной версии: ассеты HTML и картинки предпросмотра. */
+export async function artifactVersionFile(
+  dir: string,
+  commit: string,
+  relative: string,
+): Promise<{ content: Buffer; type: string }> {
+  if (!HASH.test(commit)) throw new Error('не похоже на версию артефакта');
+  const clean = relative.replace(/^\/+/, '');
+  if (clean === '' || clean.includes('\u0000')) throw new Error('файл не указан');
+  const parts = clean.split('/');
+  if (parts.some((part) => part === '' || part === '.' || part === '..' || part.startsWith('.') || part === AI_FILE)) {
+    throw new Error('файл версии недоступен');
+  }
+  const result = await gitBuffer(dir, ['show', `${commit}:${clean}`]);
+  if (result.code !== 0) throw new Error('файл версии не найден');
+  return { content: result.stdout, type: mimeOf(clean) };
 }
 
 /**
