@@ -129,6 +129,9 @@ test('справа у чата — панель файлов рабочей па
   assert.match(html, /function askDeleteEntry/, 'удаление спрашивает подтверждение');
   assert.match(html, /class="files-send"/, 'рядом со скачиванием есть кнопка «В чат»');
   assert.match(html, /Послать агенту/, 'кнопка вставки пути подписана');
+  assert.match(html, /class="files-copy"/, 'текст из предпросмотра копируется в буфер');
+  assert.match(html, /Скопировать содержимое в буфер обмена/, 'кнопка копирования подписана');
+  assert.match(html, /function copyPreviewContent/, 'копирование вынесено в отдельную функцию');
   assert.match(html, /function insertPathIntoChat/, 'путь вставляется, а не переписывает поле');
   assert.match(html, /status === 409/, 'непустая папка подтверждается после ответа сервера');
   assert.match(
@@ -315,6 +318,8 @@ async function driveChat(
   const calls: string[] = [];
   const requests: { method: string; url: string }[] = [];
   const store = new Map<string, string>();
+  /** Что панель положила в буфер обмена: кнопка копирования проверяется отсюда. */
+  const clipboard: string[] = [];
   const globals = window as unknown as Record<string, unknown>;
   window.URL.createObjectURL = () => 'blob:x';
   window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
@@ -382,8 +387,30 @@ async function driveChat(
   globals.EventSource = FakeEventSource;
 
   const code = scripts.join('\n');
-  const run = new Function('window', 'document', 'fetch', 'URL', 'location', 'history', 'localStorage', code);
-  run(window, document, window.fetch, window.URL, globals.location, globals.history, globals.localStorage);
+  const run = new Function(
+    'window',
+    'document',
+    'fetch',
+    'URL',
+    'location',
+    'history',
+    'localStorage',
+    'navigator',
+    code,
+  );
+  const browserClipboard = {
+    clipboard: { writeText: async (text: string) => void clipboard.push(text) },
+  };
+  run(
+    window,
+    document,
+    window.fetch,
+    window.URL,
+    globals.location,
+    globals.history,
+    globals.localStorage,
+    browserClipboard,
+  );
   // Скрипт асинхронный: даём микрозадачам и таймерам пройти.
   await new Promise((resolve) => setTimeout(resolve, 40));
 
@@ -393,6 +420,7 @@ async function driveChat(
     calls,
     requests,
     store,
+    clipboard,
     /** Проиграть событие сводки, как это сделал бы сервер. */
     event: (payload: Record<string, unknown>) => bulletin?.onmessage?.({ data: JSON.stringify(payload) }),
     sidebar: () => document.getElementById('chat-list')?.innerHTML ?? '',
@@ -724,6 +752,73 @@ test('панель файлов: дерево, раскрытие папки и 
 
   app.document.getElementById('files-close').onclick?.();
   assert.equal(app.store.get('icarus.files-open'), '0', 'закрытие тоже запоминается');
+});
+
+test('копирование содержимого — у текста, но не у картинки', async () => {
+  const markdown = '# Проект\n\nТекст файла.';
+  const app = await driveChat({
+    chatId: 'web-1',
+    routes: {
+      '/panel/api/workspace-files/read': (url: string) => {
+        const query = new URLSearchParams(String(url).split('?')[1] || '');
+        return query.get('path') === 'logo.png'
+          ? {
+              file: { name: 'logo.png', path: 'logo.png', dir: false, size: 10, mtime: '', type: 'PNG', image: true },
+              kind: 'image',
+              url: '/panel/api/workspace-files/raw?workspace=talk&path=logo.png',
+              download: '/panel/api/workspace-files/raw?workspace=talk&path=logo.png&download=1',
+            }
+          : {
+              file: { name: 'plan.md', path: 'plan.md', dir: false, size: 10, mtime: '', type: 'MARKDOWN', image: false },
+              kind: 'markdown',
+              text: markdown,
+              download: '/panel/api/workspace-files/raw?workspace=talk&path=plan.md&download=1',
+            };
+      },
+      '/panel/api/workspace-files': () => ({
+        workspace: { slug: 'talk', name: 'Разговор', path: '~/icarus/workspaces/talk' },
+        path: '',
+        entries: [
+          { name: 'logo.png', path: 'logo.png', dir: false, size: 10, mtime: '', type: 'PNG', image: true },
+          { name: 'plan.md', path: 'plan.md', dir: false, size: 10, mtime: '', type: 'MARKDOWN', image: false },
+        ],
+        truncated: false,
+      }),
+      '/panel/api/chat/status': () => ({ busy: [] }),
+      '/panel/api/chat/history': () => ({
+        chat: { id: 'web-1', title: 'Разговор', workspace: 'talk' },
+        messages: [],
+        live: false,
+      }),
+      '/panel/api/chats': () => ({ chats: [{ id: 'web-1', title: 'Разговор' }] }),
+    },
+  });
+
+  app.document.getElementById('toggle-files').onclick?.();
+  await new Promise((resolve) => setTimeout(resolve, 40));
+
+  const preview = app.document.getElementById('files-preview');
+  app.document
+    .querySelector('.frow[data-path="plan.md"]')
+    ?.dispatchEvent(new app.window.Event('click', { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.ok(preview.querySelector('.files-copy'), 'у markdown кнопка копирования есть');
+
+  preview.querySelector('.files-copy')?.dispatchEvent(new app.window.Event('click', { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  // В буфер едет исходный markdown: отрисованный html при вставке в редактор бесполезен.
+  assert.equal(app.clipboard.at(-1), markdown, 'скопирован исходный текст, а не html');
+  assert.ok(
+    preview.querySelector('.files-copy')?.classList.contains('copied'),
+    'после клика иконка подтверждает копирование',
+  );
+
+  app.document
+    .querySelector('.frow[data-path="logo.png"]')
+    ?.dispatchEvent(new app.window.Event('click', { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(preview.querySelector('.files-copy'), null, 'картинку в буфер не копируют — кнопки нет');
+  assert.ok(preview.querySelector('.files-dl'), 'скачивание у картинки осталось');
 });
 
 test('таблицы в репликах и предпросмотре — со своими стилями и прокруткой', () => {

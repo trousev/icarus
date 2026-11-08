@@ -1019,6 +1019,9 @@ let filesError = '';
 let filesRootToken = 0;
 let filesPreviewToken = 0;
 let filesPreviewHeight = 0;
+/** Текст для кнопки «копировать»: у картинок и бинаря его нет — кнопки тоже. */
+let filesPreviewCopy = null;
+let filesCopyTimer = 0;
 /** Идёт удаление: второй клик по корзине не должен отправить второй запрос. */
 let filesDeleting = false;
 /**
@@ -1039,6 +1042,11 @@ const TRASH_ICON =
   '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V5h6v2M7 7l1 13h8l1-13"/></svg>';
 const SEND_TO_CHAT_ICON =
   '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>';
+const COPY_ICON =
+  '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/></svg>';
+const COPIED_ICON =
+  '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7"/></svg>';
+const COPY_TITLE = 'Скопировать содержимое в буфер обмена';
 
 const filesNarrow = () => window.matchMedia('(max-width: 1100px)').matches;
 
@@ -1141,10 +1149,13 @@ function updateFilesHead() {
 function hideFilesPreview() {
   el('files-panel').classList.remove('has-preview');
   el('files-preview').innerHTML = '';
+  filesPreviewCopy = null;
 }
 
 function showFilesPreview(html) {
   el('files-preview').innerHTML = html;
+  // Старое содержимое больше не на экране: копировать его уже нечего.
+  filesPreviewCopy = null;
   el('files-panel').classList.add('has-preview');
   // Первый файл забирает примерно половину панели; дальше помним, что человек выбрал.
   if (!filesPreviewHeight) {
@@ -1604,12 +1615,87 @@ function rememberComposerCaret() {
   if (typeof input.selectionStart === 'number') composerCaret = input.selectionStart;
 }
 
+/**
+ * Текст в буфер обмена. Clipboard API живёт только в защищённом контексте, а
+ * панель часто открыта по http в локальной сети — тогда копируем скрытой textarea.
+ */
+async function writeClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.top = '-1000px';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    let ok = false;
+    try {
+      ok = document.execCommand('copy');
+    } catch {
+      /* execCommand в этом браузере нет — остаётся «не вышло» */
+    }
+    area.remove();
+    return ok;
+  }
+}
+
+/** Предпросмотр показывает первые 256 КБ — для копирования берём файл целиком. */
+async function fetchPreviewFullText(source) {
+  if (!source.slug || !source.path) return null;
+  try {
+    const response = await fetch(filesUrl(source.slug, 'raw', source.path));
+    if (!response.ok) return null;
+    return await response.text();
+  } catch {
+    return null;
+  }
+}
+
+async function copyPreviewContent(button) {
+  const source = filesPreviewCopy;
+  if (!source) return;
+  let text = source.text;
+  if (source.truncated) {
+    const full = await fetchPreviewFullText(source);
+    if (typeof full === 'string') text = full;
+  }
+  if (!(await writeClipboard(text))) {
+    setNote('не удалось скопировать содержимое — выдели текст вручную');
+    return;
+  }
+  setNote('');
+  // Ответ на клик: иконка на секунду становится галочкой, иначе непонятно, сработало ли.
+  button.classList.add('copied');
+  button.title = 'Скопировано';
+  button.setAttribute('aria-label', 'Скопировано');
+  button.innerHTML = COPIED_ICON;
+  clearTimeout(filesCopyTimer);
+  filesCopyTimer = setTimeout(() => {
+    if (!button.isConnected) return;
+    button.classList.remove('copied');
+    button.title = COPY_TITLE;
+    button.setAttribute('aria-label', COPY_TITLE);
+    button.innerHTML = COPY_ICON;
+  }, 1500);
+}
+
 function renderFilePreview(data) {
   const file = data.file || {};
+  // Копировать имеет смысл только текст: картинку и бинарь в буфер не положить.
+  const copyable = data.kind === 'markdown' || data.kind === 'text';
+  const copy = copyable
+    ? '<button type="button" class="files-copy" title="' + COPY_TITLE +
+      '" aria-label="' + COPY_TITLE + '">' + COPY_ICON + '</button>'
+    : '';
   const actions =
     '<button type="button" class="files-send" data-send="' + esc(file.path || '') +
     '" title="Послать агенту: вставить путь в чат" aria-label="Послать агенту">' +
     SEND_TO_CHAT_ICON + '<span>В чат</span></button>' +
+    copy +
     '<a class="files-dl" href="' + esc(data.download || '#') + '" download title="Скачать файл">↓</a>';
   const head =
     '<div class="files-preview-head"><b>' + esc(file.path || '') + '</b>' + actions + '</div>';
@@ -1635,6 +1721,14 @@ function renderFilePreview(data) {
       '<a class="files-dl" href="' + esc(data.download || '#') + '" download>Скачать файл</a></div>';
   }
   showFilesPreview(head + body);
+  filesPreviewCopy = copyable
+    ? {
+        slug: filesWorkspace,
+        path: file.path || '',
+        text: data.text || '',
+        truncated: Boolean(data.truncated),
+      }
+    : null;
   if (data.kind === 'markdown') bindPreviewFiles(file.path || '');
 }
 
@@ -1686,6 +1780,12 @@ el('files-tree').addEventListener('click', (event) => {
 
 // «В чат» в шапке предпросмотра: путь вставляется в поле ввода, а не отправляется.
 el('files-preview').addEventListener('click', (event) => {
+  const copy = event.target.closest('.files-copy');
+  if (copy) {
+    event.preventDefault();
+    void copyPreviewContent(copy);
+    return;
+  }
   const send = event.target.closest('.files-send');
   if (!send) return;
   event.preventDefault();

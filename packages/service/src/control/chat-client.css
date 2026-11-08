@@ -418,14 +418,19 @@
   flex: 1; min-width: 0; font-size: 17px; font-weight: 600; line-height: 1.35;
   overflow-wrap: anywhere;
 }
-.files-dl, .files-send {
+.files-dl, .files-send, .files-copy {
   flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px;
   color: var(--dim); text-decoration: none; font: inherit; font-size: 11.5px;
   border: 1px solid var(--line); border-radius: 7px; padding: 3px 8px;
   background: transparent; line-height: 1.4; cursor: pointer; white-space: nowrap;
 }
-.files-dl:hover, .files-send:hover { color: var(--text); border-color: var(--accent); }
+.files-dl:hover, .files-send:hover, .files-copy:hover { color: var(--text); border-color: var(--accent); }
 .files-dl { font-size: 13px; padding: 2px 8px; }
+/* Копирование — иконка без подписи: в шапке предпросмотра тесно, а действие
+   узнаваемое. Галочка на полторы секунды подтверждает, что текст в буфере. */
+.files-copy { padding: 3px 7px; }
+.files-copy svg { display: block; }
+.files-copy.copied { color: var(--accent); background: var(--accent-soft); border-color: var(--accent); }
 /* «В чат» — это действие, а не скачивание: заметнее, но не спорит с заголовком. */
 .files-send { color: var(--accent); border-color: rgba(122, 162, 247, .35); }
 .files-send:hover { color: var(--accent); background: var(--accent-soft); }
