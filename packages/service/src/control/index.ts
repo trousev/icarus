@@ -23,7 +23,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import fs from 'node:fs';
 import { handleWorkspacesApi } from './workspaces.ts';
-import { DEFAULT_WORKSPACE, findUser, isAdmin, userPaths, type IcarusConfig, type UserConfig } from '../config.ts';
+import { findUser, isAdmin, userPaths, type IcarusConfig, type UserConfig } from '../config.ts';
 import { LANGUAGE_LABELS, LANGUAGES, languageOf, writeProfile, type Language } from '../profile.ts';
 import { readJsonBody } from '../http/openai.ts';
 import { errorBody } from '../http/sse.ts';
@@ -63,7 +63,7 @@ import { countVisible } from '../mcp/registry.ts';
 import { handleChatApi } from './chat.ts';
 import { handleArtifactsApi, handleArtifactsRaw } from './artifacts.ts';
 import { artifactsPage } from './artifacts-ui.ts';
-import { artifactWorkspaces, countArtifacts } from '../artifacts.ts';
+import { countArtifacts } from '../artifacts.ts';
 import type { SessionRegistry } from '../sessions/registry.ts';
 import { log as logger } from '../log.ts';
 
@@ -509,19 +509,8 @@ async function sectionPage(
     return keysPage(session);
   }
   if (page.section === 'artifacts') {
-    // Workspace — состояние страницы, а не глобальная настройка: артефакты лежат
-    // в рабочей папке, и человек может держать их в любой из своих.
-    const workspaces = artifactWorkspaces(config, userId);
-    const requested = url.searchParams.get('workspace');
-    const workspace =
-      workspaces.find((item) => item.slug === requested)?.slug ??
-      workspaces.find((item) => item.slug === DEFAULT_WORKSPACE)?.slug ??
-      workspaces[0]?.slug ??
-      DEFAULT_WORKSPACE;
     return artifactsPage(session, {
-      workspace,
       ...(url.searchParams.get('artifact') ? { artifact: url.searchParams.get('artifact')! } : {}),
-      workspaces: workspaces.map((item) => ({ slug: item.slug, name: item.name })),
       counts: countsFor(config, userId),
     });
   }

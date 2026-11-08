@@ -815,6 +815,8 @@ export const CONTAINER_WORKSPACES = '/workspaces';
 export const CONTAINER_PATHS = {
   workspaces: CONTAINER_WORKSPACES,
   home: CONTAINER_HOME,
+  /** Глобальная библиотека артефактов: общая для всех, отдельным маунтом. */
+  artifacts: '/artifacts',
   memory: `${CONTAINER_HOME}/memory`,
   incoming: `${CONTAINER_HOME}/incoming`,
   sessions: `${CONTAINER_HOME}/sessions`,

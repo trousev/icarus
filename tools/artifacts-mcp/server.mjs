@@ -2,28 +2,29 @@
 // Артефакты: MCP-сервер, который объясняет агенту, куда класть готовые вещи,
 // откуда их брать и как показать человеку.
 //
-// Отдельного «создателя артефактов» нет намеренно: pi уже умеет писать файлы, а
-// структура простая. Сервер нужен для трёх вещей, которых файловые инструменты
-// не знают: где именно лежат артефакты в текущем workspace, как прочитать
-// index.ai.md вместо разбора HTML и как получить публичную ссылку.
-//
-// Артефакт — папка `artifacts/<slug>/`:
-//   index.html | index.md | index.png|jpg|svg — то, что видит человек;
-//   index.ai.md — описание для ИИ;
-//   остальные файлы — ассеты, на которые ссылается index.
-//
-// Публичная ссылка — случайный publicId в `.artifact.json`, а не имя папки.
-// `artifact_link` создаёт его в момент, когда ссылку действительно просят.
+// Артефакты — глобальная библиотека `/artifacts`, общая для всех людей. Доступ
+// к папкам решают права `.folder-acl.json`: у каждого артефакта есть владелец,
+// а уровни read ⊂ write ⊂ admin задаются отдельно для «меня» и «семьи».
+// Файловые инструменты pi блокирует generic folder-guard, поэтому читать и
+// писать здесь можно только то, что разрешено.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const PROTOCOL_VERSION = '2025-06-18';
-const SERVER_INFO = { name: 'artifacts', version: '1.0.0' };
+const SERVER_INFO = { name: 'artifacts', version: '2.0.0' };
+const ARTIFACTS = path.resolve(process.env.ICARUS_ARTIFACTS_DIR ?? '/artifacts');
+const USER_ID = (process.env.ICARUS_USER_ID ?? '').trim();
+const PUBLIC_BASE = (process.env.ICARUS_URL ?? '').replace(/\/+$/, '');
+
 const META_FILE = '.artifact.json';
+const ACL_FILE = '.folder-acl.json';
 const AI_FILE = 'index.ai.md';
 const PUBLIC_ID = /^[A-Za-z0-9_-]{16,64}$/;
+const LEVELS = { read: 1, write: 2, admin: 3 };
+const isLevel = (value) => value === 'read' || value === 'write' || value === 'admin';
+const DEFAULT_ACL = { me: 'admin', family: 'read' };
 
 const INDEX_FILES = [
   { file: 'index.html', type: 'html' },
@@ -43,30 +44,17 @@ const TYPE_LABELS = {
   image: 'Изображение',
 };
 
-const WORKSPACE = process.cwd();
-const ARTIFACTS = path.join(WORKSPACE, 'artifacts');
-const PUBLIC_BASE = (process.env.ICARUS_URL ?? '').replace(/\/+$/, '');
-const USER_ID = (process.env.ICARUS_USER_ID ?? '').trim();
-const WORKSPACE_ID = (process.env.ICARUS_WORKSPACE ?? path.basename(WORKSPACE)).trim();
+const INSTRUCTIONS = `Артефакты — ОБЩАЯ библиотека в /artifacts, а не в рабочей папке. Один артефакт — папка /artifacts/<slug>/: внутри index.html, index.md или index.png/jpg/svg, обязательный index.ai.md и ассеты рядом. slug — короткое латинское имя в нижнем регистре через дефис: plan-na-chetverg, otchet-atlas.
 
-const INSTRUCTIONS = `Артефакт — это готовая вещь для человека: страница, документ или картинка. Он живёт в папке artifacts/<slug>/ текущей рабочей папки. Специального инструмента создания нет: создавай папку и файлы обычными файловыми инструментами. slug — короткое латинское имя в нижнем регистре через дефис: plan-na-chetverg, otchet-atlas.
+Создание:
+1. artifact_new(name) — заводит папку и права. Без него писать в /artifacts нельзя: folder-guard блокирует файлы.
+2. Напиши index.ai.md (H1, о чём артефакт, что внутри, что можно менять) и index-файл обычными write.
+3. artifact_check — проверь структуру.
+4. artifact_link — дай человеку ВНУТРЕННЮЮ ссылку в панели. Публичную создавай только по прямой просьбе: «публичная», «поделиться», «без входа» — artifact_link с public: true. Публичная требует прав admin.
 
-Внутри папки ровно один index-файл, который видит человек:
-- index.html — HTML-страница;
-- index.md — markdown-документ;
-- index.png, index.jpg или index.svg — изображение.
-И всегда index.ai.md — короткое описание для ИИ: заголовок H1, о чём артефакт, что внутри, что можно менять. Его пиши для каждого артефакта: по нему модель понимает содержимое, не разбирая HTML и не глядя на картинку.
+Права у папки: owner и acl { me, family }, уровни read < write < admin (write умеет читать, admin — ещё права/удаление/публичную ссылку). Владелец всегда управляет своим артефактом; family по умолчанию read. Не обещай изменить права, если ты не владелец и не admin: это делает панель.
 
-Остальные файлы (style.css, картинки, шрифты) лежат рядом с index; ссылки внутри HTML — относительные, без внешних CDN, если без них страница ломается. Секреты, токены и чужие персональные данные в артефакт не клади.
-
-Порядок работы:
-1. Посмотри, что уже есть: artifact_list.
-2. Создай папку artifacts/<slug>/ и файлы: сначала index.ai.md, потом index.
-3. Проверь структуру: artifact_check.
-4. Дай человеку ссылку В ПАНЕЛИ: artifact_link без public — это обычная ссылка. Публичную ссылку (любой, у кого есть адрес) создавай только по прямой просьбе: «публичная», «поделиться», «открыть без входа» — тогда artifact_link с public: true. Не выдавай публичную вместо обычной.
-5. Если артефакт уже существует — не плоди второй, а правь его; перед правкой прочитай artifact_read.
-
-Как читать: artifact_list, затем artifact_read — он отдаёт index.ai.md и список файлов. HTML не парсь.`;
+Читать чужие артефакты можно в пределах прав; HTML не парсь — artifact_read отдаёт index.ai.md и список файлов. Если инструмент заблокирован правами — это не ошибка сети, а запрет: честно скажи человеку, что доступа нет.`;
 
 function send(message) {
   process.stdout.write(JSON.stringify(message) + '\n');
@@ -74,6 +62,11 @@ function send(message) {
 
 function log(message) {
   process.stderr.write(`[artifacts] ${message}\n`);
+}
+
+function requireUser() {
+  if (!USER_ID) throw new Error('не задан ICARUS_USER_ID: непонятно, чьи права проверять');
+  return USER_ID;
 }
 
 function validName(name) {
@@ -105,6 +98,16 @@ function statOrNull(file) {
   }
 }
 
+function realDirOrNull(dir) {
+  try {
+    const stats = fs.lstatSync(dir);
+    if (stats.isSymbolicLink() || !stats.isDirectory()) return null;
+    return dir;
+  } catch {
+    return null;
+  }
+}
+
 function readSmall(file, limit = 256 * 1024) {
   const stats = statOrNull(file);
   if (!stats?.isFile() || stats.size > limit) return null;
@@ -114,6 +117,12 @@ function readSmall(file, limit = 256 * 1024) {
   } catch {
     return null;
   }
+}
+
+function writeJsonAtomic(file, value) {
+  const temporary = `${file}.${process.pid}.${crypto.randomBytes(3).toString('hex')}.tmp`;
+  fs.writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o644 });
+  fs.renameSync(temporary, file);
 }
 
 function stripMarkdown(text) {
@@ -148,7 +157,7 @@ function titleOf(slug, ai, document) {
     const text = stripFrontmatter(document);
     const heading = /^\s*#\s+(.+?)\s*$/m.exec(text)?.[1];
     if (heading) return stripMarkdown(heading).slice(0, 90);
-    const title = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(document)?.[1];
+    const title = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(text)?.[1];
     if (title) return stripMarkdown(title.replace(/\s+/g, ' ').trim()).slice(0, 90);
   }
   const human = slug.replace(/[-_]+/g, ' ').trim();
@@ -171,54 +180,9 @@ function summaryOf(ai) {
 
 function humanSize(bytes) {
   if (!Number.isFinite(bytes) || bytes < 0) return '—';
-  if (bytes < 1024) return `${bytes} б`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1).replace('.', ',')} Кб`;
-  return `${(bytes / (1024 * 1024)).toFixed(1).replace('.', ',')} Мб`;
-}
-
-function detectEntry(dir) {
-  let names;
-  try {
-    names = new Set(fs.readdirSync(dir));
-  } catch {
-    return null;
-  }
-  return INDEX_FILES.find((candidate) => names.has(candidate.file)) ?? null;
-}
-
-function readMeta(dir) {
-  const text = readSmall(path.join(dir, META_FILE));
-  if (text === null) return null;
-  try {
-    const parsed = JSON.parse(text);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
-    if (typeof parsed.publicId !== 'string' || !PUBLIC_ID.test(parsed.publicId)) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-function writeMeta(dir, meta) {
-  const file = path.join(dir, META_FILE);
-  const tmp = `${file}.${process.pid}.tmp`;
-  // 0644: publicId — не секрет, а читать метку может и сервис на хосте (другой uid).
-  fs.writeFileSync(tmp, `${JSON.stringify({ version: 1, ...meta }, null, 2)}\n`, { mode: 0o644 });
-  fs.renameSync(tmp, file);
-}
-
-function urlsOf(slug, entry, publicId) {
-  const user = encodeURIComponent(USER_ID);
-  const workspace = encodeURIComponent(WORKSPACE_ID);
-  const artifact = encodeURIComponent(slug);
-  const entryPath = String(entry).split('/').map(encodeURIComponent).join('/');
-  const relativePanel = `/panel/artifacts?${new URLSearchParams({ workspace: WORKSPACE_ID, artifact: slug }).toString()}`;
-  const panel = PUBLIC_BASE ? `${PUBLIC_BASE}${relativePanel}` : relativePanel;
-  if (!PUBLIC_BASE || !USER_ID || !publicId) {
-    return { panel, raw: panel };
-  }
-  const pub = `${PUBLIC_BASE}/a/${user}/${workspace}/${artifact}/${publicId}/`;
-  return { panel, raw: `${PUBLIC_BASE}/panel/artifacts/raw/${workspace}/${artifact}/${entryPath}`, public: pub, bare: `${pub}?bare=1` };
+  if (bytes < 1024) return `${bytes} Б`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1).replace('.', ',')} КБ`;
+  return `${(bytes / (1024 * 1024)).toFixed(1).replace('.', ',')} МБ`;
 }
 
 function listFiles(dir, prefix = '') {
@@ -234,27 +198,96 @@ function listFiles(dir, prefix = '') {
     const relative = `${prefix}${entry.name}`;
     if (entry.isDirectory()) {
       files.push(...listFiles(path.join(dir, entry.name), `${relative}/`));
+      if (files.length >= 400) return files.slice(0, 400);
       continue;
     }
     if (entry.isFile()) files.push(relative);
-    if (files.length >= 400) return files.slice(0, 400);
   }
   return files;
 }
 
-function inspect(slug) {
-  if (!validName(slug)) return null;
-  const dir = safeJoin(ARTIFACTS, slug);
-  if (!dir?.startsWith(ARTIFACTS + path.sep)) return null;
-  let link;
+function detectEntry(dir) {
+  let names;
   try {
-    link = fs.lstatSync(dir);
+    names = new Set(fs.readdirSync(dir));
   } catch {
     return null;
   }
-  if (link.isSymbolicLink()) return null;
-  const stats = statOrNull(dir);
-  if (!stats?.isDirectory()) return null;
+  return INDEX_FILES.find((candidate) => names.has(candidate.file)) ?? null;
+}
+
+function readAcl(dir) {
+  const text = readSmall(path.join(dir, ACL_FILE));
+  if (text === null) return null;
+  try {
+    const parsed = JSON.parse(text);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    if (typeof parsed.owner !== 'string' || parsed.owner.trim() === '') return null;
+    if (!parsed.acl || typeof parsed.acl !== 'object') return null;
+    if (!isLevel(parsed.acl.me) || !isLevel(parsed.acl.family)) return null;
+    return { owner: parsed.owner, acl: { me: parsed.acl.me, family: parsed.acl.family } };
+  } catch {
+    return null;
+  }
+}
+
+function writeAcl(dir, owner, acl) {
+  const now = new Date().toISOString();
+  writeJsonAtomic(path.join(dir, ACL_FILE), {
+    version: 1,
+    owner,
+    acl: { me: acl.me, family: acl.family },
+    createdAt: now,
+    updatedAt: now,
+  });
+}
+
+function readMeta(dir) {
+  const text = readSmall(path.join(dir, META_FILE));
+  if (text === null) return {};
+  try {
+    const parsed = JSON.parse(text);
+    return typeof parsed.publicId === 'string' && PUBLIC_ID.test(parsed.publicId)
+      ? { publicId: parsed.publicId }
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeMeta(dir, publicId) {
+  const now = new Date().toISOString();
+  writeJsonAtomic(path.join(dir, META_FILE), { version: 1, publicId, createdAt: now, updatedAt: now });
+}
+
+function allows(level, required) {
+  return LEVELS[level] >= LEVELS[required];
+}
+
+function accessFor(owner, acl, viewer) {
+  return viewer === owner ? acl.me : acl.family;
+}
+
+function urlsOf(slug, entry, publicId) {
+  const name = encodeURIComponent(slug);
+  const panel = PUBLIC_BASE
+    ? `${PUBLIC_BASE}/panel/artifacts?artifact=${name}`
+    : `/panel/artifacts?artifact=${name}`;
+  const raw = PUBLIC_BASE
+    ? `${PUBLIC_BASE}/panel/artifacts/raw/${name}/${entry.split('/').map(encodeURIComponent).join('/')}`
+    : `/panel/artifacts/raw/${name}/${entry.split('/').map(encodeURIComponent).join('/')}`;
+  if (!PUBLIC_BASE || !publicId) return { panel, raw };
+  const pub = `${PUBLIC_BASE}/a/${name}/${publicId}/`;
+  return { panel, raw, public: pub, bare: `${pub}?bare=1` };
+}
+
+function inspect(slug, viewer = USER_ID) {
+  if (!validName(slug)) return null;
+  const dir = safeJoin(ARTIFACTS, slug);
+  if (!dir) return null;
+  if (!realDirOrNull(dir)) return null;
+  const aclFile = readAcl(dir);
+  if (!aclFile) return null;
   const entry = detectEntry(dir);
   if (!entry) return null;
   const entryPath = path.join(dir, entry.file);
@@ -271,6 +304,7 @@ function inspect(slug) {
       ? readSmall(path.join(dir, entry.file))
       : null;
   const meta = readMeta(dir);
+  const access = accessFor(aclFile.owner, aclFile.acl, viewer);
   return {
     name: slug,
     dir,
@@ -284,12 +318,18 @@ function inspect(slug) {
     ai: ai !== null,
     aiContent: ai,
     files: listFiles(dir),
-    publicId: meta?.publicId,
-    urls: urlsOf(slug, entry.file, meta?.publicId),
+    owner: aclFile.owner,
+    acl: aclFile.acl,
+    access,
+    canRead: allows(access, 'read'),
+    canWrite: allows(access, 'write'),
+    canManage: viewer === aclFile.owner || allows(access, 'admin'),
+    publicId: meta.publicId,
+    urls: urlsOf(slug, entry.file, meta.publicId),
   };
 }
 
-function listAll() {
+function listAll(viewer = USER_ID) {
   let entries;
   try {
     entries = fs.readdirSync(ARTIFACTS, { withFileTypes: true });
@@ -299,64 +339,43 @@ function listAll() {
   const items = [];
   for (const entry of entries) {
     if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
-    const artifact = inspect(entry.name);
-    if (artifact) items.push(artifact);
+    const artifact = inspect(entry.name, viewer);
+    if (artifact?.canRead) items.push(artifact);
   }
   return items.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.title.localeCompare(b.title, 'ru'));
 }
 
-function ensurePublicId(slug) {
-  if (!PUBLIC_BASE || !USER_ID) {
-    throw new Error('публичная ссылка недоступна: серверу не передали ICARUS_URL или ICARUS_USER_ID');
-  }
-  const artifact = inspect(slug);
-  if (!artifact) throw new Error(`артефакт «${slug}» не найден: в папке artifacts/${slug} нет index.html, index.md или index.png`);
-  if (artifact.publicId) return { artifact, publicId: artifact.publicId };
-  const publicId = crypto.randomBytes(18).toString('base64url');
-  const now = new Date().toISOString();
-  writeMeta(artifact.dir, { publicId, createdAt: now, updatedAt: now });
-  const next = inspect(slug) ?? artifact;
-  return { artifact: next, publicId };
-}
-
-function problemsOf(slug) {
-  const dir = safeJoin(ARTIFACTS, slug);
-  if (!dir || !validName(slug)) return ['имя папки не годится'];
-  const stats = statOrNull(dir);
-  if (!stats?.isDirectory()) return ['папки нет'];
-  const indexes = INDEX_FILES.filter((candidate) => statOrNull(path.join(dir, candidate.file))?.isFile());
-  const problems = [];
-  if (indexes.length === 0) problems.push('нет index.html, index.md или index.png/jpg/svg');
-  if (indexes.length > 1) problems.push(`index-файлов больше одного: ${indexes.map((item) => item.file).join(', ')}`);
-  const ai = readSmall(path.join(dir, AI_FILE));
-  if (ai === null) problems.push(`нет ${AI_FILE} — описания для ИИ`);
-  else if (ai.trim() === '') problems.push(`${AI_FILE} пустой`);
-  return problems;
+function artifactDir(slug) {
+  if (!validName(slug)) return null;
+  return safeJoin(ARTIFACTS, slug);
 }
 
 function listText(items, query) {
+  if (!USER_ID) return 'Не задан ICARUS_USER_ID: права проверить нечем.';
   const filtered = items.filter((item) => {
     if (!query) return true;
     const needle = query.toLowerCase();
     return (
       item.title.toLowerCase().includes(needle) ||
       item.name.toLowerCase().includes(needle) ||
+      item.owner.toLowerCase().includes(needle) ||
       item.summary.toLowerCase().includes(needle) ||
       (item.aiContent ?? '').toLowerCase().includes(needle)
     );
   });
   if (filtered.length === 0) {
     return items.length === 0
-      ? 'Артефактов пока нет. Создай папку artifacts/<slug>/ с index.ai.md и index-файлом.'
-      : `По запросу «${query}» ничего не нашлось. Всего артефактов: ${items.length}.`;
+      ? 'Доступных артефактов нет. Создай новый через artifact_new(name).'
+      : `По запросу «${query}» ничего не нашлось. Доступно артефактов: ${items.length}.`;
   }
   const lines = [`Артефакты (${filtered.length}${query ? ` из ${items.length}` : ''}):`];
   for (const item of filtered) {
     lines.push('');
     lines.push(`## ${item.title}`);
     lines.push(
-      `- папка: artifacts/${item.name}/; тип: ${item.typeLabel}; размер: ${humanSize(item.size)}; обновлён: ${item.updatedAt.slice(0, 16).replace('T', ' ')}`,
+      `- папка: /artifacts/${item.name}/; тип: ${item.typeLabel}; размер: ${humanSize(item.size)}; обновлён: ${item.updatedAt.slice(0, 16).replace('T', ' ')}`,
     );
+    lines.push(`- владелец: ${item.owner}; твой уровень: ${item.access}`);
     lines.push(`- описание для ИИ: ${item.ai ? `${AI_FILE} есть` : `${AI_FILE} НЕТ — добавь его`}`);
     if (item.summary) lines.push(`- коротко: ${item.summary}`);
     lines.push(`- файлы: ${item.files.join(', ')}`);
@@ -369,15 +388,13 @@ function listText(items, query) {
 
 function readText(slug) {
   const artifact = inspect(slug);
-  if (!artifact) {
-    throw new Error(
-      `артефакт «${slug}» не найден или в его папке нет index-файла. Список: artifact_list.`,
-    );
-  }
+  if (!artifact) throw new Error(`артефакт «${slug}» не найден или у тебя нет прав читать его. Список: artifact_list.`);
+  if (!artifact.canRead) throw new Error(`нет права читать «${slug}»: владелец ${artifact.owner}, твой уровень ${artifact.access}.`);
   const lines = [
     `# ${artifact.title}`,
     '',
-    `- папка: artifacts/${artifact.name}/`,
+    `- папка: /artifacts/${artifact.name}/`,
+    `- владелец: ${artifact.owner}; твой уровень: ${artifact.access}`,
     `- тип: ${artifact.typeLabel} (${artifact.entry})`,
     `- размер: ${humanSize(artifact.size)}`,
     `- обновлён: ${artifact.updatedAt}`,
@@ -391,53 +408,100 @@ function readText(slug) {
   ];
   if (artifact.type === 'markdown') {
     const content = readSmall(path.join(artifact.dir, artifact.entry));
-    if (content !== null) {
-      lines.push('', `## ${artifact.entry}`, '', content);
-    }
+    if (content !== null) lines.push('', `## ${artifact.entry}`, '', content);
   }
-  return { text: lines.join('\n'), artifact };
+  return lines.join('\n');
 }
 
-function linkText(slug, makePublic = false) {
+function linkText(slug, makePublic) {
+  requireUser();
   const artifact = inspect(slug);
-  if (!artifact) {
-    throw new Error(`артефакт «${slug}» не найден: в папке artifacts/${slug} нет index.html, index.md или index.png`);
-  }
+  if (!artifact) throw new Error(`артефакт «${slug}» не найден или у тебя нет прав читать его.`);
   if (!makePublic) {
     return [
       `Ссылка на «${artifact.title}» в панели:`,
       '',
       artifact.urls.panel,
       '',
-      'Это обычная внутренняя ссылка: человек должен быть в панели. Публичную ссылку создавай только по прямой просьбе — artifact_link с public: true.',
+      'Это обычная внутренняя ссылка. Публичную создавай только по прямой просьбе — artifact_link с public: true (нужен уровень admin).',
     ].join('\n');
   }
-  const { artifact: linked } = ensurePublicId(slug);
+  if (!artifact.canManage) {
+    throw new Error(`публичную ссылку делает владелец или admin артефакта; твой уровень — ${artifact.access}.`);
+  }
+  if (!PUBLIC_BASE) throw new Error('публичная ссылка недоступна: серверу не передали ICARUS_URL');
+  let publicId = artifact.publicId;
+  if (!publicId) {
+    publicId = crypto.randomBytes(18).toString('base64url');
+    writeMeta(artifact.dir, publicId);
+  }
+  const urls = urlsOf(slug, artifact.entry, publicId);
   return [
-    `Публичная ссылка на «${linked.title}»:`,
+    `Публичная ссылка на «${artifact.title}»:`,
     '',
-    `- в панели: ${linked.urls.public}`,
-    `- без панели: ${linked.urls.bare}`,
-    `- ссылка на панель (только для вошедших): ${linked.urls.panel}`,
+    `- в панели: ${urls.public}`,
+    `- без панели: ${urls.bare}`,
+    `- ссылка на панель (только для вошедших): ${urls.panel}`,
     '',
     'Отдай человеку публичную ссылку. `?bare=1` — тот же артефакт без панели.',
   ].join('\n');
 }
 
+function newText(slug) {
+  requireUser();
+  if (!validName(slug)) throw new Error('имя артефакта: латиница, цифры, дефис; без слэшей и скрытых имён');
+  const dir = artifactDir(slug);
+  if (!dir) throw new Error('имя артефакта не годится');
+  if (fs.existsSync(dir)) throw new Error(`артефакт «${slug}» уже существует: правь его, а не создавай второй.`);
+  fs.mkdirSync(dir, { recursive: true });
+  writeAcl(dir, USER_ID, DEFAULT_ACL);
+  return [
+    `Артефакт /artifacts/${slug}/ создан, права: me=admin, family=read.`,
+    '',
+    'Теперь напиши обычными write:',
+    `- /artifacts/${slug}/index.ai.md — H1, о чём артефакт, что внутри, что можно менять;`,
+    `- /artifacts/${slug}/index.md | index.html | index.png|jpg|svg — то, что увидит человек.`,
+    '',
+    'Потом artifact_check и artifact_link (внутренняя ссылка). Публичную — только по просьбе.',
+  ].join('\n');
+}
+
+function problemsOf(slug) {
+  const dir = artifactDir(slug);
+  if (!dir) return ['имя папки не годится'];
+  if (!realDirOrNull(dir)) return ['папки нет'];
+  const problems = [];
+  if (!readAcl(dir)) problems.push(`нет ${ACL_FILE} — создай артефакт через artifact_new`);
+  const indexes = INDEX_FILES.filter((candidate) => statOrNull(path.join(dir, candidate.file))?.isFile());
+  if (indexes.length === 0) problems.push('нет index.html, index.md или index.png/jpg/svg');
+  if (indexes.length > 1) problems.push(`index-файлов больше одного: ${indexes.map((item) => item.file).join(', ')}`);
+  const ai = readSmall(path.join(dir, AI_FILE));
+  if (ai === null) problems.push(`нет ${AI_FILE} — описания для ИИ`);
+  else if (ai.trim() === '') problems.push(`${AI_FILE} пустой`);
+  return problems;
+}
+
 function checkText(slug) {
-  const items = slug ? [slug] : listAll().map((item) => item.name);
-  if (items.length === 0) {
-    return 'Артефактов нет. Создай папку artifacts/<slug>/ с index.ai.md и index.html, index.md или index.png.';
+  let names;
+  if (slug) names = [slug];
+  else {
+    try {
+      names = fs.readdirSync(ARTIFACTS, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
+        .map((entry) => entry.name);
+    } catch {
+      names = [];
+    }
   }
+  if (names.length === 0) return 'Артефактов нет. Создай новый через artifact_new(name).';
   const lines = [];
   let bad = 0;
-  for (const name of items) {
+  for (const name of names) {
     const problems = problemsOf(name);
-    if (problems.length === 0) {
-      lines.push(`✓ artifacts/${name}/ — в порядке`);
-    } else {
+    if (problems.length === 0) lines.push(`✓ /artifacts/${name}/ — в порядке`);
+    else {
       bad += 1;
-      lines.push(`✗ artifacts/${name}/ — ${problems.join('; ')}`);
+      lines.push(`✗ /artifacts/${name}/ — ${problems.join('; ')}`);
     }
   }
   lines.push('', bad === 0 ? 'Все артефакты полные.' : `Неполных артефактов: ${bad}.`);
@@ -446,13 +510,24 @@ function checkText(slug) {
 
 const TOOLS = [
   {
+    name: 'artifact_new',
+    description:
+      'Создать артефакт: папку /artifacts/<slug>/ и права (me=admin, family=read). Без него писать в /artifacts нельзя. После — обычными write положи index.ai.md и index-файл.',
+    inputSchema: {
+      type: 'object',
+      properties: { name: { type: 'string', description: 'Имя папки: латиница в нижнем регистре через дефис.' } },
+      required: ['name'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'artifact_list',
     description:
-      'Список артефактов в текущей рабочей папке: название, тип, размер, описание для ИИ, ссылки. Вызывай перед созданием, чтобы не плодить дубликаты, и чтобы показать человеку, что уже есть.',
+      'Доступные артефакты: название, тип, размер, владелец, твой уровень, описание для ИИ и ссылки. Вызывай перед созданием и чтобы показать человеку, что уже есть.',
     inputSchema: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: 'Необязательный поиск по названию, описанию и тексту index.ai.md.' },
+        query: { type: 'string', description: 'Поиск по названию, владельцу, описанию и тексту index.ai.md.' },
       },
       additionalProperties: false,
     },
@@ -460,10 +535,10 @@ const TOOLS = [
   {
     name: 'artifact_read',
     description:
-      'Прочитать артефакт так, как его понимает ИИ: index.ai.md, список файлов и ссылки. Для markdown — ещё и сам текст. HTML и картинки не парси: всё нужное уже в index.ai.md.',
+      'Прочитать артефакт так, как его понимает ИИ: index.ai.md, владелец/уровень, список файлов и ссылки. HTML и картинки не парси.',
     inputSchema: {
       type: 'object',
-      properties: { name: { type: 'string', description: 'Имя папки артефакта в artifacts/.' } },
+      properties: { name: { type: 'string', description: 'Имя папки артефакта.' } },
       required: ['name'],
       additionalProperties: false,
     },
@@ -471,11 +546,11 @@ const TOOLS = [
   {
     name: 'artifact_link',
     description:
-      'Ссылка на артефакт. По умолчанию возвращает внутреннюю ссылку в панели — её и давай человеку. Публичная ссылка (любой, у кого есть адрес) создаётся только при public: true и только по прямой просьбе.',
+      'Ссылка на артефакт. По умолчанию внутренняя, в панели — её и давай человеку. Публичная (любой, у кого есть адрес) — только при public: true и только по прямой просьбе; нужен уровень admin.',
     inputSchema: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: 'Имя папки артефакта в artifacts/.' },
+        name: { type: 'string', description: 'Имя папки артефакта.' },
         public: { type: 'boolean', description: 'Создать публичную ссылку. Только по прямой просьбе человека.' },
       },
       required: ['name'],
@@ -485,20 +560,30 @@ const TOOLS = [
   {
     name: 'artifact_check',
     description:
-      'Проверить структуру артефактов: есть ли index-файл, нет ли второго, на месте ли index.ai.md. Без name проверяет все.',
+      'Проверить структуру: есть ли .folder-acl.json, index-файл, index.ai.md. Без name проверяет все.',
     inputSchema: {
       type: 'object',
-      properties: { name: { type: 'string', description: 'Имя папки артефакта; без него проверяются все.' } },
+      properties: { name: { type: 'string', description: 'Имя папки; без него проверяются все.' } },
       additionalProperties: false,
     },
   },
 ];
 
 const HANDLERS = {
-  artifact_list: (args) => listText(listAll(), typeof args.query === 'string' ? args.query.trim() : ''),
-  artifact_read: (args) => readText(String(args.name ?? '')).text,
+  artifact_new: (args) => newText(String(args.name ?? '')),
+  artifact_list: (args) => {
+    requireUser();
+    return listText(listAll(), typeof args.query === 'string' ? args.query.trim() : '');
+  },
+  artifact_read: (args) => {
+    requireUser();
+    return readText(String(args.name ?? ''));
+  },
   artifact_link: (args) => linkText(String(args.name ?? ''), args.public === true),
-  artifact_check: (args) => checkText(typeof args.name === 'string' ? args.name : ''),
+  artifact_check: (args) => {
+    requireUser();
+    return checkText(typeof args.name === 'string' ? args.name : '');
+  },
 };
 
 async function dispatch(message) {
@@ -538,10 +623,7 @@ async function dispatch(message) {
       return {
         jsonrpc: '2.0',
         id,
-        result: {
-          content: [{ type: 'text', text: String(error?.message ?? error) }],
-          isError: true,
-        },
+        result: { content: [{ type: 'text', text: String(error?.message ?? error) }], isError: true },
       };
     }
   }
@@ -590,7 +672,6 @@ function serveStdio() {
   });
 }
 
-// Запускаемся только как самостоятельный сервер: тесты импортируют helpers.
 const isMain =
   process.argv[1] !== undefined && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) serveStdio();
@@ -604,6 +685,7 @@ export {
   linkText,
   listAll,
   listText,
+  newText,
   problemsOf,
   readText,
   urlsOf,

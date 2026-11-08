@@ -33,6 +33,8 @@ export function containerEnv(config: IcarusConfig, user: UserConfig): Record<str
     ICARUS_HOME: CONTAINER_PATHS.home,
     ICARUS_USER_ID: user.id,
     ICARUS_URL: config.url,
+    // Глобальная библиотека артефактов: и MCP, и folder-guard читают этот путь.
+    ICARUS_ARTIFACTS_DIR: CONTAINER_PATHS.artifacts,
     // Язык разговора — полным именем (English, Russian). Расширение language шлёт его
     // отдельным системным сообщением: внутри большого русского промпта правило языка
     // не держало (замер — tools/persona-flywheel/smoke-language.mjs).
@@ -63,6 +65,8 @@ export function specFor(config: IcarusConfig, user: UserConfig): string {
     // Код встроенных MCP монтируется из репозитория: старый контейнер без этого
     // маунта не запустит сервер артефактов, поэтому список — часть отпечатка.
     tools: ['artifacts-mcp', ...(config.mapleDir === undefined ? [] : ['maple-mcp'])],
+    // Глобальная библиотека артефактов — отдельный маунт /artifacts.
+    artifacts: true,
     env: Object.fromEntries(Object.entries(env).sort(([a], [b]) => a.localeCompare(b))),
   });
   return createHash('sha1').update(payload).digest('hex').slice(0, 16);

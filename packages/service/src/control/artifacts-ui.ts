@@ -1,10 +1,9 @@
 // Страница раздела «Артефакты» и публичный просмотр.
 //
-// Каркас — как у остальных разделов панели: сайдбар со списком, строка с крошками
-// и поиском, справа сам артефакт. Список и содержимое приезжают отдельным клиентом
-// (artifacts-client.js), а стили и markdown лежат рядом файлами: так в TypeScript
-// не приходится экранировать бэктики, а браузер получает один и тот же код и в
-// локальной панели, и на проде.
+// Артефакты глобальные: список один на всех, без workspace-переключателя.
+// Каркас — как у остальных разделов панели: сайдбар, крошки, поиск; справа сам
+// артефакт. Список и содержимое приезжают клиентом (artifacts-client.js), стили
+// и markdown лежат отдельными файлами — как у чата и MCP.
 import fs from 'node:fs';
 import type { Artifact } from '../artifacts.ts';
 import { escapeHtml, shell, type PanelSession } from './ui.ts';
@@ -14,18 +13,14 @@ const CLIENT_MD = fs.readFileSync(new URL('./artifacts-markdown.js', import.meta
 const CLIENT_JS = fs.readFileSync(new URL('./artifacts-client.js', import.meta.url), 'utf8');
 
 export type ArtifactsPageOptions = {
-  workspace: string;
   artifact?: string;
-  workspaces: Array<{ slug: string; name: string }>;
   counts: Record<string, number>;
 };
 
-/** Ссылки меню — тот же плоский список «Настройки», что и на остальных страницах. */
+/** Меню настроек — прежний плоский список; артефакты в него не входят. */
 function navLinks(session: PanelSession, active: string, counts: Record<string, number>): string {
   return session.sections
     .map((item) => {
-      // У памяти в счётчиках ключ «personal», а пункт называется «memory»:
-      // без этой поправки число у раздела не показывалось бы вовсе.
       const count = item.id === 'memory' ? counts.personal : counts[item.id];
       const badge = count === undefined ? '' : `<em id="count-${item.id}">${count}</em>`;
       return `<a class="${item.id === active ? 'active' : ''}" href="/panel/${item.id}">${escapeHtml(item.label)}${badge}</a>`;
@@ -34,13 +29,7 @@ function navLinks(session: PanelSession, active: string, counts: Record<string, 
 }
 
 export function artifactsPage(session: PanelSession, options: ArtifactsPageOptions): string {
-  const config = {
-    user: session.user,
-    workspace: options.workspace,
-    artifact: options.artifact ?? null,
-    workspaces: options.workspaces,
-    counts: options.counts,
-  };
+  const config = { user: session.user, artifact: options.artifact ?? null, counts: options.counts };
   const json = JSON.stringify(config).replaceAll('<', '\\u003c');
   const nav = navLinks(session, 'artifacts', options.counts);
 
@@ -75,11 +64,11 @@ export function artifactsPage(session: PanelSession, options: ArtifactsPageOptio
         <div><strong id="art-name">—</strong><small id="art-meta"></small></div>
       </div>
       <div class="art-actions">
-        <label class="art-ws">workspace <select id="art-workspace" aria-label="Рабочая папка"></select></label>
         <button class="art-icon-btn" id="art-link" disabled title="Скопировать публичную ссылку" aria-label="Скопировать публичную ссылку">
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.1 0l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1"/><path d="M14 11a5 5 0 0 0-7.1 0l-2 2A5 5 0 0 0 12 20.1l1.1-1.1"/></svg>
         </button>
         <button class="btn" id="art-unpublish" hidden>Отозвать ссылку</button>
+        <button class="btn" id="art-acl" hidden>Права</button>
         <a class="btn" id="art-bare" href="#" target="_blank" rel="noopener" aria-disabled="true">Без панели</a>
         <a class="btn" id="art-download" href="#" aria-disabled="true">Скачать</a>
         <button class="btn danger" id="art-delete" disabled>Удалить</button>
@@ -95,6 +84,18 @@ export function artifactsPage(session: PanelSession, options: ArtifactsPageOptio
     </div>
   </main>
 </div>
+<div class="art-modal" id="art-acl-modal" hidden>
+  <div class="art-modal-card" role="dialog" aria-modal="true" aria-labelledby="art-acl-title">
+    <h2 id="art-acl-title">Права доступа</h2>
+    <p class="art-modal-note">Уровень включает предыдущий: <b>write</b> умеет и читать, <b>admin</b> — ещё менять права, удалять и делать публичную ссылку.</p>
+    <label class="art-field"><span>Я</span><select id="acl-me"><option value="read">чтение</option><option value="write">запись</option><option value="admin">администрирование</option></select></label>
+    <label class="art-field"><span>Семья</span><select id="acl-family"><option value="read">чтение</option><option value="write">запись</option><option value="admin">администрирование</option></select></label>
+    <div class="art-modal-actions">
+      <button class="btn" id="acl-cancel">Отмена</button>
+      <button class="btn primary" id="acl-save">Сохранить</button>
+    </div>
+  </div>
+</div>
 <script>window.__ARTIFACTS_CFG__ = ${json};</script>
 <script>${CLIENT_MD}</script>
 <script>${CLIENT_JS}</script>`);
@@ -106,12 +107,8 @@ export function artifactsPage(session: PanelSession, options: ArtifactsPageOptio
  * который отдаёт сам файл (см. http/server.ts).
  */
 export function publicArtifactPage(artifact: Artifact, content: string | null): string {
-  // Публичная база всегда заканчивается слешем: от неё считаются относительные
-  // картинки и стили внутри артефакта.
   const base = artifact.urls.public ?? '';
   const entryUrl = `${base}${encodeURIComponent(artifact.entry)}`;
-  // У markdown «без панели» — отдельная страница с отрендеренным документом, а не
-  // text/markdown: браузер иначе покажет исходник. HTML и картинка — сами файлы.
   const bareUrl = artifact.type === 'markdown' ? (artifact.urls.bare ?? entryUrl) : entryUrl;
   const doc = {
     title: artifact.title,
@@ -148,6 +145,7 @@ export function publicArtifactPage(artifact: Artifact, content: string | null): 
       <p class="art-empty"><span>Любой, у кого есть этот адрес, может смотреть артефакт. Владелец может отозвать ссылку в панели.</span></p>
     </div>
     <div class="foot">
+      <div><span>владелец</span><span>${escapeHtml(artifact.owner)}</span></div>
       <div><span>режим</span><span>публичный</span></div>
       <div><span>обновлено</span><span>${escapeHtml(dateLabel(artifact.updatedAt))}</span></div>
     </div>

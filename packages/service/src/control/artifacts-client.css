@@ -133,3 +133,23 @@
   .art-actions { gap: 4px; }
   .art-ws { display: none; }
 }
+
+/* Права доступа: небольшая модалка, без нативных confirm/prompt. */
+.art-modal {
+  position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center;
+  padding: 24px; background: rgba(8, 10, 14, .68); backdrop-filter: blur(3px);
+}
+.art-modal[hidden] { display: none; }
+.art-modal-card {
+  width: min(460px, 100%); background: var(--panel); border: 1px solid var(--line);
+  border-radius: 14px; padding: 22px 22px 18px; box-shadow: 0 24px 80px rgba(0, 0, 0, .55);
+}
+.art-modal-card h2 { font-size: 20px; margin: 0 0 8px; }
+.art-modal-note { color: var(--dim); font-size: 13px; line-height: 1.55; margin: 0 0 16px; }
+.art-field { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.art-field span { color: var(--text); font-size: 14px; }
+.art-field select {
+  background: var(--raise); color: var(--text); border: 1px solid var(--line);
+  border-radius: 8px; padding: 7px 10px; font: inherit; font-size: 13px;
+}
+.art-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }

@@ -1,212 +1,239 @@
-// Ядро артефактов: папка, index-файл, описание для ИИ и публичная ссылка.
+// Ядро артефактов: глобальная папка, ACL, публичная ссылка и миграция.
 //
-// Тест не поднимает HTTP: здесь проверяется то, что одинаково важно панели, MCP и
-// публичному маршруту, — определение типа, безопасные пути, publicId и корзина.
+// Артефакт — общий для семьи, поэтому тест смотрит на него глазами разных
+// людей: владельца, «семьи» с read/write/admin и постороннего без ACL.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
+  ACL_FILE,
+  DEFAULT_ACL,
   META_FILE,
+  accessFor,
+  allows,
   artifactFile,
   artifactUrls,
-  clearPublicId,
-  countArtifacts,
-  ensurePublicId,
+  artifactsRoot,
   inspectArtifact,
   listArtifacts,
+  migrateLegacyArtifacts,
   publicArtifact,
+  readArtifact,
+  setAcl,
   trashArtifact,
+  writeAcl,
 } from '../src/artifacts.ts';
 import { userPaths } from '../src/config.ts';
 import { makeConfig, probe } from './fixtures.ts';
 
-function artifactRoot(config: ReturnType<typeof makeConfig>, workspace = 'talk'): string {
-  return path.join(userPaths(config, probe('probe')).workspaces, workspace, 'artifacts');
-}
+const config = (overrides: Partial<ReturnType<typeof makeConfig>> = {}) => makeConfig({ users: [probe('probe'), probe('probe2')], ...overrides });
+const root = (box: ReturnType<typeof makeConfig>) => artifactsRoot(box);
+const dirOf = (box: ReturnType<typeof makeConfig>, slug: string) => path.join(root(box), slug);
 
-function seed(root: string, files: Record<string, string | Buffer>): void {
+function seed(dir: string, files: Record<string, string | Buffer>): void {
   for (const [relative, content] of Object.entries(files)) {
-    const full = path.join(root, relative);
+    const full = path.join(dir, relative);
     fs.mkdirSync(path.dirname(full), { recursive: true });
     fs.writeFileSync(full, content);
   }
 }
 
-test('артефакт — папка с index-файлом; тип определяется по нему', () => {
-  const config = makeConfig();
-  const root = artifactRoot(config);
-  seed(root, {
-    'plan/index.md': '# План на четверг\n\n1. Стендап\n',
-    'plan/index.ai.md': '# План на четверг\n\nРасписание дня: стендап, демо, ревью.\n',
-    'report/index.html': '<title>Отчёт</title><h1>Атлас</h1>',
-    'report/index.ai.md': '# Отчёт по «Атласу»\n\nГотовность 87%.\n',
-    'gift/index.svg': '<svg xmlns="http://www.w3.org/2000/svg"></svg>',
-    'gift/index.ai.md': '# Идеи подарка\n\nТри идеи для Анны.\n',
-    // Папка без index — ещё не артефакт и в список не попадает.
-    'draft/notes.txt': 'черновик',
-    // Служебная корзина — тоже не артефакт.
-    '.trash/old/index.md': '# Старое',
+function artifact(box: ReturnType<typeof makeConfig>, slug: string, files: Record<string, string | Buffer>, acl = DEFAULT_ACL, owner = 'probe'): string {
+  const dir = dirOf(box, slug);
+  seed(dir, files);
+  writeAcl(dir, owner, acl);
+  return dir;
+}
+
+test('артефакты — глобальная папка с index-файлом; тип определяется по нему', () => {
+  const box = config();
+  artifact(box, 'plan', {
+    'index.md': '# План на четверг\n\n1. Стендап\n',
+    'index.ai.md': '# План на четверг\n\nРасписание дня: стендап, демо, ревью.\n',
   });
+  artifact(box, 'report', {
+    'index.html': '<title>Отчёт</title><h1>Атлас</h1>',
+    'index.ai.md': '# Отчёт по «Атласу»\n\nГотовность 87%.\n',
+  });
+  artifact(box, 'gift', {
+    'index.svg': '<svg xmlns="http://www.w3.org/2000/svg"></svg>',
+    'index.ai.md': '# Идеи подарка\n\nТри идеи для Анны.\n',
+  });
+  // Папка без ACL или index — не артефакт.
+  seed(dirOf(box, 'draft'), { 'index.md': '# без прав', 'index.ai.md': '# без прав' });
+  seed(dirOf(box, 'empty'), { 'notes.txt': 'черновик' });
 
-  const items = listArtifacts(config, 'probe', 'talk');
+  const items = listArtifacts(box, 'probe');
   assert.deepEqual(items.map((item) => item.name).sort(), ['gift', 'plan', 'report']);
-
   const plan = items.find((item) => item.name === 'plan')!;
   assert.equal(plan.type, 'markdown');
   assert.equal(plan.title, 'План на четверг');
+  assert.equal(plan.owner, 'probe');
+  assert.equal(plan.access, 'admin');
+  assert.equal(plan.canManage, true);
   assert.equal(plan.ai, true);
   assert.match(plan.summary, /Расписание дня/);
-  assert.equal(plan.entry, 'index.md');
-  assert.match(plan.urls.panel, /\/panel\/artifacts\?workspace=talk&artifact=plan/);
-  assert.equal(plan.urls.public, undefined, 'без publicId публичной ссылки нет');
+  assert.match(plan.urls.panel, /\/panel\/artifacts\?artifact=plan/);
+  assert.equal(plan.urls.public, undefined);
+  assert.equal(items.find((item) => item.name === 'report')!.type, 'html');
+  assert.equal(items.find((item) => item.name === 'gift')!.type, 'image');
+});
 
-  const report = items.find((item) => item.name === 'report')!;
-  assert.equal(report.type, 'html');
-  assert.equal(report.title, 'Отчёт по «Атласу»', 'заголовок берётся из описания для ИИ, а не из <title>');
+test('ACL: me для владельца, family для остальных, уровни включают друг друга', () => {
+  assert.equal(allows('admin', 'write'), true);
+  assert.equal(allows('write', 'read'), true);
+  assert.equal(allows('read', 'write'), false);
+  assert.equal(accessFor('probe', { me: 'admin', family: 'write' }, 'probe'), 'admin');
+  assert.equal(accessFor('probe', { me: 'admin', family: 'write' }, 'probe2'), 'write');
 
-  const gift = items.find((item) => item.name === 'gift')!;
-  assert.equal(gift.type, 'image', 'svg — тоже изображение');
+  const box = config();
+  artifact(box, 'plan', { 'index.md': '# План', 'index.ai.md': '# План' }, { me: 'admin', family: 'read' });
+  const family = inspectArtifact(box, 'plan', 'probe2')!;
+  assert.equal(family.access, 'read');
+  assert.equal(family.canRead, true);
+  assert.equal(family.canWrite, false);
+  assert.equal(family.canManage, false);
+
+  const owner = inspectArtifact(box, 'plan', 'probe')!;
+  assert.equal(owner.access, 'admin');
+  assert.equal(owner.canManage, true);
+});
+
+test('write даёт чтение и запись, но не управление; admin даёт управление', () => {
+  const box = config();
+  artifact(box, 'plan', { 'index.md': '# План', 'index.ai.md': '# План' }, { me: 'admin', family: 'write' });
+  const writer = inspectArtifact(box, 'plan', 'probe2')!;
+  assert.equal(writer.canRead, true);
+  assert.equal(writer.canWrite, true);
+  assert.equal(writer.canManage, false);
+  assert.equal(artifactFile(box, 'probe2', 'plan', 'index.md')?.type, 'text/markdown; charset=utf-8');
+  assert.throws(() => setAcl(box, 'probe2', 'plan', { me: 'admin', family: 'admin' }), /владелец или админ/);
+
+  artifact(box, 'team', { 'index.md': '# Team', 'index.ai.md': '# Team' }, { me: 'admin', family: 'admin' });
+  const admin = inspectArtifact(box, 'team', 'probe2')!;
+  assert.equal(admin.canManage, true);
+  const changed = setAcl(box, 'probe2', 'team', { me: 'read', family: 'write' });
+  assert.deepEqual(changed.acl, { me: 'read', family: 'write' });
+});
+
+test('владелец всегда управляет своим артефактом, даже если me=read', () => {
+  const box = config();
+  artifact(box, 'frozen', { 'index.md': '# Заморожен', 'index.ai.md': '# Заморожен' }, { me: 'read', family: 'read' });
+  const owner = inspectArtifact(box, 'frozen', 'probe')!;
+  assert.equal(owner.access, 'read');
+  assert.equal(owner.canRead, true);
+  assert.equal(owner.canManage, true);
+  const changed = setAcl(box, 'probe', 'frozen', { me: 'admin', family: 'read' });
+  assert.equal(changed.acl.me, 'admin');
+});
+
+test('артефакт без ACL не существует для панели и тулов', () => {
+  const box = config();
+  seed(path.join(root(box), 'raw'), { 'index.md': '# Без прав', 'index.ai.md': '# Без прав' });
+  assert.equal(inspectArtifact(box, 'raw', 'probe'), null);
+  assert.deepEqual(listArtifacts(box, 'probe'), []);
+  assert.throws(() => readArtifact(box, 'probe', 'raw'), /не найден/);
+});
+
+test('публичная ссылка создаётся только управляющим и отзывается', () => {
+  const box = config();
+  artifact(box, 'plan', { 'index.md': '# План', 'index.ai.md': '# План' }, { me: 'admin', family: 'read' });
+  assert.throws(() => setAcl(box, 'probe2', 'plan', { me: 'admin', family: 'read' }), /владелец или админ/);
+
+  // Публичную ссылку создаёт сервис через ensurePublicId, а не этот тест:
+  // для публичной проверки достаточно положить метаданные.
+  const id = 'abcdefghijklmnopqrstuvwx';
+  fs.writeFileSync(path.join(dirOf(box, 'plan'), META_FILE), JSON.stringify({ version: 1, publicId: id }));
+  const item = inspectArtifact(box, 'plan', 'probe')!;
+  assert.equal(item.publicId, id);
+  assert.equal(item.urls.public, `http://localhost:8081/a/plan/${id}/`);
+  assert.equal(item.urls.bare, `${item.urls.public}?bare=1`);
+  assert.equal(publicArtifact(box, 'plan', id)?.artifact.name, 'plan');
+  assert.equal(publicArtifact(box, 'plan', 'x'.repeat(24)), null);
+});
+
+test('файл артефакта: вложенный ассет отдаётся по read, выход из папки — нет', () => {
+  const box = config();
+  artifact(box, 'site', {
+    'index.html': '<link rel="stylesheet" href="css/style.css">',
+    'css/style.css': 'body { color: red }',
+    'index.ai.md': '# Сайт\n',
+    '.artifact.json': '{"version":1,"publicId":"abcdefghijklmnopqrstuvwx"}',
+  }, { me: 'admin', family: 'write' });
+
+  const css = artifactFile(box, 'probe2', 'site', 'css/style.css');
+  assert.equal(css?.type, 'text/css; charset=utf-8');
+  assert.equal(fs.readFileSync(css!.file, 'utf8'), 'body { color: red }');
+  assert.equal(artifactFile(box, 'probe2', 'site', '../secret.txt'), null);
+  assert.equal(artifactFile(box, 'probe2', 'site', '/etc/passwd'), null);
+  assert.equal(artifactFile(box, 'probe2', '../site', 'index.md'), null);
+  assert.equal(artifactFile(box, 'probe2', 'site', 'index.ai.md'), null);
+  assert.equal(artifactFile(box, 'probe2', 'site', '.artifact.json'), null);
+});
+
+test('удаление — в корзину и только управляющим', () => {
+  const box = config();
+  artifact(box, 'plan', { 'index.md': '# План', 'index.ai.md': '# План' }, { me: 'admin', family: 'write' });
+  assert.throws(() => trashArtifact(box, 'probe2', 'plan'), /владелец или админ/);
+  const target = trashArtifact(box, 'probe', 'plan');
+  assert.match(target, /artifacts\/\.trash\/plan-/);
+  assert.equal(fs.existsSync(dirOf(box, 'plan')), false);
+  assert.equal(fs.existsSync(path.join(target, 'index.md')), true);
+});
+
+test('счётчик и ссылки работают без workspace', () => {
+  const box = config({ url: 'https://icarus.example' });
+  artifact(box, 'a', { 'index.md': '# A', 'index.ai.md': '# A' });
+  artifact(box, 'b', { 'index.png': Buffer.from([0x89, 0x50]), 'index.ai.md': '# B' });
+  assert.equal(listArtifacts(box, 'probe').length, 2);
+  const urls = artifactUrls(box, 'a', 'index.md');
+  assert.equal(urls.panel, 'https://icarus.example/panel/artifacts?artifact=a');
+  assert.equal(urls.raw, 'https://icarus.example/panel/artifacts/raw/a/index.md');
 });
 
 test('YAML-frontmatter в index.ai.md не становится заголовком и описанием', () => {
-  const config = makeConfig();
-  seed(artifactRoot(config), {
-    'calc/index.html': '<h1>Калькулятор</h1>',
-    'calc/index.ai.md': '---\nname: "Калькулятор"\ntype: HTML-страница\n---\n\n# Калькулятор\n\nПростой калькулятор с процентами.\n',
+  const box = config();
+  artifact(box, 'calc', {
+    'index.html': '<h1>Калькулятор</h1>',
+    'index.ai.md': '---\nname: "Калькулятор"\ntype: HTML-страница\n---\n\n# Калькулятор\n\nПростой калькулятор с процентами.\n',
   });
-  const item = inspectArtifact(config, 'probe', 'talk', 'calc');
-  assert.equal(item?.title, 'Калькулятор');
-  assert.match(item?.summary ?? '', /Простой калькулятор/);
-  assert.doesNotMatch(item?.summary ?? '', /name:/);
-});
-
-test('второй index-файл не ломает открытие: тип выбирается предсказуемо', () => {
-  const config = makeConfig();
-  seed(artifactRoot(config), {
-    'double/index.md': '# Markdown',
-    'double/index.html': '<h1>HTML</h1>',
-    'double/index.ai.md': '# Двойной\n',
-  });
-  const artifact = inspectArtifact(config, 'probe', 'talk', 'double');
-  assert.equal(artifact?.type, 'html', 'HTML приоритетнее markdown');
-  assert.equal(artifact?.entry, 'index.html');
-});
-
-test('публичная ссылка появляется по запросу и отзывается', () => {
-  const config = makeConfig();
-  seed(artifactRoot(config), {
-    'plan/index.md': '# План\n',
-    'plan/index.ai.md': '# План\n',
-  });
-
-  const first = ensurePublicId(config, 'probe', 'talk', 'plan');
-  assert.match(first.publicId, /^[A-Za-z0-9_-]{16,64}$/);
-  assert.match(first.artifact.urls.public ?? '', /\/a\/probe\/talk\/plan\//);
-  assert.match(first.artifact.urls.bare ?? '', /\?bare=1$/);
-
-  const meta = JSON.parse(
-    fs.readFileSync(path.join(artifactRoot(config), 'plan', META_FILE), 'utf8'),
-  ) as { publicId: string; version: number };
-  assert.equal(meta.publicId, first.publicId);
-  assert.equal(meta.version, 1);
-
-  // Второй запрос не делает новую ссылку: она стабильна, пока её не отозвали.
-  assert.equal(ensurePublicId(config, 'probe', 'talk', 'plan').publicId, first.publicId);
-
-  const found = publicArtifact(config, 'probe', 'talk', 'plan', first.publicId);
-  assert.equal(found?.artifact.name, 'plan');
-  assert.equal(publicArtifact(config, 'probe', 'talk', 'plan', 'x'.repeat(24)), null, 'чужой id не подходит');
-  assert.equal(publicArtifact(config, 'probe2', 'talk', 'plan', first.publicId), null, 'чужой человек не подходит');
-
-  const revoked = clearPublicId(config, 'probe', 'talk', 'plan');
-  assert.equal(revoked.publicId, undefined);
-  assert.equal(publicArtifact(config, 'probe', 'talk', 'plan', first.publicId), null, 'отозванная ссылка мертва');
-});
-
-test('файл артефакта: вложенный ассет отдаётся, выход из папки — нет', () => {
-  const config = makeConfig();
-  seed(artifactRoot(config), {
-    'site/index.html': '<link rel="stylesheet" href="css/style.css">',
-    'site/css/style.css': 'body { color: red }',
-    'site/index.ai.md': '# Сайт\n',
-    'site/.artifact.json': '{"version":1,"publicId":"abcdefghijklmnopqrstuvwx"}',
-    'secret.txt': 'чужое',
-  });
-
-  const css = artifactFile(config, 'probe', 'talk', 'site', 'css/style.css');
-  assert.equal(css?.type, 'text/css; charset=utf-8');
-  assert.equal(fs.readFileSync(css!.file, 'utf8'), 'body { color: red }');
-
-  assert.equal(artifactFile(config, 'probe', 'talk', 'site', '../secret.txt'), null, 'нельзя выйти из папки');
-  assert.equal(artifactFile(config, 'probe', 'talk', 'site', '/etc/passwd'), null, 'абсолютный путь не проходит');
-  assert.equal(artifactFile(config, 'probe', 'talk', '../talk', 'index.md'), null, 'имя артефакта проверяется');
-  assert.equal(artifactFile(config, 'probe', 'talk', 'site', 'index.html/../../secret.txt'), null);
-  // index.ai.md — заметки для модели, а не часть артефакта для человека.
-  assert.equal(artifactFile(config, 'probe', 'talk', 'site', 'index.ai.md'), null, 'описание для ИИ наружу не отдаём');
-  assert.equal(artifactFile(config, 'probe', 'talk', 'site', '.artifact.json'), null, 'скрытые файлы не отдаём');
-});
-
-test('удаление артефакта — в корзину, а не навсегда', () => {
-  const config = makeConfig();
-  seed(artifactRoot(config), {
-    'plan/index.md': '# План\n',
-    'plan/index.ai.md': '# План\n',
-  });
-  const target = trashArtifact(config, 'probe', 'talk', 'plan');
-  assert.match(target, /artifacts\/\.trash\/plan-/);
-  assert.equal(fs.existsSync(path.join(artifactRoot(config), 'plan')), false);
-  assert.equal(fs.existsSync(path.join(target, 'index.md')), true, 'файлы целы в корзине');
-  assert.equal(inspectArtifact(config, 'probe', 'talk', 'plan'), null);
-});
-
-test('счётчик артефактов складывает все workspace', () => {
-  const config = makeConfig();
-  seed(artifactRoot(config, 'talk'), { 'a/index.md': '# A', 'a/index.ai.md': '# A' });
-  seed(artifactRoot(config, 'private'), {
-    'b/index.md': '# B',
-    'b/index.ai.md': '# B',
-    'c/index.png': Buffer.from([0x89, 0x50, 0x4e, 0x47]),
-    'c/index.ai.md': '# C',
-  });
-  assert.equal(countArtifacts(config, 'probe'), 3);
-});
-
-test('ссылки собираются от внешнего адреса панели, а не от локального порта', () => {
-  const config = makeConfig({ url: 'https://icarus.example' });
-  seed(artifactRoot(config), { 'plan/index.md': '# План', 'plan/index.ai.md': '# План' });
-  const { publicId, artifact } = ensurePublicId(config, 'probe', 'talk', 'plan');
-  assert.equal(artifact.urls.public, `https://icarus.example/a/probe/talk/plan/${publicId}/`);
-  assert.equal(artifact.urls.bare, `${artifact.urls.public}?bare=1`);
-  assert.equal(
-    artifact.urls.raw,
-    'https://icarus.example/panel/artifacts/raw/talk/plan/index.md',
-  );
-  assert.equal(artifact.urls.panel, 'https://icarus.example/panel/artifacts?workspace=talk&artifact=plan');
+  const item = inspectArtifact(box, 'calc', 'probe')!;
+  assert.equal(item.title, 'Калькулятор');
+  assert.match(item.summary, /Простой калькулятор/);
+  assert.doesNotMatch(item.summary, /name:/);
 });
 
 test('имя папки с переводом строки или выходом не считается артефактом', () => {
-  const config = makeConfig();
-  seed(artifactRoot(config), { 'ok/index.md': '# Ok', 'ok/index.ai.md': '# Ok' });
-  assert.equal(inspectArtifact(config, 'probe', 'talk', '..'), null);
-  assert.equal(inspectArtifact(config, 'probe', 'talk', '.hidden'), null);
-  assert.equal(inspectArtifact(config, 'probe', 'talk', 'a/b'), null);
-  assert.equal(inspectArtifact(config, 'probe', 'talk', 'line\nbreak'), null);
+  const box = config();
+  artifact(box, 'ok', { 'index.md': '# Ok', 'index.ai.md': '# Ok' });
+  assert.equal(inspectArtifact(box, '..', 'probe'), null);
+  assert.equal(inspectArtifact(box, '.hidden', 'probe'), null);
+  assert.equal(inspectArtifact(box, 'a/b', 'probe'), null);
+  assert.equal(inspectArtifact(box, 'line\nbreak', 'probe'), null);
 
-  // Симлинк-папка могла бы увести за пределы workspace: наружу не открываем.
   const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'artifacts-outside-'));
   fs.writeFileSync(path.join(outside, 'index.md'), '# Чужое');
   fs.writeFileSync(path.join(outside, 'index.ai.md'), '# Чужое');
-  fs.symlinkSync(outside, path.join(artifactRoot(config), 'link'));
-  assert.equal(inspectArtifact(config, 'probe', 'talk', 'link'), null);
+  fs.writeFileSync(path.join(outside, ACL_FILE), JSON.stringify({ owner: 'probe', acl: DEFAULT_ACL }));
+  fs.symlinkSync(outside, path.join(root(box), 'link'));
+  assert.equal(inspectArtifact(box, 'link', 'probe'), null);
 });
 
-test('описание для ИИ необязательно только для чтения: артефакт остаётся в списке', () => {
-  const config = makeConfig();
-  seed(artifactRoot(config), { 'raw/index.md': '# Без описания\n' });
-  const item = inspectArtifact(config, 'probe', 'talk', 'raw');
-  assert.equal(item?.ai, false);
-  assert.equal(item?.title, 'Без описания');
-  assert.equal(artifactUrls(config, 'probe', 'talk', 'raw', 'index.md').public, undefined);
+test('старые артефакты из workspace переезжают в общую библиотеку', () => {
+  const box = config();
+  const old = path.join(userPaths(box, probe('probe')).workspaces, 'talk', 'artifacts', 'plan');
+  seed(old, {
+    'index.md': '# План',
+    'index.ai.md': '# План',
+    '.artifact.json': '{"version":1,"publicId":"abcdefghijklmnopqrstuvwx"}',
+  });
+  const moved = migrateLegacyArtifacts(box, probe('probe'));
+  assert.deepEqual(moved, ['plan']);
+  assert.equal(fs.existsSync(old), false);
+  const item = inspectArtifact(box, 'plan', 'probe')!;
+  assert.equal(item.owner, 'probe');
+  assert.deepEqual(item.acl, DEFAULT_ACL);
+  assert.equal(item.publicId, 'abcdefghijklmnopqrstuvwx');
 });

@@ -1,9 +1,8 @@
 // Панель артефактов и публичный просмотр: HTTP-часть.
 //
-// Раздел живёт отдельно от памяти и скиллов: у артефакта нет построчных записей,
-// git-истории и редактора. Это папка с готовой вещью, которую человек открывает,
-// скачивает или показывает по ссылке. Поэтому здесь только список, чтение, ссылки
-// и удаление; создаёт артефакты сам агент своими файловыми инструментами.
+// Артефакты глобальные: один каталог на инсталляцию, один список в панели.
+// Права проверяются на каждом действии: read — смотреть, write — менять файлы,
+// admin — права, удаление и публичная ссылка. Владелец управляет своим всегда.
 import fs from 'node:fs';
 import path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -11,22 +10,26 @@ import {
   AI_FILE,
   ArtifactError,
   artifactFile,
-  artifactWorkspaces,
   clearPublicId,
-  countArtifacts,
   displayPath,
   ensurePublicId,
+  isAccessLevel,
   listArtifacts,
   publicArtifact,
+  publicArtifactFile,
+  mimeOf,
   readArtifact,
+  setAcl,
   trashArtifact,
   type Artifact,
+  type FolderAcl,
 } from '../artifacts.ts';
-import { DEFAULT_WORKSPACE, findUser, type IcarusConfig } from '../config.ts';
+import type { IcarusConfig } from '../config.ts';
 import { readJsonBody } from '../http/openai.ts';
 import { errorBody } from '../http/sse.ts';
 import { log } from '../log.ts';
 import { publicArtifactPage } from './artifacts-ui.ts';
+
 const SANDBOX = 'sandbox allow-scripts allow-forms allow-modals allow-popups;';
 
 function json(res: ServerResponse, status: number, payload: unknown): void {
@@ -43,7 +46,6 @@ function fail(res: ServerResponse, error: unknown, where: string): void {
   json(res, 500, errorBody('раздел артефактов сломался', 'server_error'));
 }
 
-/** Имя файла в заголовке: кириллица едет и в ASCII-заменителе, и в RFC 5987. */
 function disposition(relative: string): string {
   const name = (relative.split('/').pop() ?? 'artifact').replace(/[\r\n]/g, '_');
   const ascii = name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
@@ -71,8 +73,6 @@ function sendFile(
     'x-content-type-options': 'nosniff',
     'cache-control': options.cache ?? 'no-cache',
     ...(options.download ? { 'content-disposition': disposition(file) } : {}),
-    // HTML и SVG — чужой код. Песочница без same-origin не даёт ему дотянуться
-    // до панели и её SSO-куки, даже если артефакт открыли прямо, а не в iframe.
     ...(options.sandbox ? { 'content-security-policy': SANDBOX } : {}),
   };
   res.writeHead(200, headers);
@@ -92,12 +92,7 @@ function decode(value: string | undefined): string {
   }
 }
 
-function workspaceOf(url: URL, body?: Record<string, unknown>): string {
-  const raw = body?.workspace ?? url.searchParams.get('workspace');
-  return typeof raw === 'string' && raw.trim() !== '' ? raw.trim() : DEFAULT_WORKSPACE;
-}
-
-/** Раздел «Артефакты»: страница и её API. */
+/** Глобальный список, чтение, права, ссылки и удаление. */
 export async function handleArtifactsApi(
   req: IncomingMessage,
   res: ServerResponse,
@@ -108,20 +103,9 @@ export async function handleArtifactsApi(
   const route = url.pathname.replace(/^\/panel\/artifacts\/api\/?/, '').split('/')[0] ?? '';
 
   if (req.method === 'GET' && route === 'list') {
-    const workspace = workspaceOf(url);
     try {
-      const items = listArtifacts(config, userId, workspace);
-      const user = findUser(config, userId);
-      json(res, 200, {
-        workspace,
-        workspaces: artifactWorkspaces(config, userId).map((item) => ({
-          slug: item.slug,
-          name: item.name,
-          kind: item.kind,
-        })),
-        total: user ? countArtifacts(config, userId) : items.length,
-        items,
-      });
+      const items = listArtifacts(config, userId);
+      json(res, 200, { total: items.length, items });
     } catch (error) {
       fail(res, error, 'список не собрался');
     }
@@ -129,15 +113,14 @@ export async function handleArtifactsApi(
   }
 
   if (req.method === 'GET' && route === 'read') {
-    const workspace = workspaceOf(url);
     const artifact = decode(url.searchParams.get('artifact') ?? '');
     try {
-      const read = readArtifact(config, userId, workspace, artifact);
+      const read = readArtifact(config, userId, artifact);
       json(res, 200, {
         artifact: read.artifact,
         aiContent: read.ai,
         content: read.content,
-        path: displayPath(workspace, read.artifact.name, read.artifact.entry),
+        path: displayPath(read.artifact.name, read.artifact.entry),
         aiFile: AI_FILE,
       });
     } catch (error) {
@@ -158,12 +141,11 @@ export async function handleArtifactsApi(
     json(res, 400, errorBody(`не разобрал тело запроса: ${String(error)}`, 'invalid_request_error'));
     return;
   }
-  const workspace = workspaceOf(url, body);
   const artifact = typeof body.artifact === 'string' ? body.artifact : '';
 
   if (route === 'link') {
     try {
-      const result = ensurePublicId(config, userId, workspace, artifact);
+      const result = ensurePublicId(config, userId, artifact);
       json(res, 200, { artifact: result.artifact, urls: result.artifact.urls });
     } catch (error) {
       fail(res, error, 'публичная ссылка не сделалась');
@@ -173,7 +155,7 @@ export async function handleArtifactsApi(
 
   if (route === 'unpublish') {
     try {
-      const next = clearPublicId(config, userId, workspace, artifact);
+      const next = clearPublicId(config, userId, artifact);
       json(res, 200, { artifact: next, urls: next.urls });
     } catch (error) {
       fail(res, error, 'ссылка не отозвалась');
@@ -183,11 +165,32 @@ export async function handleArtifactsApi(
 
   if (route === 'delete') {
     try {
-      const target = trashArtifact(config, userId, workspace, artifact);
-      log.info('артефакты: артефакт убран в корзину', { user: userId, workspace, artifact, target });
+      const target = trashArtifact(config, userId, artifact);
+      log.info('артефакты: артефакт убран в корзину', { user: userId, artifact, target });
       json(res, 200, { ok: true, trashed: path.basename(target) });
     } catch (error) {
       fail(res, error, 'артефакт не удалился');
+    }
+    return;
+  }
+
+  if (route === 'acl') {
+    const raw = body.acl;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      json(res, 400, errorBody('нужен acl: { me, family }', 'invalid_request_error'));
+      return;
+    }
+    const values = raw as { me?: unknown; family?: unknown };
+    if (!isAccessLevel(values.me) || !isAccessLevel(values.family)) {
+      json(res, 400, errorBody('уровень прав — read, write или admin', 'invalid_request_error'));
+      return;
+    }
+    try {
+      const acl: FolderAcl = { me: values.me, family: values.family };
+      const next = setAcl(config, userId, artifact, acl);
+      json(res, 200, { artifact: next, urls: next.urls });
+    } catch (error) {
+      fail(res, error, 'права не сохранились');
     }
     return;
   }
@@ -196,9 +199,8 @@ export async function handleArtifactsApi(
 }
 
 /**
- * Файл артефакта для панели: `/panel/artifacts/raw/<workspace>/<артефакт>/<путь>`.
- * Путь, а не query, — чтобы относительные ссылки внутри HTML работали сами:
- * `style.css` рядом с `index.html` разрешается в соседний сегмент.
+ * Файл артефакта: `/panel/artifacts/raw/<артефакт>/<путь>`. Путь, а не query,
+ * чтобы относительные стили и картинки внутри HTML разрешались сами.
  */
 export function handleArtifactsRaw(
   req: IncomingMessage,
@@ -213,14 +215,13 @@ export function handleArtifactsRaw(
   }
   const rest = url.pathname.slice('/panel/artifacts/raw/'.length);
   const parts = rest.split('/');
-  const workspace = decode(parts[0]);
-  const artifact = decode(parts[1]);
-  const relative = parts.slice(2).map(decode).join('/');
-  if (!workspace || !artifact || !relative) {
+  const artifact = decode(parts[0]);
+  const relative = parts.slice(1).map(decode).join('/');
+  if (!artifact || !relative) {
     json(res, 404, errorBody('файл не указан', 'not_found'));
     return;
   }
-  const found = artifactFile(config, userId, workspace, artifact, relative);
+  const found = artifactFile(config, userId, artifact, relative);
   if (!found) {
     json(res, 404, errorBody('файл не найден или недоступен', 'not_found'));
     return;
@@ -232,7 +233,12 @@ export function handleArtifactsRaw(
   });
 }
 
-/** Страница публичного просмотра: только этот артефакт, без списка и без правки. */
+/**
+ * Публичный просмотр: `/a/<артефакт>/<publicId>/…`.
+ * Старые ссылки `/a/<человек>/<workspace>/<артефакт>/<id>/…` уводим на новый
+ * адрес: так уже отправленные ссылки не умирают, а относительные картинки
+ * продолжают считаться от правильного каталога.
+ */
 export async function handlePublicArtifact(
   req: IncomingMessage,
   res: ServerResponse,
@@ -245,62 +251,74 @@ export async function handlePublicArtifact(
     return true;
   }
 
-  const rest = url.pathname.slice('/a/'.length);
-  const parts = rest.split('/');
-  const userId = decode(parts[0]);
-  const workspace = decode(parts[1]);
-  const artifactName = decode(parts[2]);
-  const publicId = decode(parts[3]);
-  const asset = parts.slice(4).map(decode).join('/');
+  const parts = url.pathname.slice('/a/'.length).split('/');
+  let slug = decode(parts[0]);
+  let publicId = decode(parts[1]);
+  let asset = parts.slice(2).map(decode).join('/');
 
-  if (!userId || !workspace || !artifactName || !publicId) {
+  // Сначала новая схема: /a/<slug>/<publicId>/<asset…>. Иначе вложенный ассет
+  // (css/style.css) выглядел бы как старый адрес с четырьмя сегментами.
+  let found = publicArtifact(config, slug, publicId);
+  let oldRoute = false;
+  if (!found) {
+    // Старая схема: /a/<user>/<workspace>/<slug>/<id>/...
+    if (parts.length >= 4 && parts[2] && parts[3]) {
+      slug = decode(parts[2]);
+      publicId = decode(parts[3]);
+      asset = parts.slice(4).map(decode).join('/');
+      found = publicArtifact(config, slug, publicId);
+      oldRoute = found !== null;
+    }
+    if (!found) {
+      json(res, 404, errorBody('артефакт не найден или ссылка отозвана', 'not_found'));
+      return true;
+    }
+  }
+
+  if (oldRoute) {
+    const canonical = `/a/${encodeURIComponent(slug)}/${encodeURIComponent(publicId)}/${asset}${url.search}`;
+    res.writeHead(301, { location: canonical });
+    res.end();
+    return true;
+  }
+
+  if (!slug || !publicId) {
     json(res, 404, errorBody('публичная ссылка не полная', 'not_found'));
     return true;
   }
+  const { artifact } = found;
 
-  const publicArtifactResult = publicArtifact(config, userId, workspace, artifactName, publicId);
-  if (!publicArtifactResult) {
-    json(res, 404, errorBody('артефакт не найден или ссылка отозвана', 'not_found'));
-    return true;
-  }
-  const { artifact } = publicArtifactResult;
-
-  // Ссылка на папку без слеша сломала бы относительные стили и картинки: браузер
-  // отсчитывал бы их от родителя. Уводим на канонический адрес со слешем.
   if (asset === '' && !url.pathname.endsWith('/')) {
     res.writeHead(302, { location: `${url.pathname}/${url.search}` });
     res.end();
     return true;
   }
 
-  loggerPublic(userId, workspace, artifactName);
-
   if (asset !== '') {
-    const found = artifactFile(config, userId, workspace, artifactName, asset);
-    if (!found) {
+    const file = publicArtifactFile(config, slug, asset);
+    if (!file) {
       json(res, 404, errorBody('файл артефакта не найден', 'not_found'));
       return true;
     }
-    sendFile(req, res, found.file, found.type, {
+    sendFile(req, res, file.file, file.type, {
       download: url.searchParams.get('download') === '1',
       cache: 'no-cache',
-      sandbox: /^(text\/html|image\/svg\+xml)/.test(found.type),
+      sandbox: /^(text\/html|image\/svg\+xml)/.test(file.type),
     });
     return true;
   }
 
   const bare = url.searchParams.get('bare') === '1';
   if (bare) {
-    serveBare(req, res, config, userId, workspace, artifact);
+    serveBare(req, res, config, artifact);
     return true;
   }
 
-  // По умолчанию — внутри панели: шапка, подпись, тот же просмотрщик.
   const content =
     artifact.type === 'markdown'
       ? (() => {
           try {
-            return fs.readFileSync(path.join(publicArtifactResult.dir, artifact.entry), 'utf8');
+            return fs.readFileSync(path.join(found.dir, artifact.entry), 'utf8');
           } catch {
             return null;
           }
@@ -313,8 +331,6 @@ export async function handlePublicArtifact(
     'x-content-type-options': 'nosniff',
     'referrer-policy': 'no-referrer',
     'x-robots-tag': 'noindex, nofollow',
-    // Панель публичного просмотра не должна давать артефакту доступ к своим API:
-    // страница статична, скриптов в ней нет, но CSP — дешёвая страховка.
     'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; img-src * data:; frame-src 'self'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'",
   });
   if (req.method === 'HEAD') res.end();
@@ -327,31 +343,22 @@ function serveBare(
   req: IncomingMessage,
   res: ServerResponse,
   config: IcarusConfig,
-  userId: string,
-  workspace: string,
   artifact: Artifact,
 ): void {
+  const dir = path.join(config.dataDir, 'artifacts', artifact.name);
+  const file = path.join(dir, artifact.entry);
   if (artifact.type !== 'markdown') {
-    const found = artifactFile(config, userId, workspace, artifact.name, artifact.entry);
-    if (!found) {
-      json(res, 404, errorBody('файл артефакта не найден', 'not_found'));
-      return;
-    }
-    sendFile(req, res, found.file, found.type, {
+    const type = mimeOf(file);
+    sendFile(req, res, file, type, {
       cache: 'no-cache',
-      sandbox: /^(text\/html|image\/svg\+xml)/.test(found.type),
+      sandbox: /^(text\/html|image\/svg\+xml)/.test(type),
     });
     return;
   }
 
-  const found = artifactFile(config, userId, workspace, artifact.name, artifact.entry);
-  if (!found) {
-    json(res, 404, errorBody('файл артефакта не найден', 'not_found'));
-    return;
-  }
   let content: string;
   try {
-    content = fs.readFileSync(found.file, 'utf8');
+    content = fs.readFileSync(file, 'utf8');
   } catch {
     json(res, 404, errorBody('файл артефакта не найден', 'not_found'));
     return;
@@ -411,11 +418,6 @@ function serveBare(
 
 function escapeTitle(value: string): string {
   return value.replace(/[&<>"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[char] ?? char);
-}
-
-/** Один лог на публичный просмотр: без URL-секрета и без лишних деталей. */
-function loggerPublic(userId: string, workspace: string, artifact: string): void {
-  log.debug('артефакт: публичный просмотр', { user: userId, workspace, artifact });
 }
 
 /** Код markdown-рендера для «без панели»: тот же файл, что у панели. */
