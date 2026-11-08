@@ -4,7 +4,8 @@
 //
 //   { "owner": "probe", "acl": { "me": "read", "family": "write" } }
 //
-// Уровни: read ⊂ write ⊂ admin. Для артефактов это ровно та же матрица, что
+// Уровни: none ⊂ read ⊂ write ⊂ admin. `none` — папки не существует для этого
+// субъекта: ни чтения, ни записи. Для артефактов это ровно та же матрица, что
 // показывает панель; для будущих общих каталогов достаточно положить такой файл.
 //
 // Правило: путь внутри одного из защищённых корней ищет ближайшую папку с ACL.
@@ -13,7 +14,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-export type AccessLevel = "read" | "write" | "admin";
+export type AccessLevel = "none" | "read" | "write" | "admin";
 export type FolderAcl = { me: AccessLevel; family: AccessLevel };
 export type FolderAclFile = {
   owner: string;
@@ -21,14 +22,19 @@ export type FolderAclFile = {
 };
 
 export const FOLDER_ACL_FILE = ".folder-acl.json";
-const LEVELS: Record<AccessLevel, number> = { read: 1, write: 2, admin: 3 };
+const LEVELS: Record<AccessLevel, number> = { none: 0, read: 1, write: 2, admin: 3 };
+const LEVEL_LABELS: Record<AccessLevel, string> = { none: "нет доступа", read: "чтение", write: "запись", admin: "администрирование" };
 
 export function allows(level: AccessLevel, required: AccessLevel): boolean {
   return LEVELS[level] >= LEVELS[required];
 }
 
+export function levelLabel(level: AccessLevel): string {
+  return LEVEL_LABELS[level];
+}
+
 export function isAccessLevel(value: unknown): value is AccessLevel {
-  return value === "read" || value === "write" || value === "admin";
+  return value === "none" || value === "read" || value === "write" || value === "admin";
 }
 
 /** Корни, где включён страж. По умолчанию — глобальная библиотека артефактов. */
@@ -172,7 +178,7 @@ export function folderVerdict(
         owner: acl.owner,
         level,
         allowed,
-        ...(allowed ? {} : { reason: `Нет права ${required === "read" ? "читать" : "писать"} в этой папке: владелец ${acl.owner}, твой уровень ${level}.` }),
+        ...(allowed ? {} : { reason: `Нет права ${required === "read" ? "читать" : "писать"} в этой папке: владелец ${acl.owner}, твой уровень ${levelLabel(level)}.` }),
       };
     }
     const parent = path.dirname(current);

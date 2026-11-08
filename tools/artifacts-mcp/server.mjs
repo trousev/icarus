@@ -4,9 +4,10 @@
 //
 // Артефакты — глобальная библиотека `/artifacts`, общая для всех людей. Доступ
 // к папкам решают права `.folder-acl.json`: у каждого артефакта есть владелец,
-// а уровни read ⊂ write ⊂ admin задаются отдельно для «меня» и «семьи».
-// Файловые инструменты pi блокирует generic folder-guard, поэтому читать и
-// писать здесь можно только то, что разрешено.
+// а уровни none ⊂ read ⊂ write ⊂ admin задаются отдельно для «меня» и «семьи».
+// По умолчанию family = none: новый артефакт личный, пока владелец не откроет
+// его семье. Файловые инструменты pi блокирует generic folder-guard, поэтому
+// читать и писать здесь можно только то, что разрешено.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -22,9 +23,9 @@ const META_FILE = '.artifact.json';
 const ACL_FILE = '.folder-acl.json';
 const AI_FILE = 'index.ai.md';
 const PUBLIC_ID = /^[A-Za-z0-9_-]{16,64}$/;
-const LEVELS = { read: 1, write: 2, admin: 3 };
-const isLevel = (value) => value === 'read' || value === 'write' || value === 'admin';
-const DEFAULT_ACL = { me: 'admin', family: 'read' };
+const LEVELS = { none: 0, read: 1, write: 2, admin: 3 };
+const isLevel = (value) => value === 'none' || value === 'read' || value === 'write' || value === 'admin';
+const DEFAULT_ACL = { me: 'admin', family: 'none' };
 
 const INDEX_FILES = [
   { file: 'index.html', type: 'html' },
@@ -52,7 +53,7 @@ const INSTRUCTIONS = `Артефакты — ОБЩАЯ библиотека в 
 3. artifact_check — проверь структуру.
 4. artifact_link — дай человеку ВНУТРЕННЮЮ ссылку в панели. Публичную создавай только по прямой просьбе: «публичная», «поделиться», «без входа» — artifact_link с public: true. Публичная требует прав admin.
 
-Права у папки: owner и acl { me, family }, уровни read < write < admin (write умеет читать, admin — ещё права/удаление/публичную ссылку). Владелец всегда управляет своим артефактом; family по умолчанию read. Не обещай изменить права, если ты не владелец и не admin: это делает панель.
+Права у папки: owner и acl { me, family }, уровни none < read < write < admin (write умеет читать, admin — ещё права/удаление/публичную ссылку; none — не видит ничего). Владелец всегда управляет своим артефактом. family по умолчанию none: новый артефакт личный, семья его не видит. Семейный доступ открывает владелец в панели «Права» — read/write/admin; не включай его сам и не обещай изменить права, если ты не владелец и не admin.
 
 Историю версий ведёт система: после каждого изменения папки снимок фиксируется автоматически, в панели есть «История» и «Вернуть». Не создавай git-репозитории, не коммить и не трогай .git — это сломает прозрачный откат.
 
@@ -458,7 +459,7 @@ function newText(slug) {
   fs.mkdirSync(dir, { recursive: true });
   writeAcl(dir, USER_ID, DEFAULT_ACL);
   return [
-    `Артефакт /artifacts/${slug}/ создан, права: me=admin, family=read.`,
+    `Артефакт /artifacts/${slug}/ создан, права: me=admin, family=none — виден только тебе.`,
     '',
     'Теперь напиши обычными write:',
     `- /artifacts/${slug}/index.ai.md — H1, о чём артефакт, что внутри, что можно менять;`,
@@ -514,7 +515,7 @@ const TOOLS = [
   {
     name: 'artifact_new',
     description:
-      'Создать артефакт: папку /artifacts/<slug>/ и права (me=admin, family=read). Без него писать в /artifacts нельзя. После — обычными write положи index.ai.md и index-файл.',
+      'Создать артефакт: папку /artifacts/<slug>/ и права (me=admin, family=none — личный, семья не видит). Семейный доступ владелец открывает в панели. Без artifact_new писать в /artifacts нельзя. После — обычными write положи index.ai.md и index-файл.',
     inputSchema: {
       type: 'object',
       properties: { name: { type: 'string', description: 'Имя папки: латиница в нижнем регистре через дефис.' } },

@@ -54,6 +54,7 @@ test('страница: глобальный список, поиск, прав�
   assert.match(html, /id="art-preview-restore"/);
   assert.match(html, /id="acl-me"/);
   assert.match(html, /id="acl-family"/);
+  assert.match(html, /id="acl-family"[^>]*><option value="none">нет доступа<\/option>/, 'нет доступа — уровень по умолчанию');
   assert.match(html, /id="art-bare"/);
   assert.match(html, /id="art-download"/);
   assert.match(html, /id="art-delete"/);

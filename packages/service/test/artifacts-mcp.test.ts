@@ -173,7 +173,8 @@ test('artifact_new создаёт папку и ACL, после чего раз�
       acl: { me: string; family: string };
     };
     assert.equal(saved.owner, 'probe');
-    assert.deepEqual(saved.acl, { me: 'admin', family: 'read' });
+    assert.deepEqual(saved.acl, { me: 'admin', family: 'none' });
+    assert.match(text, /family=none/);
 
     fs.writeFileSync(path.join(dir, 'index.md'), '# План\n');
     fs.writeFileSync(path.join(dir, 'index.ai.md'), '# План\n');

@@ -63,6 +63,28 @@ test('владелец читает и пишет, family read — только 
   assert.equal(familyRead.allowed, true);
 });
 
+test('family none: ни чтения, ни записи — артефакт личный', () => {
+  const root = sandbox({ owner: 'probe', me: 'admin', family: 'none' }, { 'index.md': '# Секрет' });
+  const dir = path.join(root, 'plan');
+  const acl = readFolderAcl(dir);
+  assert.deepEqual(acl?.acl, { me: 'admin', family: 'none' });
+
+  const read = folderVerdict(path.join(dir, 'index.md'), 'probe2', 'read', [root]);
+  assert.equal(read.protected, true);
+  if (!read.protected || read.rootOnly) return;
+  assert.equal(read.allowed, false);
+  assert.equal(read.level, 'none');
+  assert.match(read.reason ?? '', /нет доступа/);
+
+  const write = folderVerdict(path.join(dir, 'index.md'), 'probe2', 'write', [root]);
+  if (!write.protected || write.rootOnly) return;
+  assert.equal(write.allowed, false);
+
+  const owner = folderVerdict(path.join(dir, 'index.md'), 'probe', 'write', [root]);
+  if (!owner.protected || owner.rootOnly) return;
+  assert.equal(owner.allowed, true);
+});
+
 test('папка без ACL закрыта: новый артефакт только через artifact_new', () => {
   const root = sandbox(null, { 'index.md': '# Без прав' });
   const verdict = folderVerdict(path.join(root, 'plan', 'index.md'), 'probe', 'read', [root]);
