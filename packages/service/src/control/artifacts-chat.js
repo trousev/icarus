@@ -3,11 +3,16 @@
 // Это тот же разговор, что и в обычном чате: сообщения уходят в /panel/api/chat/send,
 // ответ приходит NDJSON-потоком. Отличие одно — сервер помечает разговор артефактом,
 // и pi работает в папке /artifacts/<slug>, а не в workspace.
+//
+// Команды с косой черты общие с основным чатом: сначала спрашиваем сервер
+// (/panel/api/chat/command), и только его отказ отправляет строку в pi. Иначе
+// /clear уезжал модели как текст и она бодро врала, что контекст очищен.
 /* global artifactMarkdown, artEl, artApi, artEsc, artStamp, artState, artSetStatus, artHideHistory, artLoadList, artRenderView */
 
 const artChatState = {
   chatId: null,
   busy: false,
+  commandBusy: false,
   controller: null,
   historyToken: 0,
   liveBox: null,
@@ -98,6 +103,44 @@ function artChatAssistant(iso) {
     text: '',
     steps: [],
   };
+}
+
+/** Заглушка «Скажи, что поправить» уходит, как только в ленте появился ход. */
+function artChatDropEmpty() {
+  const empty = artChatLog().querySelector('.art-empty');
+  if (empty) empty.remove();
+}
+
+/**
+ * Ответ команды — плашка с её именем, как в основном чате. В историю он не
+ * попадает: это не ответ модели, и после перезагрузки его не будет.
+ */
+function artChatCommandResult(command, text, failed = false) {
+  artChatDropEmpty();
+  const turn = document.createElement('div');
+  turn.className = 'turn command' + (failed ? ' error' : '');
+  const card = document.createElement('div');
+  card.className = 'command-card';
+  const head = document.createElement('div');
+  head.className = 'command-head';
+  head.textContent = command.trim().split(/\s+/)[0] || 'команда';
+  const body = document.createElement('div');
+  body.className = 'md command-text';
+  body.innerHTML = artChatMarkdown(text || '');
+  card.append(head, body);
+  turn.append(card);
+  artChatLog().append(turn);
+  artChatScroll(true);
+}
+
+/** Граница контекста: /clear начинает новую сессию, но старую ленту не прячет. */
+function artChatDivider(text) {
+  artChatDropEmpty();
+  const mark = document.createElement('div');
+  mark.className = 'art-chat-divider';
+  mark.textContent = text;
+  artChatLog().append(mark);
+  artChatScroll(true);
 }
 
 function artChatStepWord(count) {
@@ -263,7 +306,7 @@ async function artChatReadStream(response, box) {
 
 function artChatClear() {
   artChatLog().innerHTML =
-    '<div class="art-empty"><b>Скажи, что поправить</b><span>Икар изменит файлы прямо в папке артефакта: «добавь заголовок», «сделай таблицу», «поменяй цвет».</span></div>';
+    '<div class="art-empty"><b>Скажи, что поправить</b><span>Икар изменит файлы прямо в папке артефакта: «добавь заголовок», «сделай таблицу», «поменяй цвет».</span><span>Команды — как в большом чате: /clear начнёт заново, /compact сожмёт, /stats покажет токены.</span></div>';
 }
 
 function artChatRenderHistory(messages) {
@@ -274,10 +317,7 @@ function artChatRenderHistory(messages) {
   }
   for (const message of messages) {
     if (message.divider === 'clear') {
-      const mark = document.createElement('div');
-      mark.className = 'art-chat-divider';
-      mark.textContent = 'Контекст очищен';
-      artChatLog().append(mark);
+      artChatDivider('Контекст очищен');
       continue;
     }
     if (message.role === 'user') {
@@ -391,20 +431,86 @@ function artChatToggle() {
   else artChatClose();
 }
 
+/** Имя команды так, как его разбирает сервер: до пробела и без «/». */
+function artChatCommandName(text) {
+  const match = /^\/([a-zA-Z0-9_]+)/.exec(String(text || '').trim());
+  return match ? match[1].toLowerCase() : '';
+}
+
+/**
+ * Строка с косой черты: сначала спрашиваем сервер, его ли это команда.
+ * `/clear`, `/compact`, `/stats` — команды чата, у них свой маршрут; `/skill:имя`
+ * и шаблоны pi сервер не берёт, и они уходят обычной репликой. false значит
+ * «отправляй в разговор как текст».
+ */
+async function artChatRunCommand(text) {
+  if (!artChatState.chatId) return false;
+  // Вторую команду поверх первой не запускаем: ответ придёт не тому ходу.
+  if (artChatState.commandBusy) {
+    artChatNote('предыдущая команда ещё выполняется');
+    return true;
+  }
+  const chatId = artChatState.chatId;
+  artChatState.commandBusy = true;
+  artChatNote('выполняю ' + text.trim().split(/\s+/)[0] + '…');
+  try {
+    const result = await artApi('/panel/api/chat/command', {
+      method: 'POST',
+      body: JSON.stringify({ chatId, text }),
+    });
+    // Пока команда шла, панель могли закрыть или открыть другой артефакт:
+    // ответ не должен упасть в чужую ленту.
+    if (!result || !result.handled || artChatState.chatId !== chatId) {
+      artChatNote('');
+      return Boolean(result && result.handled);
+    }
+    if (result.cleared) {
+      artChatDivider('Контекст очищен');
+      artChatNote('Контекст чистый, артефакт на месте — говорим заново');
+    } else {
+      artChatCommandResult(text, result.text || '', Boolean(result.failed));
+      artChatNote('');
+    }
+    return true;
+  } catch (error) {
+    if (artChatState.chatId === chatId) {
+      artChatCommandResult(text, 'не получилось: ' + (error && error.message ? error.message : error), true);
+      artChatNote('');
+    }
+    return true;
+  } finally {
+    artChatState.commandBusy = false;
+  }
+}
+
 async function artChatSend() {
   const input = artEl('art-chat-input');
   const text = String(input.value || '').trim();
-  if (!text || artChatState.busy) return;
+  if (!text) return;
   if (!artChatState.chatId) {
     artChatNote('Разговор ещё не открылся', true);
     return;
   }
 
+  // Команду разбираем до проверки занятости: /stop и /stats нужны и во время
+  // хода. Сервер сам скажет, его ли это команда; чужие уедут в pi текстом.
+  if (artChatCommandName(text)) {
+    const handled = await artChatRunCommand(text);
+    if (handled) {
+      if (input.value.trim() === text) {
+        input.value = '';
+        input.style.height = 'auto';
+      }
+      input.focus();
+      return;
+    }
+  }
+  if (artChatState.busy) return;
+
   const chatId = artChatState.chatId;
   input.value = '';
   input.style.height = 'auto';
-  const empty = artChatLog().querySelector('.art-empty');
-  if (empty) empty.remove();
+  artChatDropEmpty();
   artChatUser(text);
   const box = artChatAssistant();
   artChatState.liveBox = box;

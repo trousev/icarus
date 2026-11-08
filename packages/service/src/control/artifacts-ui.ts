@@ -126,7 +126,7 @@ export function artifactsPage(session: PanelSession, options: ArtifactsPageOptio
         <button class="art-icon-btn" id="art-chat-close" title="Закрыть чат" aria-label="Закрыть чат">×</button>
       </div>
       <div class="art-chat-log" id="art-chat-log">
-        <div class="art-empty"><b>Скажи, что поправить</b><span>Икар изменит файлы прямо в папке артефакта: «добавь заголовок», «сделай таблицу», «поменяй цвет».</span></div>
+        <div class="art-empty"><b>Скажи, что поправить</b><span>Икар изменит файлы прямо в папке артефакта: «добавь заголовок», «сделай таблицу», «поменяй цвет».</span><span>Команды — как в большом чате: /clear начнёт заново, /compact сожмёт, /stats покажет токены.</span></div>
       </div>
       <div class="art-chat-foot">
         <div class="art-chat-note" id="art-chat-note"></div>
