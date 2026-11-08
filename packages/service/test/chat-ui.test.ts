@@ -15,6 +15,17 @@ const SESSION: PanelSession = {
   storage: 'git · local',
 };
 
+test('стили сообщений едут общим файлом — их же берёт чат правки артефакта', () => {
+  const html = chatPage(SESSION, { enabled: true });
+  // Лента, пузырь, трассировка и .md переехали в chat-messages.css: один файл
+  // на два места. Если он отвалится, ответ ИИ в боковой панели разъедется с чатом.
+  assert.match(html, /\.turn \{ display: flex; gap: 10px; margin-bottom: 20px; \}/);
+  assert.match(html, /\.turn\.user \.bubble/);
+  assert.match(html, /\.md \{ font-size: 14px; line-height: 1\.65; word-break: break-word; \}/);
+  assert.match(html, /\.trace \{ background: var\(--panel\); border: 1px solid var\(--line\)/);
+  assert.match(html, /@keyframes pulse/);
+});
+
 test('чат — это лента с композером и диалогами, а не таблица настроек', () => {
   const html = chatPage(SESSION, { chatId: 'web-1', enabled: true });
 
