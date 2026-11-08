@@ -110,3 +110,24 @@ test('AGENTS.md не зовёт подключать eager-сервер: его 
 test('без MCP в AGENTS.md нет секции про подключение', () => {
   assert.doesNotMatch(renderAgentsMd(makeConfig()), /MCP-инструменты по требованию/);
 });
+
+test('артефакты: в промпте только триггер, полные инструкции — после подключения', () => {
+  const md = renderAgentsMd(
+    makeConfig({
+      mcp: {
+        artifacts: {
+          command: 'node',
+          lifecycle: 'lazy',
+          hidden: true,
+          description: 'Артефакты: готовые страницы и картинки для человека',
+        },
+      },
+    }),
+  );
+  // Триггер виден всегда: иначе модель не узнает, что сервер вообще есть.
+  assert.match(md, /`artifacts` — Артефакты: готовые страницы и картинки для человека/);
+  assert.match(md, /`mcp_connect`/);
+  // А правила про index.ai.md и папку живут в MCP-хендшейке, не в каждом разговоре.
+  assert.doesNotMatch(md, /index\.ai\.md/);
+  assert.doesNotMatch(md, /artifacts\/<slug>/);
+});

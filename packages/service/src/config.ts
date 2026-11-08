@@ -493,6 +493,10 @@ function parseMcp(value: unknown, env: NodeJS.ProcessEnv): Record<string, McpSer
     const command = optionalString(server.command, `${where}.command`);
     const url = optionalString(server.url, `${where}.url`);
     const description = optionalString(server.description, `${where}.description`);
+    if (server.hidden !== undefined && typeof server.hidden !== 'boolean') {
+      throw new Error(`${where}.hidden: ожидалось true или false`);
+    }
+    const hidden = server.hidden === true;
     const args = asArray(server.args, `${where}.args`).map((arg, index) =>
       requiredString(arg, `${where}.args[${index}]`),
     );
@@ -507,6 +511,7 @@ function parseMcp(value: unknown, env: NodeJS.ProcessEnv): Record<string, McpSer
         : { headers: stringMap(server.headers, `${where}.headers`, env) }),
       ...(lifecycle === undefined ? {} : { lifecycle }),
       ...(description === undefined ? {} : { description }),
+      ...(hidden ? { hidden: true } : {}),
     };
   }
   return servers;

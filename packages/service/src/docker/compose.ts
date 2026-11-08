@@ -101,8 +101,13 @@ export function userVolumes(config: IcarusConfig, user: UserConfig): string[] {
     // обязан совпадать с хостовым: launcher ищет свои библиотеки по записанному
     // внутри пути. Отдельного поля в конфиге для этого больше нет — сервис знает сам.
     ...(config.mapleDir !== undefined ? [bind(config.mapleDir, config.mapleDir, 'ro')] : []),
-    // Сервер Maple живёт в репозитории: его код тоже нужен контейнеру.
-    ...(config.mapleDir !== undefined ? [bind(path.join(REPO_ROOT, 'tools'), '/opt/icarus/tools', 'ro')] : []),
+    // Код встроенных MCP живёт в репозитории, но в контейнер едут только сами
+    // серверы: каталог `tools` целиком содержит стенды и логи, которым там нечего
+    // делать. Артефакты нужны всегда, Maple — только когда он включён.
+    bind(path.join(REPO_ROOT, 'tools', 'artifacts-mcp'), '/opt/icarus/tools/artifacts-mcp', 'ro'),
+    ...(config.mapleDir !== undefined
+      ? [bind(path.join(REPO_ROOT, 'tools', 'maple-mcp'), '/opt/icarus/tools/maple-mcp', 'ro')]
+      : []),
   ];
 }
 
