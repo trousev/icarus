@@ -1,9 +1,8 @@
 // Клиент раздела «Артефакты».
 //
-// Сервер отдаёт только каркас: список и содержимое приезжают сюда. Так панель
-// открывается мгновенно, а выбор артефакта и поиск не ходят в сервис за каждым
-// нажатием. Состояние (workspace и артефакт) живёт в адресе: ссылку на конкретный
-// артефакт можно переслать, «назад» работает как надо.
+// Артефакты глобальные: список один, без workspace'ов. Сервер отдаёт каркас,
+// данные приезжают сюда; состояние (открытый артефакт) живёт в адресе.
+// Права: read — смотреть, write — менять файлы, admin — права/удаление/ссылка.
 /* global artifactMarkdown */
 
 const artCfg = window.__ARTIFACTS_CFG__;
@@ -42,17 +41,12 @@ const artStamp = (iso) => {
   if (Number.isNaN(date.getTime())) return '';
   const pad = (n) => String(n).padStart(2, '0');
   return (
-    pad(date.getDate()) +
-    '.' +
-    pad(date.getMonth() + 1) +
-    '.' +
-    date.getFullYear() +
-    ', ' +
-    pad(date.getHours()) +
-    ':' +
-    pad(date.getMinutes())
+    pad(date.getDate()) + '.' + pad(date.getMonth() + 1) + '.' + date.getFullYear() +
+    ', ' + pad(date.getHours()) + ':' + pad(date.getMinutes())
   );
 };
+
+const ART_LEVELS = { read: 'чтение', write: 'запись', admin: 'администрирование' };
 
 const artIcon = (type) => {
   if (type === 'image') {
@@ -65,7 +59,6 @@ const artIcon = (type) => {
 };
 
 const artState = {
-  workspace: artCfg.workspace || artCfg.workspaces[0]?.slug || 'talk',
   artifact: artCfg.artifact || null,
   items: [],
   query: '',
@@ -86,29 +79,11 @@ function artSetStatus(text, bad = false) {
 
 function artPushState() {
   const query = new URLSearchParams();
-  query.set('workspace', artState.workspace);
   if (artState.artifact) query.set('artifact', artState.artifact);
-  const next = '/panel/artifacts?' + query.toString();
+  const next = '/panel/artifacts' + (query.toString() ? '?' + query.toString() : '');
   if (window.location.pathname + window.location.search !== next) {
     history.replaceState(null, '', next);
   }
-}
-
-function artRenderWorkspaces() {
-  const select = artEl('art-workspace');
-  if (!select) return;
-  select.innerHTML = artCfg.workspaces
-    .map(
-      (item) =>
-        '<option value="' +
-        artEsc(item.slug) +
-        '"' +
-        (item.slug === artState.workspace ? ' selected' : '') +
-        '>' +
-        artEsc(item.name) +
-        '</option>',
-    )
-    .join('');
 }
 
 function artMatches(item) {
@@ -117,6 +92,7 @@ function artMatches(item) {
   return (
     item.title.toLowerCase().includes(needle) ||
     item.name.toLowerCase().includes(needle) ||
+    item.owner.toLowerCase().includes(needle) ||
     (item.summary || '').toLowerCase().includes(needle)
   );
 }
@@ -135,25 +111,18 @@ function artRenderList() {
     return;
   }
   list.innerHTML = visible
-    .map(
-      (item) =>
+    .map((item) => {
+      const owner = item.owner && item.owner !== artCfg.user ? ' · ' + item.owner : '';
+      return (
         '<button type="button" class="art-item' +
         (item.name === artState.artifact ? ' active' : '') +
-        '" data-artifact="' +
-        artEsc(item.name) +
-        '">' +
-        '<span class="art-item-icon">' +
-        artIcon(item.type) +
-        '</span>' +
-        '<span class="art-item-text"><b>' +
-        artEsc(item.title) +
-        '</b><span>' +
-        artEsc(item.typeLabel) +
-        ' · ' +
-        artEsc(artHumanSize(item.size)) +
-        '</span></span>' +
-        '</button>',
-    )
+        '" data-artifact="' + artEsc(item.name) + '">' +
+        '<span class="art-item-icon">' + artIcon(item.type) + '</span>' +
+        '<span class="art-item-text"><b>' + artEsc(item.title) + '</b><span>' +
+        artEsc(item.typeLabel) + ' · ' + artEsc(artHumanSize(item.size)) + artEsc(owner) +
+        '</span></span></button>'
+      );
+    })
     .join('');
 }
 
@@ -166,17 +135,16 @@ function artClearView(message) {
   artEl('art-updated').textContent = '';
   artEl('art-link').disabled = true;
   artEl('art-unpublish').hidden = true;
+  artEl('art-acl').hidden = true;
   artEl('art-download').setAttribute('aria-disabled', 'true');
   artEl('art-download').removeAttribute('href');
   artEl('art-bare').setAttribute('aria-disabled', 'true');
   artEl('art-bare').removeAttribute('href');
   artEl('art-delete').disabled = true;
   artEl('art-view').innerHTML =
-    '<div class="art-placeholder"><div class="art-placeholder-icon">' +
-    artIcon('markdown') +
-    '</div><b>' +
-    artEsc(message || 'Выбери артефакт') +
-    '</b><span>Слева — всё, что Икар сделал для тебя в этом workspace.</span></div>';
+    '<div class="art-placeholder"><div class="art-placeholder-icon">' + artIcon('markdown') +
+    '</div><b>' + artEsc(message || 'Выбери артефакт') +
+    '</b><span>Слева — всё, что сделал Икар для семьи.</span></div>';
   artCrumbs('');
 }
 
@@ -189,13 +157,15 @@ function artRenderView(data) {
   artState.selected = item;
   artEl('art-name').textContent = item.entry;
   artEl('art-type-icon').innerHTML = artIcon(item.type);
-  artEl('art-meta').textContent = item.typeLabel + ' · ' + artHumanSize(item.size);
-  artEl('art-path').textContent =
-    '~/icarus/workspaces/' + artState.workspace + '/artifacts/' + item.name + '/' + item.entry;
+  artEl('art-meta').textContent =
+    item.typeLabel + ' · ' + artHumanSize(item.size) +
+    ' · владелец ' + item.owner + ' · ' + ART_LEVELS[item.access];
+  artEl('art-path').textContent = '/artifacts/' + item.name + '/' + item.entry;
   artEl('art-updated').textContent = 'Обновлено ' + artStamp(item.updatedAt);
-  artEl('art-link').disabled = false;
-  artEl('art-unpublish').hidden = !item.publicId;
-  artEl('art-delete').disabled = false;
+  artEl('art-link').disabled = !item.canManage;
+  artEl('art-unpublish').hidden = !item.publicId || !item.canManage;
+  artEl('art-acl').hidden = !item.canManage;
+  artEl('art-delete').disabled = !item.canManage;
   artEl('art-download').href = item.urls.raw + '?download=1';
   artEl('art-download').removeAttribute('aria-disabled');
   artEl('art-bare').href =
@@ -206,11 +176,9 @@ function artRenderView(data) {
   const view = artEl('art-view');
   if (item.type === 'html') {
     view.innerHTML =
-      '<iframe class="art-frame" title="' +
-      artEsc(item.title) +
+      '<iframe class="art-frame" title="' + artEsc(item.title) +
       '" sandbox="allow-scripts allow-forms allow-modals allow-popups" src="' +
-      artEsc(item.urls.raw) +
-      '"></iframe>';
+      artEsc(item.urls.raw) + '"></iframe>';
     return;
   }
   if (item.type === 'image') {
@@ -232,25 +200,11 @@ function artRenderView(data) {
 
 async function artLoadList() {
   artEl('art-list').innerHTML = '<p class="art-empty">Читаю…</p>';
-  const data = await artApi(
-    '/panel/artifacts/api/list?workspace=' + encodeURIComponent(artState.workspace),
-  );
+  const data = await artApi('/panel/artifacts/api/list');
   artState.items = data.items || [];
-  if (data.workspace) artState.workspace = data.workspace;
-  if (data.workspaces) artCfg.workspaces = data.workspaces;
-  artRenderWorkspaces();
   artRenderList();
-  // В меню настроек артефактов больше нет — общее число живёт в шапке списка.
   const total = artEl('count-artifacts');
   if (total) total.textContent = String(data.total ?? artState.items.length);
-}
-
-/** Числа у остальных разделов приходят с сервера: клиент их только расставляет. */
-function artFillCounts() {
-  for (const [id, value] of Object.entries(artCfg.counts || {})) {
-    const node = artEl('count-' + (id === 'personal' ? 'memory' : id));
-    if (node) node.textContent = String(value);
-  }
 }
 
 async function artOpen(name, push = true) {
@@ -266,12 +220,7 @@ async function artOpen(name, push = true) {
   artRenderList();
   artEl('art-view').innerHTML = '<div class="art-placeholder"><b>Открываю…</b></div>';
   try {
-    const data = await artApi(
-      '/panel/artifacts/api/read?workspace=' +
-        encodeURIComponent(artState.workspace) +
-        '&artifact=' +
-        encodeURIComponent(name),
-    );
+    const data = await artApi('/panel/artifacts/api/read?artifact=' + encodeURIComponent(name));
     artRenderView(data);
     if (push) artPushState();
   } catch (error) {
@@ -280,7 +229,6 @@ async function artOpen(name, push = true) {
   }
 }
 
-/** Копирование ссылки: clipboard есть не всегда, поэтому есть запасной путь. */
 async function artCopy(text) {
   try {
     await navigator.clipboard.writeText(text);
@@ -304,17 +252,16 @@ async function artCopy(text) {
 }
 
 async function artMakeLink() {
-  if (!artState.selected) return;
+  if (!artState.selected?.canManage) return;
   artEl('art-link').disabled = true;
   try {
     const data = await artApi('/panel/artifacts/api/link', {
       method: 'POST',
-      body: JSON.stringify({ workspace: artState.workspace, artifact: artState.selected.name }),
+      body: JSON.stringify({ artifact: artState.selected.name }),
     });
     const url = data.urls.public;
     const copied = await artCopy(url);
     artSetStatus(copied ? 'Публичная ссылка скопирована' : 'Публичная ссылка: ' + url);
-    // Открытая ссылка живёт в панели: кнопка «без панели» в шапке ведёт туда же.
     artState.selected.urls = data.urls;
     artState.selected.publicId = data.artifact?.publicId;
     artEl('art-unpublish').hidden = !artState.selected.publicId;
@@ -326,18 +273,17 @@ async function artMakeLink() {
 }
 
 async function artUnpublish() {
-  if (!artState.selected) return;
+  if (!artState.selected?.canManage) return;
   artEl('art-unpublish').disabled = true;
   try {
     const data = await artApi('/panel/artifacts/api/unpublish', {
       method: 'POST',
-      body: JSON.stringify({ workspace: artState.workspace, artifact: artState.selected.name }),
+      body: JSON.stringify({ artifact: artState.selected.name }),
     });
     artState.selected.urls = data.urls;
     artState.selected.publicId = undefined;
     artEl('art-unpublish').hidden = true;
     artSetStatus('Публичная ссылка отозвана — старый адрес больше не откроется');
-    artRenderList();
   } catch (error) {
     artSetStatus('Ссылка не отозвалась: ' + error.message, true);
   } finally {
@@ -345,8 +291,40 @@ async function artUnpublish() {
   }
 }
 
+function artOpenAcl() {
+  if (!artState.selected?.canManage) return;
+  artEl('acl-me').value = artState.selected.acl.me;
+  artEl('acl-family').value = artState.selected.acl.family;
+  artEl('art-acl-modal').hidden = false;
+  artEl('acl-family').focus();
+}
+
+function artCloseAcl() {
+  artEl('art-acl-modal').hidden = true;
+}
+
+async function artSaveAcl() {
+  if (!artState.selected?.canManage) return;
+  const acl = { me: artEl('acl-me').value, family: artEl('acl-family').value };
+  artEl('acl-save').disabled = true;
+  try {
+    await artApi('/panel/artifacts/api/acl', {
+      method: 'POST',
+      body: JSON.stringify({ artifact: artState.selected.name, acl }),
+    });
+    artCloseAcl();
+    artSetStatus('Права сохранены');
+    await artLoadList();
+    await artOpen(artState.selected.name);
+  } catch (error) {
+    artSetStatus('Права не сохранились: ' + error.message, true);
+  } finally {
+    artEl('acl-save').disabled = false;
+  }
+}
+
 async function artDelete() {
-  if (!artState.selected) return;
+  if (!artState.selected?.canManage) return;
   const name = artState.selected.name;
   if (!artState.deleteArmed) {
     artState.deleteArmed = true;
@@ -362,7 +340,7 @@ async function artDelete() {
   try {
     await artApi('/panel/artifacts/api/delete', {
       method: 'POST',
-      body: JSON.stringify({ workspace: artState.workspace, artifact: name }),
+      body: JSON.stringify({ artifact: name }),
     });
     artSetStatus('Артефакт удалён');
     if (artState.artifact === name) {
@@ -380,25 +358,18 @@ async function artDelete() {
   }
 }
 
+/** Числа у остальных разделов приходят с сервера: клиент их только расставляет. */
+function artFillCounts() {
+  for (const [id, value] of Object.entries(artCfg.counts || {})) {
+    const node = artEl('count-' + (id === 'personal' ? 'memory' : id));
+    if (node) node.textContent = String(value);
+  }
+}
+
 async function artStart() {
   artEl('q').addEventListener('input', (event) => {
     artState.query = event.target.value.trim();
     artRenderList();
-  });
-  artEl('art-workspace').addEventListener('change', async (event) => {
-    artState.workspace = event.target.value;
-    artState.artifact = null;
-    artState.query = '';
-    artEl('q').value = '';
-    artClearView();
-    artPushState();
-    try {
-      await artLoadList();
-      const first = artState.items.find(artMatches);
-      await artOpen(first ? first.name : null);
-    } catch (error) {
-      artSetStatus('Список не загрузился: ' + error.message, true);
-    }
   });
   artEl('art-list').addEventListener('click', (event) => {
     const button = event.target.closest('[data-artifact]');
@@ -407,12 +378,19 @@ async function artStart() {
   });
   artEl('art-link').addEventListener('click', artMakeLink);
   artEl('art-unpublish').addEventListener('click', artUnpublish);
+  artEl('art-acl').addEventListener('click', artOpenAcl);
   artEl('art-delete').addEventListener('click', artDelete);
+  artEl('acl-cancel').addEventListener('click', artCloseAcl);
+  artEl('acl-save').addEventListener('click', artSaveAcl);
+  artEl('art-acl-modal').addEventListener('click', (event) => {
+    if (event.target === artEl('art-acl-modal')) artCloseAcl();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !artEl('art-acl-modal').hidden) artCloseAcl();
+  });
   artFillCounts();
-  artRenderWorkspaces();
   try {
     await artLoadList();
-    // Открытый в ссылке артефакт важнее «первого в списке»: человек пришёл по ссылке.
     const wanted = artState.artifact && artState.items.find((item) => item.name === artState.artifact);
     const first = wanted || artState.items[0];
     if (first) await artOpen(first.name);

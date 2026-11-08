@@ -91,6 +91,10 @@ export function userVolumes(config: IcarusConfig, user: UserConfig): string[] {
     // shared-memory — единственный каталог, который не принадлежит человеку:
     // он общий на весь инстанс и лежит вне его дерева.
     bind(paths.sharedMemory, CONTAINER_PATHS.sharedMemory),
+    // Глобальная библиотека артефактов: одна на всех, лежит в dataDir и видна
+    // каждому контейнеру как /artifacts. Права внутри папок проверяют панель,
+    // MCP и folder-guard, а не docker.
+    bind(path.join(config.dataDir, 'artifacts'), CONTAINER_PATHS.artifacts),
     // Реестр разговоров — только для чтения: агент по id панели находит файл сессии,
     // но писать в него не должен (реестр ведёт сервис, см. sessions/chats.ts).
     ...(fs.existsSync(paths.chats) ? [bind(paths.chats, CONTAINER_PATHS.chats, 'ro')] : []),

@@ -19,6 +19,7 @@ import {
 } from './config.ts';
 import { effectiveServers, ensureOAuthProxyKeys, readStore, storePaths } from './mcp/registry.ts';
 import { ensureWorkspaces } from './workspaces.ts';
+import { migrateLegacyArtifacts, ensureArtifactsRoot } from './artifacts.ts';
 import { renderSessionsMap } from './sessions/chats.ts';
 import { DEFAULT_LANGUAGE, languageName, languageOf, type Language } from './profile.ts';
 
@@ -51,6 +52,9 @@ function migrateLayout(paths: ReturnType<typeof userPaths>): void {
 export function ensureDirs(config: IcarusConfig, user: UserConfig): void {
   const paths = userPaths(config, user);
   migrateLayout(paths);
+  // Глобальная библиотека артефактов живёт в dataDir и монтируется всем как
+  // /artifacts. Заводим её до контейнеров: docker иначе создаст точку маунта root-ом.
+  ensureArtifactsRoot(config);
   for (const dir of [
     paths.workspaces,
     paths.icarus,
@@ -132,6 +136,7 @@ export function renderAgentsMd(
   const workspaces = CONTAINER_PATHS.workspaces;
   const rows = [
     `| \`${workspaces}/<workspace>/\` | **рабочая папка**: та, в которой ты сейчас | работай и твори здесь |`,
+    `| \`${CONTAINER_PATHS.artifacts}/\` | **общие артефакты** для людей: страницы, документы, картинки | права папки решают, что можно читать и писать |`,
     `| \`${home}/memory/\` | **личная память** этого человека | читай смело, пиши когда просят запомнить |`,
     `| \`${home}/shared-memory/\` | **семейная память**, общая для всех | писать **только по явной просьбе** |`,
     `| \`${home}/incoming/\` | вложения из чата | разбирай сам: прочитай, посмотри, разложи |`,
@@ -330,6 +335,12 @@ function copyDirFiles(from: string, to: string, depth = 0): string[] {
 
 export function prepareUser(config: IcarusConfig, user: UserConfig) {
   ensureDirs(config, user);
+  try {
+    const moved = migrateLegacyArtifacts(config, user);
+    if (moved.length > 0) log.info('артефакты: старые папки перенесены в общую библиотеку', { user: user.id, artifacts: moved });
+  } catch (error) {
+    log.warn('артефакты: старые папки не перенеслись', { user: user.id, error: String(error) });
+  }
   const paths = userPaths(config, user);
 
   // Пользовательские MCP: включённые и готовые серверы добавляются к общим.

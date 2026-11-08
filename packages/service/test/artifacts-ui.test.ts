@@ -1,7 +1,7 @@
 // Страница раздела и публичный просмотр: разметка и клиентский скрипт.
 //
-// Скрипт здесь по-настоящему компилируется: опечатка в бэкслешах ломает всю
-// страницу, а тест разметки этого не видит.
+// Скрипт здесь по-настоящему компилируется и один раз исполняется: опечатка в
+// бэкслешах ломает всю страницу, а тест разметки этого не видит.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseHTML } from 'linkedom';
@@ -23,39 +23,34 @@ const SESSION: PanelSession = {
 };
 
 const OPTIONS = {
-  workspace: 'talk',
   artifact: 'plan',
-  workspaces: [
-    { slug: 'talk', name: 'Разговор' },
-    { slug: 'private', name: 'Приватный' },
-  ],
   counts: { artifacts: 3, personal: 4, skills: 5, mcp: 2 },
 };
 
-test('страница: список в сайдбаре, поиск и действия над артефактом', () => {
+test('страница: глобальный список, поиск, права и публичная ссылка', () => {
   const html = artifactsPage(SESSION, OPTIONS);
   assert.match(html, /<title>Icarus Control Panel<\/title>/);
   assert.match(html, /АРТЕФАКТЫ/);
   assert.match(html, /id="art-list"/);
   assert.match(html, /id="q"[^>]*placeholder="Поиск по артефактам"/);
   assert.match(html, /"artifact":"plan"/);
-  assert.match(html, /"workspace":"talk"/);
-  assert.match(html, /"artifacts":3/);
-  // Меню настроек — тот же плоский список, что и на остальных страницах,
-  // без отдельных «библиотек».
-  assert.doesNotMatch(html, /<p class="nav-title">БИБЛИОТЕКА<\/p>/);
+  assert.doesNotMatch(html, /"workspace"/, 'workspace-переключателя больше нет');
+  assert.doesNotMatch(html, /id="art-workspace"/);
   assert.match(html, /<p class="nav-title">НАСТРОЙКИ<\/p>/);
+  assert.doesNotMatch(html, /БИБЛИОТЕКА/);
   assert.match(html, /href="\/panel\/memory"/);
-  // Кнопки действий: ссылка, «без панели», скачать, удалить.
   assert.match(html, /id="art-link"/);
-  assert.match(html, /id="art-unpublish"/, 'ссылку можно отозвать');
+  assert.match(html, /id="art-unpublish"/);
+  assert.match(html, /id="art-acl"/);
+  assert.match(html, /id="art-acl-modal"/);
+  assert.match(html, /id="acl-me"/);
+  assert.match(html, /id="acl-family"/);
   assert.match(html, /id="art-bare"/);
   assert.match(html, /id="art-download"/);
   assert.match(html, /id="art-delete"/);
-  assert.match(html, /workspace <select id="art-workspace"/);
 });
 
-test('клиентский скрипт страницы компилируется и знает оба рендера', () => {
+test('клиентский скрипт страницы компилируется и знает права', () => {
   const html = artifactsPage(SESSION, OPTIONS);
   const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
   assert.ok(scripts.length >= 3, 'конфиг, markdown и клиент едут отдельными скриптами');
@@ -64,6 +59,8 @@ test('клиентский скрипт страницы компилирует�
   assert.match(client, /artLoadList/);
   assert.match(client, /artMakeLink/);
   assert.match(client, /artUnpublish/);
+  assert.match(client, /artOpenAcl/);
+  assert.match(client, /artSaveAcl/);
   assert.match(client, /artDelete/);
   assert.match(client, /artifactMarkdown/);
 });
@@ -80,12 +77,18 @@ function artifact(overrides: Partial<Artifact> = {}): Artifact {
     summary: 'Расписание дня.',
     ai: true,
     files: ['index.md', 'index.ai.md'],
+    owner: 'probe',
+    acl: { me: 'admin', family: 'read' },
+    access: 'admin',
+    canRead: true,
+    canWrite: true,
+    canManage: true,
     publicId: 'abcdefghijklmnopqrstuvwx',
     urls: {
-      panel: 'https://icarus.example/panel/artifacts?workspace=talk&artifact=plan',
-      raw: 'https://icarus.example/panel/artifacts/raw/talk/plan/index.md',
-      public: 'https://icarus.example/a/probe/talk/plan/abcdefghijklmnopqrstuvwx/',
-      bare: 'https://icarus.example/a/probe/talk/plan/abcdefghijklmnopqrstuvwx/?bare=1',
+      panel: 'https://icarus.example/panel/artifacts?artifact=plan',
+      raw: 'https://icarus.example/panel/artifacts/raw/plan/index.md',
+      public: 'https://icarus.example/a/plan/abcdefghijklmnopqrstuvwx/',
+      bare: 'https://icarus.example/a/plan/abcdefghijklmnopqrstuvwx/?bare=1',
     },
     ...overrides,
   };
@@ -97,6 +100,7 @@ test('публичная страница: markdown рендерится, html �
   assert.match(md, /ПУБЛИЧНЫЙ АРТЕФАКТ/);
   assert.match(md, /public-doc/);
   assert.match(md, /artifactMarkdown/);
+  assert.match(md, /владелец/);
 
   const html = publicArtifactPage(
     artifact({
@@ -105,15 +109,15 @@ test('публичная страница: markdown рендерится, html �
       entry: 'index.html',
       urls: {
         panel: 'x',
-        raw: 'https://icarus.example/panel/artifacts/raw/talk/report/index.html',
-        public: 'https://icarus.example/a/probe/talk/report/idididididididididididid/',
-        bare: 'https://icarus.example/a/probe/talk/report/idididididididididididid/?bare=1',
+        raw: 'https://icarus.example/panel/artifacts/raw/report/index.html',
+        public: 'https://icarus.example/a/report/idididididididididididid/',
+        bare: 'https://icarus.example/a/report/idididididididididididid/?bare=1',
       },
     }),
     null,
   );
   assert.match(html, /<iframe class="art-frame"[^>]*sandbox="[^"]*allow-scripts/);
-  assert.match(html, /src="https:\/\/icarus\.example\/a\/probe\/talk\/report\/idididididididididididid\/index\.html"/);
+  assert.match(html, /src="https:\/\/icarus\.example\/a\/report\/idididididididididididid\/index\.html"/);
   assert.match(html, /Без панели/);
 
   const image = publicArtifactPage(
@@ -123,9 +127,9 @@ test('публичная страница: markdown рендерится, html �
       entry: 'index.svg',
       urls: {
         panel: 'x',
-        raw: 'https://icarus.example/panel/artifacts/raw/talk/gift/index.svg',
-        public: 'https://icarus.example/a/probe/talk/gift/idididididididididididid/',
-        bare: 'https://icarus.example/a/probe/talk/gift/idididididididididididid/?bare=1',
+        raw: 'https://icarus.example/panel/artifacts/raw/gift/index.svg',
+        public: 'https://icarus.example/a/gift/idididididididididididid/',
+        bare: 'https://icarus.example/a/gift/idididididididididididid/?bare=1',
       },
     }),
     null,
@@ -134,16 +138,15 @@ test('публичная страница: markdown рендерится, html �
   assert.doesNotMatch(image, /<iframe/);
 });
 
-test('скрипт страницы исполняется: список рисуется, markdown открывается', async () => {
+test('скрипт страницы исполняется: глобальный список рисуется, markdown открывается', async () => {
   const html = artifactsPage(SESSION, OPTIONS);
   const { document, window } = parseHTML(html);
   const scripts = [...document.querySelectorAll('script')]
     .map((node) => node.textContent ?? '')
     .filter(Boolean);
   const item = artifact();
-  // У страницы нет ни pi, ни сети: отдаём ровно два ответа, которые она просит.
   const payloads: Record<string, unknown> = {
-    list: { workspace: 'talk', workspaces: OPTIONS.workspaces, total: 3, items: [item] },
+    list: { total: 1, items: [item] },
     read: { artifact: item, content: '# План на четверг\n\n1. Стендап\n', aiContent: 'Расписание' },
   };
   window.fetch = async (url: string) => {
@@ -155,16 +158,14 @@ test('скрипт страницы исполняется: список рис�
     };
   };
   window.URL.createObjectURL = () => 'blob:x';
-  const location = { href: 'http://panel/panel/artifacts', pathname: '/panel/artifacts', search: '?workspace=talk&artifact=plan' };
+  const location = { href: 'http://panel/panel/artifacts', pathname: '/panel/artifacts', search: '?artifact=plan' };
   const history = { replaceState() {} };
-  // В браузере location висит на window; linkedom его не заводит.
   Object.defineProperty(window, 'location', { value: location, configurable: true });
 
   let crashed: string | null = null;
   try {
     const run = new Function('window', 'document', 'fetch', 'URL', 'location', 'history', scripts.join('\n'));
     run(window, document, window.fetch, window.URL, location, history);
-    // Клиент асинхронный: даём ему доиграть два запроса.
     await new Promise((resolve) => setTimeout(resolve, 20));
   } catch (error) {
     crashed = String(error);
