@@ -9,6 +9,11 @@
 const artCfg = window.__ARTIFACTS_CFG__;
 const artEl = (id) => document.getElementById(id);
 
+// Иконка «копировать» приезжает из разметки: на успех подменяем её галочкой и
+// возвращаем обратно — кнопка остаётся одной и той же.
+const ART_ICON_COPY = artEl('acl-copy')?.innerHTML ?? '';
+const ART_ICON_CHECK = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4.5 4.5L19 7"/></svg>';
+
 // Чат правки живёт отдельным скриптом и грузится следом. До него функция
 // закрытия ещё не объявлена — тогда закрывать и нечего, поэтому проверяем.
 const closeArtifactChat = () => {
@@ -148,6 +153,74 @@ function artHideHistory() {
   artHidePreview();
 }
 
+function artMetaText(item) {
+  return (
+    item.typeLabel + ' · ' + artHumanSize(item.size) +
+    ' · владелец ' + item.owner + ' · ' + ART_LEVELS[item.access]
+  );
+}
+
+/**
+ * Состояние панели действий. Кнопок-надписей больше нет: подпись объясняет
+ * только title, поэтому доступность каждого знака считается здесь.
+ */
+function artSyncActions(item, preview = false) {
+  const selected = Boolean(item);
+  const manage = selected && !preview && Boolean(item.canManage);
+  const write = selected && Boolean(item.canWrite);
+
+  const share = artEl('art-share');
+  share.disabled = !manage;
+  share.title = manage
+    ? 'Поделиться доступом'
+    : selected
+      ? 'Правами управляет владелец артефакта'
+      : 'Выбери артефакт';
+
+  const history = artEl('art-history');
+  history.disabled = !selected;
+  history.title = selected ? 'История версий' : 'Выбери артефакт';
+
+  const chat = artEl('art-chat');
+  chat.disabled = !write;
+  chat.title = write
+    ? 'Чат по артефакту'
+    : selected
+      ? 'Нужно право записи на артефакт'
+      : 'Выбери артефакт';
+
+  const download = artEl('art-download');
+  const bare = artEl('art-bare');
+  if (selected) {
+    download.href = item.urls.raw + (item.urls.raw.includes('?') ? '&' : '?') + 'download=1';
+    download.removeAttribute('aria-disabled');
+    bare.href = item.type === 'markdown' && item.urls.bare ? item.urls.bare : item.urls.raw;
+    bare.removeAttribute('aria-disabled');
+  } else {
+    download.removeAttribute('href');
+    download.setAttribute('aria-disabled', 'true');
+    bare.removeAttribute('href');
+    bare.setAttribute('aria-disabled', 'true');
+  }
+
+  const del = artEl('art-delete');
+  if (!manage) artResetDelete();
+  del.disabled = !manage;
+  del.title = !manage
+    ? (selected ? 'Удаляет владелец или админ артефакта' : 'Выбери артефакт')
+    : artState.deleteArmed
+      ? 'Нажми ещё раз, чтобы удалить'
+      : 'Удалить артефакт';
+}
+
+/** Ответ сервера о новых правах: обновляем шапку и знаки, не перерисовывая просмотр. */
+function artApplyArtifact(item) {
+  if (!item) return;
+  artState.selected = item;
+  artEl('art-meta').textContent = artMetaText(item);
+  artSyncActions(item, Boolean(artState.preview));
+}
+
 function artClearView(message) {
   artState.selected = null;
   artHideHistory();
@@ -156,18 +229,7 @@ function artClearView(message) {
   artEl('art-type-icon').innerHTML = '';
   artEl('art-path').textContent = '';
   artEl('art-updated').textContent = '';
-  artEl('art-link').hidden = false;
-  artEl('art-link').disabled = true;
-  artEl('art-unpublish').hidden = true;
-  artEl('art-acl').hidden = true;
-  artEl('art-delete').hidden = false;
-  artEl('art-download').setAttribute('aria-disabled', 'true');
-  artEl('art-download').removeAttribute('href');
-  artEl('art-bare').setAttribute('aria-disabled', 'true');
-  artEl('art-bare').removeAttribute('href');
-  artEl('art-delete').disabled = true;
-  artEl('art-chat').disabled = true;
-  artEl('art-chat').title = 'Выбери артефакт';
+  artSyncActions(null);
   closeArtifactChat();
   artEl('art-view').innerHTML =
     '<div class="art-placeholder"><div class="art-placeholder-icon">' + artIcon('markdown') +
@@ -187,39 +249,15 @@ function artRenderView(data, preview = null) {
   artEl('art-type-icon').innerHTML = artIcon(item.type);
   artEl('art-meta').textContent = preview
     ? item.typeLabel + ' · ' + artHumanSize(item.size) + ' · версия от ' + artStamp(preview.date)
-    : item.typeLabel + ' · ' + artHumanSize(item.size) +
-      ' · владелец ' + item.owner + ' · ' + ART_LEVELS[item.access];
+    : artMetaText(item);
   artEl('art-path').textContent = '/artifacts/' + item.name + '/' + item.entry;
   artEl('art-updated').textContent = preview
     ? 'Версия от ' + artStamp(preview.date)
     : 'Обновлено ' + artStamp(item.updatedAt);
-  artEl('art-link').hidden = true;
-  artEl('art-link').disabled = true;
-  artEl('art-unpublish').hidden = true;
-  artEl('art-acl').hidden = true;
-  artEl('art-delete').hidden = true;
-  artEl('art-delete').disabled = true;
-  artEl('art-download').href = item.urls.raw + (item.urls.raw.includes('?') ? '&' : '?') + 'download=1';
-  artEl('art-download').removeAttribute('aria-disabled');
-  artEl('art-bare').href = item.urls.raw;
-  artEl('art-bare').removeAttribute('aria-disabled');
-
-  if (!preview) {
-    artEl('art-link').hidden = false;
-    artEl('art-delete').hidden = false;
-    artEl('art-link').disabled = !item.canManage;
-    artEl('art-unpublish').hidden = !item.publicId || !item.canManage;
-    artEl('art-acl').hidden = !item.canManage;
-    artEl('art-delete').disabled = !item.canManage;
-    if (item.type === 'markdown' && item.urls.bare) artEl('art-bare').href = item.urls.bare;
-    // Чат правки — только тому, кто может писать: остальным он обещал бы
-    // изменение, которого сервер всё равно не разрешит.
-    artEl('art-chat').disabled = !item.canWrite;
-    artEl('art-chat').title = item.canWrite
-      ? 'Открыть чат правки артефакта'
-      : 'Нужно право записи на артефакт';
-    if (!item.canWrite) closeArtifactChat();
-  }
+  artSyncActions(item, Boolean(preview));
+  // Чат правки — только тому, кто может писать: остальным он обещал бы
+  // изменение, которого сервер всё равно не разрешит.
+  if (!item.canWrite) closeArtifactChat();
   artCrumbs(item.title);
 
   const view = artEl('art-view');
@@ -264,12 +302,11 @@ async function artOpen(name, push = true, keepHistory = false) {
     return;
   }
   artState.artifact = name;
-  artState.deleteArmed = false;
+  artResetDelete();
   // Панели исключают друг друга: чат правки и история занимают одно место.
   closeArtifactChat();
   if (keepHistory) artHidePreview();
   else artHideHistory();
-  artEl('art-delete').textContent = 'Удалить';
   artRenderList();
   artEl('art-view').innerHTML = '<div class="art-placeholder"><b>Открываю…</b></div>';
   try {
@@ -304,92 +341,176 @@ async function artCopy(text) {
   }
 }
 
-async function artMakeLink() {
-  if (!artState.selected?.canManage) return;
-  artEl('art-link').disabled = true;
-  try {
-    const data = await artApi('/panel/artifacts/api/link', {
-      method: 'POST',
-      body: JSON.stringify({ artifact: artState.selected.name }),
-    });
-    const url = data.urls.public;
-    const copied = await artCopy(url);
-    artSetStatus(copied ? 'Публичная ссылка скопирована' : 'Публичная ссылка: ' + url);
-    artState.selected.urls = data.urls;
-    artState.selected.publicId = data.artifact?.publicId;
-    artEl('art-unpublish').hidden = !artState.selected.publicId;
-  } catch (error) {
-    artSetStatus('Ссылка не сделалась: ' + error.message, true);
-  } finally {
-    artEl('art-link').disabled = false;
+function artShareNote(text, bad = false) {
+  const note = artEl('art-share-note');
+  note.textContent = text;
+  note.className = 'art-share-note' + (bad ? ' bad' : '');
+}
+
+function artSetShareBusy(busy) {
+  for (const id of ['acl-me', 'acl-family', 'acl-public', 'acl-copy', 'art-share-done']) {
+    const node = artEl(id);
+    if (node) node.disabled = busy;
   }
 }
 
-async function artUnpublish() {
-  if (!artState.selected?.canManage) return;
-  artEl('art-unpublish').disabled = true;
-  try {
-    const data = await artApi('/panel/artifacts/api/unpublish', {
-      method: 'POST',
-      body: JSON.stringify({ artifact: artState.selected.name }),
-    });
-    artState.selected.urls = data.urls;
-    artState.selected.publicId = undefined;
-    artEl('art-unpublish').hidden = true;
-    artSetStatus('Публичная ссылка отозвана — старый адрес больше не откроется');
-  } catch (error) {
-    artSetStatus('Ссылка не отозвалась: ' + error.message, true);
-  } finally {
-    artEl('art-unpublish').disabled = false;
-  }
+/** Кнопка копирования — иконка: сбрасываем её в исходный вид после показа галочки. */
+function artResetCopy() {
+  const button = artEl('acl-copy');
+  if (!button) return;
+  button.innerHTML = ART_ICON_COPY;
+  button.title = 'Копировать ссылку';
+  button.setAttribute('aria-label', 'Копировать ссылку');
 }
 
-function artOpenAcl() {
-  if (!artState.selected?.canManage) return;
-  artEl('acl-me').value = artState.selected.acl.me;
-  artEl('acl-family').value = artState.selected.acl.family;
-  artEl('art-acl-modal').hidden = false;
+/** Ссылка есть только у публичного чтения: публично писать нельзя. */
+function artRenderShareLink() {
+  const item = artState.selected;
+  const url = item?.publicId ? item.urls.public || '' : '';
+  artEl('art-share-link').hidden = !url;
+  artEl('acl-link').value = url;
+  artEl('acl-link').title = url;
+  artEl('acl-public').value = url ? 'read' : 'none';
+  artEl('acl-public-hint').textContent = url ? 'любой человек по ссылке — чтение' : 'выключена';
+}
+
+function artOpenShare() {
+  const item = artState.selected;
+  if (!item?.canManage) return;
+  const own = item.owner === artCfg.user;
+  artEl('art-share-name').textContent = item.title;
+  artEl('art-share-me-name').textContent = own ? 'Я' : 'Владелец';
+  artEl('art-share-me-sub').textContent = own ? 'владелец артефакта' : item.owner;
+  artEl('art-share-me-avatar').textContent = own ? 'Я' : 'В';
+  artEl('acl-me').value = item.acl.me;
+  artEl('acl-family').value = item.acl.family;
+  artEl('acl-me').dataset.previous = item.acl.me;
+  artEl('acl-family').dataset.previous = item.acl.family;
+  artEl('acl-public').dataset.previous = item.publicId ? 'read' : 'none';
+  artResetCopy();
+  artRenderShareLink();
+  artShareNote('Изменения сохраняются сразу.');
+  artEl('art-share-modal').hidden = false;
   artEl('acl-family').focus();
 }
 
-function artCloseAcl() {
-  artEl('art-acl-modal').hidden = true;
+function artCloseShare() {
+  artEl('art-share-modal').hidden = true;
 }
 
-async function artSaveAcl() {
-  if (!artState.selected?.canManage) return;
+/** Права изменились настолько, что артефакт больше не наш: закрываем и чистим. */
+function artLostAccess() {
+  artCloseShare();
+  artState.artifact = null;
+  artClearView('Нет доступа к артефакту');
+  artPushState();
+}
+
+async function artChangeAcl(select, previous) {
+  const item = artState.selected;
+  if (!item?.canManage) return;
   const acl = { me: artEl('acl-me').value, family: artEl('acl-family').value };
-  artEl('acl-save').disabled = true;
+  artSetShareBusy(true);
   try {
-    await artApi('/panel/artifacts/api/acl', {
+    const data = await artApi('/panel/artifacts/api/acl', {
       method: 'POST',
-      body: JSON.stringify({ artifact: artState.selected.name, acl }),
+      body: JSON.stringify({ artifact: item.name, acl }),
     });
-    artCloseAcl();
-    artSetStatus('Права сохранены');
+    artApplyArtifact(data.artifact);
+    if (!data.artifact?.canRead) {
+      artLostAccess();
+      return;
+    }
+    artShareNote('Права сохранены');
     await artLoadList();
-    await artOpen(artState.selected.name);
+    if (!data.artifact.canManage) {
+      artSetStatus('Права сохранены — управлять артефактом больше нельзя', true);
+      artCloseShare();
+    }
   } catch (error) {
-    artSetStatus('Права не сохранились: ' + error.message, true);
+    select.value = previous;
+    select.dataset.previous = previous;
+    artShareNote('Права не сохранились: ' + error.message, true);
   } finally {
-    artEl('acl-save').disabled = false;
+    artSetShareBusy(false);
   }
+}
+
+async function artChangePublic(select, previous) {
+  const item = artState.selected;
+  if (!item?.canManage) return;
+  const wanted = select.value;
+  artSetShareBusy(true);
+  try {
+    const route = wanted === 'read' ? 'link' : 'unpublish';
+    const data = await artApi('/panel/artifacts/api/' + route, {
+      method: 'POST',
+      body: JSON.stringify({ artifact: item.name }),
+    });
+    artApplyArtifact(data.artifact);
+    if (!data.artifact?.canRead) {
+      artLostAccess();
+      return;
+    }
+    artRenderShareLink();
+    artShareNote(
+      wanted === 'read'
+        ? 'Ссылка включена — скопируй её и отправь'
+        : 'Ссылка отозвана — старый адрес больше не откроется',
+    );
+    await artLoadList();
+  } catch (error) {
+    select.value = previous;
+    select.dataset.previous = previous;
+    artShareNote('Ссылка не изменилась: ' + error.message, true);
+  } finally {
+    artSetShareBusy(false);
+  }
+}
+
+async function artCopyLink() {
+  const url = artEl('acl-link').value;
+  if (!url) return;
+  const copied = await artCopy(url);
+  const button = artEl('acl-copy');
+  if (copied) {
+    button.innerHTML = ART_ICON_CHECK;
+    button.title = 'Скопировано';
+    button.setAttribute('aria-label', 'Скопировано');
+  }
+  artShareNote(
+    copied ? 'Ссылка скопирована' : 'Не получилось скопировать — выдели адрес вручную',
+    !copied,
+  );
+  setTimeout(() => {
+    if (button.isConnected) artResetCopy();
+  }, 2000);
+}
+
+/** Удаление без confirm(): первый клик взводит корзину, второй — удаляет. */
+function artResetDelete() {
+  artState.deleteArmed = false;
+  const button = artEl('art-delete');
+  if (button) button.classList.remove('armed');
 }
 
 async function artDelete() {
   if (!artState.selected?.canManage) return;
   const name = artState.selected.name;
+  const button = artEl('art-delete');
   if (!artState.deleteArmed) {
     artState.deleteArmed = true;
-    artEl('art-delete').textContent = 'Точно удалить?';
+    button.classList.add('armed');
+    button.title = 'Нажми ещё раз, чтобы удалить';
     artSetStatus('Артефакт уедет в artifacts/.trash — вернуть можно руками.');
     setTimeout(() => {
-      artState.deleteArmed = false;
-      artEl('art-delete').textContent = 'Удалить';
+      if (!artState.deleteArmed) return;
+      artResetDelete();
+      artSyncActions(artState.selected, Boolean(artState.preview));
     }, 4000);
     return;
   }
-  artEl('art-delete').disabled = true;
+  button.disabled = true;
   try {
     await artApi('/panel/artifacts/api/delete', {
       method: 'POST',
@@ -405,9 +526,8 @@ async function artDelete() {
   } catch (error) {
     artSetStatus('Не удалилось: ' + error.message, true);
   } finally {
-    artEl('art-delete').disabled = false;
-    artState.deleteArmed = false;
-    artEl('art-delete').textContent = 'Удалить';
+    artResetDelete();
+    artSyncActions(artState.selected, Boolean(artState.preview));
   }
 }
 
@@ -586,9 +706,28 @@ async function artStart() {
     if (!button) return;
     artOpen(button.dataset.artifact);
   });
-  artEl('art-link').addEventListener('click', artMakeLink);
-  artEl('art-unpublish').addEventListener('click', artUnpublish);
-  artEl('art-acl').addEventListener('click', artOpenAcl);
+  artEl('art-share').addEventListener('click', artOpenShare);
+  artEl('art-share-close').addEventListener('click', artCloseShare);
+  artEl('art-share-done').addEventListener('click', artCloseShare);
+  artEl('art-share-modal').addEventListener('click', (event) => {
+    if (event.target === artEl('art-share-modal')) artCloseShare();
+  });
+  artEl('acl-copy').addEventListener('click', artCopyLink);
+  artEl('acl-link').addEventListener('focus', (event) => event.target.select());
+  const aclChanged = (event) => {
+    const select = event.target;
+    const previous = select.dataset.previous || select.value;
+    select.dataset.previous = select.value;
+    void artChangeAcl(select, previous);
+  };
+  artEl('acl-me').addEventListener('change', aclChanged);
+  artEl('acl-family').addEventListener('change', aclChanged);
+  artEl('acl-public').addEventListener('change', (event) => {
+    const select = event.target;
+    const previous = select.dataset.previous || select.value;
+    select.dataset.previous = select.value;
+    void artChangePublic(select, previous);
+  });
   artEl('art-history').addEventListener('click', artOpenHistory);
   artEl('art-history-list').addEventListener('click', (event) => {
     const button = event.target.closest('[data-commit]');
@@ -597,15 +736,10 @@ async function artStart() {
   artEl('art-preview-current').addEventListener('click', artShowCurrent);
   artEl('art-preview-restore').addEventListener('click', artRestorePreview);
   artEl('art-delete').addEventListener('click', artDelete);
-  artEl('acl-cancel').addEventListener('click', artCloseAcl);
-  artEl('acl-save').addEventListener('click', artSaveAcl);
   artEl('history-close').addEventListener('click', artCloseHistory);
-  artEl('art-acl-modal').addEventListener('click', (event) => {
-    if (event.target === artEl('art-acl-modal')) artCloseAcl();
-  });
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;
-    if (!artEl('art-acl-modal').hidden) artCloseAcl();
+    if (!artEl('art-share-modal').hidden) artCloseShare();
     else if (!artEl('art-history-panel').hidden) artCloseHistory();
   });
   artFillCounts();

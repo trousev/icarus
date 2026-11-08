@@ -92,7 +92,7 @@ test('страница раздела: глобальный список, пои
     assert.match(html, /<p class="nav-title">НАСТРОЙКИ<\/p>/);
     assert.doesNotMatch(html, /БИБЛИОТЕКА/);
     assert.match(html, /id="art-list"/);
-    assert.match(html, /id="art-acl"/, 'права доступны из панели');
+    assert.match(html, /id="art-share"/, 'права и ссылка доступны из панели');
     assert.match(html, /id="art-history"/, 'история версий доступна из панели');
     assert.match(html, /id="art-history-panel"/);
     assert.match(html, /id="art-preview"/);
