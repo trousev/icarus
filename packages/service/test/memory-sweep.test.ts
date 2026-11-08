@@ -459,6 +459,21 @@ test('слияние близнецов: содержимое переезжае
   assert.equal(fs.existsSync(path.join(root, 'projects/собака.md')), false, 'и второй тоже');
 });
 
+test('слияние не тащит frontmatter источников в целевой файл', () => {
+  const root = tempMemory();
+  fs.writeFileSync(path.join(root, 'projects/щенок.md'), '---\ndescription: щенок\n---\n- Забрали щенка 28.09.2026\n');
+  fs.writeFileSync(path.join(root, 'projects/дори.md'), '---\ndescription: собака Дори\n---\n- Зовут Дори\n');
+
+  applySweepPlan(root, planOf({
+    merges: [{ into: 'projects/дори.md', files: ['projects/щенок.md'] }],
+  }));
+
+  const merged = read(root, 'projects/дори.md');
+  assert.match(merged, /description: собака Дори/, 'описание цели осталось');
+  assert.doesNotMatch(merged, /description: щенок/, 'описание источника не приехало фактом');
+  assert.match(merged, /- Забрали щенка 28\.09\.2026/, 'сам факт переехал');
+});
+
 test('слияние выбрасывает повторы, но не теряет уникальное', () => {
   const root = tempMemory();
   fs.writeFileSync(path.join(root, 'projects/щенок.md'), '- Щенку 3 месяца\n- Забрали 28.09.2026\n');

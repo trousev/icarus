@@ -6,7 +6,7 @@
 // будет затёрто, если загрузится раньше (расширения применяются по очереди).
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import fs from "node:fs";
-import { buildMemoryCore } from "./lib/memory-core.ts";
+import { buildMemoryCore, memoryPrompt } from "./lib/memory-core.ts";
 import { formatSkillsBlock, type SkillEntry } from "./lib/skills-core.ts";
 import { TIME_INSTRUCTION } from "./lib/time-core.ts";
 
@@ -16,8 +16,6 @@ const ICARUS = process.env.ICARUS_HOME ?? "/workspaces/.icarus";
 const PERSONA = `${ICARUS}/icarus.md`;
 const AGENTS = `${ICARUS}/AGENTS.md`;
 const DUMP = `${ICARUS}/.prompt-dump.txt`;
-const SHARED = `${ICARUS}/shared-memory`;
-const MEMORY = process.env.ICARUS_MEMORY_DIR ?? `${ICARUS}/memory`;
 
 function stripComments(markdown: string): string {
   // вырезаем все блоки комментариев в цикле: внутри комментария может встретиться
@@ -56,18 +54,9 @@ export default function (pi: ExtensionAPI) {
       .map((file: { path: string; content: string }) => `# Контекст: ${file.path}\n\n${file.content}`)
       .join("\n\n---\n\n");
 
-    const core = buildMemoryCore();
-    const memoryBlock = core
-      ? [
-          '# Ядро памяти',
-          'Это ты уже знаешь про собеседника. Не переспрашивай и не перечитывай эти файлы без нужды:',
-          'если ответ есть здесь — отвечай сразу. За деталями (журнал, полные файлы) иди в память сам.',
-          '',
-          core,
-          '',
-          `Полная память лежит в ${MEMORY}/, семейная — в ${SHARED}/.`,
-        ].join('\n')
-      : '';
+    // Блок памяти собирается в memory-core: и здесь, и во втором обработчике он
+    // должен звучать одинаково, иначе правила разъедутся с фактами.
+    const memoryBlock = memoryPrompt(buildMemoryCore());
 
     // Скиллы pi добавляет в свой сборщик промпта, а мы промпт заменяем целиком — значит,
     // каталог собираем сами, иначе модель о скиллах просто не узнает. В каталоге только

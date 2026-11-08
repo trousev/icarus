@@ -22,7 +22,15 @@ export { sessionIdFor };
  * Что остаётся от расширений в приватном режиме: персона и всё, что только читает.
  * Экстрактор и уборщик памяти сюда не входят — они пишут в память фоном.
  */
-const PRIVATE_EXTENSIONS = ['persona.ts', 'clock.ts', 'control-panel.ts', 'web-search.ts', 'escalation.ts', 'private-guard.ts'];
+const PRIVATE_EXTENSIONS = [
+  'persona.ts',
+  'clock.ts',
+  'memory-index.ts',
+  'control-panel.ts',
+  'web-search.ts',
+  'escalation.ts',
+  'private-guard.ts',
+];
 
 /** Инструменты, которыми можно писать. В приватном workspace их не выдаём вовсе. */
 const WRITE_TOOLS = 'write,edit,bash';
