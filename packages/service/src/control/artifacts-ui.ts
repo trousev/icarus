@@ -13,6 +13,10 @@ const CLIENT_CSS = fs.readFileSync(new URL('./artifacts-client.css', import.meta
 // ответ ИИ в боковой панели должен выглядеть так же, как в большой ленте.
 const MESSAGES_CSS = fs.readFileSync(new URL('./chat-messages.css', import.meta.url), 'utf8');
 const CLIENT_MD = fs.readFileSync(new URL('./artifacts-markdown.js', import.meta.url), 'utf8');
+// Таблица — такой же самостоятельный рендер, как markdown: один файл на панель,
+// публичную страницу и «без панели».
+const CLIENT_TABLE = fs.readFileSync(new URL('./artifacts-table.js', import.meta.url), 'utf8');
+const CLIENT_TABLE_CSS = fs.readFileSync(new URL('./artifacts-table.css', import.meta.url), 'utf8');
 const CLIENT_JS = fs.readFileSync(new URL('./artifacts-client.js', import.meta.url), 'utf8');
 // Чат правки — отдельным файлом: у него свой поток и своя лента, и вместе с
 // клиентом раздела это был бы один нечитаемый скрипт.
@@ -52,6 +56,7 @@ export function artifactsPage(session: PanelSession, options: ArtifactsPageOptio
 
   return shell(`<style>${MESSAGES_CSS}</style>
 <style>${CLIENT_CSS}</style>
+<style>${CLIENT_TABLE_CSS}</style>
 <div class="app art-app art-panel-app">
   <aside class="art-side">
     <div class="brand">
@@ -177,6 +182,7 @@ export function artifactsPage(session: PanelSession, options: ArtifactsPageOptio
 </div>
 <script>window.__ARTIFACTS_CFG__ = ${json};</script>
 <script>${CLIENT_MD}</script>
+<script>${CLIENT_TABLE}</script>
 <script>${CLIENT_JS}</script>
 <script>${CLIENT_CHAT}</script>`);
 }
@@ -189,7 +195,10 @@ export function artifactsPage(session: PanelSession, options: ArtifactsPageOptio
 export function publicArtifactPage(artifact: Artifact, content: string | null): string {
   const base = artifact.urls.public ?? '';
   const entryUrl = `${base}${encodeURIComponent(artifact.entry)}`;
-  const bareUrl = artifact.type === 'markdown' ? (artifact.urls.bare ?? entryUrl) : entryUrl;
+  // У markdown и таблицы «как есть» — это их собственная страница, а не файл:
+  // голый CSV в браузере выглядел бы листингом текста.
+  const pageLike = artifact.type === 'markdown' || artifact.type === 'table';
+  const bareUrl = pageLike ? (artifact.urls.bare ?? entryUrl) : entryUrl;
   const doc = {
     title: artifact.title,
     entry: artifact.entry,
@@ -203,9 +212,12 @@ export function publicArtifactPage(artifact: Artifact, content: string | null): 
       ? `<iframe class="art-frame" title="${escapeHtml(artifact.title)}" sandbox="allow-scripts allow-forms allow-modals allow-popups" src="${escapeHtml(entryUrl)}"></iframe>`
       : artifact.type === 'image'
         ? `<div class="art-image"><img src="${escapeHtml(entryUrl)}" alt="${escapeHtml(artifact.title)}"></div>`
-        : `<article class="art-doc" id="public-doc"></article>`;
+        : artifact.type === 'table'
+          ? '<div id="public-table"></div>'
+          : `<article class="art-doc" id="public-doc"></article>`;
 
   return shell(`<style>${CLIENT_CSS}</style>
+<style>${CLIENT_TABLE_CSS}</style>
 <div class="app art-app">
   <aside class="art-side">
     <div class="brand">
@@ -254,9 +266,25 @@ export function publicArtifactPage(artifact: Artifact, content: string | null): 
     </div>
   </main>
 </div>
-${artifact.type === 'markdown' ? `<script>${CLIENT_MD}</script>
+${publicScript(artifact, doc)}`);
+}
+
+/**
+ * Скрипт публичной страницы: разметку рисует тот же клиент, что и панель, —
+ * поэтому ссылка и панель не расходятся в поведении.
+ */
+function publicScript(artifact: Artifact, doc: Record<string, unknown>): string {
+  if (artifact.type === 'markdown') {
+    return `<script>${CLIENT_MD}</script>
 <script>window.__PUBLIC_DOC__ = ${JSON.stringify(doc).replaceAll('<', '\\u003c')};
-document.getElementById('public-doc').innerHTML = artifactMarkdown(window.__PUBLIC_DOC__.content, { fileBase: window.__PUBLIC_DOC__.raw });</script>` : ''}`);
+document.getElementById('public-doc').innerHTML = artifactMarkdown(window.__PUBLIC_DOC__.content, { fileBase: window.__PUBLIC_DOC__.raw });</script>`;
+  }
+  if (artifact.type === 'table') {
+    return `<script>${CLIENT_TABLE}</script>
+<script>window.__PUBLIC_TABLE__ = ${JSON.stringify({ content: doc.content, file: artifact.entry }).replaceAll('<', '\\u003c')};
+artifactTableMount(document.getElementById('public-table'), window.__PUBLIC_TABLE__.content, { file: window.__PUBLIC_TABLE__.file });</script>`;
+  }
+  return '';
 }
 
 function icon(type: Artifact['type']): string {
@@ -265,6 +293,9 @@ function icon(type: Artifact['type']): string {
   }
   if (type === 'html') {
     return '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 7-5 5 5 5"/><path d="m16 7 5 5-5 5"/><path d="m13 5-2 14"/></svg>';
+  }
+  if (type === 'table') {
+    return '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M9 10v9"/></svg>';
   }
   return '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/><path d="M9 12h6M9 16h6"/></svg>';
 }

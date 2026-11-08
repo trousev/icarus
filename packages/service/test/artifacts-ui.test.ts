@@ -249,6 +249,71 @@ test('публичная страница: markdown рендерится, html �
   assert.doesNotMatch(image, /<iframe/);
 });
 
+function tableArtifact(overrides: Partial<Artifact> = {}): Artifact {
+  return artifact({
+    name: 'hours',
+    title: 'Часы за неделю',
+    type: 'table',
+    typeLabel: 'Таблица',
+    entry: 'index.csv',
+    files: ['index.csv', 'index.ai.md'],
+    urls: {
+      panel: 'https://icarus.example/panel/artifacts?artifact=hours',
+      raw: 'https://icarus.example/panel/artifacts/raw/hours/index.csv',
+      public: 'https://icarus.example/a/hours/abcdefghijklmnopqrstuvwx/',
+      bare: 'https://icarus.example/a/hours/abcdefghijklmnopqrstuvwx/?bare=1',
+    },
+    ...overrides,
+  });
+}
+
+test('публичная страница таблицы: рисует её клиент таблицы, ссылка «без панели» — страница', () => {
+  const html = publicArtifactPage(tableArtifact(), 'кто,часы\nАнна,3\nБорис,11\n');
+  assert.match(html, /id="public-table"/);
+  assert.match(html, /__PUBLIC_TABLE__/);
+  assert.match(html, /artifactTableMount\(document\.getElementById\('public-table'\)/);
+  assert.match(html, /"file":"index\.csv"/);
+  // Переводы строк в данных остаются JSON-строками: страницу они не ломают.
+  assert.match(html, /"content":"кто,часы\\nАнна,3/);
+  assert.match(html, /href="https:\/\/icarus\.example\/a\/hours\/abcdefghijklmnopqrstuvwx\/\?bare=1"/);
+  assert.doesNotMatch(html, /id="public-doc"/, 'markdown-рендер тут ни при чём');
+  assert.doesNotMatch(html, /<iframe/);
+});
+
+test('панель рисует таблицу из содержимого read, не запрашивая файл отдельно', async () => {
+  const html = artifactsPage(SESSION, OPTIONS);
+  const { document, window } = parseHTML(html);
+  const scripts = [...document.querySelectorAll('script')]
+    .map((node) => node.textContent ?? '')
+    .filter(Boolean);
+  const item = tableArtifact();
+  const read = { artifact: item, content: 'кто,часы\nАнна,3\nБорис,11\n', aiContent: 'Кто сколько работал.' };
+  const calls: string[] = [];
+  window.fetch = async (url: string) => {
+    const path = String(url);
+    calls.push(path);
+    const data = path.includes('/api/read')
+      ? read
+      : path.includes('/api/list')
+        ? { total: 1, items: [item] }
+        : {};
+    return { ok: true, headers: { get: () => 'application/json' }, json: async () => data };
+  };
+  window.URL.createObjectURL = () => 'blob:x';
+  const location = { href: 'http://panel/panel/artifacts', pathname: '/panel/artifacts', search: '?artifact=hours' };
+  const history = { replaceState() {} };
+  Object.defineProperty(window, 'location', { value: location, configurable: true });
+  const run = new Function('window', 'document', 'fetch', 'URL', 'location', 'history', scripts.join('\n'));
+  run(window, document, window.fetch, window.URL, location, history);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  assert.equal(document.querySelectorAll('.art-table-grid tbody tr').length, 2);
+  assert.equal(document.querySelector('.art-table-count')?.textContent, '2 строки');
+  assert.equal(document.getElementById('art-name')?.textContent, 'index.csv');
+  // Отдельного запроса за файлом нет: CSV приехал в ответе read.
+  assert.equal(calls.filter((call) => call.includes('/raw/')).length, 0);
+});
+
 test('скрипт страницы исполняется: глобальный список рисуется, markdown открывается', async () => {
   const html = artifactsPage(SESSION, OPTIONS);
   const { document, window } = parseHTML(html);

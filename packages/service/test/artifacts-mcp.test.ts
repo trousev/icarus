@@ -159,6 +159,31 @@ test('artifact_read отдаёт index.ai.md и права', async () => {
   );
 });
 
+test('таблица: CSV/TSV в списке и чтении, без парсинга HTML', async () => {
+  await withServer(
+    {
+      'artifacts/hours/.folder-acl.json': acl('probe'),
+      'artifacts/hours/index.tsv': 'кто\tчасы\nАнна\t3\n',
+      'artifacts/hours/index.ai.md': '# Часы за неделю\n\nКто сколько работал.\n',
+    },
+    async (rpc) => {
+      const list = resultText(
+        await rpc.call({ method: 'tools/call', params: { name: 'artifact_list', arguments: {} } }),
+      );
+      assert.match(list, /Часы за неделю/);
+      assert.match(list, /Таблица/);
+      assert.match(list, /index\.tsv/);
+
+      const read = resultText(
+        await rpc.call({ method: 'tools/call', params: { name: 'artifact_read', arguments: { name: 'hours' } } }),
+      );
+      assert.match(read, /Кто сколько работал/);
+      // Содержимое таблицы ИИ тоже нужно: по ней он отвечает на вопросы.
+      assert.match(read, /Анна\t3/);
+    },
+  );
+});
+
 test('artifact_new создаёт папку и ACL, после чего разрешена запись', async () => {
   await withServer({}, async (rpc, root) => {
     const answer = await rpc.call({

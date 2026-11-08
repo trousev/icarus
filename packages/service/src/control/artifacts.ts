@@ -442,7 +442,7 @@ export async function handlePublicArtifact(
   }
 
   const content =
-    artifact.type === 'markdown'
+    artifact.type === 'markdown' || artifact.type === 'table'
       ? (() => {
           try {
             return fs.readFileSync(path.join(found.dir, artifact.entry), 'utf8');
@@ -475,6 +475,10 @@ function serveBare(
   const dir = path.join(config.dataDir, 'artifacts', artifact.name);
   const file = path.join(dir, artifact.entry);
   if (artifact.type !== 'markdown') {
+    if (artifact.type === 'table') {
+      serveBareTable(req, res, artifact, file);
+      return;
+    }
     const type = mimeOf(file);
     sendFile(req, res, file, type, {
       cache: 'no-cache',
@@ -543,9 +547,62 @@ function serveBare(
   else res.end(html);
 }
 
+/**
+ * Таблица «без панели»: один самодостаточный HTML — поиск и сортировка работают
+ * без панели, потому что клиент таблицы встраивается сюда же.
+ */
+function serveBareTable(
+  req: IncomingMessage,
+  res: ServerResponse,
+  artifact: Artifact,
+  file: string,
+): void {
+  let content: string;
+  try {
+    content = fs.readFileSync(file, 'utf8');
+  } catch {
+    json(res, 404, errorBody('файл артефакта не найден', 'not_found'));
+    return;
+  }
+  const data = JSON.stringify({ content, file: artifact.entry }).replaceAll('<', '\\u003c');
+  const html = `<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeTitle(artifact.title)}</title>
+<style>
+  :root { color-scheme: dark; --bg:#0f1116; --text:#e6e8ec; --dim:#8b93a1; --line:#262b36; --accent:#7aa2f7; --panel:#1b1f28; --raise:#20242e; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.6 ui-sans-serif, system-ui, sans-serif; }
+  ${TABLE_CLIENT_CSS_FOR_BARE}
+</style>
+</head>
+<body><main id="table"></main>
+<script>${TABLE_CLIENT_FOR_BARE}</script>
+<script>window.__TABLE__ = ${data};
+artifactTableMount(document.getElementById('table'), window.__TABLE__.content, { file: window.__TABLE__.file });
+</script>
+</body>
+</html>`;
+  res.writeHead(200, {
+    'content-type': 'text/html; charset=utf-8',
+    'cache-control': 'no-cache',
+    'x-content-type-options': 'nosniff',
+    'referrer-policy': 'no-referrer',
+    'x-robots-tag': 'noindex, nofollow',
+    'content-security-policy': "sandbox allow-scripts; default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'",
+  });
+  if (req.method === 'HEAD') res.end();
+  else res.end(html);
+}
+
 function escapeTitle(value: string): string {
   return value.replace(/[&<>"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[char] ?? char);
 }
 
 /** Код markdown-рендера для «без панели»: тот же файл, что у панели. */
 const MARKDOWN_CLIENT_FOR_BARE = fs.readFileSync(new URL('./artifacts-markdown.js', import.meta.url), 'utf8');
+/** Клиент и стили таблицы — те же файлы, что у панели и публичной страницы. */
+const TABLE_CLIENT_FOR_BARE = fs.readFileSync(new URL('./artifacts-table.js', import.meta.url), 'utf8');
+const TABLE_CLIENT_CSS_FOR_BARE = fs.readFileSync(new URL('./artifacts-table.css', import.meta.url), 'utf8');

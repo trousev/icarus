@@ -4,7 +4,7 @@
 // данные приезжают сюда; состояние (открытый артефакт) живёт в адресе.
 // Права: none — не видит ничего, read — смотреть, write — менять файлы,
 // admin — права/удаление/ссылка. По умолчанию семья не видит новый артефакт.
-/* global artifactMarkdown, artChatClose */
+/* global artifactMarkdown, artifactTableMount, artChatClose */
 
 const artCfg = window.__ARTIFACTS_CFG__;
 const artEl = (id) => document.getElementById(id);
@@ -66,6 +66,9 @@ const artIcon = (type) => {
   }
   if (type === 'html') {
     return '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 7-5 5 5 5"/><path d="m16 7 5 5-5 5"/><path d="m13 5-2 14"/></svg>';
+  }
+  if (type === 'table') {
+    return '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M9 10v9"/></svg>';
   }
   return '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/><path d="M9 12h6M9 16h6"/></svg>';
 };
@@ -194,7 +197,11 @@ function artSyncActions(item, preview = false) {
   if (selected) {
     download.href = item.urls.raw + (item.urls.raw.includes('?') ? '&' : '?') + 'download=1';
     download.removeAttribute('aria-disabled');
-    bare.href = item.type === 'markdown' && item.urls.bare ? item.urls.bare : item.urls.raw;
+    // У markdown и таблицы «без панели» — своя страница: файл показал бы исходник.
+    bare.href =
+      (item.type === 'markdown' || item.type === 'table') && item.urls.bare
+        ? item.urls.bare
+        : item.urls.raw;
     bare.removeAttribute('aria-disabled');
   } else {
     download.removeAttribute('href');
@@ -271,6 +278,18 @@ function artRenderView(data, preview = null) {
   if (item.type === 'image') {
     view.innerHTML =
       '<div class="art-image"><img src="' + artEsc(item.urls.raw) + '" alt="' + artEsc(item.title) + '"></div>';
+    return;
+  }
+  if (item.type === 'table') {
+    // Таблица рисуется из CSV-текста, который уже приехал в ответе read:
+    // отдельный запрос за файлом не нужен, версия в предпросмотре тоже работает.
+    view.innerHTML = '<div class="art-table-host"></div>';
+    const mount = typeof artifactTableMount === 'function' ? artifactTableMount : null;
+    if (!mount) {
+      view.innerHTML = '<div class="art-placeholder bad"><b>Таблица не загрузилась</b></div>';
+      return;
+    }
+    mount(view.querySelector('.art-table-host'), data.content || '', { file: item.entry });
     return;
   }
   const markdown =

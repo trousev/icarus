@@ -47,6 +47,10 @@ async function withServer(handler: (base: string, config: IcarusConfig) => Promi
     'css/nested.css': 'p { color: blue }',
     'index.ai.md': '# Отчёт по «Атласу»\n\nГотовность 87%.\n',
   });
+  item(config, 'hours', {
+    'index.csv': 'кто,часы,задача\nАнна,3,стендап\nБорис,11,"демо, показ"\n',
+    'index.ai.md': '# Часы за неделю\n\nКто сколько работал.\n',
+  });
   item(config, 'gift', {
     'index.svg': '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>',
     'index.ai.md': '# Идеи подарка\n\nТри идеи для Анны.\n',
@@ -107,8 +111,8 @@ test('API: глобальный список, чтение и описание �
       total: number;
       items: Array<{ name: string; type: string; title: string; ai: boolean; owner: string }>;
     };
-    assert.equal(list.total, 3);
-    assert.deepEqual(list.items.map((item) => item.name).sort(), ['gift', 'plan', 'report']);
+    assert.equal(list.total, 4);
+    assert.deepEqual(list.items.map((item) => item.name).sort(), ['gift', 'hours', 'plan', 'report']);
     const plan = list.items.find((item) => item.name === 'plan')!;
     assert.equal(plan.type, 'markdown');
     assert.equal(plan.title, 'План на четверг');
@@ -192,6 +196,48 @@ test('публичный HTML живёт в песочнице и отдаёт �
     const nested = await fetch(`${base}${basePath}css/nested.css`);
     assert.equal(nested.status, 200, 'вложенный ассет не должен выглядеть старой ссылкой');
     assert.equal(await nested.text(), 'p { color: blue }');
+  });
+});
+
+test('таблица: CSV читается как текст и отдаётся интерактивом в ссылке и «без панели»', async () => {
+  await withServer(async (base) => {
+    const read = (await (await api(base, 'read?artifact=hours')).json()) as {
+      content: string;
+      artifact: { type: string; typeLabel: string; entry: string };
+    };
+    assert.equal(read.artifact.type, 'table');
+    assert.equal(read.artifact.typeLabel, 'Таблица');
+    assert.equal(read.artifact.entry, 'index.csv');
+    assert.match(read.content, /Борис,11/);
+
+    const raw = await fetch(`${base}/panel/artifacts/raw/hours/index.csv`, { headers: asUser() });
+    assert.equal(raw.status, 200);
+    assert.match(raw.headers.get('content-type') ?? '', /text\/csv/);
+    // Скачивание — это исходник, а не страница панели.
+    const download = await fetch(`${base}/panel/artifacts/raw/hours/index.csv?download=1`, { headers: asUser() });
+    assert.match(download.headers.get('content-disposition') ?? '', /attachment/);
+
+    const linked = (await (await post(base, 'link', { artifact: 'hours' })).json()) as {
+      urls: { public: string; bare: string };
+    };
+    const page = await fetch(`${base}${pathOf(linked.urls.public)}`);
+    assert.equal(page.status, 200);
+    const html = await page.text();
+    assert.match(html, /id="public-table"/);
+    assert.match(html, /artifactTableMount/);
+    assert.match(html, /Часы за неделю/);
+    assert.match(html, /"file":"index\.csv"/);
+    // CSV-значения приезжают данными, а не разметкой страницы.
+    assert.doesNotMatch(html, /<b>Сырой HTML<\/b>/);
+
+    const bare = await fetch(`${base}${pathOf(linked.urls.bare)}`);
+    assert.equal(bare.status, 200);
+    const bareHtml = await bare.text();
+    assert.match(bareHtml, /id="table"/);
+    assert.match(bareHtml, /artifactTableMount/);
+    assert.match(bareHtml, /Поиск по таблице/);
+    assert.doesNotMatch(bareHtml, /ПУБЛИЧНЫЙ АРТЕФАКТ/);
+    assert.doesNotMatch(bareHtml, /<table[^>]*art-doc/);
   });
 });
 

@@ -130,6 +130,26 @@ test('список, чтение и права', async () => {
   );
 });
 
+test('таблица: CSV в списке — «Таблица», чтение отдаёт содержимое', async () => {
+  await withServer(
+    {
+      'artifacts/hours/.folder-acl.json': acl('probe'),
+      'artifacts/hours/index.csv': 'кто,часы\nАнна,3\n',
+      'artifacts/hours/index.ai.md': '# Часы за неделю\n\nКто сколько работал.\n',
+    },
+    async (rpc) => {
+      const list = text(await rpc.call({ method: 'tools/call', params: { name: 'artifact_list', arguments: {} } }));
+      assert.match(list, /Таблица/);
+      assert.match(list, /index\.csv/);
+      const read = text(
+        await rpc.call({ method: 'tools/call', params: { name: 'artifact_read', arguments: { name: 'hours' } } }),
+      );
+      assert.match(read, /## index\.csv/);
+      assert.match(read, /Анна,3/);
+    },
+  );
+});
+
 test('artifact_new создаёт папку и ACL', async () => {
   await withServer({}, async (rpc, root) => {
     const answer = text(

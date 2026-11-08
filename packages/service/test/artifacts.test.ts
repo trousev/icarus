@@ -81,6 +81,33 @@ test('артефакты — глобальная папка с index-файло
   assert.equal(items.find((item) => item.name === 'gift')!.type, 'image');
 });
 
+test('таблица — такой же index-файл, как markdown: CSV/TSV и содержимое для панели', () => {
+  const box = config();
+  artifact(box, 'budget', {
+    'index.csv': 'кто,часы\nАнна,3\nБорис,11\n',
+    'index.ai.md': '# Часы за неделю\n\nКто сколько работал.\n',
+  });
+  artifact(box, 'export', {
+    'index.tsv': 'товар\tцена\nA\t1 200\n',
+    'index.ai.md': '# Выгрузка\n\nТаблица из Excel.\n',
+  });
+
+  const budget = inspectArtifact(box, 'budget', 'probe')!;
+  assert.equal(budget.type, 'table');
+  assert.equal(budget.typeLabel, 'Таблица');
+  assert.equal(budget.title, 'Часы за неделю');
+  assert.equal(budget.entry, 'index.csv');
+  const read = readArtifact(box, 'probe', 'budget');
+  assert.match(read.content ?? '', /Борис,11/);
+  assert.match(read.ai ?? '', /Кто сколько работал/);
+  assert.equal(inspectArtifact(box, 'export', 'probe')!.type, 'table');
+  assert.equal(artifactFile(box, 'probe', 'budget', 'index.csv')?.type, 'text/csv; charset=utf-8');
+  assert.equal(
+    artifactFile(box, 'probe', 'export', 'index.tsv')?.type,
+    'text/tab-separated-values; charset=utf-8',
+  );
+});
+
 test('ACL: me для владельца, family для остальных, уровни включают друг друга', () => {
   assert.equal(allows('admin', 'write'), true);
   assert.equal(allows('write', 'read'), true);

@@ -265,7 +265,7 @@ export async function artifactVersion(
   if (!entry) throw new Error('в этой версии нет index-файла');
   const ai = await showText(dir, info.hash, AI_FILE);
   const document =
-    entry.type === 'html' || entry.type === 'markdown'
+    entry.type === 'html' || entry.type === 'markdown' || entry.type === 'table'
       ? await showText(dir, info.hash, entry.file)
       : null;
   const sizeResult = await git(dir, ['cat-file', '-s', `${info.hash}:${entry.file}`]);
@@ -288,7 +288,7 @@ export async function artifactVersion(
       files: files.filter((file) => file !== AI_FILE),
       urls: { raw: `${rawRoot}${encodedPath(entry.file)}` },
     },
-    content: entry.type === 'markdown' ? document : null,
+    content: entry.type === 'markdown' || entry.type === 'table' ? document : null,
     aiContent: ai,
     commit: info,
   };

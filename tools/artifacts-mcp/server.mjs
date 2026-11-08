@@ -31,6 +31,8 @@ const INDEX_FILES = [
   { file: 'index.html', type: 'html' },
   { file: 'index.htm', type: 'html' },
   { file: 'index.md', type: 'markdown' },
+  { file: 'index.csv', type: 'table' },
+  { file: 'index.tsv', type: 'table' },
   { file: 'index.png', type: 'image' },
   { file: 'index.jpg', type: 'image' },
   { file: 'index.jpeg', type: 'image' },
@@ -42,14 +44,15 @@ const INDEX_FILES = [
 const TYPE_LABELS = {
   html: 'HTML-страница',
   markdown: 'Markdown-документ',
+  table: 'Таблица',
   image: 'Изображение',
 };
 
-const INSTRUCTIONS = `Артефакты — ОБЩАЯ библиотека в /artifacts, а не в рабочей папке. Один артефакт — папка /artifacts/<slug>/: внутри index.html, index.md или index.png/jpg/svg, обязательный index.ai.md и ассеты рядом. slug — короткое латинское имя в нижнем регистре через дефис: plan-na-chetverg, otchet-atlas.
+const INSTRUCTIONS = `Артефакты — ОБЩАЯ библиотека в /artifacts, а не в рабочей папке. Один артефакт — папка /artifacts/<slug>/: внутри index.html, index.md, index.csv/tsv или index.png/jpg/svg, обязательный index.ai.md и ассеты рядом. slug — короткое латинское имя в нижнем регистре через дефис: plan-na-chetverg, otchet-atlas.
 
 Создание:
 1. artifact_new(name) — заводит папку и права. Без него писать в /artifacts нельзя: folder-guard блокирует файлы.
-2. Напиши index.ai.md (H1, о чём артефакт, что внутри, что можно менять) и index-файл обычными write.
+2. Напиши index.ai.md (H1, о чём артефакт, что внутри, что можно менять) и index-файл обычными write. Таблица — обычный CSV/TSV с заголовками в первой строке: панель сама даст поиск и сортировку, свой HTML для этого не нужен.
 3. artifact_check — проверь структуру.
 4. artifact_link — дай человеку ВНУТРЕННЮЮ ссылку в панели. Публичную создавай только по прямой просьбе: «публичная», «поделиться», «без входа» — artifact_link с public: true. Публичная требует прав admin.
 
@@ -409,7 +412,7 @@ function readText(slug) {
       ? `## ${AI_FILE}\n\n${artifact.aiContent}`
       : `## ${AI_FILE} отсутствует\n\nАртефакт неполный: добавь описание для ИИ — заголовок H1, о чём он, что внутри, что можно менять.`,
   ];
-  if (artifact.type === 'markdown') {
+  if (artifact.type === 'markdown' || artifact.type === 'table') {
     const content = readSmall(path.join(artifact.dir, artifact.entry));
     if (content !== null) lines.push('', `## ${artifact.entry}`, '', content);
   }
@@ -463,7 +466,7 @@ function newText(slug) {
     '',
     'Теперь напиши обычными write:',
     `- /artifacts/${slug}/index.ai.md — H1, о чём артефакт, что внутри, что можно менять;`,
-    `- /artifacts/${slug}/index.md | index.html | index.png|jpg|svg — то, что увидит человек.`,
+    `- /artifacts/${slug}/index.md | index.html | index.csv (или index.tsv) | index.png|jpg|svg — то, что увидит человек.`,
     '',
     'Потом artifact_check и artifact_link (внутренняя ссылка). Публичную — только по просьбе.',
   ].join('\n');
@@ -476,7 +479,7 @@ function problemsOf(slug) {
   const problems = [];
   if (!readAcl(dir)) problems.push(`нет ${ACL_FILE} — создай артефакт через artifact_new`);
   const indexes = INDEX_FILES.filter((candidate) => statOrNull(path.join(dir, candidate.file))?.isFile());
-  if (indexes.length === 0) problems.push('нет index.html, index.md или index.png/jpg/svg');
+  if (indexes.length === 0) problems.push('нет index.html, index.md, index.csv/tsv или index.png/jpg/svg');
   if (indexes.length > 1) problems.push(`index-файлов больше одного: ${indexes.map((item) => item.file).join(', ')}`);
   const ai = readSmall(path.join(dir, AI_FILE));
   if (ai === null) problems.push(`нет ${AI_FILE} — описания для ИИ`);

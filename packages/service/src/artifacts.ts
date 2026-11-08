@@ -6,7 +6,7 @@
 //
 // Внутри папки:
 //
-//   index.html | index.md | index.png|jpg|svg — то, что видит человек;
+//   index.html | index.md | index.csv|tsv | index.png|jpg|svg — то, что видит человек;
 //   index.ai.md                                — короткое описание для ИИ;
 //   .artifact.json                             — публичная ссылка (publicId);
 //   .folder-acl.json                          — владелец и права.
@@ -39,7 +39,7 @@ export const META_FILE = '.artifact.json';
 /** Права папки. Один и тот же формат у артефактов и будущих общих каталогов. */
 export const ACL_FILE = '.folder-acl.json';
 
-export type ArtifactType = 'html' | 'markdown' | 'image';
+export type ArtifactType = 'html' | 'markdown' | 'table' | 'image';
 export type AccessLevel = 'none' | 'read' | 'write' | 'admin';
 
 export type FolderAcl = {
@@ -63,6 +63,7 @@ export const DEFAULT_ACL: FolderAcl = { me: 'admin', family: 'none' };
 export const ARTIFACT_TYPE_LABELS: Record<ArtifactType, string> = {
   html: 'HTML-страница',
   markdown: 'Markdown-документ',
+  table: 'Таблица',
   image: 'Изображение',
 };
 
@@ -70,6 +71,10 @@ const INDEX_FILES: ReadonlyArray<{ file: string; type: ArtifactType }> = [
   { file: 'index.html', type: 'html' },
   { file: 'index.htm', type: 'html' },
   { file: 'index.md', type: 'markdown' },
+  // CSV/TSV — не «файл рядом», а полноценный index: панель рисует из него
+  // интерактивную таблицу, поэтому таблица живёт по тем же правилам, что и текст.
+  { file: 'index.csv', type: 'table' },
+  { file: 'index.tsv', type: 'table' },
   { file: 'index.png', type: 'image' },
   { file: 'index.jpg', type: 'image' },
   { file: 'index.jpeg', type: 'image' },
@@ -486,7 +491,12 @@ export function readArtifact(
   return {
     artifact,
     ai: readTextIfSmall(path.join(dir, AI_FILE)),
-    content: artifact.type === 'markdown' ? readTextIfSmall(path.join(dir, artifact.entry)) : null,
+    // Таблица — такой же текст, как markdown: клиент рисует её из содержимого,
+    // а не отдельным запросом за файлом.
+    content:
+      artifact.type === 'markdown' || artifact.type === 'table'
+        ? readTextIfSmall(path.join(dir, artifact.entry))
+        : null,
     dir,
   };
 }
@@ -574,6 +584,8 @@ const MIME: Record<string, string> = {
   '.htm': 'text/html; charset=utf-8',
   '.md': 'text/markdown; charset=utf-8',
   '.markdown': 'text/markdown; charset=utf-8',
+  '.csv': 'text/csv; charset=utf-8',
+  '.tsv': 'text/tab-separated-values; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8',
