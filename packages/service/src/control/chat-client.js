@@ -463,8 +463,18 @@ function showEmpty(show) {
 /** «Входящие» — не папка в реестре, а всё, что осталось без полки. */
 const INBOX_FOLDER = { id: '', name: 'Входящие', collapsed: false };
 
-/** Одна строка списка: сам разговор, а кнопка «⋯» — рядом, не внутри кнопки. */
+/** Одна строка списка: сам разговор, а кнопки «✎» и «⋯» — рядом, не внутри кнопки. */
 function chatRowHtml(chat) {
+  // Имя правится прямо в строке списка: двойной клик по названию или карандаш
+  // при наведении. Пока правим — вместо строки стоит поле ввода.
+  if (chat.id === renamingId) {
+    return (
+      '<div class="chat-row" data-id="' + esc(chat.id) + '">' +
+      '<div class="chat-item editing"><div class="chat-item-top">' +
+      '<input class="chat-item-input" maxlength="128" value="' + esc(chat.title) +
+      '" aria-label="Новое имя разговора" /></div></div></div>'
+    );
+  }
   // Точка одна и она старше видит занятость: жёлтая — ход идёт, зелёная — есть
   // непрочитанный ответ. Разметка точки появляется, только когда она нужна, —
   // иначе `gap` у flex-строки съедал бы место под пустую колонку.
@@ -481,6 +491,9 @@ function chatRowHtml(chat) {
     (channelTag(chat) ? '<span class="chat-item-tag">' + esc(channelTag(chat)) + '</span>' : '') +
     '<time class="chat-item-time">' + esc(timeLabel(chat.createdAt)) + '</time>' +
     '</div><div class="chat-item-preview">' + esc(cleanPreview(chat.preview || '')) + '</div></button>' +
+    // Переименование — здесь же: имя человек видит в списке и хочет поправить тут.
+    '<button class="chat-rename" type="button" data-id="' + esc(chat.id) +
+    '" title="Переименовать разговор" aria-label="Переименовать разговор">✎</button>' +
     // Перенос доступен и мышью, и с клавиатуры: кнопка открывает меню с папками.
     '<button class="chat-more" type="button" data-id="' + esc(chat.id) +
     '" title="Переместить в папку" aria-label="Переместить в папку">⋯</button>' +
@@ -534,6 +547,12 @@ function folderHeadHtml(folder, count) {
     '</div>'
   );
 }
+
+/** Имя разговора, которое сейчас правится в списке; `null` — не правим. */
+let renamingId = null;
+
+/** Поля, у которых Enter уже сохранил имя: следом приходит blur, второй раз не пишем. */
+const renameCommitted = new WeakSet();
 
 function renderChats() {
   const box = el('chat-list');
@@ -608,6 +627,10 @@ function bindChatList(box) {
   });
   box.querySelectorAll('.chat-item').forEach((node) => {
     node.onclick = () => selectChat(node.dataset.id);
+    node.ondblclick = (event) => {
+      event.preventDefault();
+      startRename(node.dataset.id);
+    };
   });
   box.querySelectorAll('.chat-more').forEach((node) => {
     node.onclick = (event) => {
@@ -675,6 +698,33 @@ function bindChatList(box) {
     };
     // Уход из поля — это отмена: случайный клик по ленте не должен переименовать.
     renameInput.onblur = () => finish(false);
+  }
+  box.querySelectorAll('.chat-rename').forEach((node) => {
+    node.onclick = (event) => {
+      event.stopPropagation();
+      startRename(node.dataset.id);
+    };
+  });
+  const input = box.querySelector('.chat-item-input');
+  if (input) {
+    input.focus();
+    input.select?.();
+    input.onkeydown = (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        void commitRename(input);
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        cancelRename();
+      }
+    };
+    // Ушли мышкой в другое место — это тоже «готово»: поле не должно висеть.
+    // Но если строку перерисовало событие сводки, это не «человек закончил»:
+    // сохранять обрывок имени из исчезнувшего поля нельзя.
+    input.onblur = () => {
+      if (input.isConnected === false) return;
+      void commitRename(input);
+    };
   }
 }
 
@@ -941,6 +991,46 @@ async function restoreArchived(chatId) {
   } catch (error) {
     setNote('не удалось вернуть из архива: ' + error.message);
   }
+}
+
+function startRename(chatId) {
+  if (!chatId) return;
+  renamingId = chatId;
+  renderChats();
+}
+
+function cancelRename() {
+  if (renamingId === null) return;
+  renamingId = null;
+  renderChats();
+}
+
+/**
+ * Сохранение имени из списка: сервер пишет его в chats.json, как и `/rename`.
+ * Enter и потеря фокуса приходят оба — второй раз запрос не шлём.
+ */
+async function commitRename(input) {
+  if (renameCommitted.has(input)) return;
+  renameCommitted.add(input);
+  const chatId = renamingId;
+  if (!chatId) return;
+  const title = String(input.value || '').replace(/\s+/g, ' ').trim();
+  const known = chats.find((chat) => chat.id === chatId);
+  renamingId = null;
+  if (!title || !known || title === known.title) {
+    renderChats();
+    return;
+  }
+  try {
+    const data = await api('/panel/api/chats', {
+      method: 'PATCH',
+      body: JSON.stringify({ id: chatId, title: title }),
+    });
+    if (data && data.chat) applyChatTitle(data.chat.id, data.chat.title);
+  } catch (error) {
+    setNote('не получилось переименовать: ' + error.message);
+  }
+  renderChats();
 }
 
 /**
@@ -2965,6 +3055,12 @@ function applyBulletin(event) {
     // Открыт занятый разговор, а мы к нему не подписаны (ход начался в другой
     // вкладке или мы только что его открыли) — цепляемся.
     if (event.chatId === currentId && !streaming()) void attachLive();
+    return;
+  }
+  // Имя разговора уточнилось: модель придумала его после хода или человек
+  // переименовал из списка. Двигаем шапку и строку сайдбара, порядок не трогаем.
+  if (event.type === 'title') {
+    if (event.chat && event.chat.id) applyChatTitle(event.chat.id, event.chat.title);
     return;
   }
   if (event.type !== 'idle') return;

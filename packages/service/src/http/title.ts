@@ -8,6 +8,7 @@
 // лишний полный агентский прогон с мусором в истории и в памяти. Поэтому
 // такой запрос узнаётся по метке в промпте (плюс отдельная модель)
 // и обслуживается здесь же, локально и без сессии.
+import { log, redact } from '../log.ts';
 import { normalizeContent, type IncomingMessage } from '../sessions/divergence.ts';
 
 /** Модель, которой клиент может пометить запрос заголовка: соглашение от LibreChat. */
@@ -169,4 +170,42 @@ export function cleanModelTitle(raw: string): string {
 
   if (!cleaned) return '';
   return upFirst(cap(cleaned, MODEL_MAX_WORDS, MODEL_MAX_CHARS).replace(/[.,;:!?]+$/, '').trim());
+}
+
+/** Кто дал разговору имя: модель по смыслу или эвристика из первой фразы. */
+export type TitleSource = 'model' | 'heuristic';
+
+export type ModelTitleOptions = {
+  /** Чем спросить модель: разовый вызов дешёвой модели мимо живой сессии. */
+  ask: (prompt: string) => Promise<string>;
+  /** Разговор, который увидит модель. */
+  conversation: string;
+  /** Имя, если модель не справилась: эвристика из первой реплики. */
+  fallback: string;
+  /** Клиент ушёл — незачем держать вызов модели. */
+  signal?: AbortSignal;
+};
+
+/**
+ * Заголовок от дешёвой модели с откатом на эвристику. Заголовок — украшение:
+ * таймаут, пустой ответ и мусор в ответе не повод задерживать или ломать ход,
+ * поэтому любой сбой молча уходит в фолбэк. Отмену зовущего логируем отдельно:
+ * «стоп» — не поломка.
+ */
+export async function askModelTitle(
+  options: ModelTitleOptions,
+): Promise<{ title: string; source: TitleSource }> {
+  const { ask, conversation, fallback, signal } = options;
+  try {
+    const cleaned = cleanModelTitle(await ask(buildTitlePrompt(conversation)));
+    if (cleaned) return { title: cleaned, source: 'model' };
+    log.warn('модель вернула пустой заголовок — оставляю эвристику');
+  } catch (error) {
+    if (signal?.aborted) {
+      log.debug('заголовок отменён вместе с ходом');
+    } else {
+      log.warn('заголовок от модели не вышел — оставляю эвристику', { error: redact(String(error)) });
+    }
+  }
+  return { title: fallback, source: 'heuristic' };
 }

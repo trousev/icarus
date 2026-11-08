@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createHash } from 'node:crypto';
-import { log, redact } from '../log.ts';
+import { log } from '../log.ts';
 import { CONTAINER_INCOMING, findUser, userPaths, type IcarusConfig, type UserConfig } from '../config.ts';
 import { findWorkspace } from '../workspaces.ts';
 import { buildPrompt } from '../prompt.ts';
@@ -16,8 +16,7 @@ import type { PiSession } from '../sessions/pi-session.ts';
 import { AnswerBuffer } from './answer.ts';
 import { chunk, completion, completionId, DONE, errorBody, usageChunk, type Usage } from './sse.ts';
 import {
-  buildTitlePrompt,
-  cleanModelTitle,
+  askModelTitle,
   conversationFromTitlePrompt,
   isTitleRequest,
   titleFromPrompt,
@@ -59,26 +58,14 @@ async function respondTitle(
     const onClose = () => controller.abort();
     res.on('close', onClose);
     try {
-      const asked = await ctx.registry.oneShot(user, buildTitlePrompt(conversationFromTitlePrompt(prompt)), {
-        timeoutMs: TITLE_TIMEOUT_MS,
+      const asked = await askModelTitle({
+        ask: (question) => ctx.registry.oneShot(user, question, { timeoutMs: TITLE_TIMEOUT_MS, signal: controller.signal }),
+        conversation: conversationFromTitlePrompt(prompt),
+        fallback,
         signal: controller.signal,
       });
-      const cleaned = cleanModelTitle(asked);
-      if (cleaned) {
-        title = cleaned;
-        source = 'модель';
-      } else {
-        log.warn('модель вернула пустой заголовок — оставляю эвристику', { user: user.id });
-      }
-    } catch (error) {
-      if (controller.signal.aborted) {
-        log.debug('заголовок отменён вместе с ходом', { user: user.id });
-      } else {
-        log.warn('заголовок от модели не вышел — оставляю эвристику', {
-          user: user.id,
-          error: redact(String(error)),
-        });
-      }
+      title = asked.title;
+      source = asked.source === 'model' ? 'модель' : 'эвристика';
     } finally {
       res.off('close', onClose);
     }

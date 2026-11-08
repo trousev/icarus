@@ -76,6 +76,13 @@ export type ChatRecord = {
    * разговор можно вернуть. Поэтому здесь отметка, а не флаг «удалён».
    */
   archivedAt?: string;
+  /**
+   * Кто назвал разговор. `auto` — мы: эвристика из первой реплики или модель,
+   * и такое имя первые ходы ещё можно уточнить. `manual` — человек через
+   * `/rename` или из списка, и его не трогаем. Поля нет у старых записей —
+   * считаем, что имя уже устоялось, и моделью его не переписываем.
+   */
+  titleSource?: 'auto' | 'manual';
 };
 
 function chatsFile(config: IcarusConfig, user: UserConfig): string {
@@ -107,16 +114,13 @@ export function isGenericTitle(chat: ChatRecord): boolean {
   return !chat.title.trim() || chat.title === NEW_CHAT_TITLE || chat.title === defaultTitle(chat.channel);
 }
 
-/**
- * Можно ли продолжать разговор из панели. Панель ведёт веб-чаты и продолжает
- * Telegram: транспорт — труба, а разговор (сессия pi и файл истории) у нас один.
- *
- * API остаётся только для чтения: его клиент присылает историю в каждом запросе
- * и считает её своей, поэтому ход из панели развёл бы две версии разговора
- * (см. sessions/divergence.ts). Это не про канал, а про владельца истории.
- */
 export function panelCanWrite(chat: Pick<ChatRecord, 'channel'>): boolean {
   return chat.channel === 'web' || chat.channel === 'telegram';
+}
+
+/** Имя дали мы, а не человек: такое ещё можно уточнить моделью. */
+export function isAutoTitle(chat: ChatRecord): boolean {
+  return chat.titleSource === 'auto';
 }
 
 function inferChannel(id: string): ChatChannel {
@@ -180,6 +184,7 @@ function normalize(value: unknown): ChatRecord | null {
     ...(typeof item.artifact === 'string' && item.artifact !== '' ? { artifact: item.artifact } : {}),
     ...(lastTurn ? { lastTurn } : {}),
     ...(typeof item.archivedAt === 'string' && item.archivedAt !== '' ? { archivedAt: item.archivedAt } : {}),
+    ...(item.titleSource === 'auto' || item.titleSource === 'manual' ? { titleSource: item.titleSource } : {}),
   };
 }
 
@@ -280,8 +285,12 @@ export function renameChat(
   const chats = readChats(config, user);
   const chat = chats.find((item) => item.conversationId === conversationId || item.id === conversationId);
   if (!chat) return null;
-  if (chat.title !== name) {
+  // Имя выбрал человек: модель его больше не переписывает, даже если разговор
+  // только начался. Пишем и когда имя совпало: запись могла прийти из версии
+  // без этого поля, и тогда метку надо поставить, иначе модель переименует.
+  if (chat.title !== name || chat.titleSource !== 'manual') {
     chat.title = name;
+    chat.titleSource = 'manual';
     writeChats(config, user, chats);
   }
   return chat;
@@ -535,6 +544,31 @@ export function updateChatTitles(config: IcarusConfig, user: UserConfig, titles:
 }
 
 /**
+ * Имя от нас: эвристика из первой реплики или модель. Помечаем `auto` — только
+ * такие имена модель ещё может уточнить; имя, выбранное человеком, не трогаем.
+ * Архивный разговор не переименовываем: он убран с глаз, и новое имя там —
+ * след чужой работы, а не то, что человек ждёт увидеть, вернув разговор.
+ */
+export function applyAutoTitle(
+  config: IcarusConfig,
+  user: UserConfig,
+  conversationId: string,
+  title: string,
+): ChatRecord | null {
+  const name = title.trim();
+  if (!name) return null;
+  const chats = readChats(config, user);
+  const chat = chats.find((item) => item.conversationId === conversationId || item.id === conversationId);
+  if (!chat || chat.archivedAt || chat.titleSource === 'manual') return null;
+  if (chat.title !== name || chat.titleSource !== 'auto') {
+    chat.title = name;
+    chat.titleSource = 'auto';
+    writeChats(config, user, chats);
+  }
+  return chat;
+}
+
+/**
  * Заголовок из первой реплики человека. Читаем голову файла и только если
  * заголовок ещё служебный: у Telegram/API нет своего finishChat, поэтому
  * первый же ход даёт имя разговору, а панель потом показывает его как обычный.
@@ -543,7 +577,7 @@ export function refreshChatTitle(config: IcarusConfig, user: UserConfig, convers
   try {
     const chats = readChats(config, user);
     const chat = chats.find((item) => item.conversationId === conversationId || item.id === conversationId);
-    if (!chat || !isGenericTitle(chat)) return;
+    if (!chat || !isGenericTitle(chat) || chat.archivedAt) return;
 
     const file = sessionFileForId(userPaths(config, user).sessions, sessionIdOf(chat, user));
     if (!file) return;
@@ -552,6 +586,10 @@ export function refreshChatTitle(config: IcarusConfig, user: UserConfig, convers
     const title = titleFromText(text.replace(/^\[(?:голосовое|voice)[^\]]*\]\s*/i, ''));
     if (!title || title === chat.title) return;
     chat.title = title;
+    // У Telegram/API имя тоже наше: если человек его не выбирал, модель потом
+    // может уточнить его по первым репликам — но живой заголовок сейчас считается
+    // в веб-чате, туда и смотрим.
+    if (chat.titleSource !== 'manual') chat.titleSource = 'auto';
     writeChats(config, user, chats);
   } catch (error) {
     // Заголовок — украшение: его сбой не должен отменять ответ человеку.
