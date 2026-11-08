@@ -139,7 +139,8 @@ test('artifact_new создаёт папку и ACL', async () => {
     const dir = path.join(root, 'artifacts', 'plan');
     const saved = JSON.parse(fs.readFileSync(path.join(dir, '.folder-acl.json'), 'utf8'));
     assert.equal(saved.owner, 'probe');
-    assert.deepEqual(saved.acl, { me: 'admin', family: 'read' });
+    assert.deepEqual(saved.acl, { me: 'admin', family: 'none' });
+    assert.match(answer, /виден только тебе/);
     fs.writeFileSync(path.join(dir, 'index.md'), '# План\n');
     fs.writeFileSync(path.join(dir, 'index.ai.md'), '# План\n');
     const check = text(

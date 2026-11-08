@@ -108,9 +108,9 @@ export function artifactsPage(session: PanelSession, options: ArtifactsPageOptio
 <div class="art-modal" id="art-acl-modal" hidden>
   <div class="art-modal-card" role="dialog" aria-modal="true" aria-labelledby="art-acl-title">
     <h2 id="art-acl-title">Права доступа</h2>
-    <p class="art-modal-note">Уровень включает предыдущий: <b>write</b> умеет и читать, <b>admin</b> — ещё менять права, удалять и делать публичную ссылку.</p>
+    <p class="art-modal-note">Новый артефакт по умолчанию личный: у семьи «нет доступа». Уровень включает предыдущий: <b>write</b> умеет и читать, <b>admin</b> — ещё менять права, удалять и делать публичную ссылку.</p>
     <label class="art-field"><span>Я</span><select id="acl-me"><option value="read">чтение</option><option value="write">запись</option><option value="admin">администрирование</option></select></label>
-    <label class="art-field"><span>Семья</span><select id="acl-family"><option value="read">чтение</option><option value="write">запись</option><option value="admin">администрирование</option></select></label>
+    <label class="art-field"><span>Семья</span><select id="acl-family"><option value="none">нет доступа</option><option value="read">чтение</option><option value="write">запись</option><option value="admin">администрирование</option></select></label>
     <div class="art-modal-actions">
       <button class="btn" id="acl-cancel">Отмена</button>
       <button class="btn primary" id="acl-save">Сохранить</button>
