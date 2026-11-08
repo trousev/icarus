@@ -133,11 +133,9 @@ export function chatPage(session: PanelSession, options: ChatPageOptions): strin
   <!-- Правая панель: файлы рабочей папки открытого разговора. Клиент рисует
        дерево и предпросмотр; здесь только каркас, иначе страница пухнет вдвое. -->
   <aside class="files-panel" id="files-panel" aria-label="Файлы workspace">
-    <header class="files-head">
-      <i class="files-dot"></i>
-      <div class="files-id"><b id="files-ws">Разговор</b><span id="files-ws-path"></span></div>
-      <button class="icon-btn files-close" id="files-close" aria-label="Скрыть файлы" title="Скрыть файлы">×</button>
-    </header>
+    <!-- На узком экране панель выдвигается поверх шапки чата и закрывает кнопку
+         «Файлы»: свой крестик остаётся единственным способом её свернуть. -->
+    <button class="icon-btn files-close" id="files-close" aria-label="Скрыть файлы" title="Скрыть файлы">×</button>
     <div class="files-tree" id="files-tree"><p class="files-note">Читаю папку…</p></div>
     <div class="files-split" id="files-split" role="separator" aria-orientation="horizontal"
          aria-label="Высота предпросмотра" aria-valuemin="90" tabindex="0"><span></span></div>

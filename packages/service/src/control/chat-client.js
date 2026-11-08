@@ -1008,8 +1008,7 @@ const FILES_PREVIEW_MIN = 90;
 let filesOpen = false;
 /** Slug workspace'а, чьё дерево сейчас нарисовано. */
 let filesWorkspace = null;
-let filesWorkspaceName = '';
-/** Путь для подписи в шапке: `~/icarus/…/workspaces/talk`. */
+/** Путь для подписи над деревом: `~/icarus/…/workspaces/talk`. */
 let filesRootPath = '';
 /** path → { entries, truncated }; грузим только раскрытые папки. */
 let filesCache = new Map();
@@ -1133,11 +1132,6 @@ function setFilesPreviewHeight(height) {
   return next;
 }
 
-function updateFilesHead() {
-  el('files-ws').textContent = filesWorkspaceName || wsLabel(currentWorkspace);
-  el('files-ws-path').textContent = filesRootPath;
-}
-
 function hideFilesPreview() {
   el('files-panel').classList.remove('has-preview');
   el('files-preview').innerHTML = '';
@@ -1194,7 +1188,6 @@ function treeRows(dir, depth, rows) {
 
 function renderFiles() {
   if (!filesOpen) return;
-  updateFilesHead();
   const tree = el('files-tree');
   const keep = tree.scrollTop;
   const rows = [
@@ -1222,7 +1215,6 @@ async function loadFilesRoot() {
   const token = ++filesRootToken;
   const slug = currentWorkspace;
   filesWorkspace = slug;
-  filesWorkspaceName = wsLabel(slug);
   filesRootPath = '';
   filesCache = new Map();
   filesExpanded.clear();
@@ -1233,7 +1225,6 @@ async function loadFilesRoot() {
   try {
     const data = await fetchFileList(slug, '');
     if (token !== filesRootToken || filesWorkspace !== slug) return;
-    filesWorkspaceName = data.workspace?.name || filesWorkspaceName;
     filesRootPath = data.workspace?.path || '';
     filesCache.set('', { entries: data.entries || [], truncated: Boolean(data.truncated) });
     renderFiles();
@@ -1265,7 +1256,6 @@ async function refreshFilesTree() {
           truncated: Boolean(data.truncated),
         });
         if (!relative) {
-          filesWorkspaceName = data.workspace?.name || filesWorkspaceName;
           filesRootPath = data.workspace?.path || filesRootPath;
         }
       } catch {
@@ -1319,10 +1309,7 @@ function toggleFilesPanel() {
 /** Разговор переехал в другую папку: дерево меняется следом. */
 function syncFilesWorkspace() {
   if (!filesOpen) return;
-  if (filesWorkspace === currentWorkspace && filesCache.has('')) {
-    updateFilesHead();
-    return;
-  }
+  if (filesWorkspace === currentWorkspace && filesCache.has('')) return;
   void loadFilesRoot();
 }
 
