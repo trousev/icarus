@@ -26,7 +26,7 @@ import {
   type FolderAcl,
 } from '../artifacts.ts';
 import type { IcarusConfig } from '../config.ts';
-import { artifactHistory, restoreArtifact } from '../artifacts-git.ts';
+import { artifactHistory, artifactVersion, artifactVersionFile, restoreArtifact } from '../artifacts-git.ts';
 import { readJsonBody } from '../http/openai.ts';
 import { errorBody } from '../http/sse.ts';
 import { log } from '../log.ts';
@@ -83,6 +83,28 @@ function sendFile(
     return;
   }
   fs.createReadStream(file).pipe(res);
+}
+
+function sendBuffer(
+  req: IncomingMessage,
+  res: ServerResponse,
+  content: Buffer,
+  type: string,
+  options: { download?: string; sandbox?: boolean } = {},
+): void {
+  const headers: Record<string, string> = {
+    'content-type': type,
+    'content-length': String(content.length),
+    'x-content-type-options': 'nosniff',
+    'cache-control': 'no-cache',
+    ...(options.download
+      ? { 'content-disposition': disposition(options.download) }
+      : {}),
+    ...(options.sandbox ? { 'content-security-policy': SANDBOX } : {}),
+  };
+  res.writeHead(200, headers);
+  if (req.method === 'HEAD') res.end();
+  else res.end(content);
 }
 
 function decode(value: string | undefined): string {
@@ -143,6 +165,21 @@ export async function handleArtifactsApi(
       });
     } catch (error) {
       fail(res, error, 'история не прочиталась');
+    }
+    return;
+  }
+
+  if (req.method === 'GET' && route === 'preview') {
+    const name = decode(url.searchParams.get('artifact') ?? '');
+    const commit = decode(url.searchParams.get('commit') ?? '');
+    try {
+      const read = readArtifact(config, userId, name);
+      const version = await artifactVersion(config, read.dir, commit);
+      const history = await artifactHistory(read.dir);
+      json(res, 200, { ...version, current: history[0]?.hash ?? null });
+    } catch (error) {
+      if (error instanceof ArtifactError) fail(res, error, 'версия не прочиталась');
+      else json(res, 400, errorBody(error instanceof Error ? error.message : 'версия не прочиталась', 'invalid_request_error'));
     }
     return;
   }
@@ -267,6 +304,42 @@ export function handleArtifactsRaw(
     cache: 'no-cache',
     sandbox: /^(text\/html|image\/svg\+xml)/.test(found.type),
   });
+}
+
+/**
+ * Файл конкретной версии: ассеты внутри предпросмотра HTML и картинки.
+ * `/panel/artifacts/version/<артефакт>/<commit>/<путь>`.
+ */
+export async function handleArtifactsVersionRaw(
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL,
+  config: IcarusConfig,
+  userId: string,
+): Promise<void> {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    json(res, 405, errorBody('файл версии только читают', 'invalid_request_error'));
+    return;
+  }
+  const parts = url.pathname.slice('/panel/artifacts/version/'.length).split('/');
+  const name = decode(parts[0]);
+  const commit = decode(parts[1]);
+  const relative = parts.slice(2).map(decode).join('/');
+  if (!name || !commit || !relative) {
+    json(res, 404, errorBody('файл версии не указан', 'not_found'));
+    return;
+  }
+  try {
+    const read = readArtifact(config, userId, name);
+    const file = await artifactVersionFile(read.dir, commit, relative);
+    sendBuffer(req, res, file.content, file.type, {
+      ...(url.searchParams.get('download') === '1' ? { download: relative } : {}),
+      sandbox: /^(text\/html|image\/svg\+xml)/.test(file.type),
+    });
+  } catch (error) {
+    if (error instanceof ArtifactError) fail(res, error, 'файл версии не прочитался');
+    else json(res, 404, errorBody(error instanceof Error ? error.message : 'файл версии не найден', 'not_found'));
+  }
 }
 
 /**
