@@ -273,6 +273,13 @@ function artChatRenderHistory(messages) {
     return;
   }
   for (const message of messages) {
+    if (message.divider === 'clear') {
+      const mark = document.createElement('div');
+      mark.className = 'art-chat-divider';
+      mark.textContent = 'Контекст очищен';
+      artChatLog().append(mark);
+      continue;
+    }
     if (message.role === 'user') {
       if (String(message.text || '').trim()) artChatUser(message.text);
       continue;

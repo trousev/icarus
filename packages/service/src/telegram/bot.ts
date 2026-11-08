@@ -7,8 +7,8 @@
 // Разговоров у человека столько, сколько он захочет: в личке — топики (Bot API 9.4,
 // включаются Threaded Mode в BotFather), в группе — по разговору на человека. Разговор
 // в терминах pi — это пара «чат + топик» (см. conversationIdFor): у каждого свой
-// процесс, своя история и свой /compact. Топики, заведённые человеком, бот узнаёт по
-// служебному сообщению forum_topic_created: списком топиков Bot API не делится.
+// процесс и своя история. Топики человек заводит сам в клиенте Telegram; бот узнаёт
+// о новом топике по служебному сообщению forum_topic_created и не мешает ему.
 //
 // Вложения разбираем те же, что и HTTP-вход: картинки уезжают модели нативно
 // и ложатся в incoming/, голосовые — расшифровкой (см. attachments.ts, speech.ts).
@@ -18,26 +18,48 @@ import { buildPrompt } from '../prompt.ts';
 import { phraseForToolStart, phraseForToolEnd, subagentStatus } from '../reasoning.ts';
 import { mcpReauthNotice } from '../mcp/reauth.ts';
 import { speechTranscriber, type Transcriber } from '../speech.ts';
-import type {
-  AbortOutcome,
-  ClearOutcome,
-  CommandsOutcome,
-  CompactOutcome,
-  SessionRegistry,
-  StatsOutcome,
-} from '../sessions/registry.ts';
+import type { SessionRegistry } from '../sessions/registry.ts';
 import type { PiSession } from '../sessions/pi-session.ts';
+import {
+  clearText,
+  compactText,
+  parseCommand,
+  REMOVED_COMMANDS,
+  RENAME_NEEDS_NAME,
+  renameFailed,
+  renameText,
+  skillsText,
+  statsText,
+  stopText,
+  TOPICS_REMOVED,
+  UNKNOWN_COMMAND,
+  type ParsedCommand,
+} from '../sessions/commands.ts';
 import { collectIncoming, type Incoming, type IncomingVoice } from './attachments.ts';
 import {
   describeTelegramError,
   TelegramApi,
-  TelegramError,
   TOPIC_NAME_LIMIT,
-  type ForumTopic,
   type TelegramMessage,
   type TelegramUpdate,
 } from './api.ts';
 import { TelegramReply } from './reply.ts';
+
+// Тексты и разбор команд общие с веб-чатом (sessions/commands.ts). Реэкспорт
+// оставляет прежний вход тем, кто уже берёт их из бота, — и тестам тоже.
+export {
+  clearText,
+  compactText,
+  parseCommand,
+  REMOVED_COMMANDS,
+  RENAME_NEEDS_NAME,
+  renameText,
+  skillsText,
+  statsText,
+  stopText,
+  UNKNOWN_COMMAND,
+};
+export type { ParsedCommand };
 
 /** Длинный опрос: Telegram держит запрос, пока не появится сообщение. */
 export const POLL_TIMEOUT_SECONDS = 50;
@@ -57,20 +79,14 @@ export const COMMANDS = [
   { command: 'compact', description: 'подвести итог разговора' },
   { command: 'stop', description: 'остановить ответ' },
   { command: 'stats', description: 'токены, деньги, контекст' },
-  { command: 'clear', description: 'начать разговор заново' },
-  { command: 'topic', description: 'завести отдельный разговор-топик' },
-  { command: 'topics', description: 'какие топики я помню' },
-  { command: 'rename', description: 'переименовать текущий топик' },
+  { command: 'clear', description: 'начать разговор с чистого листа' },
+  { command: 'rename', description: 'переименовать текущий чат' },
   { command: 'skills', description: 'скиллы и шаблоны' },
 ];
 
 /**
  * Команды, которые бот разбирает сам. Всё остальное с косой черты — реплика для pi:
  * у него свои команды (`/skill:имя`, промпт-шаблоны), и отбирать их у человека нельзя.
- *
- * `/topic`, `/topics` и `/rename` имеют смысл только в чате с включённым Threaded
- * Mode, но меню одно на все чаты: в выключенном режиме они объясняют, где галочка,
- * вместо «400 the chat is not a forum».
  */
 export const BOT_COMMANDS = new Set([
   'start',
@@ -79,8 +95,6 @@ export const BOT_COMMANDS = new Set([
   'stop',
   'stats',
   'clear',
-  'topic',
-  'topics',
   'rename',
   'skills',
 ]);
@@ -103,62 +117,12 @@ export const HELP = [
   '/stop — остановиться, если я ушёл не туда',
   '/stats — сколько токенов и денег ушло и сколько занято в контексте',
   '/clear — начать разговор с чистого листа (память остаётся при мне)',
-  '/topic [имя] — завести отдельный разговор-топик: у него своя история и свой /compact',
-  '/topics — какие топики я помню',
-  '/rename <имя> — переименовать топик, в котором написано',
+  '/rename <имя> — переименовать текущий чат',
   '/skills — что у меня есть сверх разговора: скиллы и шаблоны',
   '',
   'Ещё я понимаю фото и голосовые, помню прошлые разговоры и умею искать в интернете.',
   'Всё остальное — просто пиши словами.',
 ].join('\n');
-
-/** Приветствие с оговоркой про топики: обещать /topic там, где он не работает, нельзя. */
-export function greetingFor(topicsEnabled: boolean): string {
-  return topicsEnabled
-    ? `${GREETING}\n/topic — завести отдельный разговор: топики в шапке чата.`
-    : GREETING;
-}
-
-/** Threaded Mode выключен: объясняем, где галочка, — в личке её нет. */
-export const NO_TOPICS_MODE = [
-  'Отдельные разговоры (топики) у меня пока выключены.',
-  '',
-  'Это не в чате, а в @BotFather: My bots → этот бот → Bot Settings → Threads Settings →',
-  'включить Threaded Mode. После этого /topic заведёт первый топик.',
-].join('\n');
-
-/** Что отвечаем на /topic: топик заведён, разговор у него свой. */
-export function topicCreated(name: string): string {
-  return [
-    `Завёл разговор «${name}».`,
-    '',
-    'Всё, что напишешь здесь, живёт отдельно от других топиков: своя история, свой /compact.',
-  ].join('\n');
-}
-
-/** Не вышло завести топик: имя у человека или у Telegram — показываем причину как есть. */
-export function topicFailed(reason: string): string {
-  return `Не смог завести топик: ${reason}`;
-}
-
-/** /topics: Bot API не отдаёт список топиков, поэтому показываем то, что видели сами. */
-export function topicsList(topics: Array<{ name: string }>): string {
-  if (topics.length === 0) {
-    return [
-      'Пока не знаю ни одного топика.',
-      '',
-      'Telegram не показывает боту список топиков: я вижу только те, что заводил сам или в которых',
-      'при мне писали. Заведи /topic — или ткни в «All Messages» в шапке чата, и он появится здесь.',
-    ].join('\n');
-  }
-  return [
-    'Разговоры, которые я помню:',
-    '',
-    ...topics.map((topic) => `• ${topic.name}`),
-    '',
-    'Переключиться — тапом по топику в шапке чата. Новый — /topic.',
-  ].join('\n');
-}
 
 /**
  * Ответ не доехал до топика. Говорим об этом в корне чата: в топике человек ждал бы
@@ -171,20 +135,6 @@ export function topicDeliveryFailed(reason: string): string {
     'Ответа в топике не будет — напиши в корень чата, и продолжим здесь.',
   ].join('\n');
 }
-
-/** /rename: имя топика меняется только изнутри топика. */
-export const RENAME_OUTSIDE = 'Переименовать можно только разговор: открой топик и напиши /rename новое имя.';
-/** /rename без имени: подсказываем форму, а не угадываем. */
-export const RENAME_NEEDS_NAME = 'Напиши так: /rename Письмо из налоговой.';
-
-export function renamed(name: string): string {
-  return `Теперь этот разговор называется «${name}».`;
-}
-
-/** Имя топика по умолчанию: человек написал /topic без названия. */
-export const DEFAULT_TOPIC_NAME = 'Новый разговор';
-/** Служебное имя, которым Telegram помечает топик, заведённый «All Messages». */
-export const IMPLICIT_TOPIC_NAME = 'New Topic';
 
 export const NO_USERNAME =
   'Не могу тебя узнать: в Telegram у тебя не задан username, а я различаю людей по нему. ' +
@@ -199,8 +149,6 @@ export const VOICE_NO_SPEECH =
 
 /** Расшифровка вышла пустой: тишина, музыка или слишком тихая запись. */
 export const VOICE_EMPTY = 'В голосовом не разобрал ни слова — попробуй ещё раз или напиши словами.';
-
-export const UNKNOWN_COMMAND = 'Такой команды не знаю. /help — что я умею.';
 
 export const BUSY = 'Ещё думаю над прошлым сообщением — секунду.';
 
@@ -275,152 +223,14 @@ export function conversationIdFor(
  * разговор в терминах pi и якорь — сообщение внутри того же топика, ответом на которое
  * Telegram положит ответ в топик, даже если `message_thread_id` отобьёт.
  */
-type Route = { threadId: number | null; conversationId: string; anchor?: number; freshTopic?: 'implicit' | 'named' };
+type Route = { threadId: number | null; conversationId: string; anchor?: number };
 
 /**
- * Топик сообщения и признак того, что номер взят из свежего топика, а не из самого
- * сообщения (см. TelegramBot.resolveThread). Признак нужен /topic: в общей ленте топик
- * уже завёл клиент Telegram, и второй такой же заводить незачем — но переименовывать
- * можно только топик с неявным именем (`is_name_implicit`: своё имя человек уже выбрал).
+ * Номер топика, к которому относится сообщение. Считать его здесь, а не в обработчике,
+ * нужно потому, что служебка о новом топике и первое сообщение из общей ленты едут
+ * в разных очередях (см. TelegramBot.resolveThread).
  */
-type ThreadRoute = { threadId: number | null; fresh: boolean; implicit: boolean };
-
-/** Разобранная команда: имя без «/» и без «@бота», и всё, что человек написал после. */
-export type ParsedCommand = { name: string; args: string };
-
-/**
- * `/compact`, `/compact@the_icarus_bot`, `/compact пожелание` — команда; `/etc/hosts`
- * и «а /compact потом» — реплика. Аргументы разбираем только у своих команд: у pi
- * есть собственные (`/skill:имя`, промпт-шаблоны), и в них мы не лезем.
- */
-export function parseCommand(text: string): ParsedCommand | null {
-  const match = /^\/([a-zA-Z0-9_]+)(?:@[a-zA-Z0-9_]+)?(?:\s+([\s\S]*))?$/.exec(text.trim());
-  const name = match?.[1];
-  if (!name) return null;
-  return { name: name.toLowerCase(), args: (match?.[2] ?? '').trim() };
-}
-
-function tokens(value: number): string {
-  return Math.round(value).toLocaleString('ru-RU');
-}
-
-/** Число из ответа pi: там всё необязательное, и падать на пропуске незачем. */
-function count(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
-}
-
-/** Деньги в отчёте: у разговора на день копейки и есть цена, округлять их жалко. */
-function money(value: number): string {
-  return `$${value < 1 ? value.toFixed(3) : value.toFixed(2)}`;
-}
-
-/** Что ответить на /compact: решает не бот, а реестр сессий. */
-export function compactText(outcome: CompactOutcome): string {
-  switch (outcome.status) {
-    case 'compacted':
-      return `Подвёл итог: ${tokens(outcome.tokensBefore)} → ${tokens(outcome.tokensAfter)} токенов. Продолжаем с этого места.`;
-    case 'nothing':
-      return 'Сжимать пока нечего: разговор короткий или уже сжат.';
-    case 'no-session':
-      return 'Сжимать нечего: разговор ещё не начат или уже сжат и закрыт — начнём, когда напишешь.';
-    case 'busy':
-      return 'Сейчас думаю над ответом — сожму, когда договорю.';
-    case 'failed':
-      return `Не получилось сжать: ${outcome.error}`;
-  }
-}
-
-/** Что ответить на /stop. */
-export function stopText(outcome: AbortOutcome): string {
-  switch (outcome.status) {
-    case 'stopped':
-      return 'Остановился. Скажи, если нужно иначе.';
-    case 'idle':
-      return 'Я и так ничего не делаю — можно писать.';
-    case 'no-session':
-      return 'Останавливать нечего: разговор ещё не начат или уже закрыт.';
-    case 'failed':
-      return `Не получилось остановиться: ${outcome.error}`;
-  }
-}
-
-/** Что ответить на /stats: цифры разговора человеческими словами. */
-export function statsText(outcome: StatsOutcome): string {
-  if (outcome.status === 'failed') return `Не смог посчитать: ${outcome.error}`;
-
-  const stats = outcome.stats;
-  const used = (stats.tokens ?? {}) as Record<string, unknown>;
-  const context = (stats.contextUsage ?? {}) as Record<string, unknown>;
-  const lines: string[] = [];
-
-  const replies = count(stats.userMessages);
-  const tools = count(stats.toolCalls);
-  if (replies !== null) {
-    lines.push(
-      tools !== null && tools > 0
-        ? `Твоих реплик: ${tokens(replies)}, шагов с инструментами: ${tokens(tools)}.`
-        : `Твоих реплик: ${tokens(replies)}.`,
-    );
-  }
-
-  const total = count(used.total);
-  if (total !== null && total > 0) {
-    const parts = [`вход ${tokens(count(used.input) ?? 0)}`, `выход ${tokens(count(used.output) ?? 0)}`];
-    const cached = count(used.cacheRead);
-    if (cached !== null && cached > 0) parts.push(`из кэша ${tokens(cached)}`);
-    lines.push(`Токенов всего: ${tokens(total)} (${parts.join(', ')}).`);
-  }
-
-  const percent = count(context.percent);
-  const contextTokens = count(context.tokens);
-  const window = count(context.contextWindow);
-  if (percent !== null && contextTokens !== null && window !== null) {
-    lines.push(`Занято в контексте: ${Math.round(percent)}% (${tokens(contextTokens)} из ${tokens(window)}).`);
-  }
-
-  const cost = count(stats.cost);
-  if (cost !== null && cost > 0) lines.push(`Потрачено: ${money(cost)}.`);
-
-  return lines.length > 0 ? lines.join('\n') : 'Разговор пока пустой: ни реплик, ни токенов.';
-}
-
-/** Что ответить на /clear. */
-export function clearText(outcome: ClearOutcome): string {
-  switch (outcome.status) {
-    case 'started':
-      return 'Начали с чистого листа: прошлую нить убрал в архив. Память не трогал — то, что я о вас знаю, осталось.';
-    case 'empty':
-      return 'Разговор и так с чистого листа — начинать заново нечего.';
-    case 'busy':
-      return 'Сейчас думаю над ответом: сначала /stop, потом начнём заново.';
-    case 'failed':
-      return `Не получилось начать заново: ${outcome.error}`;
-  }
-}
-
-/** Порядок в списке команд: сначала скиллы человека, потом шаблоны и команды. */
-function commandRank(source: string | undefined): number {
-  if (source === 'skill') return 0;
-  if (source === 'prompt') return 1;
-  return 2;
-}
-
-/** Что ответить на /skills: что человек может позвать сам. */
-export function skillsText(outcome: CommandsOutcome): string {
-  if (outcome.status === 'failed') return `Не смог спросить у pi: ${outcome.error}`;
-  if (outcome.commands.length === 0) {
-    return 'Сверх разговора у меня сейчас ничего нет — только память, поиск и руки. Скажи, чего не хватает.';
-  }
-
-  const lines = ['Вот что можно позвать прямо в чате:', ''];
-  const commands = [...outcome.commands].sort(
-    (a, b) => commandRank(a.source) - commandRank(b.source) || a.name.localeCompare(b.name),
-  );
-  for (const command of commands) {
-    lines.push(command.description ? `/${command.name} — ${command.description}` : `/${command.name}`);
-  }
-  return lines.join('\n');
-}
+type ThreadRoute = { threadId: number | null };
 
 export type TelegramBotOptions = {
   api?: TelegramApi;
@@ -455,36 +265,6 @@ export class KeyedQueue {
   }
 }
 
-/**
- * Что бот помнит о топиках: номер → имя, по чатам. Bot API не даёт списка топиков
- * (это умеет только клиентский TDLib), поэтому копим то, что видели сами: завели
- * через /topic — запомнили ответ createForumTopic; человек завёл сам — пришло
- * служебное forum_topic_created. Память живёт до перезапуска: после него /topics
- * честно скажет, что видит только новые топики.
- */
-export class TopicsCache {
-  private chats = new Map<number, Map<number, string>>();
-
-  remember(chatId: number, threadId: number, name: string): void {
-    let topics = this.chats.get(chatId);
-    if (!topics) {
-      topics = new Map();
-      this.chats.set(chatId, topics);
-    }
-    topics.set(threadId, name);
-  }
-
-  name(chatId: number, threadId: number): string | undefined {
-    return this.chats.get(chatId)?.get(threadId);
-  }
-
-  list(chatId: number): Array<{ threadId: number; name: string }> {
-    const topics = this.chats.get(chatId);
-    if (!topics) return [];
-    return [...topics].map(([threadId, name]) => ({ threadId, name }));
-  }
-}
-
 export class TelegramBot {
   private config: IcarusConfig;
   private registry: SessionRegistry;
@@ -505,17 +285,11 @@ export class TelegramBot {
    * мешает писать поверх, и ждать пять минут ответа субагентов он не станет.
    */
   private turns = new Map<string, { interrupt: () => Promise<void> }>();
-  /** Что знаем о топиках: Bot API списка не отдаёт, копим увиденное (см. TopicsCache). */
-  private topics = new TopicsCache();
-  /** Threaded Mode у бота: null — ещё не спрашивали (getMe не ответил). */
-  private topicsEnabled: boolean | null = null;
   /**
    * Топик, который человек только что завёл из общей ленты: клиент создаёт топик, а
    * само сообщение приезжает как сообщение корня — см. resolveThread.
    */
-  private freshTopics = new Map<number, { threadId: number; at: number; name: string; implicit: boolean }>();
-  /** Топики, которые завели мы сами (/topic): их служебка не должна перехватывать лобби. */
-  private ownTopics = new Set<string>();
+  private freshTopics = new Map<number, { threadId: number; at: number; name: string }>();
   private freshTopicWindowMs: number;
 
   constructor(config: IcarusConfig, registry: SessionRegistry, options: TelegramBotOptions = {}) {
@@ -544,15 +318,9 @@ export class TelegramBot {
   private async announce(): Promise<void> {
     try {
       const me = await this.api.getMe();
-      // Топики в личке — не наша настройка, а флаг бота: без Threaded Mode /topic
-      // отвечает не «400 the chat is not a forum», а понятной инструкцией.
-      this.topicsEnabled = Boolean(me.has_topics_enabled);
       log.info('телеграм-бот на связи', {
         username: me.username ?? '?',
         id: me.id,
-        topics: this.topicsEnabled,
-        // Человек заводит топики сам только с этим флагом — иначе только через /topic.
-        usersCreateTopics: Boolean(me.allows_users_to_create_topics),
       });
       await this.api.setMyCommands(COMMANDS);
     } catch (error) {
@@ -561,49 +329,18 @@ export class TelegramBot {
   }
 
   /**
-   * Включены ли топики в личке. Спрашиваем лениво: getMe на старте мог не ответить
-   * (сеть моргнула), а звать createForumTopic вслепую — значит показать человеку
-   * «the chat is not a forum» вместо того, где включается режим.
-   *
-   * Выключенный режим навсегда не запоминаем: Threaded Mode могли включить уже после
-   * старта сервиса, и тогда каждый /topic обязан спросить заново. Удачный ответ
-   * (true) кэшируем — переспрашивать его незачем.
-   */
-  private async topicsAvailable(): Promise<boolean> {
-    if (this.topicsEnabled === true) return true;
-    try {
-      const me = await this.api.getMe();
-      this.topicsEnabled = Boolean(me.has_topics_enabled);
-      return this.topicsEnabled;
-    } catch (error) {
-      log.warn('телеграм: не спросил про топики', { error: describeTelegramError(error) });
-      return false;
-    }
-  }
-
-  private topicKey(chatId: number, threadId: number): string {
-    return `${chatId}:${threadId}`;
-  }
-
-  /**
-   * Запоминает топик, который завёл человек. Топик, заведённый из общей ленты
-   * («All Messages»), приходит служебным `forum_topic_created` с неявным именем: сам
-   * топик есть, а вот первое сообщение в него ещё не приехало — оно догоняет следом.
-   * Свои топики (/topic) сюда не пишем: иначе следующее сообщение из корня уехало бы
-   * в только что заведённый нами топик.
+   * Запоминает топик, который человек только что завёл из общей ленты. Служебка
+   * `forum_topic_created` приходит раньше первого сообщения, а само сообщение
+   * может приехать без `message_thread_id` — см. resolveThread.
    */
   private noteTopicCreated(message: TelegramMessage): void {
     const topic = message.forum_topic_created;
     const threadId = topicThreadId(message);
     if (!topic || threadId === null || message.chat.type !== 'private') return;
-    if (this.ownTopics.has(this.topicKey(message.chat.id, threadId))) return;
-    // Неявное имя — то, которое Telegram дал топику сам (по первой реплике): его и
-    // переписываем на /topic. Своё имя человек выбрал сам, трогать его не за что.
     this.freshTopics.set(message.chat.id, {
       threadId,
       at: Date.now(),
       name: topic.name,
-      implicit: topic.is_name_implicit === true,
     });
   }
 
@@ -629,24 +366,24 @@ export class TelegramBot {
       if (!message.forum_topic_created && this.freshTopics.get(chatId)?.threadId === threadId) {
         this.freshTopics.delete(chatId);
       }
-      return { threadId, fresh: false, implicit: false };
+      return { threadId };
     }
     // Служебка без номера топика и чужие чаты — не наше дело: топиков там не заводят.
     if (message.forum_topic_created || message.chat.type !== 'private') {
-      return { threadId: null, fresh: false, implicit: false };
+      return { threadId: null };
     }
 
     const fresh = this.freshTopics.get(chatId);
-    if (!fresh) return { threadId: null, fresh: false, implicit: false };
+    if (!fresh) return { threadId: null };
     this.freshTopics.delete(chatId);
-    if (Date.now() - fresh.at > this.freshTopicWindowMs) return { threadId: null, fresh: false, implicit: false };
+    if (Date.now() - fresh.at > this.freshTopicWindowMs) return { threadId: null };
 
     log.info('телеграм: сообщение из общей ленты относим к свежему топику', {
       chatId,
       threadId: fresh.threadId,
       name: fresh.name,
     });
-    return { threadId: fresh.threadId, fresh: true, implicit: fresh.implicit };
+    return { threadId: fresh.threadId };
   }
 
   private async loop(): Promise<void> {
@@ -685,7 +422,7 @@ export class TelegramBot {
    */
   enqueue(update: TelegramUpdate): Promise<void> {
     const message = update.message;
-    const thread = message ? this.resolveThread(message) : { threadId: null, fresh: false, implicit: false };
+    const thread = message ? this.resolveThread(message) : { threadId: null };
     const key = message ? `${message.chat.id}:${thread.threadId ?? 0}` : 'unknown';
     const text = message?.text ?? message?.caption ?? '';
     const command = parseCommand(text);
@@ -728,18 +465,9 @@ export class TelegramBot {
     const thread = routed ?? this.resolveThread(message);
     const threadId = thread.threadId;
 
-    // Служебное: завели топик — запоминаем имя, иначе /topics нечего показать.
-    // Список топиков Bot API не отдаёт, так что это единственный источник правды.
-    if (message.forum_topic_created) {
-      if (threadId !== null) {
-        this.topics.remember(chatId, threadId, message.forum_topic_created.name);
-      }
-      return;
-    }
-    if (message.forum_topic_edited?.name && threadId !== null) {
-      this.topics.remember(chatId, threadId, message.forum_topic_edited.name);
-      return;
-    }
+    // Служебные сообщения топиков: завели или переименовали. Отвечать на них
+    // нечего, а разговором они не являются. Имя в панели хранит /rename.
+    if (message.forum_topic_created || message.forum_topic_edited) return;
 
     const user = findTelegramUser(this.config, message.from.username);
     if (!user) {
@@ -781,6 +509,11 @@ export class TelegramBot {
         await this.runCommand(message, user, command, route);
         return;
       }
+      // Убранные команды объясняем сами — даже с аргументами, иначе они уедут в pi.
+      if (REMOVED_COMMANDS.has(command.name)) {
+        await this.say(chatId, TOPICS_REMOVED, route.threadId, route.anchor);
+        return;
+      }
       // Незнакомая команда без аргументов — почти наверняка опечатка: подсказываем.
       // С аргументами это уже реплика: у pi есть свои команды, и отбирать их нельзя.
       if (command.args === '') {
@@ -812,7 +545,6 @@ export class TelegramBot {
       ...(thread.threadId !== null && topicThreadId(message) === thread.threadId
         ? { anchor: message.message_id }
         : {}),
-      ...(thread.fresh ? { freshTopic: thread.implicit ? ('implicit' as const) : ('named' as const) } : {}),
     };
   }
 
@@ -835,7 +567,7 @@ export class TelegramBot {
 
     switch (command.name) {
       case 'start':
-        return say(greetingFor(await this.topicsAvailable()));
+        return say(GREETING);
       case 'help':
         return say(HELP);
       case 'compact':
@@ -846,12 +578,8 @@ export class TelegramBot {
         return say(statsText(await this.registry.stats(user, conversationId)));
       case 'clear':
         return say(clearText(await this.registry.clear(user, conversationId)));
-      case 'topic':
-        return this.createTopic(message, user, command.args, route);
-      case 'topics':
-        return say(topicsList(this.topics.list(chatId)));
       case 'rename':
-        return this.renameTopic(message, command.args, threadId);
+        return this.renameChat(message, user, command.args, route);
       case 'skills':
         return say(skillsText(await this.registry.commands(user, conversationId)));
       default:
@@ -1056,92 +784,36 @@ export class TelegramBot {
   }
 
   /**
-   * `/topic [имя]`: заводит топик и отвечает уже внутри него — человек сразу видит,
-   * где теперь живёт этот разговор. В личке без Threaded Mode не зовём API вовсе:
-   * объяснить, где галочка, полезнее, чем показать «the chat is not a forum».
-   *
-   * Особый случай — `/topic`, написанный в общей ленте: топик там уже завёл клиент
-   * Telegram (лента в личке с топиками и есть «начать новый разговор»), и имя ему дал
-   * сам, по первой реплике. Второй такой же заводить незачем: переименовываем готовый —
-   * иначе рядом с ответом остаётся пустой топик-двойник, а человек решает, что разговор
-   * потерялся. Топик с именем, которое человек выбрал сам, не трогаем.
+   * `/rename имя`: переименовывает текущий разговор. Имя живёт в chats.json и
+   * видно в панели; если разговор идёт в топике Telegram, переименовываем и его —
+   * человек должен увидеть новое имя там, где разговаривает.
    */
-  private async createTopic(
+  private async renameChat(
     message: TelegramMessage,
     user: UserConfig,
     argument: string,
     route: Route,
   ): Promise<void> {
     const chatId = message.chat.id;
-    const name = (argument || DEFAULT_TOPIC_NAME).slice(0, TOPIC_NAME_LIMIT);
-
-    if (route.freshTopic === 'implicit' && route.threadId !== null) {
-      return this.renameFreshTopic(chatId, route, name);
-    }
-
-    if (message.chat.type === 'private' && !(await this.topicsAvailable())) {
-      await this.say(chatId, NO_TOPICS_MODE, route.threadId, route.anchor);
-      return;
-    }
-
-    let topic: ForumTopic;
-    try {
-      topic = await this.api.createForumTopic(chatId, name);
-    } catch (error) {
-      const reason = describeTelegramError(error);
-      log.warn('телеграм: топик не завёлся', { user: user.id, error: reason });
-      // Топики выключены или бот не админ — это одна и та же беда с разных сторон.
-      const noTopics = error instanceof TelegramError && /not a forum|not enough rights|CHAT_ADMIN_REQUIRED/i.test(reason);
-      await this.say(chatId, noTopics ? NO_TOPICS_MODE : topicFailed(reason), route.threadId, route.anchor);
-      return;
-    }
-
-    // Топик наш: запоминаем его сами, чтобы служебка Telegram не сошла за «свежий
-    // топик человека» и не перетянула в него следующее сообщение из общей ленты.
-    this.ownTopics.add(this.topicKey(chatId, topic.message_thread_id));
-    this.freshTopics.delete(chatId);
-    this.topics.remember(chatId, topic.message_thread_id, topic.name);
-    await this.say(chatId, topicCreated(topic.name), topic.message_thread_id);
-  }
-
-  /** `/topic` в общей ленте: имя даём топику, который уже завёл клиент Telegram. */
-  private async renameFreshTopic(chatId: number, route: Route, name: string): Promise<void> {
-    const threadId = route.threadId as number;
-    try {
-      await this.api.editForumTopic(chatId, threadId, name);
-    } catch (error) {
-      const reason = describeTelegramError(error);
-      log.warn('телеграм: свежий топик не переименовался', { chatId, threadId, error: reason });
-      await this.say(chatId, topicFailed(reason), threadId, route.anchor);
-      return;
-    }
-    this.ownTopics.add(this.topicKey(chatId, threadId));
-    this.topics.remember(chatId, threadId, name);
-    await this.say(chatId, topicCreated(name), threadId, route.anchor);
-  }
-
-  /** `/rename имя`: переименовывает текущий топик — из корня чата переименовывать нечего. */
-  private async renameTopic(message: TelegramMessage, argument: string, threadId: number | null): Promise<void> {
-    const chatId = message.chat.id;
-    if (threadId === null) {
-      await this.say(chatId, RENAME_OUTSIDE, threadId);
-      return;
-    }
-    const name = argument.slice(0, TOPIC_NAME_LIMIT);
+    const name = argument.replace(/\s+/g, ' ').trim().slice(0, TOPIC_NAME_LIMIT);
     if (name === '') {
-      await this.say(chatId, RENAME_NEEDS_NAME, threadId);
+      await this.say(chatId, RENAME_NEEDS_NAME, route.threadId, route.anchor);
       return;
     }
 
-    try {
-      await this.api.editForumTopic(chatId, threadId, name);
-    } catch (error) {
-      log.warn('телеграм: топик не переименовался', { error: describeTelegramError(error) });
-      await this.say(chatId, topicFailed(describeTelegramError(error)), threadId);
-      return;
+    if (route.threadId !== null) {
+      try {
+        await this.api.editForumTopic(chatId, route.threadId, name);
+      } catch (error) {
+        const reason = describeTelegramError(error);
+        log.warn('телеграм: топик не переименовался', { chatId, threadId: route.threadId, error: reason });
+        await this.say(chatId, renameFailed(reason), route.threadId, route.anchor);
+        return;
+      }
     }
-    this.topics.remember(chatId, threadId, name);
-    await this.say(chatId, renamed(name), threadId);
+
+    const outcome = await this.registry.rename(user, route.conversationId, name);
+    await this.say(chatId, renameText(outcome), route.threadId, route.anchor);
   }
 
   /**

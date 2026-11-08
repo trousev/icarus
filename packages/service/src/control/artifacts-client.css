@@ -242,6 +242,13 @@
    что в основном чате, задают её сами. */
 .art-chat-log .turn { margin-bottom: 14px; }
 .art-chat-log .turn:last-child { margin-bottom: 0; }
+.art-chat-divider {
+  display: flex; align-items: center; gap: 8px; margin: 4px 0 14px;
+  color: var(--dim); font-size: 10px; letter-spacing: .06em; text-transform: uppercase;
+}
+.art-chat-divider::before, .art-chat-divider::after {
+  content: ''; flex: 1; border-top: 1px solid var(--line);
+}
 /* В узкой панели пузырь человека занимает всю ширину: 86% от 348 px оставляли
    бы справа пустую полосу, которой некуда деться. */
 .art-chat-log .turn.user .bubble { max-width: 100%; }

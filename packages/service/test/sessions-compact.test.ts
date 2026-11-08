@@ -15,6 +15,7 @@ function fakeSession(overrides: Partial<Record<string, unknown>> = {}) {
     user: { id: 'probe' },
     container: 'stub',
     generation: 0,
+    workspace: 'talk',
     busy: false,
     alive: true,
     lastUsed: Date.now(),
@@ -133,16 +134,21 @@ test('/compact сжимает живую сессию и рассказывае�
   }
 });
 
-test('/compact по закрытому разговору и во время хода — внятные ответы', async () => {
+test('/compact поднимает затихший разговор, но не лезет в занятый', async () => {
   const session = fakeSession();
   const registry = makeRegistry(session);
   try {
-    assert.deepEqual(await registry.compact(probe(), 'conv'), { status: 'no-session' });
+    // Процесса нет — но история на диске: /compact поднимает сессию и сжимает её.
+    assert.deepEqual(await registry.compact(probe(), 'conv'), {
+      status: 'compacted',
+      tokensBefore: 1200,
+      tokensAfter: 300,
+    });
+    assert.equal(session.compactCalls, 1);
 
-    await registry.acquire(probe(), 'conv');
     session.busy = true;
     assert.deepEqual(await registry.compact(probe(), 'conv'), { status: 'busy' });
-    assert.equal(session.compactCalls, 0, 'в занятую сессию не лезем');
+    assert.equal(session.compactCalls, 1, 'в занятую сессию не лезем');
   } finally {
     registry.dispose();
   }

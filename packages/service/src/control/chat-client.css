@@ -203,6 +203,59 @@
   padding: 9px 9px 9px 14px;
 }
 .composer-box:focus-within { border-color: var(--accent); }
+/* Палитра команд висит над полем, не сдвигая его: absolute внутри рамки.
+   Максимум десять строк — дальше список скроллится, иначе он закрыл бы ленту. */
+.cmd-palette {
+  position: absolute; left: 0; right: 0; bottom: calc(100% + 8px); z-index: 20;
+  display: flex; flex-direction: column; gap: 1px;
+  max-height: 300px; overflow: auto; padding: 5px;
+  background: var(--raise); border: 1px solid var(--line); border-radius: 11px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, .38);
+  scrollbar-gutter: stable;
+}
+.cmd-palette[hidden] { display: none; }
+.cmd-palette::-webkit-scrollbar { width: 4px; }
+.cmd-palette::-webkit-scrollbar-thumb { background: var(--line); border-radius: 2px; }
+.cmd-row {
+  display: flex; align-items: baseline; gap: 9px; width: 100%;
+  padding: 7px 9px; border: 0; border-radius: 7px; background: none;
+  color: var(--text); font: inherit; text-align: left; cursor: pointer;
+}
+.cmd-row:hover, .cmd-row.active { background: var(--accent-soft); }
+.cmd-row code {
+  flex: 0 0 auto; color: var(--accent); font-size: 12.5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.cmd-desc {
+  flex: 1 1 auto; min-width: 0; color: var(--dim); font-size: 12px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cmd-src {
+  flex: 0 0 auto; color: var(--dim); font-size: 10px; font-style: normal;
+  letter-spacing: .06em; text-transform: uppercase; opacity: .75;
+}
+/* Ответ команды: не ответ модели, а служебная плашка. В историю он не пишется,
+   поэтому и выглядит иначе — с именем команды над текстом. */
+.turn.command { display: block; }
+.command-card {
+  max-width: 900px; margin: 0 auto; padding: 10px 14px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 11px;
+}
+.command-head {
+  color: var(--accent); font-size: 11px; letter-spacing: .04em; margin-bottom: 5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.command-text { font-size: 13px; color: var(--text); }
+.turn.command.error .command-head { color: var(--danger); }
+.turn.command.error .command-text { color: var(--danger); }
+/* Граница контекста: /clear начинает новый разговор, но старую ленту не прячет. */
+.turn.divider {
+  display: flex; align-items: center; gap: 12px; color: var(--dim);
+  font-size: 11px; letter-spacing: .05em; text-transform: uppercase;
+  margin: 4px 0 22px;
+}
+.turn.divider hr { flex: 1; border: 0; border-top: 1px solid var(--line); margin: 0; }
+.turn.divider span { flex: 0 0 auto; }
 /* Поле тянется до самой правой границы рамки: полоса прокрутки встаёт в стык с
    ней, как в списке диалогов, а не висит посередине поля. Кнопки отправки и
    стопа живут поверх поля в правом нижнем углу — отсюда и padding справа. */
