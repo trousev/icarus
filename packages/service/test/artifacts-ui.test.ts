@@ -293,7 +293,25 @@ test('кнопка «Чат» открывает панель и читает и
   assert.equal(document.getElementById('art-chat-panel')?.hidden, false, 'панель чата открылась');
   assert.ok(calls.some((call) => call.includes('/panel/artifacts/api/chat')), 'разговор создан на сервере');
   assert.ok(calls.some((call) => call.includes('/panel/api/chat/history')), 'история запрошена');
-  const log = document.getElementById('art-chat-log')?.textContent ?? '';
-  assert.match(log, /Добавь заголовок/);
-  assert.match(log, /Добавил заголовок/);
+  const log = document.getElementById('art-chat-log');
+  assert.match(log?.textContent ?? '', /Добавь заголовок/);
+  assert.match(log?.textContent ?? '', /Добавил заголовок/);
+
+  // Ответ ИИ — это .md без пузыря, как в основном чате. Пустой пузырь ответа
+  // (он висел под шагом, пока модель думала) и был багом боковой панели.
+  assert.equal(log?.querySelectorAll('.turn.assistant .md').length, 1, 'ответ живёт в .md');
+  assert.equal(log?.querySelector('.turn.assistant .md')?.textContent, 'Добавил заголовок.');
+  assert.equal(log?.querySelector('.art-chat-bubble'), null, 'старого пузыря ответа нет');
+  assert.ok(log?.querySelector('.turn.assistant .avatar'), 'у ответа аватар, как в основном чате');
+  assert.ok(log?.querySelector('.turn.user .bubble'), 'реплика человека — в пузыре');
+  assert.equal(log?.querySelector('.turn.assistant .typing')?.hasAttribute('hidden'), true);
+});
+
+test('стили ответа и трассировки у бокового чата — общие с основным чатом', () => {
+  const html = artifactsPage(SESSION, OPTIONS);
+  assert.match(html, /\.turn\.user \.bubble/, 'пузырь человека — из общего файла');
+  assert.match(html, /\.md \{ font-size: 14px/, 'типографика ответа — из общего файла');
+  assert.match(html, /\.trace \{ background: var\(--panel\)/, 'карточка шагов — из общего файла');
+  assert.match(html, /\.art-chat-log \.typing:not\(\[hidden\]\)/, '«думает» — пузырь');
+  assert.doesNotMatch(html, /\.art-chat-bubble/, 'у ответа пузыря больше нет');
 });

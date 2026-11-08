@@ -7,6 +7,9 @@ import { DEFAULT_WORKSPACE } from '../config.ts';
 import { escapeHtml, shell, type PanelSession } from './ui.ts';
 
 const CLIENT_CSS = fs.readFileSync(new URL('./chat-client.css', import.meta.url), 'utf8');
+// Сообщения (пузыри, трассировка, .md) — общий файл с боковым чатом артефактов:
+// один и тот же ответ должен выглядеть одинаково в обоих местах.
+const MESSAGES_CSS = fs.readFileSync(new URL('./chat-messages.css', import.meta.url), 'utf8');
 // Разметку держим отдельным файлом: её разбирает тест, а клиенту она нужна раньше
 // самого чата — функции разметки подключаются как обычные глобальные.
 const CLIENT_MD = fs.readFileSync(new URL('./chat-markdown.js', import.meta.url), 'utf8');
@@ -31,7 +34,8 @@ export function chatPage(session: PanelSession, options: ChatPageOptions): strin
   // JSON уезжает в <script>: экранируем «<», иначе значение с </script> закроет тег.
   const json = JSON.stringify(config).replaceAll('<', '\\u003c');
 
-  return shell(`<style>${CLIENT_CSS}</style>
+  return shell(`<style>${MESSAGES_CSS}</style>
+<style>${CLIENT_CSS}</style>
 <div class="chat-app" id="chat-app">
   <aside class="chat-side" id="chat-side">
     <div class="side-brand">

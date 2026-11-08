@@ -56,55 +56,100 @@ function artChatMarkdown(text) {
   return '<p>' + artEsc(source).replace(/\n/g, '<br>') + '</p>';
 }
 
+/** Реплика человека: тот же пузырь, что в основном чате, без подписи «ты». */
 function artChatUser(text) {
   const turn = document.createElement('div');
-  turn.className = 'art-chat-turn user';
-  const who = document.createElement('div');
-  who.className = 'art-chat-who';
-  who.textContent = 'ТЫ · ' + artStamp(new Date().toISOString());
+  turn.className = 'turn user';
   const bubble = document.createElement('div');
-  bubble.className = 'art-chat-bubble';
+  bubble.className = 'bubble';
   bubble.textContent = text;
-  turn.append(who, bubble);
+  turn.append(bubble);
   artChatLog().append(turn);
   artChatScroll(true);
   return turn;
 }
 
-function artChatAssistant() {
+/**
+ * Ход ИИ. Разметка — как у addAssistant в chat-client.js: аватар, подпись,
+ * карточка трассировки, ответ в .md (без пузыря) и строка «думает».
+ * Пустого пузыря ответа тут нет: .md — обычный текстовый блок.
+ */
+function artChatAssistant(iso) {
   const turn = document.createElement('div');
-  turn.className = 'art-chat-turn assistant';
+  turn.className = 'turn assistant';
   turn.innerHTML =
-    '<div class="art-chat-who">ICARUS · ' + artStamp(new Date().toISOString()) + '</div>' +
-    '<div class="art-chat-steps" hidden></div>' +
-    '<div class="art-chat-bubble"></div>' +
-    '<div class="art-chat-typing">Икар думает…</div>';
+    '<div class="avatar">I</div>' +
+    '<div class="assistant-body">' +
+    '<div class="who"><b>Icarus</b><time>' +
+    artEsc(artStamp(iso || new Date().toISOString())) +
+    '</time></div>' +
+    '<div class="trace-slot"></div>' +
+    '<div class="md"></div>' +
+    '<div class="typing">Икар думает</div>' +
+    '</div>';
   artChatLog().append(turn);
   artChatScroll(true);
   return {
     turn,
-    steps: turn.querySelector('.art-chat-steps'),
-    bubble: turn.querySelector('.art-chat-bubble'),
-    typing: turn.querySelector('.art-chat-typing'),
+    body: turn.querySelector('.assistant-body'),
+    slot: turn.querySelector('.trace-slot'),
+    md: turn.querySelector('.md'),
+    typing: turn.querySelector('.typing'),
     text: '',
-    trace: [],
+    steps: [],
   };
 }
 
+function artChatStepWord(count) {
+  const ten = count % 10;
+  const hundred = count % 100;
+  if (ten === 1 && hundred !== 11) return 'шаг';
+  if (ten >= 2 && ten <= 4 && (hundred < 12 || hundred > 14)) return 'шага';
+  return 'шагов';
+}
+
+/** Трассировка — карточка-пузырь, как в основном чате: шаги видны сразу. */
 function artChatSteps(box) {
-  box.steps.hidden = box.trace.length === 0;
-  box.steps.innerHTML = box.trace
-    .map((step) => {
-      const mark = step.status === 'error' ? ' bad' : step.status === 'ok' ? ' done' : '';
-      const label = step.label || step.tool || 'шаг';
-      const detail = step.detail ? ' · ' + step.detail : '';
-      return '<span class="art-chat-step' + mark + '"><b>' + artEsc(label) + '</b>' + artEsc(detail) + '</span>';
-    })
-    .join('');
+  if (!box.steps.length) {
+    box.slot.innerHTML = '';
+    return;
+  }
+  // Перерисовка не должна схлопывать карточку, которую человек уже раскрыл
+  // или свернул: каждый дельта-текст приходит сюда заново.
+  const opened = box.slot.querySelector('details.trace');
+  const open = opened ? opened.open : true;
+  box.slot.innerHTML =
+    '<details class="trace" open><summary>' +
+    box.steps.length +
+    ' ' +
+    artChatStepWord(box.steps.length) +
+    ' · трассировка</summary><div class="trace-list">' +
+    box.steps
+      .map((step) => {
+        const status = String(step.status || 'running').replace(/[^a-z]/gi, '');
+        const tool = String(step.tool || 'tool').replace(/[^a-z0-9_]/gi, '_');
+        return (
+          '<div class="trace-step ' +
+          status +
+          ' tool-' +
+          tool +
+          '" title="' +
+          artEsc(step.result || '') +
+          '"><span class="trace-label">' +
+          artEsc(step.label || step.tool || 'шаг') +
+          '</span><span class="trace-detail">' +
+          artEsc(step.detail || step.tool || '') +
+          '</span><span class="trace-dot"></span></div>'
+        );
+      })
+      .join('') +
+    '</div></details>';
+  const next = box.slot.querySelector('details.trace');
+  if (next) next.open = open;
 }
 
 function artChatRender(box) {
-  box.bubble.innerHTML = artChatMarkdown(box.text);
+  box.md.innerHTML = artChatMarkdown(box.text);
   box.typing.hidden = Boolean(box.text) || !artChatState.busy;
   artChatSteps(box);
   artChatScroll();
@@ -122,18 +167,18 @@ function artChatEvent(box, event) {
     return;
   }
   if (event.type === 'step') {
-    box.trace.push(event.step || {});
+    box.steps.push(event.step || {});
     artChatRender(box);
     return;
   }
   if (event.type === 'step-update') {
-    const index = box.trace.findIndex((step) => step.id === event.id);
-    if (index !== -1) box.trace[index] = event.step || box.trace[index];
+    const index = box.steps.findIndex((step) => step.id === event.id);
+    if (index !== -1) box.steps[index] = event.step || box.steps[index];
     artChatRender(box);
     return;
   }
   if (event.type === 'step-end') {
-    const step = box.trace.find((item) => item.id === event.id);
+    const step = box.steps.find((item) => item.id === event.id);
     if (step) {
       step.status = event.status || step.status;
       step.result = event.result;
@@ -149,7 +194,7 @@ function artChatEvent(box, event) {
   if (event.type === 'reauth') {
     if (!event.url) return;
     const card = document.createElement('div');
-    card.className = 'art-chat-note bad';
+    card.className = 'reauth-card';
     card.textContent = 'Доступ к MCP «' + (event.server || 'MCP') + '» истёк. ';
     const link = document.createElement('a');
     link.href = String(event.url);
@@ -157,7 +202,7 @@ function artChatEvent(box, event) {
     link.rel = 'noopener noreferrer';
     link.textContent = 'Переподключить';
     card.append(link);
-    box.turn.append(card);
+    box.body.append(card);
     artChatScroll();
     return;
   }
@@ -166,8 +211,8 @@ function artChatEvent(box, event) {
     artChatSetBusy(false);
     box.typing.hidden = true;
     if (!box.text.trim()) {
-      box.text = box.trace.length ? 'Готово.' : '(ответ пустой)';
-      box.bubble.innerHTML = artChatMarkdown(box.text);
+      box.text = box.steps.length ? 'Готово.' : '(ответ пустой)';
+      box.md.innerHTML = artChatMarkdown(box.text);
     }
     artChatNote('Готово · артефакт обновлён');
     artChatState.liveBox = null;
@@ -177,7 +222,7 @@ function artChatEvent(box, event) {
   if (event.type === 'error') {
     box.turn.classList.add('error');
     box.text = (box.text ? box.text + '\n\n' : '') + '[ошибка: ' + (event.message || 'ответ не пришёл') + ']';
-    box.bubble.innerHTML = artChatMarkdown(box.text);
+    box.md.innerHTML = artChatMarkdown(box.text);
     box.typing.hidden = true;
     artChatState.busy = false;
     artChatSetBusy(false);
@@ -232,11 +277,11 @@ function artChatRenderHistory(messages) {
       if (String(message.text || '').trim()) artChatUser(message.text);
       continue;
     }
-    const box = artChatAssistant();
+    const box = artChatAssistant(message.timestamp);
     box.typing.hidden = true;
     box.text = String(message.text || '');
-    box.trace = Array.isArray(message.trace) ? message.trace : [];
-    box.bubble.innerHTML = artChatMarkdown(box.text || (box.trace.length ? 'Готово.' : ''));
+    box.steps = Array.isArray(message.trace) ? message.trace : [];
+    box.md.innerHTML = artChatMarkdown(box.text || (box.steps.length ? 'Готово.' : ''));
     artChatSteps(box);
   }
   artChatScroll(true);
@@ -387,7 +432,7 @@ async function artChatSend() {
     if (!abort.signal.aborted) {
       box.turn.classList.add('error');
       box.text = (box.text ? box.text + '\n\n' : '') + '[ошибка: ' + (error && error.message ? error.message : error) + ']';
-      box.bubble.innerHTML = artChatMarkdown(box.text);
+      box.md.innerHTML = artChatMarkdown(box.text);
       box.typing.hidden = true;
       artChatNote('');
     }

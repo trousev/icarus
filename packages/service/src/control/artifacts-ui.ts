@@ -9,6 +9,9 @@ import type { Artifact } from '../artifacts.ts';
 import { escapeHtml, shell, type PanelSession } from './ui.ts';
 
 const CLIENT_CSS = fs.readFileSync(new URL('./artifacts-client.css', import.meta.url), 'utf8');
+// Сообщения (пузыри, трассировка, .md) — тот же файл, что и у основного чата:
+// ответ ИИ в боковой панели должен выглядеть так же, как в большой ленте.
+const MESSAGES_CSS = fs.readFileSync(new URL('./chat-messages.css', import.meta.url), 'utf8');
 const CLIENT_MD = fs.readFileSync(new URL('./artifacts-markdown.js', import.meta.url), 'utf8');
 const CLIENT_JS = fs.readFileSync(new URL('./artifacts-client.js', import.meta.url), 'utf8');
 // Чат правки — отдельным файлом: у него свой поток и своя лента, и вместе с
@@ -36,7 +39,8 @@ export function artifactsPage(session: PanelSession, options: ArtifactsPageOptio
   const json = JSON.stringify(config).replaceAll('<', '\\u003c');
   const nav = navLinks(session, 'artifacts', options.counts);
 
-  return shell(`<style>${CLIENT_CSS}</style>
+  return shell(`<style>${MESSAGES_CSS}</style>
+<style>${CLIENT_CSS}</style>
 <div class="app art-app art-panel-app">
   <aside class="art-side">
     <div class="brand">
