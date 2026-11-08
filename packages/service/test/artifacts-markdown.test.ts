@@ -37,6 +37,18 @@ test('списки, цитата и таблица остаются структ
   );
 });
 
+test('в ячейке таблицы живёт разметка, а \\| — литеральная палка', () => {
+  const html = render('| **шаг** | что |\n| --- | --- |\n| миграция | схема \\| данные |');
+  assert.match(html, /<th><strong>шаг<\/strong><\/th>/);
+  assert.match(html, /<td>схема \| данные<\/td>/);
+  assert.doesNotMatch(html, /\\\|/);
+  // Меньше ячеек, чем в шапке, — таблица не разваливается.
+  assert.equal(
+    compact(render('| a | b |\n| --- | --- |\n| c |')),
+    '<table><thead><tr><th>a</th><th>b</th></tr></thead><tbody><tr><td>c</td><td></td></tr></tbody></table>',
+  );
+});
+
 test('картинки и ссылки внутри артефакта ведут в его же папку', () => {
   assert.equal(
     render('![схема](images/scheme.png)', { fileBase: '/raw/site/' }),

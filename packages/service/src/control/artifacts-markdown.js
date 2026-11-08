@@ -112,16 +112,48 @@ function artifactEmphasize(text) {
     .replace(/~~([^~\n]+)~~/g, '<del>$1</del>');
 }
 
-function tableRow(line) {
-  return line
-    .trim()
-    .replace(/^\||\|$/g, '')
-    .split('|')
-    .map((cell) => cell.trim());
+/**
+ * Есть ли в строке граница таблицы. `\|` — это литерал внутри ячейки, а не
+ * граница: строка без настоящего `|` таблицей не считается.
+ */
+function hasTablePipe(line) {
+  return line.replace(/\\\|/g, '').includes('|');
+}
+
+/** Ячейки строки: `\|` возвращается в текст как обычный символ, обрамление срезаем. */
+function tableCells(line) {
+  let text = line.trim();
+  if (text.startsWith('|')) text = text.slice(1);
+  if (text.endsWith('|') && !text.endsWith('\\|')) text = text.slice(0, -1);
+  const cells = [];
+  let cell = '';
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === '\\' && text[index + 1] === '|') {
+      cell += '|';
+      index += 1;
+      continue;
+    }
+    if (char === '|') {
+      cells.push(cell.trim());
+      cell = '';
+      continue;
+    }
+    cell += char;
+  }
+  cells.push(cell.trim());
+  return cells;
 }
 
 function isTableDivider(line) {
   return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
+}
+
+/** Строка короче шапки добивается пустыми ячейками, длиннее — обрезается. */
+function fitCells(cells, width) {
+  const result = cells.slice(0, width);
+  while (result.length < width) result.push('');
+  return result;
 }
 
 /**
@@ -238,14 +270,18 @@ function artifactMarkdown(text, options = {}) {
     }
 
     // Таблица: строка с | и следующая за ней линия-разделитель.
-    if (line.includes('|') && index + 1 < lines.length && isTableDivider(lines[index + 1])) {
+    if (hasTablePipe(line) && index + 1 < lines.length && isTableDivider(lines[index + 1])) {
       flushAll();
-      const head = tableRow(line);
+      const head = tableCells(line);
       index += 1;
       const rows = [];
-      while (index + 1 < lines.length && lines[index + 1].includes('|') && lines[index + 1].trim() !== '') {
+      while (
+        index + 1 < lines.length &&
+        hasTablePipe(lines[index + 1]) &&
+        lines[index + 1].trim() !== ''
+      ) {
         index += 1;
-        rows.push(tableRow(lines[index]));
+        rows.push(tableCells(lines[index]));
       }
       out.push(
         '<table><thead><tr>' +
@@ -254,7 +290,11 @@ function artifactMarkdown(text, options = {}) {
           rows
             .map(
               (row) =>
-                '<tr>' + row.map((cell) => '<td>' + inline(cell) + '</td>').join('') + '</tr>',
+                '<tr>' +
+                fitCells(row, head.length)
+                  .map((cell) => '<td>' + inline(cell) + '</td>')
+                  .join('') +
+                '</tr>',
             )
             .join('') +
           '</tbody></table>',

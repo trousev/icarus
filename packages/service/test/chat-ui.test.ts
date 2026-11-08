@@ -619,7 +619,7 @@ test('панель файлов: дерево, раскрытие папки и 
           image: false,
         },
         kind: 'markdown',
-        text: '# Проект\n\nВложенные инструкции.',
+        text: '# Проект\n\nВложенные инструкции.\n\n| шаг | кто |\n| --- | --- |\n| миграция | Дмитрий |',
         download: '/panel/api/workspace-files/raw?workspace=talk&path=projects%2FAGENTS.md&download=1',
       }),
       '/panel/api/workspace-files': (url: string) => {
@@ -694,6 +694,9 @@ test('панель файлов: дерево, раскрытие папки и 
   const preview = app.document.getElementById('files-preview');
   assert.match(preview.innerHTML, /projects\/AGENTS\.md/, 'в предпросмотре видно путь файла');
   assert.match(preview.innerHTML, /Вложенные инструкции/, 'markdown отрисован, а не лежит текстом');
+  assert.match(preview.innerHTML, /<table>/, 'таблица из markdown — настоящая таблица');
+  assert.match(preview.innerHTML, /<th>шаг<\/th>/, 'шапка таблицы на месте');
+  assert.match(preview.innerHTML, /<td>миграция<\/td>/, 'строка таблицы на месте');
   assert.ok(
     app.document.getElementById('files-panel').classList.contains('has-preview'),
     'предпросмотр занимает нижнюю половину панели',
@@ -721,6 +724,15 @@ test('панель файлов: дерево, раскрытие папки и 
 
   app.document.getElementById('files-close').onclick?.();
   assert.equal(app.store.get('icarus.files-open'), '0', 'закрытие тоже запоминается');
+});
+
+test('таблицы в репликах и предпросмотре — со своими стилями и прокруткой', () => {
+  const html = chatPage(SESSION, { enabled: true });
+  assert.match(html, /function isTableDivider/, 'markdown чата умеет таблицы');
+  assert.match(html, /class="md-table"/, 'таблица оборачивается в блок с прокруткой');
+  assert.match(html, /\.md \.md-table \{[\s\S]*?overflow-x: auto/, 'широкая таблица прокручивается сама');
+  assert.match(html, /\.md \.md-table table \{[\s\S]*?border-collapse: collapse/, 'у таблицы есть рамки');
+  assert.match(html, /\.md \.md-table th, \.md \.md-table td/, 'ячейки подписаны');
 });
 
 test('удаление: файл спрашивает, пустая папка — нет, непустая — да', async () => {

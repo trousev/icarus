@@ -98,6 +98,18 @@
 .md a:hover, .turn.user .bubble a:hover { color: var(--text); }
 .md img.md-image { display: block; max-width: 100%; height: auto; border-radius: 10px; border: 1px solid var(--line); margin: 10px 0; }
 .md hr { border: 0; border-top: 1px solid var(--line); margin: 14px 0; }
+/* Широкая таблица прокручивается сама: иначе она растянула бы ленту чата. */
+.md .md-table { margin: 10px 0; overflow-x: auto; }
+.md .md-table table { border-collapse: collapse; width: max-content; min-width: 100%; font-size: 13px; }
+.md .md-table th, .md .md-table td {
+  text-align: left; vertical-align: top; padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.md .md-table th {
+  color: var(--dim); font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+  font-weight: 600; white-space: nowrap;
+}
+.md .md-table tr:last-child td { border-bottom: 0; }
 
 .typing { color: var(--dim); font-size: 12px; margin-top: 3px; }
 .typing::after { content: '…'; animation: pulse 1.2s infinite; }
