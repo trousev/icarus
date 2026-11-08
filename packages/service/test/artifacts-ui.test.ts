@@ -45,6 +45,11 @@ test('страница: глобальный список, поиск, прав�
   assert.match(html, /id="art-acl-modal"/);
   assert.match(html, /id="art-history"/);
   assert.match(html, /id="art-history-panel"/);
+  assert.match(html, /id="art-chat"/);
+  assert.match(html, /id="art-chat-panel"/);
+  assert.match(html, /id="art-chat-input"/);
+  assert.match(html, /id="art-chat-send"/);
+  assert.match(html, /id="art-chat-close"/);
   assert.match(html, /id="art-preview"/);
   assert.match(html, /id="art-preview-restore"/);
   assert.match(html, /id="acl-me"/);
@@ -59,7 +64,8 @@ test('клиентский скрипт страницы компилирует�
   const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
   assert.ok(scripts.length >= 3, 'конфиг, markdown и клиент едут отдельными скриптами');
   assert.doesNotThrow(() => new Function(scripts.join('\n')), 'скрипт страницы не компилируется');
-  const client = scripts[scripts.length - 1];
+  const client = scripts.find((script) => script.includes('artLoadList')) ?? '';
+  assert.ok(client, 'клиент раздела едет отдельным скриптом');
   assert.match(client, /artLoadList/);
   assert.match(client, /artMakeLink/);
   assert.match(client, /artUnpublish/);
@@ -70,6 +76,14 @@ test('клиентский скрипт страницы компилирует�
   assert.match(client, /artRestorePreview/);
   assert.match(client, /artDelete/);
   assert.match(client, /artifactMarkdown/);
+
+  const chat = scripts.find((script) => script.includes('artChatSend')) ?? '';
+  assert.ok(chat, 'клиент чата едет отдельным скриптом');
+  assert.match(chat, /artChatOpen/);
+  assert.match(chat, /artChatSend/);
+  assert.match(chat, /panel\/api\/chat\/send/);
+  assert.match(chat, /panel\/artifacts\/api\/chat/);
+  assert.match(chat, /artChatRefreshArtifact/);
 });
 
 function artifact(overrides: Partial<Artifact> = {}): Artifact {
@@ -215,4 +229,70 @@ test('скрипт страницы исполняется: глобальный
   assert.match(document.getElementById('art-preview-meta')?.textContent ?? '', /начальная версия/);
   assert.match(document.getElementById('art-view')?.innerHTML ?? '', /Старая версия/);
   assert.equal(document.getElementById('art-preview-restore')?.hidden, false);
+});
+
+test('кнопка «Чат» открывает панель и читает историю разговора артефакта', async () => {
+  const html = artifactsPage(SESSION, OPTIONS);
+  const { document, window } = parseHTML(html);
+  const scripts = [...document.querySelectorAll('script')]
+    .map((node) => node.textContent ?? '')
+    .filter(Boolean);
+  const item = artifact();
+  const calls: string[] = [];
+  const answer = (data: unknown) => ({
+    ok: true,
+    headers: { get: () => 'application/json' },
+    json: async () => data,
+  });
+  window.fetch = async (url: string) => {
+    const path = String(url);
+    calls.push(path);
+    if (path.includes('/panel/artifacts/api/list')) return answer({ total: 1, items: [item] });
+    if (path.includes('/panel/artifacts/api/read')) {
+      return answer({ artifact: item, content: '# План на четверг\n', aiContent: 'Расписание дня.' });
+    }
+    if (path.includes('/panel/artifacts/api/chat')) {
+      return answer({ chatId: 'web-art-1', title: 'Правка · План на четверг' });
+    }
+    if (path.includes('/panel/api/chat/history')) {
+      return answer({
+        chat: {
+          id: 'web-art-1',
+          title: 'Правка · План на четверг',
+          workspace: 'talk',
+          channel: 'web',
+          readOnly: false,
+          createdAt: '2026-11-06T22:01:00.000Z',
+          updatedAt: '2026-11-06T22:02:00.000Z',
+          preview: '',
+        },
+        messages: [
+          { role: 'user', text: 'Добавь заголовок', timestamp: '2026-11-06T22:01:00.000Z' },
+          { role: 'assistant', text: 'Добавил заголовок.', timestamp: '2026-11-06T22:02:00.000Z' },
+        ],
+        live: false,
+      });
+    }
+    return answer({});
+  };
+  window.URL.createObjectURL = () => 'blob:x';
+  const location = { href: 'http://panel/panel/artifacts', pathname: '/panel/artifacts', search: '?artifact=plan' };
+  const history = { replaceState() {} };
+  Object.defineProperty(window, 'location', { value: location, configurable: true });
+
+  const run = new Function('window', 'document', 'fetch', 'URL', 'location', 'history', scripts.join('\n'));
+  run(window, document, window.fetch, window.URL, location, history);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  const button = document.getElementById('art-chat');
+  assert.equal(button?.hasAttribute('disabled'), false, 'у владельца с write кнопка доступна');
+  button?.dispatchEvent(new window.Event('click'));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  assert.equal(document.getElementById('art-chat-panel')?.hidden, false, 'панель чата открылась');
+  assert.ok(calls.some((call) => call.includes('/panel/artifacts/api/chat')), 'разговор создан на сервере');
+  assert.ok(calls.some((call) => call.includes('/panel/api/chat/history')), 'история запрошена');
+  const log = document.getElementById('art-chat-log')?.textContent ?? '';
+  assert.match(log, /Добавь заголовок/);
+  assert.match(log, /Добавил заголовок/);
 });

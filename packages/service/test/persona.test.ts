@@ -55,3 +55,26 @@ test('путь к вложениям подставляется, а не ост�
   assert.doesNotMatch(text, /\$\{ICARUS\}/, 'незаполненный шаблон в промпте — модель пойдёт мимо');
   assert.doesNotMatch(text, /\bundefined\b/);
 });
+
+test('режим артефакта: промпт про конкретную папку, а не про workspace', async () => {
+  process.env.ICARUS_ARTIFACT = 'plan';
+  process.env.ICARUS_ARTIFACT_TITLE = 'План на четверг';
+  process.env.ICARUS_ARTIFACT_ENTRY = 'index.md';
+  process.env.ICARUS_ARTIFACT_TYPE = 'markdown';
+  try {
+    const text = await prompt();
+    assert.match(text, /# Правка артефакта/);
+    assert.match(text, /План на четверг/);
+    assert.match(text, /\/artifacts\/plan/);
+    assert.match(text, /`index\.md`/);
+    assert.match(text, /заменено этим режимом/, 'границы persona не спорят с папкой артефакта');
+    assert.match(text, /История версий ведётся системой/);
+    assert.match(text, /\.folder-acl\.json/);
+    assert.doesNotMatch(text, /# Твой workspace/, 'в артефактном режиме workspace не упоминается');
+  } finally {
+    delete process.env.ICARUS_ARTIFACT;
+    delete process.env.ICARUS_ARTIFACT_TITLE;
+    delete process.env.ICARUS_ARTIFACT_ENTRY;
+    delete process.env.ICARUS_ARTIFACT_TYPE;
+  }
+});

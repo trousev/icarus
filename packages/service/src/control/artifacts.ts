@@ -25,8 +25,9 @@ import {
   type Artifact,
   type FolderAcl,
 } from '../artifacts.ts';
-import type { IcarusConfig } from '../config.ts';
+import { findUser, type IcarusConfig } from '../config.ts';
 import { artifactHistory, artifactVersion, artifactVersionFile, restoreArtifact } from '../artifacts-git.ts';
+import { ensureArtifactChat } from './artifact-chat.ts';
 import { readJsonBody } from '../http/openai.ts';
 import { errorBody } from '../http/sse.ts';
 import { log } from '../log.ts';
@@ -197,6 +198,23 @@ export async function handleArtifactsApi(
     return;
   }
   const artifact = typeof body.artifact === 'string' ? body.artifact : '';
+
+  // Чат правки: один разговор на артефакт. Дальше клиент работает обычными
+  // маршрутами /panel/api/chat/* — заводить второй протокол незачем.
+  if (route === 'chat') {
+    const user = findUser(config, userId);
+    if (!user) {
+      json(res, 404, errorBody(`пользователь ${userId} не заведён`, 'not_found'));
+      return;
+    }
+    try {
+      const chat = ensureArtifactChat(config, user, artifact);
+      json(res, 200, { chatId: chat.id, title: chat.title });
+    } catch (error) {
+      fail(res, error, 'чат по артефакту не открылся');
+    }
+    return;
+  }
 
   if (route === 'link') {
     try {
