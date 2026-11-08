@@ -118,6 +118,93 @@ function artifact(overrides: Partial<Artifact> = {}): Artifact {
   };
 }
 
+/**
+ * Страница артефакта с уже открытым боковым чатом. Маршруты ищутся по подстроке
+ * пути; `{ stream: [...] }` отдаёт NDJSON-поток, остальное — JSON. Всё, что не
+ * задано, отвечает как обычная панель: список, чтение артефакта и пустая история.
+ */
+async function openArtifactChat(
+  routes: Record<string, (url: string, init?: RequestInit) => unknown> = {},
+) {
+  const html = artifactsPage(SESSION, OPTIONS);
+  const { document, window } = parseHTML(html);
+  const scripts = [...document.querySelectorAll('script')]
+    .map((node) => node.textContent ?? '')
+    .filter(Boolean);
+  const item = artifact();
+  const calls: Array<{ url: string; body: string }> = [];
+  const chat = {
+    id: 'web-art-1',
+    title: 'Правка · План на четверг',
+    workspace: 'talk',
+    channel: 'web',
+    readOnly: false,
+    createdAt: '2026-11-06T22:01:00.000Z',
+    updatedAt: '2026-11-06T22:02:00.000Z',
+    preview: '',
+  };
+  const fallback = (path: string): unknown => {
+    if (path.includes('/panel/artifacts/api/list')) return { total: 1, items: [item] };
+    if (path.includes('/panel/artifacts/api/read')) {
+      return { artifact: item, content: '# План на четверг\n', aiContent: 'Расписание дня.' };
+    }
+    if (path.includes('/panel/artifacts/api/chat')) return { chatId: chat.id, title: chat.title };
+    if (path.includes('/panel/api/chat/history')) return { chat, messages: [], live: false };
+    return {};
+  };
+
+  window.fetch = async (url: string, init?: RequestInit) => {
+    const path = String(url);
+    calls.push({ url: path, body: String(init?.body ?? '') });
+    const route = Object.entries(routes).find(([key]) => path.includes(key))?.[1];
+    const data = route ? route(path, init) : fallback(path);
+    if (data && typeof data === 'object' && 'stream' in data) {
+      const lines = (data as { stream: string[] }).stream;
+      let at = 0;
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => 'application/x-ndjson; charset=utf-8' },
+        json: async () => ({}),
+        body: {
+          getReader: () => ({
+            read: async () =>
+              at < lines.length
+                ? { value: new TextEncoder().encode(lines[at++] + '\n'), done: false }
+                : { done: true },
+          }),
+        },
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => 'application/json' },
+      json: async () => data ?? {},
+    };
+  };
+  window.URL.createObjectURL = () => 'blob:x';
+  const location = { href: 'http://panel/panel/artifacts', pathname: '/panel/artifacts', search: '?artifact=plan' };
+  Object.defineProperty(window, 'location', { value: location, configurable: true });
+  const history = { replaceState() {} };
+
+  const run = new Function('window', 'document', 'fetch', 'URL', 'location', 'history', scripts.join('\n'));
+  run(window, document, window.fetch, window.URL, location, history);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  document.getElementById('art-chat')?.dispatchEvent(new window.Event('click'));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  const input = document.getElementById('art-chat-input');
+  const pressEnter = () => {
+    const event = document.createEvent('Event');
+    event.initEvent('keydown', true, true);
+    Object.defineProperty(event, 'key', { value: 'Enter' });
+    input?.dispatchEvent(event);
+  };
+  return { document, calls, input, pressEnter };
+}
+
 test('публичная страница: markdown рендерится, html — в песочнице, картинка — сама', () => {
   const md = publicArtifactPage(artifact(), '# План на четверг\n\n1. Стендап\n');
   assert.match(md, /План на четверг/);
@@ -307,6 +394,48 @@ test('кнопка «Чат» открывает панель и читает и
   assert.ok(log?.querySelector('.turn.assistant .avatar'), 'у ответа аватар, как в основном чате');
   assert.ok(log?.querySelector('.turn.user .bubble'), 'реплика человека — в пузыре');
   assert.equal(log?.querySelector('.turn.assistant .typing')?.hasAttribute('hidden'), true);
+});
+
+test('/clear в боковом чате — команда чата, а не реплика модели', async () => {
+  const stand = await openArtifactChat({
+    '/panel/api/chat/command': () => ({ handled: true, text: 'Начали с чистого листа.', cleared: true }),
+  });
+
+  if (!stand.input) throw new Error('нет поля ввода бокового чата');
+  stand.input.value = '/clear';
+  stand.pressEnter();
+  await new Promise((resolve) => setTimeout(resolve, 40));
+
+  const command = stand.calls.find((call) => call.url.includes('/panel/api/chat/command'));
+  assert.deepEqual(JSON.parse(command?.body ?? '{}'), { chatId: 'web-art-1', text: '/clear' });
+  assert.equal(
+    stand.calls.some((call) => call.url.includes('/panel/api/chat/send')),
+    false,
+    'команда не должна уезжать модели как текст',
+  );
+  assert.match(stand.document.getElementById('art-chat-log')?.textContent ?? '', /Контекст очищен/);
+  assert.match(stand.document.getElementById('art-chat-note')?.textContent ?? '', /Контекст чистый/);
+  assert.equal(stand.input.value, '', 'поле очищено после команды');
+});
+
+test('команда pi в боковом чате уезжает в разговор обычной репликой', async () => {
+  const stand = await openArtifactChat({
+    '/panel/api/chat/command': () => ({ handled: false }),
+    '/panel/api/chat/send': () => ({
+      stream: [JSON.stringify({ type: 'text', text: 'скилл сработал' }), JSON.stringify({ type: 'done' })],
+    }),
+  });
+
+  if (!stand.input) throw new Error('нет поля ввода бокового чата');
+  stand.input.value = '/skill:demo покажи';
+  stand.pressEnter();
+  await new Promise((resolve) => setTimeout(resolve, 60));
+
+  assert.ok(stand.calls.some((call) => call.url.includes('/panel/api/chat/command')), 'сервер спросили');
+  const sent = stand.calls.filter((call) => call.url.includes('/panel/api/chat/send'));
+  assert.equal(sent.length, 1, 'после отказа сервера реплика ушла в pi');
+  assert.equal(JSON.parse(sent[0]?.body ?? '{}').text, '/skill:demo покажи');
+  assert.match(stand.document.getElementById('art-chat-log')?.textContent ?? '', /скилл сработал/);
 });
 
 test('стили ответа и трассировки у бокового чата — общие с основным чатом', () => {
