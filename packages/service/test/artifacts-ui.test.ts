@@ -535,3 +535,217 @@ test('кнопка «Поделиться»: права меняются сра�
   assert.equal(document.getElementById('art-share-link')?.hidden, false);
   assert.match(document.getElementById('acl-link')?.value ?? '', /\/a\/plan\/abcdefghijklmnopqrstuvwx\//);
 });
+
+// Адрес элемента из предпросмотра: та же панель, только HTML-артефакт.
+const HTML_REF = 'main.page/section.hero/h1.title';
+
+async function htmlStand(options: { canWrite?: boolean; textStatus?: number } = {}) {
+  const html = artifactsPage(SESSION, OPTIONS);
+  const { document, window } = parseHTML(html);
+  const win = window as any;
+  const scripts = [...document.querySelectorAll('script')]
+    .map((node) => node.textContent ?? '')
+    .filter(Boolean);
+  const item = artifact({
+    name: 'report',
+    type: 'html',
+    typeLabel: 'HTML-страница',
+    entry: 'index.html',
+    files: ['index.html', 'index.ai.md'],
+    canWrite: options.canWrite ?? true,
+    urls: {
+      panel: 'https://icarus.example/panel/artifacts?artifact=report',
+      raw: 'https://icarus.example/panel/artifacts/raw/report/index.html',
+    },
+  });
+  const calls: Array<{ url: string; body: string }> = [];
+  const answer = (data: unknown, status = 200) => ({
+    ok: status < 400,
+    status,
+    headers: { get: () => 'application/json' },
+    json: async () => data,
+  });
+  win.fetch = async (url: string, init?: RequestInit) => {
+    const path = String(url);
+    calls.push({ url: path, body: String(init?.body ?? '') });
+    if (path.includes('/panel/artifacts/api/list')) return answer({ total: 1, items: [item] });
+    if (path.includes('/panel/artifacts/api/refs')) {
+      return answer({
+        artifact: item,
+        refs: [{ ref: HTML_REF, tag: 'h1', quote: 'Атлас', editable: true }],
+        base: 'base-1',
+        changed: true,
+      });
+    }
+    if (path.includes('/panel/artifacts/api/text')) {
+      if (options.textStatus) {
+        return answer({ error: { message: 'артефакт успел измениться — обнови предпросмотр' } }, options.textStatus);
+      }
+      return answer({ ok: true, artifact: item, ref: HTML_REF, before: 'Атлас', base: 'base-2' });
+    }
+    if (path.includes('/panel/artifacts/api/read')) {
+      return answer({ artifact: item, content: null, aiContent: 'Отчёт по «Атласу».' });
+    }
+    if (path.includes('/panel/artifacts/api/chat')) {
+      return answer({ chatId: 'web-art-1', title: 'Правка · Отчёт' });
+    }
+    if (path.includes('/panel/api/chat/send')) {
+      const lines = [JSON.stringify({ type: 'text', text: 'Готово' }), JSON.stringify({ type: 'done' })];
+      let at = 0;
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => 'application/x-ndjson; charset=utf-8' },
+        json: async () => ({}),
+        body: {
+          getReader: () => ({
+            read: async () =>
+              at < lines.length
+                ? { value: new TextEncoder().encode(lines[at++] + '\n'), done: false }
+                : { done: true },
+          }),
+        },
+      };
+    }
+    if (path.includes('/panel/api/chat/history')) {
+      return answer({
+        chat: {
+          id: 'web-art-1',
+          title: 'Правка · Отчёт',
+          workspace: 'talk',
+          channel: 'web',
+          readOnly: false,
+          createdAt: '2026-11-06T22:01:00.000Z',
+          updatedAt: '2026-11-06T22:02:00.000Z',
+          preview: '',
+        },
+        messages: [],
+        live: false,
+      });
+    }
+    return answer({});
+  };
+  win.URL.createObjectURL = () => 'blob:x';
+  const location = { href: 'http://panel/panel/artifacts', pathname: '/panel/artifacts', search: '?artifact=report' };
+  Object.defineProperty(win, 'location', { value: location, configurable: true });
+  const history = { replaceState() {} };
+
+  const run = new Function('window', 'document', 'fetch', 'URL', 'location', 'history', scripts.join('\n'));
+  run(win, document, win.fetch, win.URL, location, history);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  return { document, win, calls };
+}
+
+async function pickOn(stand: Awaited<ReturnType<typeof htmlStand>>) {
+  stand.document.getElementById('art-pick')?.dispatchEvent(new stand.win.Event('click'));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+}
+
+test('выбор элемента: адрес и цитата уезжают в боковой чат', async () => {
+  const stand = await htmlStand();
+  const { document, win, calls } = stand;
+  const pick = document.getElementById('art-pick');
+  assert.equal(pick?.hasAttribute('disabled'), false, 'у HTML с правом записи выбор доступен');
+
+  await pickOn(stand);
+  assert.ok(calls.some((call) => call.url.includes('/panel/artifacts/api/refs')), 'исходник размечен');
+  assert.match(document.getElementById('art-view')?.innerHTML ?? '', /index\.html\?pick=1/);
+  assert.equal(pick?.getAttribute('aria-pressed'), 'true');
+  assert.match(document.getElementById('art-note')?.textContent ?? '', /Разметил элементы: 1/);
+
+  win.artPickHandle({ type: 'ref', ref: HTML_REF, quote: 'Атлас', tag: 'h1' });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  assert.equal(document.getElementById('art-chat-panel')?.hidden, false, 'чат открылся сам');
+  assert.equal(document.getElementById('art-chat-ref')?.hidden, false, 'чип со ссылкой виден');
+  assert.equal(document.getElementById('art-chat-ref-path')?.textContent, HTML_REF);
+  assert.equal(document.getElementById('art-chat-ref-quote')?.textContent, '«Атлас»');
+  assert.equal(
+    document.getElementById('art-chat-input')?.getAttribute('placeholder'),
+    'Что сделать с этим элементом?',
+  );
+
+  assert.equal(
+    win.artChatCompose('сделай компактнее', { ref: HTML_REF, quote: 'Атлас' }),
+    '> Элемент артефакта `' + HTML_REF + '` (data-icarus-ref в исходнике) — «Атлас»\n\nсделай компактнее',
+  );
+
+  document.getElementById('art-chat-ref-clear')?.dispatchEvent(new win.Event('click'));
+  assert.equal(document.getElementById('art-chat-ref')?.hidden, true, '«убрать из ссылки» снимает чип');
+});
+
+test('правка текста из предпросмотра пишется в исходник с отпечатком версии', async () => {
+  const stand = await htmlStand();
+  const { document, win, calls } = stand;
+  await pickOn(stand);
+
+  // Открытие чата не должно сбрасывать отпечаток: иначе правка после ссылки
+  // уезжает с пустым base и сервер честно отказывает.
+  win.artPickHandle({ type: 'ref', ref: HTML_REF, quote: 'Атлас', tag: 'h1' });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  win.artPickHandle({ type: 'text', ref: HTML_REF, text: 'Атлас 2' });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+
+  const saved = calls.filter((call) => call.url.includes('/panel/artifacts/api/text'));
+  assert.equal(saved.length, 1, 'одна запись — один маршрут');
+  assert.deepEqual(JSON.parse(saved[0]!.body), {
+    artifact: 'report',
+    ref: HTML_REF,
+    text: 'Атлас 2',
+    base: 'base-1',
+  });
+  assert.match(document.getElementById('art-note')?.textContent ?? '', /Текст сохранён/);
+  assert.ok(
+    calls.filter((call) => call.url.includes('/panel/artifacts/api/read')).length >= 2,
+    'после записи предпросмотр перечитан',
+  );
+});
+
+test('отказ сохранения виден в панели, а не притворяется успехом', async () => {
+  const stand = await htmlStand({ textStatus: 409 });
+  const { document, win } = stand;
+  await pickOn(stand);
+
+  win.artPickHandle({ type: 'text', ref: HTML_REF, text: 'Атлас 2' });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.match(document.getElementById('art-note')?.textContent ?? '', /Не сохранилось/);
+  assert.match(document.getElementById('art-note')?.textContent ?? '', /измениться/);
+});
+
+test('без права записи выбор элемента недоступен', async () => {
+  const stand = await htmlStand({ canWrite: false });
+  assert.equal(stand.document.getElementById('art-pick')?.hasAttribute('disabled'), true);
+  await pickOn(stand);
+  assert.equal(
+    stand.calls.some((call) => call.url.includes('/panel/artifacts/api/refs')),
+    false,
+    'даже запрос разметки не уходит',
+  );
+});
+
+test('ссылка уезжает в сообщение вместе с задачей и снимается после отправки', async () => {
+  const stand = await htmlStand();
+  const { document, win, calls } = stand;
+  await pickOn(stand);
+  win.artPickHandle({ type: 'ref', ref: HTML_REF, quote: 'Атлас', tag: 'h1' });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  const input = document.getElementById('art-chat-input');
+  input.value = 'сделай компактнее';
+  input.dispatchEvent(new win.Event('input', { bubbles: true }));
+  const enter = document.createEvent('Event');
+  enter.initEvent('keydown', true, true);
+  Object.defineProperty(enter, 'key', { value: 'Enter' });
+  input.dispatchEvent(enter);
+  await new Promise((resolve) => setTimeout(resolve, 80));
+
+  const sent = calls.filter((call) => call.url.includes('/panel/api/chat/send'));
+  assert.equal(sent.length, 1, 'реплика ушла одним сообщением');
+  assert.equal(
+    JSON.parse(sent[0]!.body).text,
+    '> Элемент артефакта `' + HTML_REF + '` (data-icarus-ref в исходнике) — «Атлас»\n\nсделай компактнее',
+  );
+  assert.equal(document.getElementById('art-chat-ref')?.hidden, true, 'после отправки чип убран');
+  assert.match(document.getElementById('art-chat-log')?.textContent ?? '', /Элемент артефакта/);
+});

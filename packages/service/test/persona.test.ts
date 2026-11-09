@@ -78,3 +78,21 @@ test('режим артефакта: промпт про конкретную п
     delete process.env.ICARUS_ARTIFACT_TYPE;
   }
 });
+
+test('режим HTML-артефакта: в промпте есть контракт адресов элементов', async () => {
+  process.env.ICARUS_ARTIFACT = 'report';
+  process.env.ICARUS_ARTIFACT_TITLE = 'Отчёт по «Атласу»';
+  process.env.ICARUS_ARTIFACT_ENTRY = 'index.html';
+  process.env.ICARUS_ARTIFACT_TYPE = 'html';
+  try {
+    const text = await prompt();
+    assert.match(text, /data-icarus-ref/, 'модель знает, что это за атрибут');
+    assert.match(text, /ссылк[аи] находит элемент/, 'и зачем его сохранять');
+    assert.match(text, /правкой именно этого блока/, 'ссылка из чата — про конкретный блок');
+  } finally {
+    delete process.env.ICARUS_ARTIFACT;
+    delete process.env.ICARUS_ARTIFACT_TITLE;
+    delete process.env.ICARUS_ARTIFACT_ENTRY;
+    delete process.env.ICARUS_ARTIFACT_TYPE;
+  }
+});

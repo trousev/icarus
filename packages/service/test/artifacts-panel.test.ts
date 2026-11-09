@@ -441,3 +441,118 @@ test('чат правки: один разговор на артефакт и т
     assert.equal((await post(base, 'chat', { artifact: 'nope' })).status, 404);
   });
 });
+
+
+test('адреса элементов: разметка, правка текста и версия в истории', async () => {
+  await withServer(async (base, config) => {
+    const file = path.join(artifactsRoot(config), 'report', 'index.html');
+
+    const first = await post(base, 'refs', { artifact: 'report' });
+    assert.equal(first.status, 200);
+    const annotated = (await first.json()) as {
+      refs: Array<{ ref: string; tag: string; quote: string; editable: boolean }>;
+      base: string;
+      changed: boolean;
+      artifact: { canWrite: boolean };
+    };
+    assert.equal(annotated.changed, true, 'первый проход размечает файл');
+    assert.equal(annotated.artifact.canWrite, true);
+    const h1 = annotated.refs.find((item) => item.ref === 'h1');
+    assert.ok(h1, 'у заголовка появился адрес');
+    assert.equal(h1.tag, 'h1');
+    assert.equal(h1.quote, 'Атлас');
+    assert.equal(h1.editable, true);
+    assert.match(fs.readFileSync(file, 'utf8'), /<h1 data-icarus-ref="h1">Атлас<\/h1>/);
+
+    // Повторное включение выбора элемента ничего не коммитит.
+    const again = (await (await post(base, 'refs', { artifact: 'report' })).json()) as {
+      changed: boolean;
+      base: string;
+    };
+    assert.equal(again.changed, false);
+    assert.equal(again.base, annotated.base);
+
+    const saved = await post(base, 'text', {
+      artifact: 'report',
+      ref: 'h1',
+      text: 'Атлас 2',
+      base: annotated.base,
+    });
+    assert.equal(saved.status, 200);
+    const result = (await saved.json()) as { before: string; base: string };
+    assert.equal(result.before, 'Атлас');
+    assert.notEqual(result.base, annotated.base);
+    assert.match(fs.readFileSync(file, 'utf8'), /<h1 data-icarus-ref="h1">Атлас 2<\/h1>/);
+
+    const history = (await (await api(base, 'history?artifact=report')).json()) as {
+      history: Array<{ subject: string }>;
+    };
+    assert.equal(history.history[0]!.subject, 'artifact: edit h1');
+    assert.equal(history.history[1]!.subject, 'artifact: разметка элементов');
+  });
+});
+
+test('правка текста: устаревший отпечаток, чужой адрес и read-only — отказ', async () => {
+  await withServer(async (base, config) => {
+    const dir = path.join(artifactsRoot(config), 'report');
+    const file = path.join(dir, 'index.html');
+    const annotated = (await (await post(base, 'refs', { artifact: 'report' })).json()) as { base: string };
+
+    // Ссылка из другого артефакта: такого адреса здесь нет.
+    const foreign = await post(base, 'text', {
+      artifact: 'report',
+      ref: 'main.page/section.hero/h1.title',
+      text: 'Из чужой страницы',
+      base: annotated.base,
+    });
+    assert.equal(foreign.status, 409);
+    assert.match(fs.readFileSync(file, 'utf8'), /Атлас/);
+
+    // ИИ успел переписать файл: отпечаток не сходится — правку не применяем.
+    fs.writeFileSync(file, '<html><body><h1>Уже другое</h1></body></html>');
+    const stale = await post(base, 'text', {
+      artifact: 'report',
+      ref: 'h1',
+      text: 'Из старой версии',
+      base: annotated.base,
+    });
+    assert.equal(stale.status, 409);
+    assert.match(fs.readFileSync(file, 'utf8'), /Уже другое/);
+
+    // Без права записи размечать и править нельзя, даже если читать можно.
+    writeAcl(dir, 'probe', { me: 'admin', family: 'read' });
+    assert.equal((await post(base, 'refs', { artifact: 'report' }, 'probe2')).status, 403);
+    assert.equal(
+      (await post(base, 'text', { artifact: 'report', ref: 'h1', text: 'Чужое', base: 'deadbeefdeadbeef' }, 'probe2'))
+        .status,
+      403,
+    );
+
+    // Markdown-артефакт адресов не имеет: это не ошибка прав, а другой тип.
+    assert.equal((await post(base, 'refs', { artifact: 'plan' })).status, 400);
+  });
+});
+
+test('предпросмотр с выбором элемента: скрипт только в ответе, файл не меняется', async () => {
+  await withServer(async (base, config) => {
+    const file = path.join(artifactsRoot(config), 'report', 'index.html');
+    await post(base, 'refs', { artifact: 'report' });
+    const before = fs.readFileSync(file, 'utf8');
+
+    const plain = await fetch(`${base}/panel/artifacts/raw/report/index.html`, { headers: asUser() });
+    assert.doesNotMatch(await plain.text(), /icarus-artifacts-pick/);
+
+    const pick = await fetch(`${base}/panel/artifacts/raw/report/index.html?pick=1`, { headers: asUser() });
+    assert.equal(pick.status, 200);
+    assert.match(pick.headers.get('content-type') ?? '', /text\/html/);
+    assert.match(pick.headers.get('content-security-policy') ?? '', /sandbox/);
+    const html = await pick.text();
+    assert.match(html, /Атлас/);
+    assert.match(html, /icarus-artifacts-pick/, 'скрипт выбора доехал в ответ');
+    assert.match(html, /postMessage/);
+    assert.equal(fs.readFileSync(file, 'utf8'), before, 'исходник на диске не тронут');
+
+    // Выбор элемента — панель артефактов, а не публичная ссылка.
+    assert.equal((await fetch(`${base}/panel/artifacts/raw/report/index.html?pick=1`)).status, 401);
+  });
+});

@@ -26,7 +26,8 @@ import {
   type FolderAcl,
 } from '../artifacts.ts';
 import { findUser, type IcarusConfig } from '../config.ts';
-import { artifactHistory, artifactVersion, artifactVersionFile, restoreArtifact } from '../artifacts-git.ts';
+import { annotate, hashOf, replaceText } from '../artifacts-refs.ts';
+import { artifactHistory, artifactVersion, artifactVersionFile, commitArtifact, restoreArtifact } from '../artifacts-git.ts';
 import { ensureArtifactChat } from './artifact-chat.ts';
 import { readJsonBody } from '../http/openai.ts';
 import { errorBody } from '../http/sse.ts';
@@ -117,6 +118,29 @@ function decode(value: string | undefined): string {
   }
 }
 
+/** Исходник артефакта пишем через временный файл: половину HTML читать нельзя. */
+function writeSource(file: string, content: string): void {
+  const temporary = `${file}.${process.pid}.${Date.now().toString(36)}.tmp`;
+  fs.writeFileSync(temporary, content, { mode: 0o644 });
+  fs.renameSync(temporary, file);
+}
+
+function entrySource(read: { artifact: Artifact; dir: string }): { file: string; source: string } {
+  if (read.artifact.type !== 'html') {
+    throw new ArtifactError('адреса элементов есть только у HTML-артефакта', 400);
+  }
+  const file = path.join(read.dir, read.artifact.entry);
+  return { file, source: fs.readFileSync(file, 'utf8') };
+}
+
+/**
+ * Скрипт выбора элемента живёт только в ответе предпросмотра: HTML на диске
+ * остаётся чистым, а песочница iframe не даёт ему дотянуться до панели.
+ */
+function injectPicker(html: string): string {
+  return `${html}\n<!-- Icarus: выбор элемента. Это ответ панели, файл на диске не меняется. -->\n<script>${PICK_CLIENT}</script>\n`;
+}
+
 /** Глобальный список, чтение, права, ссылки и удаление. */
 export async function handleArtifactsApi(
   req: IncomingMessage,
@@ -198,6 +222,70 @@ export async function handleArtifactsApi(
     return;
   }
   const artifact = typeof body.artifact === 'string' ? body.artifact : '';
+
+  // Адреса элементов: проставляем data-icarus-ref в исходник. Идемпотентно —
+  // повторное открытие предпросмотра новых версий не плодит.
+  if (route === 'refs') {
+    try {
+      const read = readArtifact(config, userId, artifact);
+      if (!read.artifact.canWrite) {
+        throw new ArtifactError('размечать элементы может тот, у кого есть право записи', 403);
+      }
+      const { file, source } = entrySource(read);
+      const annotated = annotate(source);
+      if (annotated.changed) {
+        writeSource(file, annotated.html);
+        await commitArtifact(read.dir, 'artifact: разметка элементов');
+        log.info('артефакты: элементы размечены', { user: userId, artifact, refs: annotated.refs.length });
+      }
+      const next = inspectArtifact(config, artifact, userId) ?? read.artifact;
+      json(res, 200, {
+        artifact: next,
+        refs: annotated.refs,
+        base: hashOf(annotated.html),
+        changed: annotated.changed,
+      });
+    } catch (error) {
+      fail(res, error, 'элементы не размечены');
+    }
+    return;
+  }
+
+  // Правка текста выбранного элемента: base защищает от гонки с ИИ, который
+  // мог переписать файл, пока человек набирал строку.
+  if (route === 'text') {
+    const ref = typeof body.ref === 'string' ? body.ref : '';
+    const text = typeof body.text === 'string' ? body.text : '';
+    const base = typeof body.base === 'string' ? body.base : '';
+    try {
+      const read = readArtifact(config, userId, artifact);
+      if (!read.artifact.canWrite) {
+        throw new ArtifactError('править текст может тот, у кого есть право записи', 403);
+      }
+      if (!base) throw new ArtifactError('не передана версия исходника — обнови предпросмотр', 400);
+      const { file, source } = entrySource(read);
+      if (hashOf(source) !== base) {
+        throw new ArtifactError(
+          'артефакт успел измениться — обнови предпросмотр и выбери элемент заново',
+          409,
+        );
+      }
+      const result = replaceText(source, ref, text);
+      writeSource(file, result.html);
+      await commitArtifact(read.dir, `artifact: edit ${ref}`);
+      const next = inspectArtifact(config, artifact, userId) ?? read.artifact;
+      json(res, 200, {
+        ok: true,
+        artifact: next,
+        ref,
+        before: result.before,
+        base: hashOf(result.html),
+      });
+    } catch (error) {
+      fail(res, error, 'текст не сохранился');
+    }
+    return;
+  }
 
   // Чат правки: один разговор на артефакт. Дальше клиент работает обычными
   // маршрутами /panel/api/chat/* — заводить второй протокол незачем.
@@ -315,6 +403,19 @@ export function handleArtifactsRaw(
   const found = artifactFile(config, userId, artifact, relative);
   if (!found) {
     json(res, 404, errorBody('файл не найден или недоступен', 'not_found'));
+    return;
+  }
+  // Предпросмотр с выбором элемента: тот же адрес файла, поэтому относительные
+  // стили и картинки не ломаются, но в ответ добавляется скрипт выбора.
+  if (url.searchParams.get('pick') === '1' && found.type.includes('text/html')) {
+    let source: string;
+    try {
+      source = fs.readFileSync(found.file, 'utf8');
+    } catch {
+      json(res, 404, errorBody('файл не найден', 'not_found'));
+      return;
+    }
+    sendBuffer(req, res, Buffer.from(injectPicker(source), 'utf8'), found.type, { sandbox: true });
     return;
   }
   sendFile(req, res, found.file, found.type, {
@@ -549,3 +650,6 @@ function escapeTitle(value: string): string {
 
 /** Код markdown-рендера для «без панели»: тот же файл, что у панели. */
 const MARKDOWN_CLIENT_FOR_BARE = fs.readFileSync(new URL('./artifacts-markdown.js', import.meta.url), 'utf8');
+
+/** Скрипт выбора элемента: вставляется в HTML только в ответе предпросмотра. */
+const PICK_CLIENT = fs.readFileSync(new URL('./artifacts-pick.js', import.meta.url), 'utf8');

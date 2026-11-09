@@ -79,6 +79,11 @@ const artState = {
   selected: null,
   preview: null,
   deleteArmed: false,
+  // Режим выбора элемента в HTML-предпросмотре и отпечаток исходника, на
+  // котором размечены адреса: по нему сервер понимает, что ссылка устарела.
+  pick: false,
+  refsBase: null,
+  selection: null,
 };
 
 function artCrumbs(title) {
@@ -169,6 +174,22 @@ function artSyncActions(item, preview = false) {
   const manage = selected && !preview && Boolean(item.canManage);
   const write = selected && Boolean(item.canWrite);
 
+  // Выбор элемента — только у HTML и только тому, кто может писать: у ссылки
+  // без права записи нет адресата, а у картинки нет элементов.
+  const pick = artEl('art-pick');
+  const canPick = selected && !preview && item.type === 'html' && Boolean(item.canWrite);
+  pick.disabled = !canPick;
+  pick.setAttribute('aria-pressed', canPick && artState.pick ? 'true' : 'false');
+  if (canPick) {
+    pick.title = artState.pick ? 'Выключить выбор элементов' : 'Выбрать элемент на странице';
+  } else if (!selected) {
+    pick.title = 'Выбери артефакт';
+  } else if (item.type !== 'html') {
+    pick.title = 'Выбор элементов есть только у HTML-артефакта';
+  } else {
+    pick.title = 'Нужно право записи на артефакт';
+  }
+
   const share = artEl('art-share');
   share.disabled = !manage;
   share.title = manage
@@ -223,6 +244,7 @@ function artApplyArtifact(item) {
 
 function artClearView(message) {
   artState.selected = null;
+  artPickReset();
   artHideHistory();
   artEl('art-name').textContent = '—';
   artEl('art-meta').textContent = '';
@@ -262,10 +284,16 @@ function artRenderView(data, preview = null) {
 
   const view = artEl('art-view');
   if (item.type === 'html') {
+    // В режиме выбора элемента тот же файл отдаётся с `?pick=1`: сервер
+    // добавляет в ответ скрипт выбора, а исходник на диске не меняется.
+    const raw = String(item.urls.raw || '');
+    const source = artState.pick && !preview
+      ? raw + (raw.includes('?') ? '&' : '?') + 'pick=1'
+      : raw;
     view.innerHTML =
       '<iframe class="art-frame" title="' + artEsc(item.title) +
       '" sandbox="allow-scripts allow-forms allow-modals allow-popups" src="' +
-      artEsc(item.urls.raw) + '"></iframe>';
+      artEsc(source) + '"></iframe>';
     return;
   }
   if (item.type === 'image') {
@@ -303,6 +331,8 @@ async function artOpen(name, push = true, keepHistory = false) {
   }
   artState.artifact = name;
   artResetDelete();
+  // Другой артефакт — другие адреса: старый выбор элемента больше не годится.
+  artPickReset();
   // Панели исключают друг друга: чат правки и история занимают одно место.
   closeArtifactChat();
   if (keepHistory) artHidePreview();
@@ -531,6 +561,125 @@ async function artDelete() {
   }
 }
 
+/** Выключить выбор элемента: режим живёт только пока открыт HTML-предпросмотр. */
+function artPickReset() {
+  artState.pick = false;
+  artState.refsBase = null;
+  const button = artEl('art-pick');
+  if (button) button.setAttribute('aria-pressed', 'false');
+}
+
+/** Перечитать открытый артефакт, не закрывая чат и историю. */
+async function artRefresh() {
+  const name = artState.artifact;
+  if (!name) return;
+  const data = await artApi('/panel/artifacts/api/read?artifact=' + encodeURIComponent(name));
+  artRenderView(data);
+}
+
+/**
+ * Выбор элемента: перед включением просим сервер разметить исходник.
+ * Разметка идемпотентна, а `refsBase` — отпечаток ровно того файла, который
+ * сейчас в предпросмотре: с ним правка не затрёт чужую, более новую версию.
+ */
+async function artTogglePick() {
+  const item = artState.selected;
+  if (!item || !item.canWrite || item.type !== 'html' || artState.preview) return;
+  if (artState.pick) {
+    artPickReset();
+    artSetStatus('Выбор элементов выключен');
+    await artRefresh();
+    return;
+  }
+  try {
+    const data = await artApi('/panel/artifacts/api/refs', {
+      method: 'POST',
+      body: JSON.stringify({ artifact: item.name }),
+    });
+    artState.pick = true;
+    artState.refsBase = typeof data.base === 'string' ? data.base : null;
+    artState.selected = data.artifact || item;
+    const count = Array.isArray(data.refs) ? data.refs.length : 0;
+    artSetStatus(
+      (data.changed ? 'Разметил элементы: ' : 'Элементы уже размечены: ') +
+        count + ' — кликни блок на странице',
+    );
+    await artRefresh();
+  } catch (error) {
+    artSetStatus('Не размечено: ' + error.message, true);
+    artSyncActions(artState.selected, false);
+  }
+}
+
+/** Ответ из iframe: выбран элемент или человек поправил его текст. */
+function artPickHandle(data) {
+  if (!data || typeof data !== 'object') return;
+  if (data.type === 'ref' && typeof data.ref === 'string') {
+    artState.selection = {
+      ref: data.ref,
+      quote: typeof data.quote === 'string' ? data.quote : '',
+      tag: typeof data.tag === 'string' ? data.tag : '',
+    };
+    artSetStatus(
+      'Выбран элемент ' + data.ref + (data.quote ? ' — «' + data.quote + '»' : ''),
+    );
+    if (typeof window.artChatAttachRef === 'function') void window.artChatAttachRef(artState.selection);
+    return;
+  }
+  if (data.type === 'text' && typeof data.ref === 'string' && typeof data.text === 'string') {
+    void artSaveText(data.ref, data.text);
+    return;
+  }
+  if (data.type === 'miss') {
+    artSetStatus('У этого элемента нет адреса — разметка неполная', true);
+  }
+}
+
+/** Сказать iframe, что сохранить не вышло: он вернёт текст, который был. */
+function artPickRestore(message) {
+  const frame = document.querySelector('.art-frame');
+  if (!frame || !frame.contentWindow) return;
+  frame.contentWindow.postMessage(
+    { source: 'icarus-artifacts-panel', type: 'restore', message: message || '' },
+    '*',
+  );
+}
+
+/**
+ * Сохранить текст элемента в исходник. Пишет сервер: файл и коммит в истории
+ * делает он же, чтобы панель не держала второй путь записи артефактов.
+ */
+async function artSaveText(ref, text) {
+  const name = artState.artifact;
+  if (!name) return;
+  try {
+    const data = await artApi('/panel/artifacts/api/text', {
+      method: 'POST',
+      body: JSON.stringify({ artifact: name, ref, text, base: artState.refsBase || '' }),
+    });
+    artState.refsBase = typeof data.base === 'string' ? data.base : artState.refsBase;
+    artState.selected = data.artifact || artState.selected;
+    artSetStatus('Текст сохранён в исходник — версия в истории');
+    await artRefresh();
+  } catch (error) {
+    artSetStatus('Не сохранилось: ' + error.message, true);
+    artPickRestore(error.message);
+  }
+}
+
+function artPickListen(event) {
+  const frame = document.querySelector('.art-frame');
+  if (!frame || !frame.contentWindow || event.source !== frame.contentWindow) return;
+  const data = event.data || {};
+  if (data.source !== 'icarus-artifacts-pick') return;
+  artPickHandle(data);
+}
+
+// Скрипт раздела — классический script, поэтому функции и так глобальные.
+// Явное присваивание нужно тестам и странице: по нему видно, что это вход
+// из iframe, а не случайная утечка.
+window.artPickHandle = artPickHandle;
+
 function artHistoryLabel(subject) {
   const text = String(subject || '');
   if (text === 'artifact: initial version') return 'начальная версия';
@@ -608,6 +757,7 @@ function artPreviewMeta(data) {
 }
 
 function artShowPreview(data) {
+  artPickReset();
   artState.preview = data;
   artRenderView(data, data.commit);
   artEl('art-preview').hidden = false;
@@ -707,6 +857,8 @@ async function artStart() {
     artOpen(button.dataset.artifact);
   });
   artEl('art-share').addEventListener('click', artOpenShare);
+  artEl('art-pick').addEventListener('click', () => void artTogglePick());
+  window.addEventListener('message', artPickListen);
   artEl('art-share-close').addEventListener('click', artCloseShare);
   artEl('art-share-done').addEventListener('click', artCloseShare);
   artEl('art-share-modal').addEventListener('click', (event) => {
