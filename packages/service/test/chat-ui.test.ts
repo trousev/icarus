@@ -157,7 +157,7 @@ test('справа у чата — панель файлов рабочей па
     'и появляется только в выдвижном режиме',
   );
   assert.match(html, /class="fdel"/, 'у каждой строки есть корзина');
-  assert.match(html, /aria-label="Удалить /, 'корзина подписана именем файла');
+  assert.match(html, /cfg\.ui\.deleteLabel \+ ' ' \+ entry\.name/, 'корзина подписана именем файла');
   assert.match(html, /function askDeleteEntry/, 'удаление спрашивает подтверждение');
   assert.match(html, /class="files-send"/, 'рядом со скачиванием есть кнопка «В чат»');
   assert.match(html, /Послать агенту/, 'кнопка вставки пути подписана');

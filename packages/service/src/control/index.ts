@@ -26,7 +26,20 @@ import { handleWorkspacesApi } from './workspaces.ts';
 import { handleFoldersApi } from './folders.ts';
 import { handleWorkspaceFilesApi } from './files.ts';
 import { findUser, isAdmin, userPaths, type IcarusConfig, type UserConfig } from '../config.ts';
-import { LANGUAGE_LABELS, LANGUAGES, languageOf, writeProfile, type Language } from '../profile.ts';
+import {
+  DEFAULT_UI_LANGUAGE,
+  LANGUAGE_LABELS,
+  LANGUAGES,
+  UI_LANGUAGES,
+  isUiLanguage,
+  languageOf,
+  readProfile,
+  uiLanguageOf,
+  writeProfile,
+  type Language,
+  type UiLanguage,
+} from '../profile.ts';
+import { panelStrings, type PanelStrings } from './strings.ts';
 import { readJsonBody } from '../http/openai.ts';
 import { errorBody } from '../http/sse.ts';
 import {
@@ -99,28 +112,44 @@ export type PanelContext = {
   draft?: (userId: string, idea: string) => Promise<string>;
 };
 
-/** Разделы панели: порядок здесь — порядок в сайдбаре. */
-export const SECTIONS: { id: string; label: string; adminOnly?: boolean }[] = [
-  { id: 'memory', label: 'Память' },
-  { id: 'skills', label: 'Скиллы' },
-  { id: 'mcp', label: 'MCP' },
+/** Разделы панели: порядок здесь — порядок в сайдбаре. Подписи — из словаря. */
+export const SECTIONS: { id: string; adminOnly?: boolean }[] = [
+  { id: 'memory' },
+  { id: 'skills' },
+  { id: 'mcp' },
   // Ключи — настройка инсталляции, а не человека: раздел видят и открывают только
   // админы. Стоит он перед «Пользователем»: остальное — про содержимое, это — про
   // доступы, а последним идёт личная настройка.
-  { id: 'keys', label: 'Ключи', adminOnly: true },
-  { id: 'profile', label: 'Пользователь' },
+  { id: 'keys', adminOnly: true },
+  { id: 'profile' },
 ];
+
+/** Подпись раздела на языке интерфейса. */
+function sectionLabel(id: string, ui: PanelStrings): string {
+  switch (id) {
+    case 'memory':
+      return ui.sectionMemory;
+    case 'skills':
+      return ui.sectionSkills;
+    case 'mcp':
+      return ui.sectionMcp;
+    case 'keys':
+      return ui.sectionKeys;
+    case 'profile':
+      return ui.sectionProfile;
+    default:
+      return id;
+  }
+}
+
+/** Подписи областей: их рисует панель, и держать их в браузере незачем. */
+function scopeLabels(ui: PanelStrings): Record<string, string> {
+  return { personal: ui.scopePersonal, shared: ui.scopeShared, skills: ui.sectionSkills };
+}
 
 type Scope = 'personal' | 'shared' | 'skills' | 'profile';
 /** Режим раздела: memory правится построчно, skills — целым файлом. */
 export type ScopeMode = 'memory' | 'skills' | 'profile';
-
-/** Заголовки областей: их рисует панель, и держать их в браузере незачем. */
-const SCOPE_LABELS: Record<string, string> = {
-  personal: 'Личная',
-  shared: 'Семейная',
-  skills: 'Скиллы',
-};
 
 function json(res: ServerResponse, status: number, payload: unknown): void {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
@@ -147,12 +176,16 @@ function skillError(res: ServerResponse, error: unknown): void {
 }
 
 /**
- * Раздел «Пользователь»: сейчас в нём одна настройка — язык ответов.
+ * Раздел «Пользователь»: две независимые настройки — язык ответов и язык интерфейса.
  *
- * GET отдаёт текущий язык и список доступных, POST его меняет. Файл профиля лежит
- * рядом с памятью человека, поэтому язык переживает и перезапуск сервиса, и
- * пересоздание контейнера. Живую сессию он не рвёт: pi читает AGENTS.md при старте,
- * поэтому следующая реплика поднимает её заново — тем же механизмом, что и скиллы.
+ * GET отдаёт обе и списки доступных; POST меняет ту, которую прислали, не трогая
+ * вторую. Файл профиля лежит рядом с памятью человека, поэтому настройки переживают
+ * и перезапуск сервиса, и пересоздание контейнера.
+ *
+ * Смена языка ответов живую сессию не рвёт, но помечает ресурсы: pi читает AGENTS.md
+ * при старте, поэтому следующая реплика поднимает её заново — тем же механизмом, что
+ * и скиллы. Смена языка интерфейса pi не касается вовсе: её видит только панель, и
+ * перезапускать из-за неё разговор значило бы терять контекст ни за что.
  */
 async function handleProfileApi(
   req: IncomingMessage,
@@ -173,6 +206,10 @@ async function handleProfileApi(
       language: languageOf(config, user),
       languages: LANGUAGES,
       labels: LANGUAGE_LABELS,
+      uiLanguage: uiLanguageOf(config, user),
+      uiLanguages: UI_LANGUAGES,
+      // Подписи одни и те же: «Русский» и «English» человек читает на любом языке.
+      uiLabels: LANGUAGE_LABELS,
     });
     return;
   }
@@ -191,21 +228,43 @@ async function handleProfileApi(
   }
 
   const language = body.language;
-  if (typeof language !== 'string' || !(LANGUAGES as readonly string[]).includes(language)) {
+  const requestedUi = body.uiLanguage;
+  if (language === undefined && requestedUi === undefined) {
+    json(res, 400, errorBody('нужен language или uiLanguage', 'invalid_request_error'));
+    return;
+  }
+  if (language !== undefined && (typeof language !== 'string' || !(LANGUAGES as readonly string[]).includes(language))) {
     json(res, 400, errorBody(`язык «${String(language)}» не поддерживается: ${LANGUAGES.join(', ')}`, 'invalid_request_error'));
     return;
   }
+  if (requestedUi !== undefined && !isUiLanguage(requestedUi)) {
+    json(
+      res,
+      400,
+      errorBody(
+        `язык интерфейса «${String(requestedUi)}» не поддерживается: ${UI_LANGUAGES.join(', ')}`,
+        'invalid_request_error',
+      ),
+    );
+    return;
+  }
 
-  const previous = languageOf(config, user);
-  writeProfile(config, user, { language: language as Language });
+  // Меняем только присланное поле: иначе переключение интерфейса молча сбрасывало
+  // бы язык ответов (и наоборот) — ровно то смешение, от которого уходим.
+  const previousLanguage = languageOf(config, user);
+  const current = readProfile(config, user) ?? { language: previousLanguage, uiLanguage: DEFAULT_UI_LANGUAGE };
+  const next = {
+    language: (language as Language | undefined) ?? current.language,
+    uiLanguage: (requestedUi as UiLanguage | undefined) ?? current.uiLanguage,
+  };
+  writeProfile(config, user, next);
 
-  // Язык живёт в AGENTS.md, а его pi читает при старте процесса — значит, живую
-  // сессию без этой пометки смена языка не догонит, и человек услышит прежний язык.
-  // Помечаем только когда язык правда поменялся: лишний перезапуск сессии — это
-  // потеря контекста разговора ни за что.
-  if (language !== previous) bumpResources(ctx, userId);
+  // Язык ответов живёт в AGENTS.md, а его pi читает при старте процесса — значит,
+  // живую сессию без этой пометки смена языка не догонит, и человек услышит прежний
+  // язык. Помечаем только когда он правда поменялся, и никогда — из-за интерфейса.
+  if (next.language !== previousLanguage) bumpResources(ctx, userId);
 
-  json(res, 200, { user: userId, language });
+  json(res, 200, { user: userId, language: next.language, uiLanguage: next.uiLanguage });
 }
 
 /**
@@ -522,10 +581,14 @@ function routeApi(pathname: string): { section: string; name: string } | null {
  * Разделы панели у этого человека: ключи — только у админа. Остальных разделов
  * не прячем: это его собственные память, скиллы и настройки.
  */
-function sectionsFor(config: IcarusConfig, user: UserConfig | undefined): { id: string; label: string }[] {
-  return SECTIONS.filter((section) => section.adminOnly !== true || isAdmin(user)).map(({ id, label }) => ({
+function sectionsFor(
+  config: IcarusConfig,
+  user: UserConfig | undefined,
+  ui: PanelStrings,
+): { id: string; label: string }[] {
+  return SECTIONS.filter((section) => section.adminOnly !== true || isAdmin(user)).map(({ id }) => ({
     id,
-    label,
+    label: sectionLabel(id, ui),
   }));
 }
 
@@ -539,15 +602,20 @@ async function sectionPage(
 ): Promise<string> {
   await prepare(config, userId);
   const user = findUser(config, userId);
+  // Язык интерфейса — до сборки сессии: из него берутся подписи разделов, областей
+  // и всех строк страницы. Без человека (панель без конфига) остаётся русский.
+  const uiLanguage: UiLanguage = user ? uiLanguageOf(config, user) : DEFAULT_UI_LANGUAGE;
+  const ui = panelStrings(uiLanguage);
   const session: PanelSession = {
     user: userId,
-    sections: sectionsFor(config, user),
+    sections: sectionsFor(config, user, ui),
     scopes: scopesFor(),
-    scopeLabels: SCOPE_LABELS,
+    scopeLabels: scopeLabels(ui),
     model: config.models[0]?.id ?? '—',
     storage: 'git · local',
     draftSkills,
     admin: isAdmin(user),
+    uiLanguage,
     // Язык ответов: панель показывает его в разделе «Пользователь» и подсвечивает
     // выбранный. Он же уезжает в AGENTS.md человека (см. workspace.ts).
     ...(user ? { language: languageOf(config, user) } : {}),
@@ -678,16 +746,21 @@ async function handleApi(
     }
     await prepare(config, userId);
     const scopes = scopesFor();
+    const uiLanguage = uiLanguageOf(config, user);
+    const ui = panelStrings(uiLanguage);
     json(res, 200, {
       user: userId,
-      sections: sectionsFor(config, user),
+      sections: sectionsFor(config, user, ui),
       scopes: Object.keys(scopes),
       modes: scopes,
-      labels: SCOPE_LABELS,
+      labels: scopeLabels(ui),
       counts: countsFor(config, userId),
       language: languageOf(config, user),
       languages: LANGUAGES,
       languageLabels: LANGUAGE_LABELS,
+      uiLanguage,
+      uiLanguages: UI_LANGUAGES,
+      uiLanguageLabels: LANGUAGE_LABELS,
     });
     return;
   }

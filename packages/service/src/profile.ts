@@ -1,12 +1,16 @@
 // Профиль человека: то, что он сам про себя настроил в панели.
 //
-// Пока здесь ровно одно поле — язык, на котором человек хочет слышать Икара.
-// Язык не трогает личность: персона, память и шутки остаются как есть, меняется
-// только язык реплик (см. раздел «Язык» в icarus.md).
+// Здесь две независимые настройки языка. `language` — язык ОТВЕТОВ: он не трогает
+// личность (персона, память и шутки остаются как есть), меняется только язык реплик
+// (см. раздел «Язык» в icarus.md) и уезжает в AGENTS.md. `uiLanguage` — язык
+// ИНТЕРФЕЙСА панели: подписи, кнопки, пустые состояния. Общего у них только то, что
+// оба живут в профиле человека; менять их надо порознь, иначе англоязычный интерфейс
+// потянет за собой ответы (или наоборот).
 //
 // Файл лежит рядом с памятью человека (`<home>/profile.json`), а не в config.yaml:
 // config.yaml — общий для всех, а язык у каждого свой. Читает его сервис: язык
-// подставляется в AGENTS.md, который и уезжает в контейнер.
+// ответов подставляется в AGENTS.md, который и уезжает в контейнер, а язык
+// интерфейса — в строки панели.
 //
 // Конфиг — не единственный источник: он даёт умолчание (`userLanguage`), профиль
 // человека его перекрывает. Так у старой установки всё остаётся по-русски, пока
@@ -26,6 +30,20 @@ export const LANGUAGES = ['ru', 'en'] as const;
 export type Language = (typeof LANGUAGES)[number];
 
 export const DEFAULT_LANGUAGE: Language = 'ru';
+
+/**
+ * Язык интерфейса панели. Те же коды, что у языка ответов, но список отдельный:
+ * перевести интерфейс на язык, которого нет у ответов (или наоборот), — обычное
+ * дело, и общий список заставлял бы добавлять языки парами.
+ */
+export const UI_LANGUAGES = ['ru', 'en'] as const;
+export type UiLanguage = (typeof UI_LANGUAGES)[number];
+
+/**
+ * Умолчание — русский: панель всегда была русской, и старый profile.json без
+ * `uiLanguage` не должен при первом же чтении переключить человеку интерфейс.
+ */
+export const DEFAULT_UI_LANGUAGE: UiLanguage = 'ru';
 
 /**
  * Всё, что нужно прозе промпта, — одним словарём на язык.
@@ -66,10 +84,24 @@ export function languageForms(language: Language): LanguageForms {
   return FORMS[language];
 }
 
-export type Profile = { language: Language };
+export type Profile = { language: Language; uiLanguage: UiLanguage };
 
 export function isLanguage(value: unknown): value is Language {
   return typeof value === 'string' && (LANGUAGES as readonly string[]).includes(value);
+}
+
+export function isUiLanguage(value: unknown): value is UiLanguage {
+  return typeof value === 'string' && (UI_LANGUAGES as readonly string[]).includes(value);
+}
+
+/**
+ * Язык интерфейса этого человека. Конфиг здесь не участвует: `userLanguage` —
+ * умолчание языка ответов, а интерфейс до этой настройки всегда был русским.
+ * Битый или неизвестный `uiLanguage` — тоже русский, а не отказ отрисовать панель.
+ */
+export function uiLanguageOf(config: IcarusConfig, user: UserConfig): UiLanguage {
+  const stored = readProfile(config, user);
+  return stored?.uiLanguage ?? DEFAULT_UI_LANGUAGE;
 }
 
 /**
@@ -113,14 +145,22 @@ export function readProfile(
     return undefined;
   }
   if (typeof parsed !== 'object' || parsed === null) return undefined;
-  const language = (parsed as Record<string, unknown>).language;
+  const raw = parsed as Record<string, unknown>;
+  const language = raw.language;
   if (!isLanguage(language)) return undefined;
-  return { language };
+  // Своей строки у старого профиля нет — интерфейс остаётся русским. Неизвестная
+  // локаль тоже не повод не отрисовать панель: язык ответов при этом сохраняется.
+  const uiLanguage = isUiLanguage(raw.uiLanguage) ? raw.uiLanguage : DEFAULT_UI_LANGUAGE;
+  return { language, uiLanguage };
 }
 
-/** Записать язык. Каталог создаётся: панель может обогнать первый старт сервиса. */
+/** Записать настройки. Каталог создаётся: панель может обогнать первый старт сервиса. */
 export function writeProfile(config: IcarusConfig, user: UserConfig, profile: Profile): void {
   const file = profilePath(config, user);
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, stringifyYaml({ language: profile.language }), { mode: 0o600 });
+  fs.writeFileSync(
+    file,
+    stringifyYaml({ language: profile.language, uiLanguage: profile.uiLanguage }),
+    { mode: 0o600 },
+  );
 }

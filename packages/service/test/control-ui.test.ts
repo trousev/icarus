@@ -43,7 +43,7 @@ test('память правится построчно, у скиллов сво
 
   // Удаление записей живёт в разделе памяти и уходит своим маршрутом.
   assert.match(html, /endpoint\('forget-many'\)/, 'пачка уходит маршрутом раздела');
-  assert.match(html, /askConfirm\('Убрать из памяти '/);
+  assert.match(html, /askConfirm\(fill\(cfg\.ui\.removeMemoryPrompt, \{ what \}\)/, 'удаление просит подтверждение');
 
   // Пустая шапка файла не занимает место: без файла её нет.
   assert.match(html, /\.file-head\[hidden\] \{ display:none; \}/);
@@ -95,10 +95,10 @@ test('раздел скиллов — редактор, а не список ф�
   assert.match(open, /endpoint\('skill', \{ id: cfg\.file \}\)/, 'скилл открывается своим маршрутом');
   assert.match(open, /endpoint\('history'\)/, 'у скиллов история — по всему каталогу, а не по файлу');
   assert.match(open, /endpoint\('save'\)/);
-  assert.match(open, /askConfirm\('Удалить скилл «'/, 'удаление спрашивает подтверждение');
+  assert.match(open, /askConfirm\(fill\(cfg\.ui\.deleteSkillPrompt, \{ name: data\.name \}\)/, 'удаление спрашивает подтверждение');
   // Отказ проверки не должен стирать черновик: сообщение уходит в строку состояния,
   // а не вместо редактора (иначе «нет описания» уносит с собой весь написанный текст).
-  assert.match(open, /skillStatus\('Не сохранилось: '/, 'ошибка сохранения видна в редакторе');
+  assert.match(open, /skillStatus\(cfg\.ui\.saveFailedPrefix \+/, 'ошибка сохранения видна в редакторе');
 });
 
 test('шапка подписана Icarus Control Panel и рисует разделы из сервиса', () => {

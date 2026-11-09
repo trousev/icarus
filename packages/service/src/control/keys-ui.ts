@@ -2,25 +2,26 @@
 // файлами: в TypeScript не приходится экранировать бэктики, а тесты могут исполнить
 // тот же скрипт, что получает браузер.
 import fs from 'node:fs';
-import { settingsAside, shell, type PanelSession } from './ui.ts';
+import { escapeHtml, sessionStrings, settingsAside, shell, sessionUiLanguage, type PanelSession } from './ui.ts';
 
 const CLIENT_CSS = fs.readFileSync(new URL('./keys-client.css', import.meta.url), 'utf8');
 const CLIENT_JS = fs.readFileSync(new URL('./keys-client.js', import.meta.url), 'utf8');
 
 export function keysPage(session: PanelSession): string {
+  const ui = sessionStrings(session);
   const json = JSON.stringify({ user: session.user, section: 'keys' }).replaceAll('<', '\\u003c');
   return shell(`<style>${CLIENT_CSS}</style>
 <div class="app">
 ${settingsAside(session, 'keys', {
   foot: [
-    ['модель', session.model ?? '—'],
-    ['доступ', 'админ'],
+    [ui.modelLabel, session.model ?? '—'],
+    [ui.accessLabel, ui.accessAdmin],
   ],
 })}
 <div>
   <div class="top">
     <div class="crumbs">Icarus / <b>Ключи</b></div>
-    <div class="status"><i></i>Агент активен</div>
+    <div class="status"><i></i>${escapeHtml(ui.agentActive)}</div>
   </div>
   <div class="content">
     <p class="section-title">СЕКРЕТЫ ИНСТАЛЯЦИИ</p>
@@ -46,5 +47,5 @@ ${settingsAside(session, 'keys', {
 </div>
 </div>
 <script>window.__KEYS_CFG__ = ${json};</script>
-<script>${CLIENT_JS}</script>`);
+<script>${CLIENT_JS}</script>`, sessionUiLanguage(session));
 }

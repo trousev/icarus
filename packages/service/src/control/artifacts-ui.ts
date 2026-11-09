@@ -6,7 +6,7 @@
 // и markdown лежат отдельными файлами — как у чата и MCP.
 import fs from 'node:fs';
 import type { Artifact } from '../artifacts.ts';
-import { escapeHtml, shell, type PanelSession } from './ui.ts';
+import { escapeHtml, sessionStrings, sessionUiLanguage, shell, type PanelSession } from './ui.ts';
 
 const CLIENT_CSS = fs.readFileSync(new URL('./artifacts-client.css', import.meta.url), 'utf8');
 // Сообщения (пузыри, трассировка, .md) — тот же файл, что и у основного чата:
@@ -48,6 +48,7 @@ function navLinks(session: PanelSession, active: string, counts: Record<string, 
 }
 
 export function artifactsPage(session: PanelSession, options: ArtifactsPageOptions): string {
+  const ui = sessionStrings(session);
   const config = { user: session.user, artifact: options.artifact ?? null, counts: options.counts };
   const json = JSON.stringify(config).replaceAll('<', '\\u003c');
   const nav = navLinks(session, 'artifacts', options.counts);
@@ -58,26 +59,26 @@ export function artifactsPage(session: PanelSession, options: ArtifactsPageOptio
   <aside class="art-side">
     <div class="brand">
       <div class="logo">I</div>
-      <div><b>Icarus</b><span>агент · чат и настройки</span></div>
+      <div><b>Icarus</b><span>${escapeHtml(ui.brandTagline)}</span></div>
     </div>
-    <a class="nav-back" href="/panel/chat">← Назад в чат</a>
-    <div class="art-side-head"><span>АРТЕФАКТЫ</span><em id="art-total">0</em></div>
-    <div class="art-list" id="art-list"><p class="art-empty">Читаю…</p></div>
+    <a class="nav-back" href="/panel/chat">${escapeHtml(ui.backToChat)}</a>
+    <div class="art-side-head"><span>${escapeHtml(ui.artifacts.toUpperCase())}</span><em id="art-total">0</em></div>
+    <div class="art-list" id="art-list"><p class="art-empty">${escapeHtml(ui.loading)}</p></div>
     <div class="art-side-bottom">
-      <p class="nav-title">НАСТРОЙКИ</p>
+      <p class="nav-title">${escapeHtml(ui.settingsNavTitle)}</p>
       <nav class="nav">${nav}</nav>
     </div>
     <div class="foot">
-      <div><span>модель</span><span>${escapeHtml(session.model ?? '—')}</span></div>
-      <div><span>хранилище</span><span>${escapeHtml(session.storage ?? 'git · local')}</span></div>
+      <div><span>${escapeHtml(ui.modelLabel)}</span><span>${escapeHtml(session.model ?? '—')}</span></div>
+      <div><span>${escapeHtml(ui.storageLabel)}</span><span>${escapeHtml(session.storage ?? 'git · local')}</span></div>
     </div>
   </aside>
   <main class="art-main">
     <div class="art-main-body">
     <div class="top">
-      <div class="crumbs" id="art-crumbs">Icarus / <b>Артефакты</b></div>
-      <div class="search"><input id="q" placeholder="Поиск по артефактам" size="30" autocomplete="off"></div>
-      <div class="status"><i></i>Агент активен</div>
+      <div class="crumbs" id="art-crumbs">Icarus / <b>${escapeHtml(ui.artifacts)}</b></div>
+      <div class="search"><input id="q" placeholder="${escapeHtml(ui.searchArtifacts)}" size="30" autocomplete="off"></div>
+      <div class="status"><i></i>${escapeHtml(ui.agentActive)}</div>
     </div>
     <div class="art-toolbar">
       <div class="art-file">
@@ -189,7 +190,7 @@ export function artifactsPage(session: PanelSession, options: ArtifactsPageOptio
 <script>window.__ARTIFACTS_CFG__ = ${json};</script>
 <script>${CLIENT_MD}</script>
 <script>${CLIENT_JS}</script>
-<script>${CLIENT_CHAT}</script>`);
+<script>${CLIENT_CHAT}</script>`, sessionUiLanguage(session));
 }
 
 /**

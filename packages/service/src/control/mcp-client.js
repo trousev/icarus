@@ -1,6 +1,8 @@
 /* Панель MCP: список серверов, переключатели, форма и OAuth-подключение.
    Данные приезжают с /panel/mcp/*; страница не хранит секретов и не рисует их. */
 (function () {
+  const cfg = window.__MCP_CFG__ || {};
+  const ui = cfg.ui || {};
   const el = (id) => document.getElementById(id);
   // Адрес «мёртвого» loopback приходит со страницы: порт живёт в oauth.ts.
   // Запасное значение — на случай страницы из кэша, отданной старым сервисом.
@@ -16,7 +18,7 @@
     if (!response.ok || !type.includes('application/json')) {
       const message = type.includes('application/json')
         ? (await response.json().catch(() => ({}))).error?.message || response.statusText
-        : 'сессия входа истекла — обнови страницу';
+        : ui.sessionExpired || 'сессия входа истекла — обнови страницу';
       throw new Error(message);
     }
     return response.json();
@@ -24,6 +26,10 @@
 
   const esc = (s) =>
     String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  /** Подстановка в шаблон словаря: «{n} {word}» и подобные. */
+  const fill = (template, values) =>
+    Object.entries(values).reduce((text, [key, value]) => text.split('{' + key + '}').join(String(value)), template);
 
   function notice(message, bad) {
     const box = el('mcp-notice');
@@ -181,12 +187,14 @@
     try {
       const data = await api('/panel/mcp/servers');
       box.innerHTML = '';
-      el('mcp-summary').textContent =
-        data.servers.length +
-        ' ' + plural(data.servers.length, 'сервер', 'сервера', 'серверов') +
-        ' · включено ' + data.enabled + ' · готово ' + data.ready;
+      el('mcp-summary').textContent = fill(ui.mcpSummary, {
+        n: data.servers.length,
+        word: plural(data.servers.length, ui.serversWord),
+        enabled: data.enabled,
+        ready: data.ready,
+      });
       if (!data.servers.length) {
-        box.innerHTML = '<p class="mcp-empty">Пока пусто. Возьми рецепт выше, если готового сервера хватает, или нажми «Добавить MCP» — адрес и способ входа подскажет сам сервер.</p>';
+        box.innerHTML = '<p class="mcp-empty">' + esc(ui.mcpEmpty) + '</p>';
         return;
       }
       for (const server of data.servers) box.append(card(server));
@@ -200,12 +208,15 @@
   }
 
   function plural(n, one, few, many) {
+    // Старый вызов передаёт три строки, новый — формы из словаря.
+    const words = typeof one === 'string' ? { one, few, many } : one;
+    if (ui.lang && ui.lang !== 'ru') return n === 1 ? words.one : words.many;
     const tens = n % 100;
     const ones = n % 10;
-    if (tens >= 11 && tens <= 14) return many;
-    if (ones === 1) return one;
-    if (ones >= 2 && ones <= 4) return few;
-    return many;
+    if (tens >= 11 && tens <= 14) return words.many;
+    if (ones === 1) return words.one;
+    if (ones >= 2 && ones <= 4) return words.few;
+    return words.many;
   }
 
   async function runTest(server, result, button) {
@@ -474,12 +485,13 @@
   function recipeBrief(recipe) {
     const list = (items) => '<ul>' + items.map((item) => '<li>' + esc(item) + '</li>').join('') + '</ul>';
     return '<div class="recipe-brief">' +
-      '<p><b>Когда нужен.</b> ' + esc(recipe.when) + '</p>' +
-      (recipe.requires.length ? '<p><b>Что должно быть снаружи</b></p>' + list(recipe.requires) : '') +
+      '<p><b>' + esc(ui.mcpRecipeWhen) + '</b> ' + esc(recipe.when) + '</p>' +
+      (recipe.requires.length ? '<p><b>' + esc(ui.mcpRecipeRequires) + '</b></p>' + list(recipe.requires) : '') +
       (recipe.caveat ? '<p class="recipe-caveat">' + esc(recipe.caveat) + '</p>' : '') +
-      (recipe.steps.length ? '<p><b>Что сделать</b></p>' + list(recipe.steps) : '') +
-      (recipe.trouble.length ? '<details><summary>Если не поднялся</summary>' + list(recipe.trouble) + '</details>' : '') +
-      '<p class="hint">Проверено ' + esc(recipe.checkedAt) + ' · <a href="' + esc(recipe.docs) + '" target="_blank" rel="noopener">документация сервера</a></p>' +
+      (recipe.steps.length ? '<p><b>' + esc(ui.mcpRecipeSteps) + '</b></p>' + list(recipe.steps) : '') +
+      (recipe.trouble.length ? '<details><summary>' + esc(ui.mcpRecipeTrouble) + '</summary>' + list(recipe.trouble) + '</details>' : '') +
+      '<p class="hint">' + esc(fill(ui.mcpRecipeChecked, { date: recipe.checkedAt })) +
+        ' · <a href="' + esc(recipe.docs) + '" target="_blank" rel="noopener">' + esc(ui.mcpRecipeDocs) + '</a></p>' +
     '</div>';
   }
 
@@ -496,7 +508,7 @@
     const credentialEnv = Object.fromEntries((editor && editor.credentialEnv ? editor.credentialEnv : []).map((name) => [name, '']));
     const args = server && Array.isArray(server.args) ? server.args.join('\n') : '';
     return '' +
-      '<h2>' + (recipe ? 'Добавить: ' + esc(recipe.name) : isEdit ? 'Изменить MCP' : 'Добавить MCP') + '</h2>' +
+      '<h2>' + esc(recipe ? fill(ui.mcpRecipeAddNamed, { name: recipe.name }) : isEdit ? ui.mcpRecipeEdit : ui.mcpAdd) + '</h2>' +
       '<p class="about">' + (recipe
         ? 'Команда, транспорт и несекретные настройки уже подставлены рецептом. Заполни ключи — если они нужны.'
         : 'Адрес и способ входа сервер обычно рассказывает сам. Ручные endpoints нужны только упрямым.') + '</p>' +
@@ -704,17 +716,20 @@
     node.className = 'recipe-card';
     node.dataset.recipe = recipe.id;
     const keys = recipe.secrets.length === 0
-      ? 'без ключей'
+      ? ui.mcpRecipeNoKeys
       : recipe.secretKind === 'header'
-        ? 'попросит ключ'
-        : 'попросит ' + recipe.secrets.length + ' ' + plural(recipe.secrets.length, 'ключ', 'ключа', 'ключей');
+        ? ui.mcpRecipeHeaderKey
+        : fill(ui.mcpRecipeKeys, {
+            n: recipe.secrets.length,
+            word: plural(recipe.secrets.length, ui.keysWord),
+          });
     node.innerHTML =
       '<div class="recipe-head">' + badge(recipe.category) + badge(keys, recipe.secrets.length ? 'wait' : 'on') + '</div>' +
       '<h3>' + esc(recipe.name) + '</h3>' +
       '<p class="recipe-when">' + esc(recipe.when) + '</p>' +
       (recipe.caveat ? '<p class="recipe-caveat">' + esc(recipe.caveat) + '</p>' : '') +
       '<div class="recipe-foot"><code>' + esc(transportLabel(recipe.transport)) + '</code>' +
-        '<button type="button" data-recipe="' + esc(recipe.id) + '">Добавить</button></div>';
+        '<button type="button" data-recipe="' + esc(recipe.id) + '">' + esc(ui.mcpRecipeAdd) + '</button></div>';
     node.querySelector('[data-recipe]').addEventListener('click', (event) => openRecipe(recipe.id, event.currentTarget));
     return node;
   }
@@ -737,7 +752,7 @@
     try {
       const data = await api('/panel/mcp/recipes');
       if (data.rule) el('mcp-rule').textContent = data.rule;
-      if (data.checkedAt) el('mcp-checked').textContent = 'проверено ' + data.checkedAt;
+      if (data.checkedAt) el('mcp-checked').textContent = fill(ui.mcpChecked, { date: data.checkedAt });
       if (data.skipped) {
         el('mcp-skipped').textContent = data.skipped;
         el('mcp-skipped').hidden = false;
