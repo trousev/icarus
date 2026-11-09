@@ -18,7 +18,8 @@ test('спецификация уровня разбирается из стро
   );
   assert.deepEqual(
     parseTierSpec('deepinfra/deepseek-ai/DeepSeek-V4.1-Flash', { provider: 'x', id: 'y', thinking: 'off' }),
-    { provider: 'deepinfra', id: 'deepseek-ai/DeepSeek-V4.1-Flash', thinking: 'off' },
+    { provider: 'deepinfra', id: 'deepseek-ai/DeepSeek-V4.1-Flash', thinking: 'low' },
+    'без явного уровня размышления не выключаем: off — корень DSML-бага',
   );
   assert.deepEqual(parseTierSpec('мусор', { provider: 'deepinfra', id: 'fallback', thinking: 'off' }), {
     provider: 'deepinfra',

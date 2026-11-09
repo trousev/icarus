@@ -24,7 +24,7 @@ export function makeConfig(overrides: Partial<IcarusConfig> = {}): IcarusConfig 
     panel: { userHeader: PANEL_USER_HEADER },
     docker: { image: 'icarus-user:dev', prefix: 'icarus-user', socket: null },
     models: [
-      { provider: PROVIDER, id: MODEL_ID, thinking: 'off', tier: 'fast' },
+      { provider: PROVIDER, id: MODEL_ID, thinking: 'low', tier: 'fast' },
       { provider: PROVIDER, id: MODEL_ID, thinking: 'medium', tier: 'strong' },
     ],
     auth: {},

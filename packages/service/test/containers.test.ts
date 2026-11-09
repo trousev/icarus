@@ -44,7 +44,7 @@ function spec(overrides: Partial<IcarusConfig> = {}, user = probe()): string {
 
 test('уровни моделей и личность уезжают в окружение, а ключей панели там нет', () => {
   const env = containerEnv(config, probe());
-  assert.equal(env.ICARUS_MODEL_FAST, 'deepinfra/deepseek-ai/DeepSeek-V4.1-Flash:off');
+  assert.equal(env.ICARUS_MODEL_FAST, 'deepinfra/deepseek-ai/DeepSeek-V4.1-Flash:low');
   assert.equal(env.ICARUS_MODEL_STRONG, 'deepinfra/deepseek-ai/DeepSeek-V4.1-Flash:medium');
   assert.equal(env.ICARUS_USER_ID, 'probe');
   assert.equal(env.ICARUS_URL, config.url, 'адрес панели Икар называет человеку в чате');
@@ -58,6 +58,20 @@ test('уровни моделей и личность уезжают в окру
 
   const own = makeConfig({ env: { ICARUS_MODEL_FAST: 'своё' } });
   assert.equal(containerEnv(own, probe()).ICARUS_MODEL_FAST, 'своё', 'явное окружение важнее');
+});
+
+test('без thinking в конфиге размышления не выключаются: fast и vision уходят на low', () => {
+  const bare = makeConfig({
+    dataDir: '/data',
+    models: [
+      { provider: 'deepinfra', id: 'deepseek-ai/DeepSeek-V4.1-Flash', tier: 'fast' },
+      { provider: 'deepinfra', id: 'deepseek-ai/DeepSeek-V4.1-Flash', tier: 'vision' },
+    ],
+  });
+
+  const env = containerEnv(bare, probe());
+  assert.equal(env.ICARUS_MODEL_FAST, 'deepinfra/deepseek-ai/DeepSeek-V4.1-Flash:low');
+  assert.equal(env.ICARUS_MODEL_VISION, 'deepinfra/deepseek-ai/DeepSeek-V4.1-Flash:low');
 });
 
 test('язык из профиля человека задаёт ICARUS_LANGUAGE, и он входит в отпечаток', () => {
@@ -147,7 +161,7 @@ test('стек: контейнер человека — образ, маунты
     'приватный workspace монтируется только для чтения',
   );
   assert.ok(service.volumes.includes('/data/shared:/workspaces/.icarus/shared-memory'));
-  assert.equal(service.environment.ICARUS_MODEL_FAST, 'deepinfra/deepseek-ai/DeepSeek-V4.1-Flash:off');
+  assert.equal(service.environment.ICARUS_MODEL_FAST, 'deepinfra/deepseek-ai/DeepSeek-V4.1-Flash:low');
   assert.equal(service.environment.ICARUS_USER_ID, 'probe');
 });
 

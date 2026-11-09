@@ -7,7 +7,8 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { PiSession, modelEnv } from '../src/sessions/pi-session.ts';
+import { PiSession } from '../src/sessions/pi-session.ts';
+import { modelTierEnv } from '../src/docker/spec.ts';
 import type { Spawner } from '../src/sessions/rpc-client.ts';
 import { makeConfig, probe } from './fixtures.ts';
 
@@ -76,19 +77,19 @@ test('прерывание чистит очередь, шлёт abort и ждё
 
 test('модели уровней уезжают в контейнер: субагентам есть кого брать', () => {
   const config = makeConfig();
-  assert.deepEqual(modelEnv(config), {
-    ICARUS_MODEL_FAST: 'deepinfra/deepseek-ai/DeepSeek-V4.1-Flash',
-    ICARUS_MODEL_STRONG: 'deepinfra/deepseek-ai/DeepSeek-V4.1-Flash',
+  assert.deepEqual(modelTierEnv(config), {
+    ICARUS_MODEL_FAST: 'deepinfra/deepseek-ai/DeepSeek-V4.1-Flash:low',
+    ICARUS_MODEL_STRONG: 'deepinfra/deepseek-ai/DeepSeek-V4.1-Flash:medium',
   });
-  assert.deepEqual(modelEnv({ ...config, models: [{ provider: 'x', id: 'y' }] }), {});
+  assert.deepEqual(modelTierEnv({ ...config, models: [{ provider: 'x', id: 'y' }] }), {});
 });
 
 test('в бою имя модели приходит из конфига, а не из окружения хоста', async () => {
   const envs: Array<Record<string, string>> = [];
   const session = makeSession(stubSpawner(envs));
   session.dispose();
-  assert.equal(envs[0]?.ICARUS_MODEL_FAST, 'deepinfra/deepseek-ai/DeepSeek-V4.1-Flash');
-  assert.equal(envs[0]?.ICARUS_MODEL_STRONG, 'deepinfra/deepseek-ai/DeepSeek-V4.1-Flash');
+  assert.equal(envs[0]?.ICARUS_MODEL_FAST, 'deepinfra/deepseek-ai/DeepSeek-V4.1-Flash:low');
+  assert.equal(envs[0]?.ICARUS_MODEL_STRONG, 'deepinfra/deepseek-ai/DeepSeek-V4.1-Flash:medium');
   assert.ok(envs[0]?.ICARUS_CHANNEL, 'канал разговора тоже передаётся');
   assert.match(envs[0]?.ICARUS_SEARCH_URL ?? '', /^http:\/\/icarus:\d+$/, 'адрес роутера задан и не требует токена');
 });

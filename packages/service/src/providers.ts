@@ -77,6 +77,21 @@ const DEEPINFRA_DEFAULTS: ModelMeta = {
   maxTokens: 16384,
 };
 
+/**
+ * Уровни pi → значения reasoning_effort DeepInfra. У pi свой набор уровней, у хоста
+ * свой; `off` — это не отсутствие поля, а явное «none»: иначе DeepInfra применит
+ * умолчание модели и размышления могут остаться включёнными.
+ */
+const DEEPINFRA_THINKING_LEVELS = {
+  off: 'none',
+  minimal: 'minimal',
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  xhigh: 'xhigh',
+  max: 'max',
+} as const;
+
 /** Описание одной модели DeepInfra в формате models.json. */
 function deepInfraModel(id: string): Record<string, unknown> {
   const meta: ModelMeta = { ...DEEPINFRA_DEFAULTS, ...(DEEPINFRA_CATALOG[id] ?? {}) };
@@ -87,6 +102,7 @@ function deepInfraModel(id: string): Record<string, unknown> {
     input: meta.input,
     contextWindow: meta.contextWindow,
     maxTokens: meta.maxTokens,
+    ...(meta.reasoning ? { thinkingLevelMap: DEEPINFRA_THINKING_LEVELS } : {}),
     ...(meta.cost ? { cost: meta.cost } : {}),
   };
 }
@@ -105,8 +121,11 @@ const CUSTOM_PROVIDERS: Record<string, (models: ModelConfig[]) => Record<string,
     compat: {
       // DeepSeek на DeepInfra не принимает роль developer — системный промпт идёт как system.
       supportsDeveloperRole: false,
-      // Размышления приезжают в reasoning_content, а запрос несёт thinking/reasoning_effort.
-      thinkingFormat: 'deepseek',
+      // DeepInfra знает reasoning_effort, но не поле thinking:{type} из DeepSeek API:
+      // второе молча игнорируется. Формат openai шлёт ровно reasoning_effort —
+      // в том числе reasoning_effort: "none", когда размышления выключены.
+      thinkingFormat: 'openai',
+      supportsReasoningEffort: true,
     },
     models: [...new Set(models.map((model) => model.id))].map((id) => deepInfraModel(id)),
   }),

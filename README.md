@@ -115,7 +115,7 @@ panel:                          # панель управления: кого п
   # devUser: probe              # локальный запуск без прокси; на проде не задавать
 
 models:                         # общие модели: tier раздаёт эскалация
-  - { provider: deepinfra, id: deepseek-ai/DeepSeek-V4.1-Flash, thinking: off, tier: fast }
+  - { provider: deepinfra, id: deepseek-ai/DeepSeek-V4.1-Flash, thinking: low, tier: fast }
 # auth: { deepinfra: env:DEEPINFRA_API_KEY }   # обычно не нужно: ключ подхватится из .env
 env: { TZ: Europe/Dublin }      # часовой пояс человека: по нему Икар считает дату и датирует память
 # кастомных маунтов нет: контейнер видит только /workspaces и установку Maple

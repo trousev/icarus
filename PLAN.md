@@ -292,7 +292,7 @@ assistant…»). Значит, переопределение промпта н�
 | Агент полез руками: `bash`, правки файлов, MCP | `strong` (`deepseek-ai/DeepSeek-V4.1-Flash`, thinking из конфига) |
 | Поиск и чтение — разведка: до трёх тулов ход остаётся на `fast`, дальше это уже работа | `strong` |
 | Длинная реплика или явная просьба о работе | `strong` |
-| Всё остальное | `fast` (`deepseek-ai/DeepSeek-V4.1-Flash`, thinking off) |
+| Всё остальное | `fast` (`deepseek-ai/DeepSeek-V4.1-Flash`, thinking low) |
 
 Уровни не зашиты в код: сервис собирает их из `models` в конфиге человека и отдаёт контейнеру переменными
 `ICARUS_MODEL_FAST` / `_STRONG` / `_VISION` в виде `provider/model:thinking`. Наружу по-прежнему одна модель —
@@ -356,8 +356,9 @@ assistant…»). Значит, переопределение промпта н�
 OpenAI-совместимый хост, но во встроенном каталоге pi его нет: провайдер описывается в
 `~/.pi/agent/models.json`, который сервис собирает из `models` (см. `packages/service/src/providers.ts`).
 Там же живут `baseUrl`, протокол `openai-completions` и `compat` для DeepSeek: `supportsDeveloperRole: false`
-(роль `developer` эти модели не принимают, системный промпт идёт как `system`) и
-`thinkingFormat: "deepseek"` (размышления приезжают в `reasoning_content`). Ключ — `DEEPINFRA_API_KEY`,
+(роль `developer` эти модели не принимают, системный промпт идёт как `system`) и `thinkingFormat: "openai"`
+(DeepInfra знает `reasoning_effort`, а поле `thinking: {type}` из DeepSeek API молча игнорирует). Уровни pi
+описаны в `thinkingLevelMap`: `off → none`, остальные — как есть. Ключ — `DEEPINFRA_API_KEY`,
 он же попадает в `auth.json` через `PROVIDER_ENV`.
 
 Вместе с моделями пришлось переехать и поиску, потому что серверного веб-поиска у DeepInfra нет: тул

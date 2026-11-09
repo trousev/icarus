@@ -33,7 +33,7 @@ export function oneShotArgs(model: ModelConfig, prompt: string, systemPrompt: st
     '--model',
     `${model.provider}/${model.id}`,
     '--thinking',
-    model.thinking ?? 'off',
+    model.thinking ?? 'low',
     '--system-prompt',
     systemPrompt,
     '--no-tools',
