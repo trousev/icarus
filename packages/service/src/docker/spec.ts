@@ -15,7 +15,7 @@ export function modelTierEnv(config: IcarusConfig): Record<string, string> {
   const env: Record<string, string> = {};
   for (const model of config.models) {
     if (!model.tier) continue;
-    env[`ICARUS_MODEL_${model.tier.toUpperCase()}`] = `${model.provider}/${model.id}:${model.thinking ?? 'off'}`;
+    env[`ICARUS_MODEL_${model.tier.toUpperCase()}`] = `${model.provider}/${model.id}:${model.thinking ?? 'low'}`;
   }
   return env;
 }

@@ -13,14 +13,16 @@ export function parseTierSpec(value: string | undefined, fallback: TierSpec): Ti
   const [provider, ...rest] = (path ?? "").split("/");
   const id = rest.join("/");
   if (!provider || !id) return fallback;
-  return { provider, id, thinking: thinking ?? "off" };
+  // Без явного уровня не выключаем размышления: на off модель теряет канал reasoning
+  // и пишет вызовы инструментов разметкой в видимый ответ.
+  return { provider, id, thinking: thinking ?? "low" };
 }
 
 export const TIERS: Record<Tier, TierSpec> = {
   fast: parseTierSpec(process.env.ICARUS_MODEL_FAST, {
     provider: "deepinfra",
     id: "deepseek-ai/DeepSeek-V4.1-Flash",
-    thinking: "off",
+    thinking: "low",
   }),
   strong: parseTierSpec(process.env.ICARUS_MODEL_STRONG, {
     provider: "deepinfra",
@@ -30,7 +32,7 @@ export const TIERS: Record<Tier, TierSpec> = {
   vision: parseTierSpec(process.env.ICARUS_MODEL_VISION, {
     provider: "deepinfra",
     id: "deepseek-ai/DeepSeek-V4.1-Flash",
-    thinking: "off",
+    thinking: "low",
   }),
 };
 
@@ -100,8 +102,8 @@ export function chooseTier(input: TierInput): Tier {
  * pi поднимает неподдерживаемый уровень до ближайшего доступного: если в каталоге
  * модели у `medium` стоит null, `thinking: medium` из конфига молча превратился бы в
  * `high`. Мы отдаём модели ровно тот уровень, который выбрал человек, вместо того
- * чтобы гадать по каталогу. `off` не трогаем: там pi выключает размышления отдельной
- * веткой, и подменять его нечем.
+ * чтобы гадать по каталогу. `off` не трогаем: это явное выключение размышлений,
+ * и подменять его уровнем нельзя.
  */
 export function unblockThinking<T extends object>(model: T, level: string): T {
   const map = (model as { thinkingLevelMap?: Record<string, string | null> }).thinkingLevelMap;

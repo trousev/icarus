@@ -93,7 +93,7 @@ dataDir: ~/icarus-data
 docker: { image: icarus-user:dev, socket: unix:///var/run/docker.sock, network: icarus }
 
 models:
-  - { provider: deepinfra, id: deepseek-ai/DeepSeek-V4.1-Flash, thinking: off,    tier: fast }
+  - { provider: deepinfra, id: deepseek-ai/DeepSeek-V4.1-Flash, thinking: low,    tier: fast }
   - { provider: deepinfra, id: deepseek-ai/DeepSeek-V4.1-Flash, thinking: medium, tier: strong }
 auth: { deepinfra: env:DEEPINFRA_API_KEY }
 # кастомных маунтов нет: контейнер видит только /workspaces и установку Maple

@@ -5,6 +5,7 @@ import { channelForConversation, sessionIdFor } from './identity.ts';
 import { appendChatSession, findChatRecord, refreshChatTitle, sessionIdOf } from './chats.ts';
 import { log } from '../log.ts';
 import { SERVICE_NAME } from '../docker/compose.ts';
+import { modelTierEnv } from '../docker/spec.ts';
 import {
   CONTAINER_PATHS,
   containerWorkspace,
@@ -59,7 +60,7 @@ export function piArgsFor(model: ModelConfig, sessionId: string, workspace: stri
     '--model',
     `${model.provider}/${model.id}`,
     '--thinking',
-    model.thinking ?? 'off',
+    model.thinking ?? 'low',
     ...(isPrivate
       ? [
           '--no-extensions',
@@ -70,24 +71,6 @@ export function piArgsFor(model: ModelConfig, sessionId: string, workspace: stri
         ]
       : []),
   ];
-}
-
-/**
- * Модели по уровням — в окружение контейнера: расширение субагентов берёт оттуда
- * подсказку, какой моделью вести ребёнка. Уровни живут в конфиге, и дублировать их
- * в env вручную незачем: здесь они всегда совпадают с тем, что раздаёт эскалация.
- */
-export function modelEnv(config: IcarusConfig): Record<string, string> {
-  const env: Record<string, string> = {};
-  const pick = (tier: 'fast' | 'strong'): string | null => {
-    const model = config.models.find((item) => item.tier === tier);
-    return model ? `${model.provider}/${model.id}` : null;
-  };
-  const fast = pick('fast');
-  if (fast) env.ICARUS_MODEL_FAST = fast;
-  const strong = pick('strong');
-  if (strong) env.ICARUS_MODEL_STRONG = strong;
-  return env;
 }
 
 /**
@@ -187,7 +170,7 @@ export class PiSession {
         // Поисковый роутер живёт в сервисе, а pi — в контейнере на той же
         // docker-сети: имя compose-сервиса резолвится, токен не нужен.
         ICARUS_SEARCH_URL: `http://${SERVICE_NAME}:${config.port}`,
-        ...modelEnv(config),
+        ...modelTierEnv(config),
         // Ключи из .env и настроек панели: контейнер получил их при создании, но
         // сохранённый в панели ключ должен доехать до следующего разговора без
         // пересоздания контейнера. Здесь они перекрывают окружение контейнера.
