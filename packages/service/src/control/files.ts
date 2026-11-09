@@ -397,7 +397,7 @@ export function rawWorkspaceFile(root: string, relative: string): RawWorkspaceFi
 }
 
 /** Имя для `content-disposition`: ASCII-запасной вариант и честный UTF-8. */
-function attachmentName(name: string): string {
+export function downloadHeader(name: string): string {
   const fallback = name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
   const encoded = encodeURIComponent(name).replace(/['()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
   return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
@@ -480,7 +480,7 @@ export async function handleWorkspaceFilesApi(
         // SVG — это документ: открытый напрямую, он мог бы исполнить скрипт в
         // origin панели. Sandbox оставляет картинке только картинку.
         ...(inline ? { 'content-security-policy': 'sandbox' } : {}),
-        ...(inline ? {} : { 'content-disposition': attachmentName(raw.name) }),
+        ...(inline ? {} : { 'content-disposition': downloadHeader(raw.name) }),
       });
       fs.createReadStream(raw.file)
         .on('error', (error) => {

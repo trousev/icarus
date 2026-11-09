@@ -3,6 +3,10 @@
 // Bot API — обычный JSON по https, поэтому клиент маленький и без зависимостей.
 // Всё, что нужно боту, — четыре метода; остальное (вебхук, TLS, очередь) Telegram
 // берёт на себя: сервису не нужен ни домен, ни сертификат.
+//
+// Файлы — единственное исключение из «JSON по https»: их Bot API принимает только
+// multipart-формой, полем `photo` или `document`. Поэтому здесь два отдельных метода
+// и общий `upload`, а не строковый параметр: строкой картинку в Telegram не отправишь.
 import { log, redact } from '../log.ts';
 
 export type TelegramUser = {
@@ -113,6 +117,45 @@ export const TELEGRAM_API_BASE = 'https://api.telegram.org';
 export const TELEGRAM_TIMEOUT_MS = 30_000;
 /** Предел Bot API на скачивание: файл больше 20 МБ он не отдаёт вовсе. */
 export const TELEGRAM_FILE_LIMIT = 20 * 1024 * 1024;
+/** Предел Bot API на отправку фотографии: больше — только документом. */
+export const TELEGRAM_PHOTO_LIMIT = 10 * 1024 * 1024;
+/** Предел Bot API на отправку документа (файла) любого вида. */
+export const TELEGRAM_UPLOAD_LIMIT = 50 * 1024 * 1024;
+/** Подпись под фото/файлом короче сообщения: больше Telegram не примет. */
+export const CAPTION_LIMIT = 1024;
+/** Отправка файла дольше текста: запас на то, чтобы 10 МБ уехали по сети. */
+export const UPLOAD_TIMEOUT_MS = 120_000;
+
+/** Файл, который едет в Telegram: байты плюс человеческое имя и тип. */
+export type UploadFile = {
+  bytes: Buffer;
+  /** Имя для человека: по нему Telegram различает тип документа. */
+  name: string;
+  mimeType: string;
+};
+
+/** Подпись и место для файла: у вложения текст лежит в `caption`, а не в `text`. */
+export type UploadOptions = {
+  caption?: string;
+  threadId?: number | null;
+  parseMode?: ParseMode;
+};
+
+/** Файл не влезает в предел Bot API: отправлять не пробуем, говорим человеку. */
+export class UploadTooBigError extends Error {
+  /** Сколько мегабайт Telegram согласен принять этим методом. */
+  readonly limit: number;
+
+  constructor(name: string, bytes: number, limit: number) {
+    super(`«${name}» весит ${megabytes(bytes)} МБ — Telegram принимает не больше ${megabytes(limit)} МБ`);
+    this.name = 'UploadTooBigError';
+    this.limit = limit;
+  }
+}
+
+function megabytes(bytes: number): number {
+  return Math.max(1, Math.round(bytes / (1024 * 1024)));
+}
 
 /** Ошибка Bot API: `{ok: false, error_code, description}`. */
 export class TelegramError extends Error {
@@ -137,7 +180,15 @@ export type TelegramApiOptions = {
   sleep?: (ms: number) => Promise<void>;
 };
 
-type CallOptions = { signal?: AbortSignal; timeoutMs?: number };
+type CallOptions = {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  /**
+   * Готовое тело multipart. Параметры в `params` тогда не уезжают: файл и поля
+   * лежат в самой форме, а `content-type` с boundary fetch ставит сам.
+   */
+  multipart?: FormData;
+};
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -171,17 +222,26 @@ export class TelegramApi {
         error_code?: number;
         parameters?: { retry_after?: number };
       };
+      let response: Response;
       try {
-        const response = await this.request(`${this.baseUrl}/bot${this.token}/${method}`, {
+        response = await this.request(`${this.baseUrl}/bot${this.token}/${method}`, {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(params),
+          // Форма сама несёт boundary в content-type: свой заголовок её бы сломал.
+          ...(options.multipart
+            ? { body: options.multipart }
+            : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(params) }),
           signal,
         });
-        payload = (await response.json()) as typeof payload;
       } catch (error) {
         // Сеть и таймауты — не ответ Bot API: пусть решает вызывающий (опрос повторит).
         throw error instanceof Error ? error : new Error(String(error));
+      }
+      try {
+        payload = (await response.json()) as typeof payload;
+      } catch {
+        // Не JSON: так отвечает прокси или балансировщик (HTML на 413), а не Bot API.
+        // Статус при этом содержательный — отдаём его, а не «не разобрался ответ».
+        throw new TelegramError(`ответ не разобрался (HTTP ${response.status})`, response.status);
       }
 
       if (payload.ok === true) return payload.result as T;
@@ -282,6 +342,60 @@ export class TelegramApi {
         reply_parameters: { message_id: anchorMessageId },
       });
     }
+  }
+
+  /**
+   * Фотография в чат: картинку Telegram показывает в пузыре и сжимает сам.
+   * Предел — 10 МБ; всё, что больше, честнее отправить документом (см. outgoing.ts).
+   */
+  sendPhoto(chatId: number, file: UploadFile, options: UploadOptions = {}): Promise<SentMessage> {
+    return this.upload('sendPhoto', 'photo', chatId, file, TELEGRAM_PHOTO_LIMIT, options);
+  }
+
+  /**
+   * Документ в чат: файл как файл, с человеческим именем в шапке. Так уезжают
+   * PDF, архивы, длинные картинки и анимированные GIF — Telegram их не пережимает.
+   */
+  sendDocument(chatId: number, file: UploadFile, options: UploadOptions = {}): Promise<SentMessage> {
+    return this.upload('sendDocument', 'document', chatId, file, TELEGRAM_UPLOAD_LIMIT, options);
+  }
+
+  /**
+   * Отправка файла: форма собирается здесь, а не у вызывающего, — иначе каждый
+   * вызывающий повторял бы лимиты, подпись и проверку топика.
+   */
+  private async upload(
+    method: 'sendPhoto' | 'sendDocument',
+    field: 'photo' | 'document',
+    chatId: number,
+    file: UploadFile,
+    limit: number,
+    options: UploadOptions,
+  ): Promise<SentMessage> {
+    // Проверяем до сети: 10 МБ по HTTP — это долго, а отказ всё равно придёт.
+    if (!file.name.trim()) throw new Error('у файла нет имени: Telegram не поймёт, что это');
+    if (file.bytes.length === 0) throw new Error(`файл «${file.name}» пустой`);
+    if (file.bytes.length > limit) throw new UploadTooBigError(file.name, file.bytes.length, limit);
+
+    const form = new FormData();
+    form.append('chat_id', String(chatId));
+    // Buffer — это Uint8Array, но типы Blob ждут ArrayBuffer, а у Buffer он может
+    // быть Shared: на деле байты ложатся в тело запроса как есть, без копии.
+    form.append(field, new Blob([file.bytes as unknown as Uint8Array<ArrayBuffer>], { type: file.mimeType }), file.name);
+    if (options.caption) form.append('caption', options.caption.slice(0, CAPTION_LIMIT));
+    if (options.parseMode) form.append('parse_mode', options.parseMode);
+    if (options.threadId) form.append('message_thread_id', String(options.threadId));
+
+    const sent = await this.call<SentMessage>(method, {}, { multipart: form, timeoutMs: UPLOAD_TIMEOUT_MS });
+    if (options.threadId && !landedInThread(sent, options.threadId)) {
+      log.warn('телеграм: файл лег не в топик', {
+        chatId,
+        threadId: options.threadId,
+        method,
+        name: file.name,
+      });
+    }
+    return sent;
   }
 
   /** Правка сообщения. «Не изменилось» — не ошибка: значит, показывать нечего. */

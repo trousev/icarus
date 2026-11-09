@@ -84,6 +84,30 @@ test('опасные схемы не линкуются', () => {
   assert.equal(inline('data:text/html,привет'), 'data:text/html,привет');
 });
 
+test('локальный файл из ответа — ссылка на скачивание, а не сырой markdown', () => {
+  const href = '/panel/api/chat/file?path=' + encodeURIComponent('/workspaces/talk/смета.pdf');
+  assert.equal(inline('[смета за март](/workspaces/talk/смета.pdf)'), `<a class="md-file" href="${href}" download>📎 смета за март</a>`);
+  // Пробел в имени файла — не повод оставить ссылку текстом.
+  const spaced = '/panel/api/chat/file?path=' + encodeURIComponent('/workspaces/talk/смета за март.pdf');
+  assert.equal(
+    inline('[смета](/workspaces/talk/смета за март.pdf)'),
+    `<a class="md-file" href="${spaced}" download>📎 смета</a>`,
+  );
+  // Чужой путь файлом не становится: сервер его всё равно не отдаст, но и
+  // притворяться ссылкой незачем — остаётся текстом, как раньше.
+  assert.equal(inline('[что-то](/etc/passwd)'), '[что-то](/etc/passwd)');
+  // А внешняя ссылка по-прежнему открывается в новой вкладке.
+  assert.equal(
+    inline('[сайт](https://example.com)'),
+    '<a href="https://example.com" target="_blank" rel="noopener noreferrer">сайт</a>',
+  );
+  // Заголовок ссылки — не часть адреса.
+  assert.equal(
+    inline('[сайт](https://example.com "Example")'),
+    '<a href="https://example.com" target="_blank" rel="noopener noreferrer">сайт</a>',
+  );
+});
+
 test('реплика человека: HTML экранируется, а адрес всё равно ссылка', () => {
   // У реплики нет markdown — только переводы строк и ссылки.
   assert.equal(

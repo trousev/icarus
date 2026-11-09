@@ -10,7 +10,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
-  CONTAINER_HOME,
   CONTAINER_INCOMING,
   DEFAULT_WORKSPACE,
   findUser,
@@ -18,7 +17,9 @@ import {
   type IcarusConfig,
   type UserConfig,
 } from '../config.ts';
+import { isRasterImage, localFileOf } from '../local-files.ts';
 import { findWorkspace } from '../workspaces.ts';
+import { downloadHeader } from './files.ts';
 import { readJsonBody } from '../http/openai.ts';
 import { errorBody } from '../http/sse.ts';
 import { titleFromText } from '../http/title.ts';
@@ -357,61 +358,33 @@ function retitleChat(
   return { ...chat, title };
 }
 
-const IMAGE_TYPES: Record<string, string> = {
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.bmp': 'image/bmp',
-};
-
 /**
  * Картинка по пути, который модель написала в markdown. Наружу отдаём только
  * картинки из вложений и рабочих папок человека: оба каталога уже смонтированы
  * в контейнер. Всё остальное — 404, а не «почитай хост».
+ *
+ * Путь разбирает localFileOf — там же, где его разбирает Telegram: оба канала
+ * должны показывать человеку одно и то же.
  */
 export function chatImageFile(
   config: IcarusConfig,
   user: UserConfig,
   raw: unknown,
 ): { file: string; type: string } | null {
-  if (typeof raw !== 'string') return null;
-  let relative = raw.trim();
-  if (!relative || relative.includes('\u0000')) return null;
-  if (relative.startsWith('file://')) relative = relative.slice('file://'.length);
-  // MCP-сервер отдаёт путь в markdown закодированным (пробелы в имени папки), а
-  // %2e%2e после раскодирования всё равно упрётся в проверку «..» ниже.
-  if (/%[0-9a-f]{2}/i.test(relative)) {
-    try {
-      relative = decodeURIComponent(relative);
-    } catch {
-      return null;
-    }
-  }
-  // Служебный каталог снимаем первым: после общего '/workspace/' от него осталось бы
-  // '.icarus/incoming/…', и ни incoming/, ни workspaces/ уже не совпали бы.
-  if (relative.startsWith(`${CONTAINER_HOME}/`)) relative = relative.slice(CONTAINER_HOME.length + 1);
-  else if (relative.startsWith('/workspace/')) relative = relative.slice('/workspace/'.length);
-  else if (relative.startsWith('workspace/')) relative = relative.slice('workspace/'.length);
-  else if (relative.startsWith('/')) relative = relative.slice(1);
+  const found = localFileOf(config, user, raw);
+  return found !== null && isRasterImage(found.type) ? found : null;
+}
 
-  const paths = userPaths(config, user);
-  let root = paths.incoming;
-  if (relative.startsWith('incoming/')) relative = relative.slice('incoming/'.length);
-  // Файлы, которые агент создал сам (графики и что угодно ещё), лежат в его
-  // workspace: рисовать их в чате — единственный способ донести картинку до человека.
-  else if (relative.startsWith('workspaces/')) {
-    root = paths.workspaces;
-    relative = relative.slice('workspaces/'.length);
-  }
-
-  if (!relative || relative.includes('..')) return null;
-  const full = path.resolve(root, relative);
-  if (!full.startsWith(path.resolve(root) + path.sep)) return null;
-  const type = IMAGE_TYPES[path.extname(full).toLowerCase()];
-  if (!type || !fs.existsSync(full) || !fs.statSync(full).isFile()) return null;
-  return { file: full, type };
+/**
+ * Любой файл по пути из markdown: панель отдаёт его ссылкой на скачивание.
+ * Тот же localFileOf, что и у картинки, — но без ограничения «только картинка».
+ */
+export function chatAttachmentFile(
+  config: IcarusConfig,
+  user: UserConfig,
+  raw: unknown,
+): { file: string; type: string } | null {
+  return localFileOf(config, user, raw);
 }
 
 type SessionDigest = {
@@ -1132,6 +1105,25 @@ export async function handleChatApi(
       }
       res.writeHead(200, { 'content-type': image.type, 'cache-control': 'private, max-age=300' });
       fs.createReadStream(image.file).pipe(res);
+      return true;
+    }
+
+    // Файл из ответа агента: не картинку он рисует ссылкой, и по клику человек
+    // должен получить его, а не 404 от статики. Не картинку отдаём скачиванием:
+    // HTML из ответа модели, открытый в origin панели, — это чужая страница.
+    if (pathname === '/panel/api/chat/file' && req.method === 'GET') {
+      const file = chatAttachmentFile(ctx.config, user, url.searchParams.get('path'));
+      if (!file) {
+        json(res, 404, errorBody('файл не найден или недоступен'));
+        return true;
+      }
+      res.writeHead(200, {
+        'content-type': 'application/octet-stream',
+        'content-disposition': downloadHeader(path.basename(file.file)),
+        'cache-control': 'private, max-age=60',
+        'x-content-type-options': 'nosniff',
+      });
+      fs.createReadStream(file.file).pipe(res);
       return true;
     }
 
