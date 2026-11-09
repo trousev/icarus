@@ -13,7 +13,9 @@ import {
   createWorkspace,
   deleteWorkspace,
   ensureWorkspaces,
+  findSelectableWorkspace,
   listWorkspaces,
+  selectableWorkspaces,
   slugify,
   WorkspaceError,
 } from '../src/workspaces.ts';
@@ -82,6 +84,26 @@ test('служебные workspace удалить нельзя', () => {
 
 test('пустое название не принимается', () => {
   assert.throws(() => createWorkspace(config, user, '   '), /название/);
+});
+
+test('выбор workspace для разговора: приватный не участвует, имя и slug равнозначны', () => {
+  createWorkspace(config, user, 'Работа');
+  const available = selectableWorkspaces(config, user);
+
+  assert.equal(available.some((item) => item.slug === 'rabota'), true);
+  assert.equal(available.some((item) => item.kind === 'private'), false, 'приватного в списке нет');
+
+  const bySlug = findSelectableWorkspace(config, user, 'rabota');
+  assert.ok(bySlug !== null && bySlug !== 'private');
+  assert.equal(bySlug.slug, 'rabota', 'по slug');
+
+  const byName = findSelectableWorkspace(config, user, ' работа ');
+  assert.ok(byName !== null && byName !== 'private');
+  assert.equal(byName.slug, 'rabota', 'по имени, без регистра');
+
+  assert.equal(findSelectableWorkspace(config, user, PRIVATE_WORKSPACE), 'private', 'запрет, а не опечатка');
+  assert.equal(findSelectableWorkspace(config, user, 'Приватный'), 'private');
+  assert.equal(findSelectableWorkspace(config, user, 'Луна'), null);
 });
 
 test('приватная сессия не получает инструментов записи, обычная — получает', () => {

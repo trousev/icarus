@@ -18,6 +18,7 @@ import {
   renderSessionsMap,
   sessionIdOf,
   setChatArchived,
+  setChatWorkspace,
   type ChatRecord,
 } from '../src/sessions/chats.ts';
 import { makeConfig, probe } from './fixtures.ts';
@@ -246,6 +247,32 @@ test('реестр пишет Telegram-разговор в chats.json, когд�
     assert.equal(chat?.channel, 'telegram');
     assert.equal(chat?.conversationId, 'telegram-42');
     assert.match(chat?.createdAt ?? '', /^\d{4}-\d{2}-\d{2}T/);
+  } finally {
+    registry.dispose();
+  }
+});
+
+test('переключение workspace: запись живёт в chats.json, а pi поднимается в новой папке', async () => {
+  const { config, user } = fixture();
+  // Разговора ещё нет: /workspace — законная первая команда в новом чате.
+  const chat = setChatWorkspace(config, user, 'telegram-42', 'rabota');
+  assert.equal(chat.workspace, 'rabota');
+  assert.equal(ensureChat(config, user, 'telegram-42', 'telegram').workspace, 'rabota', 'ensureChat папку не откатывает');
+
+  // Сессия поднимается уже в новой папке: старая ушла вместе с процессом.
+  let startedIn = '';
+  const session = { alive: true, generation: 0, busy: false, lastUsed: Date.now(), dispose: () => {} };
+  const registry = new SessionRegistry(config, {
+    ensureContainer: async () => 'stub',
+    createSession: (_config, _user, _conversation, _model, _container, _generation, workspace) => {
+      startedIn = workspace;
+      return session as never;
+    },
+  });
+
+  try {
+    await registry.acquire(user, 'telegram-42');
+    assert.equal(startedIn, 'rabota');
   } finally {
     registry.dispose();
   }

@@ -172,6 +172,34 @@ export function findWorkspace(config: IcarusConfig, user: UserConfig, slug: stri
   return listWorkspaces(config, user).find((item) => item.slug === slug);
 }
 
+/**
+ * Workspace'ы, которые человек может выбрать для разговора. Приватный сюда не
+ * входит: он только для чтения, и переключать в него разговор нельзя — не
+ * «спрятать из списка, но пустить по имени», а не участвует вообще.
+ */
+export function selectableWorkspaces(config: IcarusConfig, user: UserConfig): Workspace[] {
+  return listWorkspaces(config, user).filter((item) => item.kind !== 'private');
+}
+
+/**
+ * Workspace по тому, что человек написал: slug папки (`icarus`) или её имя
+ * (`Работа`). Отдельный ответ для приватного: это не опечатка, а запрет.
+ */
+export function findSelectableWorkspace(
+  config: IcarusConfig,
+  user: UserConfig,
+  name: string,
+): Workspace | 'private' | null {
+  const wanted = name.replace(/\s+/g, ' ').trim().toLowerCase();
+  if (!wanted) return null;
+  const matches = (item: Workspace): boolean =>
+    item.slug.toLowerCase() === wanted || item.name.toLowerCase() === wanted;
+
+  const items = listWorkspaces(config, user);
+  if (items.some((item) => item.kind === 'private' && matches(item))) return 'private';
+  return items.find((item) => item.kind !== 'private' && matches(item)) ?? null;
+}
+
 /** Workspace по умолчанию для входов без выбора (Telegram, старые записи). */
 export function defaultWorkspace(config: IcarusConfig, user: UserConfig): Workspace {
   return findWorkspace(config, user, DEFAULT_WORKSPACE) ?? {

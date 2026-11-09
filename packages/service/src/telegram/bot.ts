@@ -12,7 +12,7 @@
 //
 // Вложения разбираем те же, что и HTTP-вход: картинки уезжают модели нативно
 // и ложатся в incoming/, голосовые — расшифровкой (см. attachments.ts, speech.ts).
-import { findTelegramUser, userPaths, type IcarusConfig, type UserConfig } from '../config.ts';
+import { DEFAULT_WORKSPACE, findTelegramUser, userPaths, type IcarusConfig, type UserConfig } from '../config.ts';
 import { log, redact } from '../log.ts';
 import { buildPrompt } from '../prompt.ts';
 import { phraseForToolStart, phraseForToolEnd, subagentStatus } from '../reasoning.ts';
@@ -20,8 +20,14 @@ import { mcpReauthNotice } from '../mcp/reauth.ts';
 import { speechTranscriber, type Transcriber } from '../speech.ts';
 import type { SessionRegistry } from '../sessions/registry.ts';
 import type { PiSession } from '../sessions/pi-session.ts';
-import { lastTurnOf, recordTurn } from '../sessions/chats.ts';
+import { lastTurnOf, recordTurn, setChatWorkspace, workspaceForConversation } from '../sessions/chats.ts';
 import type { ChatChannel } from '../sessions/identity.ts';
+import {
+  findSelectableWorkspace,
+  listWorkspaces,
+  selectableWorkspaces,
+  type Workspace,
+} from '../workspaces.ts';
 import {
   clearText,
   compactText,
@@ -84,6 +90,7 @@ export const COMMANDS = [
   { command: 'stats', description: 'токены, деньги, контекст' },
   { command: 'clear', description: 'начать разговор с чистого листа' },
   { command: 'rename', description: 'переименовать текущий чат' },
+  { command: 'workspace', description: 'рабочая папка разговора' },
   { command: 'skills', description: 'скиллы и шаблоны' },
 ];
 
@@ -99,6 +106,7 @@ export const BOT_COMMANDS = new Set([
   'stats',
   'clear',
   'rename',
+  'workspace',
   'skills',
 ]);
 
@@ -121,11 +129,40 @@ export const HELP = [
   '/stats — сколько токенов и денег ушло и сколько занято в контексте',
   '/clear — начать разговор с чистого листа (память остаётся при мне)',
   '/rename <имя> — переименовать текущий чат',
+  '/workspace — рабочая папка этого разговора и куда ещё можно переключиться',
+  '/workspace <имя> — переключить разговор в другую папку',
   '/skills — что у меня есть сверх разговора: скиллы и шаблоны',
   '',
   'Ещё я понимаю фото и голосовые, помню прошлые разговоры и умею искать в интернете.',
   'Всё остальное — просто пиши словами.',
 ].join('\n');
+
+/**
+ * Приватный workspace в Telegram не выбирается: он только для чтения, и
+ * переключать в него разговор нельзя — ни списком, ни по имени.
+ */
+export const WORKSPACE_PRIVATE_REFUSED = 'В приватный workspace переключить нельзя: он только для чтения.';
+
+/**
+ * `/workspace` без имени: где разговор сейчас и какие папки есть. Имена — те же,
+ * что в панели: человек ищет «Работу», а не slug `rabota`.
+ */
+export function workspacesText(current: string, available: Workspace[]): string {
+  if (available.length === 0) return 'Переключать некуда: рабочих папок нет.';
+  return [`Сейчас: ${current}`, '', 'Доступны:', ...available.map((item) => item.name)].join('\n');
+}
+
+export function workspaceSwitched(name: string): string {
+  return `Переключил на «${name}».`;
+}
+
+export function workspaceUnknown(name: string): string {
+  return `Нет такого workspace: «${name}». /workspace — покажу, какие есть.`;
+}
+
+export function workspaceFailed(reason: string): string {
+  return `Не получилось переключить: ${reason}`;
+}
 
 /**
  * Ответ не доехал до топика. Говорим об этом в корне чата: в топике человек ждал бы
@@ -606,6 +643,8 @@ export class TelegramBot {
         return say(clearText(await this.registry.clear(user, conversationId)));
       case 'rename':
         return this.renameChat(message, user, command.args, route);
+      case 'workspace':
+        return this.selectWorkspace(message, user, command.args, route);
       case 'skills':
         return say(skillsText(await this.registry.commands(user, conversationId)));
       default:
@@ -885,6 +924,59 @@ export class TelegramBot {
 
     const outcome = await this.registry.rename(user, route.conversationId, name);
     await this.say(chatId, renameText(outcome), route.threadId, route.anchor);
+  }
+
+  /**
+   * `/workspace [имя]`: рабочая папка разговора. Без имени — текущая и список
+   * доступных, с именем — переключение. Выбор живёт в chats.json вместе с
+   * разговором: его видит панель, и он переживает перезапуск бота. Приватный
+   * workspace не участвует ни в списке, ни в переключении.
+   */
+  private async selectWorkspace(
+    message: TelegramMessage,
+    user: UserConfig,
+    argument: string,
+    route: Route,
+  ): Promise<void> {
+    const say = (text: string): Promise<void> => this.say(message.chat.id, text, route.threadId, route.anchor);
+
+    const slug = workspaceForConversation(this.config, user, route.conversationId) ?? DEFAULT_WORKSPACE;
+    const current = listWorkspaces(this.config, user).find((item) => item.slug === slug)?.name ?? slug;
+    // Имя с пробелами — обычное дело: «Работа над Атласом» человек пишет целиком.
+    const name = argument.replace(/\s+/g, ' ').trim();
+
+    if (name === '') {
+      await say(workspacesText(current, selectableWorkspaces(this.config, user)));
+      return;
+    }
+
+    const workspace = findSelectableWorkspace(this.config, user, name);
+    if (workspace === 'private') {
+      await say(WORKSPACE_PRIVATE_REFUSED);
+      return;
+    }
+    if (!workspace) {
+      await say(workspaceUnknown(name));
+      return;
+    }
+
+    try {
+      setChatWorkspace(this.config, user, route.conversationId, workspace.slug);
+    } catch (error) {
+      log.warn('телеграм: workspace не переключился', {
+        user: user.id,
+        conversation: route.conversationId,
+        error: String(error),
+      });
+      await say(workspaceFailed(error instanceof Error ? error.message : String(error)));
+      return;
+    }
+    log.info('телеграм: разговор переключён в другой workspace', {
+      user: user.id,
+      conversation: route.conversationId,
+      workspace: workspace.slug,
+    });
+    await say(workspaceSwitched(workspace.name));
   }
 
   /**
