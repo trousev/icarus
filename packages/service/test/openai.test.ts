@@ -81,6 +81,8 @@ test('контейнер монтирует память, сессии и реп
   assert.match(joined, /\/tools\/artifacts-mcp:\/opt\/icarus\/tools\/artifacts-mcp:ro/);
   // OPDS-сервер — рецепт из каталога: без маунта команда из рецепта не найдёт файл.
   assert.match(joined, /\/tools\/opds-mcp:\/opt\/icarus\/tools\/opds-mcp:ro/);
+  // Кинозал монтируется всегда: сервер может понадобиться и после сборки конфига.
+  assert.match(joined, /\/tools\/arr-mcp:\/opt\/icarus\/tools\/arr-mcp:ro/);
   assert.doesNotMatch(joined, /\/tools:\/opt\/icarus\/tools:ro/);
 });
 
