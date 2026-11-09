@@ -240,6 +240,19 @@ let searchTimer = 0;
 let pending = [];
 /** Workspace'ы человека и тот, в котором открыт текущий разговор. */
 let workspaces = [];
+/**
+ * Папки в меню слева. Свёрнутость и состав хранит сервер: меню должно выглядеть
+ * одинаково с любого устройства, а не только в этом браузере (в отличие от unread).
+ */
+let folders = [];
+/** Открыт ввод новой папки: строка рисуется прямо в списке, без модалки. */
+let folderDraft = false;
+/** id папки, которую переименовывают на месте. */
+let folderRenaming = null;
+/** Разговор, который сейчас тащат мышью: по нему подсвечиваем цель. */
+let draggingChatId = null;
+/** Открытое меню «Переместить в…»: одно на всю панель. */
+let chatMenu = null;
 let currentWorkspace = cfg.defaultWorkspace || 'talk';
 /** Папка нового чата по умолчанию: клик по «Новый чат» не тащит папку прошлого разговора. */
 const defaultWorkspace = currentWorkspace;
@@ -426,56 +439,373 @@ function showEmpty(show) {
   if (show) el('chat-messages').innerHTML = '';
 }
 
+/** «Входящие» — не папка в реестре, а всё, что осталось без полки. */
+const INBOX_FOLDER = { id: '', name: 'Входящие', collapsed: false };
+
+/** Одна строка списка: сам разговор, а кнопка «⋯» — рядом, не внутри кнопки. */
+function chatRowHtml(chat) {
+  // Точка одна и она старше видит занятость: жёлтая — ход идёт, зелёная — есть
+  // непрочитанный ответ. Разметка точки появляется, только когда она нужна, —
+  // иначе `gap` у flex-строки съедал бы место под пустую колонку.
+  const dot = busyChats.has(chat.id) ? 'busy' : unread.has(chat.id) ? 'unread' : '';
+  return (
+    '<div class="chat-row" data-id="' + esc(chat.id) + '">' +
+    '<button class="chat-item' +
+    (chat.id === currentId ? ' active' : '') +
+    (chat.readOnly ? ' read-only' : '') +
+    '" data-id="' + esc(chat.id) + '">' +
+    '<div class="chat-item-top">' +
+    (dot ? '<span class="chat-dot ' + dot + '"></span>' : '') +
+    '<span class="chat-item-title">' + esc(chat.title) + '</span>' +
+    (channelTag(chat) ? '<span class="chat-item-tag">' + esc(channelTag(chat)) + '</span>' : '') +
+    '<time class="chat-item-time">' + esc(timeLabel(chat.createdAt)) + '</time>' +
+    '</div><div class="chat-item-preview">' + esc(cleanPreview(chat.preview || '')) + '</div></button>' +
+    // Перенос доступен и мышью, и с клавиатуры: кнопка открывает меню с папками.
+    '<button class="chat-more" type="button" data-id="' + esc(chat.id) +
+    '" title="Переместить в папку" aria-label="Переместить в папку">⋯</button>' +
+    '</div>'
+  );
+}
+
+/** Разговоры с прежними заголовками дат: внутри папки они тоже помогают глазам. */
+function chatItemsHtml(list, withDates) {
+  let group = '';
+  let html = '';
+  for (const chat of list) {
+    if (withDates) {
+      const label = groupLabel(chat.createdAt);
+      if (label !== group) {
+        if (group) html += '</div>';
+        group = label;
+        html += '<div class="chat-group"><p class="chat-group-title">' + esc(label) + '</p>';
+      }
+    }
+    html += chatRowHtml(chat);
+  }
+  if (group) html += '</div>';
+  return html;
+}
+
+/** Заголовок папки: клик сворачивает, «✎» и «×» правят саму папку. */
+function folderHeadHtml(folder, count) {
+  const collapsed = Boolean(folder.collapsed);
+  const renaming = folderRenaming === folder.id && folder.id !== '';
+  // «Входящие» — не папка реестра: у них нет ни свёрнутости, ни действий, поэтому
+  // и роль кнопки им не нужна — иначе клавиатура упирается в пустую кнопку.
+  const interactive = folder.id !== '';
+  return (
+    '<div class="folder-head' + (collapsed ? ' collapsed' : '') + (interactive ? '' : ' inbox') +
+    '" data-folder="' + esc(folder.id) + '"' +
+    (interactive ? ' role="button" tabindex="0" aria-expanded="' + (collapsed ? 'false' : 'true') + '"' : '') + '>' +
+    '<span class="folder-caret" aria-hidden="true">▾</span>' +
+    (renaming
+      ? '<input class="folder-rename" data-folder="' + esc(folder.id) + '" value="' + esc(folder.name) +
+        '" maxlength="64" autocomplete="off" aria-label="Название папки">'
+      : '<span class="folder-name">' + esc(folder.name) + '</span>') +
+    '<span class="folder-count">' + count + '</span>' +
+    (folder.id
+      ? '<span class="folder-actions">' +
+        '<button class="folder-act" type="button" data-act="rename" data-folder="' + esc(folder.id) +
+        '" title="Переименовать папку" aria-label="Переименовать папку">✎</button>' +
+        '<button class="folder-act" type="button" data-act="delete" data-folder="' + esc(folder.id) +
+        '" title="Удалить папку" aria-label="Удалить папку">×</button></span>'
+      : '') +
+    '</div>'
+  );
+}
+
 function renderChats() {
   const box = el('chat-list');
   const top = box.scrollTop;
-  if (!chats.length) {
-    const query = el('chat-search').value.trim();
-    if (query) {
-      box.innerHTML = '<p class="side-empty">Ничего не найдено.</p>';
-    } else {
-      // В черновике подсказка «начни новый чат» лишняя: он уже начат.
-      box.innerHTML = draft ? '' : '<p class="side-empty">Пока пусто. Начни новый чат.</p>';
-    }
+  const query = el('chat-search').value.trim();
+  if (!chats.length && !folders.length && !folderDraft) {
+    // В черновике подсказка «начни новый чат» лишняя: он уже начат.
+    box.innerHTML = query
+      ? '<p class="side-empty">Ничего не найдено.</p>'
+      : draft
+        ? ''
+        : '<p class="side-empty">Пока пусто. Начни новый чат.</p>';
     return;
   }
-  let group = '';
+
   let html = '';
-  for (const chat of chats) {
-    const label = groupLabel(chat.createdAt);
-    if (label !== group) {
-      if (group) html += '</div>';
-      group = label;
-      html += '<div class="chat-group"><p class="chat-group-title">' + esc(label) + '</p>';
-    }
-    // Точка одна и она старше видит занятость: жёлтая — ход идёт, зелёная — есть
-    // непрочитанный ответ. Разметка точки появляется, только когда она нужна, —
-    // иначе `gap` у flex-строки съедал бы место под пустую колонку.
-    const dot = busyChats.has(chat.id) ? 'busy' : unread.has(chat.id) ? 'unread' : '';
-    html +=
-      '<button class="chat-item' +
-      (chat.id === currentId ? ' active' : '') +
-      (chat.readOnly ? ' read-only' : '') +
-      '" data-id="' +
-      esc(chat.id) +
-      '"><div class="chat-item-top">' +
-      (dot ? '<span class="chat-dot ' + dot + '"></span>' : '') +
-      '<span class="chat-item-title">' +
-      esc(chat.title) +
-      '</span>' +
-      (channelTag(chat) ? '<span class="chat-item-tag">' + esc(channelTag(chat)) + '</span>' : '') +
-      '<time class="chat-item-time">' +
-      esc(timeLabel(chat.createdAt)) +
-      '</time></div><div class="chat-item-preview">' +
-      esc(cleanPreview(chat.preview || '')) +
-      '</div></button>';
+  if (folderDraft) {
+    html += '<div class="folder-new"><input id="folder-new-name" placeholder="Название папки" maxlength="64" autocomplete="off"></div>';
   }
-  if (group) html += '</div>';
+
+  if (!folders.length) {
+    // Папок ещё нет — список живёт как раньше. Заводить «Входящие» на весь
+    // список незачем: заголовок появится, когда появится первая папка.
+    html += chatItemsHtml(chats, true) || (query ? '<p class="side-empty">Ничего не найдено.</p>' : '');
+  } else {
+    for (const folder of folders) {
+      const items = chats.filter((chat) => chat.folder === folder.id);
+      html += folderHeadHtml(folder, items.length);
+      // Во время поиска свёрнутость не прячет найденное: иначе человек решит,
+      // что совпадений нет, хотя они лежат в закрытой папке.
+      if (folder.collapsed && !query) continue;
+      // Подсказка про перетаскивание — не результат поиска, её тут не место.
+      html += items.length
+        ? chatItemsHtml(items, true)
+        : query
+          ? ''
+          : '<p class="side-empty folder-empty">Перетащи чат сюда</p>';
+    }
+    // Разговоры без папки и те, чья папка уже удалена с другого устройства.
+    const inbox = chats.filter((chat) => !folders.some((folder) => folder.id === chat.folder));
+    html += folderHeadHtml(INBOX_FOLDER, inbox.length);
+    html += inbox.length
+      ? chatItemsHtml(inbox, true)
+      : query
+        ? ''
+        : '<p class="side-empty folder-empty">Здесь новые чаты. Перетащи их в папку.</p>';
+    if (query && !chats.length) html += '<p class="side-empty">Ничего не найдено.</p>';
+  }
+
   box.innerHTML = html;
   box.scrollTop = top;
+  bindChatList(box);
+}
+
+/** Обработчики строк и заголовков: их пересоздаёт каждая перерисовка списка. */
+function bindChatList(box) {
+  box.querySelectorAll('.chat-row').forEach((row) => {
+    row.draggable = true;
+    row.addEventListener('dragstart', (event) => {
+      draggingChatId = row.dataset.id;
+      row.classList.add('dragging');
+      event.dataTransfer.effectAllowed = 'move';
+      // Свой id кладём и текстом: dataTransfer — единственный переносимый между
+      // dragover и drop кусок состояния, глобальная переменная тут ненадёжна.
+      event.dataTransfer.setData('text/plain', draggingChatId);
+    });
+    row.addEventListener('dragend', () => {
+      draggingChatId = null;
+      row.classList.remove('dragging');
+      box.querySelectorAll('.folder-head.drop-target').forEach((head) => head.classList.remove('drop-target'));
+    });
+  });
   box.querySelectorAll('.chat-item').forEach((node) => {
     node.onclick = () => selectChat(node.dataset.id);
   });
+  box.querySelectorAll('.chat-more').forEach((node) => {
+    node.onclick = (event) => {
+      event.stopPropagation();
+      openChatMenu(node.dataset.id, node);
+    };
+  });
+  box.querySelectorAll('.folder-head').forEach((head) => {
+    head.onclick = (event) => {
+      if (event.target.closest('.folder-act') || event.target.closest('.folder-rename')) return;
+      toggleChatFolder(head.dataset.folder).catch((error) => setNote('не удалось свернуть папку: ' + error.message));
+    };
+    head.onkeydown = (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      if (event.target.closest('.folder-rename')) return;
+      event.preventDefault();
+      toggleChatFolder(head.dataset.folder).catch(() => {});
+    };
+  });
+  box.querySelectorAll('.folder-act').forEach((button) => {
+    button.onclick = (event) => {
+      event.stopPropagation();
+      const id = button.dataset.folder;
+      if (button.dataset.act === 'rename') {
+        folderRenaming = id;
+        renderChats();
+      } else {
+        deleteFolderById(id).catch((error) => setNote('не удалось удалить папку: ' + error.message));
+      }
+    };
+  });
+
+  const draftInput = box.querySelector('#folder-new-name');
+  if (draftInput) {
+    draftInput.focus();
+    draftInput.onkeydown = (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        createFolderFromInput(draftInput.value).catch((error) => setNote('не удалось создать папку: ' + error.message));
+      } else if (event.key === 'Escape') {
+        folderDraft = false;
+        renderChats();
+      }
+    };
+  }
+  const renameInput = box.querySelector('.folder-rename');
+  if (renameInput) {
+    renameInput.focus();
+    renameInput.select();
+    const finish = (save) => {
+      if (folderRenaming !== renameInput.dataset.folder) return;
+      const id = folderRenaming;
+      folderRenaming = null;
+      if (save) renameFolderById(id, renameInput.value).catch((error) => setNote('не удалось переименовать папку: ' + error.message));
+      else renderChats();
+    };
+    renameInput.onkeydown = (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        finish(true);
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        finish(false);
+      }
+    };
+    // Уход из поля — это отмена: случайный клик по ленте не должен переименовать.
+    renameInput.onblur = () => finish(false);
+  }
+}
+
+/* ── папки ─────────────────────────────────────────────────────────────────── */
+
+async function loadFolders() {
+  try {
+    const data = await api('/panel/api/folders');
+    folders = data.folders || [];
+  } catch (error) {
+    folders = [];
+    setNote('не удалось загрузить папки: ' + error.message);
+  }
+  renderChats();
+}
+
+/** Меняем папку оптимистично и откатываем, если сервер не принял. */
+async function persistFolder(folderId, changes) {
+  const folder = folders.find((item) => item.id === folderId);
+  if (!folder) return;
+  const before = { ...folder };
+  Object.assign(folder, changes);
+  renderChats();
+  try {
+    const data = await api('/panel/api/folders/' + encodeURIComponent(folderId), {
+      method: 'PATCH',
+      body: JSON.stringify(changes),
+    });
+    if (data.folder) Object.assign(folder, data.folder);
+  } catch (error) {
+    Object.assign(folder, before);
+    setNote('не удалось сохранить папку: ' + error.message);
+  }
+  renderChats();
+}
+
+/** Свернуть/развернуть. У «Входящих» состояния нет — им сворачивать нечего. */
+async function toggleChatFolder(folderId) {
+  const folder = folders.find((item) => item.id === folderId);
+  if (!folder) return;
+  await persistFolder(folderId, { collapsed: !folder.collapsed });
+}
+
+async function createFolderFromInput(rawName) {
+  const name = String(rawName || '').trim();
+  if (!name) {
+    folderDraft = false;
+    renderChats();
+    return;
+  }
+  const data = await api('/panel/api/folders', { method: 'POST', body: JSON.stringify({ name }) });
+  if (data.folder) folders.push(data.folder);
+  folderDraft = false;
+  renderChats();
+}
+
+async function renameFolderById(folderId, rawName) {
+  const folder = folders.find((item) => item.id === folderId);
+  if (!folder) return;
+  const name = String(rawName || '').trim();
+  folderRenaming = null;
+  if (!name || name === folder.name) {
+    renderChats();
+    return;
+  }
+  const data = await api('/panel/api/folders/' + encodeURIComponent(folderId), {
+    method: 'PATCH',
+    body: JSON.stringify({ name }),
+  });
+  if (data.folder) Object.assign(folder, data.folder);
+  renderChats();
+}
+
+/** Удаление папки разговоры не трогает: сервер возвращает их во «Входящие». */
+async function deleteFolderById(folderId) {
+  const folder = folders.find((item) => item.id === folderId);
+  if (!folder) return;
+  await api('/panel/api/folders/' + encodeURIComponent(folderId), { method: 'DELETE' });
+  folders = folders.filter((item) => item.id !== folderId);
+  for (const chat of chats) if (chat.folder === folderId) delete chat.folder;
+  renderChats();
+}
+
+async function moveChatToFolder(chatId, folderId) {
+  await api('/panel/api/chat/folder', {
+    method: 'POST',
+    body: JSON.stringify({ id: chatId, folder: folderId || null }),
+  });
+  const chat = chats.find((item) => item.id === chatId);
+  if (chat) {
+    if (folderId) chat.folder = folderId;
+    else delete chat.folder;
+  }
+  // Перенос в свёрнутую папку выглядел бы как «чат пропал» — раскрываем её.
+  const target = folders.find((item) => item.id === folderId);
+  if (target && target.collapsed) await persistFolder(folderId, { collapsed: false });
+  else renderChats();
+}
+
+function closeChatMenu() {
+  if (!chatMenu) return;
+  chatMenu.remove();
+  chatMenu = null;
+}
+
+/** Меню «переместить в…»: то же действие, что перетаскивание, но без мыши. */
+function openChatMenu(chatId, anchor) {
+  closeChatMenu();
+  const chat = chats.find((item) => item.id === chatId);
+  if (!chat) return;
+  const current = chat.folder || '';
+  const option = (id, name) =>
+    '<button type="button" role="menuitemradio" aria-checked="' + (id === current ? 'true' : 'false') + '"' +
+    ' class="' + (id === current ? 'on' : '') + '" data-folder="' + esc(id) + '">' + esc(name) + '</button>';
+  const menu = document.createElement('div');
+  menu.className = 'chat-menu';
+  menu.id = 'chat-menu';
+  menu.setAttribute('role', 'menu');
+  menu.innerHTML =
+    '<p class="chat-menu-title">Переместить в</p>' +
+    (folders.length
+      ? folders.map((folder) => option(folder.id, folder.name)).join('')
+      : '<p class="chat-menu-empty">Папок пока нет</p>') +
+    option('', 'Входящие') +
+    '<button type="button" class="chat-menu-new" data-new="1">+ Новая папка…</button>';
+  document.body.appendChild(menu);
+
+  // Ставим рядом с кнопкой, но не даём вылезти за окно.
+  const rect = anchor.getBoundingClientRect();
+  const width = menu.offsetWidth || 200;
+  menu.style.left = Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8)) + 'px';
+  const below = rect.bottom + 4;
+  menu.style.top =
+    (below + menu.offsetHeight > window.innerHeight - 8 ? Math.max(8, rect.top - menu.offsetHeight - 4) : below) + 'px';
+
+  menu.addEventListener('click', (event) => {
+    const button = event.target.closest('button');
+    if (!button) return;
+    if (button.dataset.new) {
+      closeChatMenu();
+      folderDraft = true;
+      renderChats();
+      const input = el('folder-new-name');
+      if (input) input.scrollIntoView({ block: 'nearest' });
+      return;
+    }
+    if (!('folder' in button.dataset)) return;
+    const folderId = button.dataset.folder || null;
+    closeChatMenu();
+    moveChatToFolder(chatId, folderId).catch((error) => setNote('не удалось перенести чат: ' + error.message));
+  });
+  chatMenu = menu;
 }
 
 /**
@@ -2890,6 +3220,53 @@ function closeMenu() {
 
 /* «Новый чат» всегда открывает именно новый чат: workspace выбирается уже в нём. */
 el('new-chat').onclick = () => startDraft();
+/* «+ Папка» открывает ввод прямо в списке: модалка ради одного поля — лишний слой. */
+el('new-folder').onclick = () => {
+  folderDraft = true;
+  folderRenaming = null;
+  renderChats();
+  const input = el('folder-new-name');
+  if (input) input.scrollIntoView({ block: 'nearest' });
+};
+
+/* ── перетаскивание разговора в папку ──────────────────────────────────────────
+   Слушаем контейнер, а не строки: список перерисовывается целиком, и обработчики
+   на строках пришлось бы вешать заново после каждой перерисовки. */
+el('chat-list').addEventListener('dragover', (event) => {
+  const head = event.target.closest && event.target.closest('.folder-head');
+  if (!head || !draggingChatId) return;
+  // preventDefault — это и есть «сюда можно бросать»: без него drop не случится.
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+  head.classList.add('drop-target');
+});
+el('chat-list').addEventListener('dragleave', (event) => {
+  const head = event.target.closest && event.target.closest('.folder-head');
+  if (head) head.classList.remove('drop-target');
+});
+el('chat-list').addEventListener('drop', (event) => {
+  const head = event.target.closest && event.target.closest('.folder-head');
+  if (!head) return;
+  event.preventDefault();
+  head.classList.remove('drop-target');
+  const transferred = event.dataTransfer ? event.dataTransfer.getData('text/plain') : '';
+  const chatId = transferred || draggingChatId;
+  if (!chatId) return;
+  draggingChatId = null;
+  moveChatToFolder(chatId, head.dataset.folder || null).catch((error) =>
+    setNote('не удалось перенести чат: ' + error.message),
+  );
+});
+
+/* Меню переноса закрывается кликом мимо и по Escape: висящее меню перекрывает чат. */
+document.addEventListener('click', (event) => {
+  if (!chatMenu) return;
+  if (event.target.closest('.chat-menu') || event.target.closest('.chat-more')) return;
+  closeChatMenu();
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') closeChatMenu();
+});
 el('draft-item').onclick = () => el('chat-input').focus();
 el('toggle-side').onclick = () => {
   if (window.matchMedia('(max-width: 900px)').matches) el('chat-app').classList.toggle('side-open');
@@ -3031,6 +3408,7 @@ el('chat-search').addEventListener('input', () => {
   }, 180);
 });
 el('chat-list').addEventListener('scroll', () => {
+  closeChatMenu();
   if (!nextCursor || loadingChats) return;
   const box = el('chat-list');
   if (box.scrollTop + box.clientHeight >= box.scrollHeight - 120) {
@@ -3058,6 +3436,9 @@ window.addEventListener('focus', () => {
 (async () => {
   loadUnread();
   await loadChats(true);
+  // Папки — до первого показа списка как раз нет: они лишь группируют уже
+  // загруженные разговоры, поэтому грузим их следом и перерисовываем.
+  await loadFolders();
   await loadWorkspaces();
   defaultEmptyHtml = el('chat-empty').innerHTML;
   startBulletin();

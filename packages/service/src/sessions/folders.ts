@@ -1,0 +1,182 @@
+// Папки в левом меню панели: человек сам раскладывает разговоры по полкам.
+//
+// Это только порядок в списке, а не рабочая папка: workspace у разговора остаётся
+// своим, и перенос в папку ничего не двигает на диске. Настроек у папки нет
+// специально — с ними папка превращается во второй workspace, а вместо порядка
+// получается вторая система управления (см. идею 06).
+//
+// Храним в `<dataDir>/users/<id>/folders.json`, рядом с chats.json: принадлежность
+// чата — поле в самом реестре, а не второй индекс.
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { userPaths, type IcarusConfig, type UserConfig } from '../config.ts';
+import { log } from '../log.ts';
+import { reassignChatFolder } from './chats.ts';
+
+export type ChatFolder = {
+  id: string;
+  name: string;
+  createdAt: string;
+  /**
+   * Свёрнута ли папка в меню. Состояние живёт на сервере, а не в localStorage:
+   * разговор один и тот же с любого устройства, и меню не должно разъезжаться.
+   */
+  collapsed: boolean;
+};
+
+/** Сколько чатов вернулось во «Входящие» после удаления папки. */
+export type DeletedFolder = { folder: ChatFolder; movedChats: number };
+
+export class FolderError extends Error {
+  status: number;
+
+  constructor(message: string, status = 400) {
+    super(message);
+    this.name = 'FolderError';
+    this.status = status;
+  }
+}
+
+const NAME_LIMIT = 64;
+const META_VERSION = 1;
+
+function foldersFile(config: IcarusConfig, user: UserConfig): string {
+  return path.join(userPaths(config, user).root, 'folders.json');
+}
+
+/** Имя папки: без крайних пробелов и без двойных — иначе в меню одна строка на вид. */
+export function folderName(raw: unknown): string {
+  if (typeof raw !== 'string') return '';
+  return raw.replace(/\s+/g, ' ').trim().slice(0, NAME_LIMIT);
+}
+
+function normalize(value: unknown): ChatFolder | null {
+  if (!value || typeof value !== 'object') return null;
+  const item = value as Record<string, unknown>;
+  const id = typeof item.id === 'string' ? item.id.trim() : '';
+  const name = folderName(item.name);
+  if (!id || !name) return null;
+  return {
+    id,
+    name,
+    createdAt: typeof item.createdAt === 'string' ? item.createdAt : new Date(0).toISOString(),
+    collapsed: item.collapsed === true,
+  };
+}
+
+/** Список папок читается целиком: это маленький реестр, а не история. */
+export function readFolders(config: IcarusConfig, user: UserConfig): ChatFolder[] {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(foldersFile(config, user), 'utf8')) as { folders?: unknown };
+    if (!Array.isArray(parsed.folders)) return [];
+    const seen = new Set<string>();
+    return parsed.folders.flatMap((item) => {
+      const folder = normalize(item);
+      if (!folder || seen.has(folder.id)) return [];
+      seen.add(folder.id);
+      return [folder];
+    });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      log.warn('не читается список папок', { user: user.id, error: String(error) });
+    }
+    return [];
+  }
+}
+
+/** Пишем через временный файл: оборванная запись не должна оставить меню пустым. */
+export function writeFolders(config: IcarusConfig, user: UserConfig, folders: ChatFolder[]): void {
+  const file = foldersFile(config, user);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, `${JSON.stringify({ version: META_VERSION, folders }, null, 2)}\n`, { mode: 0o600 });
+  fs.chmodSync(tmp, 0o600);
+  fs.renameSync(tmp, file);
+}
+
+export function findFolder(config: IcarusConfig, user: UserConfig, id: string): ChatFolder | null {
+  return readFolders(config, user).find((folder) => folder.id === id) ?? null;
+}
+
+/** Одинаковые имена в меню не различить на глаз — поэтому не даём их завести. */
+function assertFreeName(folders: ChatFolder[], name: string, except?: string): void {
+  const taken = folders.some(
+    (folder) => folder.id !== except && folder.name.toLocaleLowerCase('ru') === name.toLocaleLowerCase('ru'),
+  );
+  if (taken) throw new FolderError(`папка «${name}» уже есть`, 409);
+}
+
+export function createFolder(
+  config: IcarusConfig,
+  user: UserConfig,
+  rawName: unknown,
+  now = new Date(),
+): ChatFolder {
+  const name = folderName(rawName);
+  if (!name) throw new FolderError('нужно название папки');
+  const folders = readFolders(config, user);
+  assertFreeName(folders, name);
+  const folder: ChatFolder = {
+    id: `f-${now.getTime().toString(36)}-${crypto.randomBytes(3).toString('hex')}`,
+    name,
+    createdAt: now.toISOString(),
+    collapsed: false,
+  };
+  folders.push(folder);
+  writeFolders(config, user, folders);
+  return folder;
+}
+
+export function renameFolder(
+  config: IcarusConfig,
+  user: UserConfig,
+  id: string,
+  rawName: unknown,
+): ChatFolder {
+  const name = folderName(rawName);
+  if (!name) throw new FolderError('нужно название папки');
+  const folders = readFolders(config, user);
+  const folder = folders.find((item) => item.id === id);
+  if (!folder) throw new FolderError(`папка ${id} не найдена`, 404);
+  assertFreeName(folders, name, id);
+  if (folder.name !== name) {
+    folder.name = name;
+    writeFolders(config, user, folders);
+  }
+  return folder;
+}
+
+/** Свёрнутость меняется кликом по заголовку, поэтому отдельной операцией. */
+export function setFolderCollapsed(
+  config: IcarusConfig,
+  user: UserConfig,
+  id: string,
+  collapsed: boolean,
+): ChatFolder {
+  const folders = readFolders(config, user);
+  const folder = folders.find((item) => item.id === id);
+  if (!folder) throw new FolderError(`папка ${id} не найдена`, 404);
+  if (folder.collapsed !== collapsed) {
+    folder.collapsed = collapsed;
+    writeFolders(config, user, folders);
+  }
+  return folder;
+}
+
+/**
+ * Удаление папки не удаляет разговоры: они возвращаются во «Входящие». Файлы
+ * истории при этом и так не трогаются — они лежат в общей папке сессий.
+ */
+export function deleteFolder(config: IcarusConfig, user: UserConfig, id: string): DeletedFolder {
+  const folders = readFolders(config, user);
+  const folder = folders.find((item) => item.id === id);
+  if (!folder) throw new FolderError(`папка ${id} не найдена`, 404);
+  writeFolders(
+    config,
+    user,
+    folders.filter((item) => item.id !== id),
+  );
+  const movedChats = reassignChatFolder(config, user, id, null);
+  return { folder, movedChats };
+}

@@ -352,6 +352,8 @@ async function driveChat(
   const globals = window as unknown as Record<string, unknown>;
   window.URL.createObjectURL = () => 'blob:x';
   window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+  // В linkedom нет scrollIntoView, а панель подкручивает список к полю новой папки.
+  (window.Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {};
   // Скрипт чата — обычный браузерный: он читает `window.location`, а не аргумент.
   globals.location = { href: 'http://panel/panel/chat', search: '', pathname: '/panel/chat' };
   globals.history = { replaceState() {} };
@@ -1177,4 +1179,113 @@ test('/rename обновляет шапку и сайдбар без перез�
   assert.match(app.sidebar(), /Налоги/, 'сайдбар тоже');
   assert.match(app.messages(), /Теперь этот разговор называется «Налоги»/, 'ответ команды виден');
   assert.match(app.messages(), /старая реплика/, 'лента не перечитывалась');
+});
+
+test('папки в меню: группировка, перенос из меню и свёрнутость', async () => {
+  const posted: string[] = [];
+  const folder = { id: 'f-work', name: 'Работа', createdAt: '2026-11-01T10:00:00.000Z', collapsed: false };
+  const app = await driveChat({
+    chatId: 'web-1',
+    routes: {
+      '/panel/api/chat/status': () => ({ busy: [] }),
+      '/panel/api/chat/history': () => ({
+        chat: { id: 'web-1', title: 'Разговор', workspace: 'talk' },
+        messages: [],
+        live: false,
+      }),
+      '/panel/api/chats': () => ({
+        chats: [
+          { id: 'web-1', title: 'Разговор', folder: 'f-work' },
+          { id: 'web-2', title: 'Долгий таск' },
+        ],
+      }),
+      '/panel/api/folders': (url, init) => {
+        const method = init?.method || 'GET';
+        if (method === 'GET') return { folders: [folder] };
+        posted.push(method + ' ' + url + ' ' + String(init?.body ?? ''));
+        // Создание отдаёт новую папку, правка — ту же, с новым состоянием.
+        if (method === 'POST') return { folder: { ...folder, id: 'f-home', name: 'Дом' } };
+        return { folder: { ...folder, collapsed: true } };
+      },
+      '/panel/api/chat/folder': (url, init) => {
+        posted.push((init?.method || 'GET') + ' ' + url + ' ' + String(init?.body ?? ''));
+        return { ok: true };
+      },
+    },
+  });
+
+  // Две полки: папка с разговором и «Входящие» для всех остальных.
+  assert.match(app.sidebar(), /folder-name">Работа/);
+  assert.match(app.sidebar(), /folder-name">Входящие/);
+  assert.match(app.sidebar(), /chat-item-title">Разговор/);
+
+  // «⋯» на разговоре открывает меню: папки и «Входящие» — тот же перенос, но без мыши.
+  app.document.querySelector('.chat-more[data-id="web-1"]')?.click();
+  const menu = app.document.getElementById('chat-menu');
+  assert.ok(menu, 'кнопка «⋯» открывает меню переноса');
+  assert.match(menu.innerHTML, /Работа/, 'в меню есть папка');
+  menu.querySelector('button[data-folder=""]')?.click();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.ok(
+    posted.some((call) => call.includes('/panel/api/chat/folder') && call.includes('"folder":null')),
+    'перенос во «Входящие» ушёл на сервер',
+  );
+  assert.equal(app.document.getElementById('chat-menu'), null, 'меню закрылось после выбора');
+
+  // Клик по заголовку сворачивает папку: состояние помнит сервер, а не браузер.
+  (app.document.querySelector('.folder-head[data-folder="f-work"]') as unknown as { click: () => void }).click();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.ok(
+    posted.some((call) => call.includes('PATCH') && call.includes('"collapsed":true')),
+    'свёрнутость сохраняется на сервере',
+  );
+  assert.match(app.sidebar(), /folder-head collapsed/);
+
+  // Новая папка заводится строкой в списке, без модалки.
+  app.document.getElementById('new-folder')?.click();
+  const input = app.document.getElementById('folder-new-name');
+  assert.ok(input, 'по «+ Папка» появляется поле имени');
+  (input as unknown as { value: string }).value = 'Дом';
+  input.dispatchEvent(new app.window.Event('input'));
+  pressKey(app, input, 'Enter');
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.ok(
+    posted.some((call) => call.includes('POST') && call.includes('/panel/api/folders') && call.includes('Дом')),
+    'папка создана через API',
+  );
+  assert.match(app.sidebar(), /folder-name">Дом/);
+});
+
+test('поиск показывает совпадения и в свёрнутой папке', async () => {
+  const app = await driveChat({
+    chatId: 'web-1',
+    routes: {
+      '/panel/api/chat/status': () => ({ busy: [] }),
+      '/panel/api/chat/history': () => ({
+        chat: { id: 'web-1', title: 'Разговор', workspace: 'talk' },
+        messages: [],
+        live: false,
+      }),
+      // Сервер ищет по заголовку, панель только рисует ответ: здесь он всегда один.
+      '/panel/api/chats': () => ({
+        chats: [{ id: 'web-1', title: 'Сводка по «Атласу»', folder: 'f-work' }],
+      }),
+      '/panel/api/folders': () => ({
+        folders: [{ id: 'f-work', name: 'Работа', createdAt: '2026-11-01T10:00:00.000Z', collapsed: true }],
+      }),
+    },
+  });
+
+  // Свёрнутая папка не должна прятать найденное: иначе «ничего не найдено» —
+  // ложь, совпадение просто лежит в закрытой полке.
+  assert.doesNotMatch(app.sidebar(), /chat-item-title">Сводка/, 'до поиска папка свёрнута');
+  const search = app.document.getElementById('chat-search') as unknown as {
+    value: string;
+    dispatchEvent(event: unknown): boolean;
+  };
+  search.value = 'Атлас';
+  search.dispatchEvent(new app.window.Event('input'));
+  await new Promise((resolve) => setTimeout(resolve, 320));
+
+  assert.match(app.sidebar(), /chat-item-title">Сводка по «Атласу»/, 'найденное видно и в свёрнутой папке');
 });

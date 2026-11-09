@@ -53,6 +53,10 @@ export function chatPage(session: PanelSession, options: ChatPageOptions): strin
 
     <button class="new-chat" id="new-chat"><span>+</span> Новый чат</button>
 
+    <!-- Папки — надстройка над списком, а не ещё один чат: кнопка маленькая и
+         стоит рядом с главной. Свёрнутость и состав папок помнит сервер. -->
+    <button class="new-folder" id="new-folder" type="button"><span>+</span> Папка</button>
+
     <!-- Черновик занимает место кнопки: разговор создаётся только с первым
          сообщением, а до тех пор это просто строка списка «Новый чат». -->
     <div class="draft-wrap" id="draft-wrap" hidden>

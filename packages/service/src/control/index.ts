@@ -23,6 +23,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import fs from 'node:fs';
 import { handleWorkspacesApi } from './workspaces.ts';
+import { handleFoldersApi } from './folders.ts';
 import { handleWorkspaceFilesApi } from './files.ts';
 import { findUser, isAdmin, userPaths, type IcarusConfig, type UserConfig } from '../config.ts';
 import { LANGUAGE_LABELS, LANGUAGES, languageOf, writeProfile, type Language } from '../profile.ts';
@@ -643,8 +644,15 @@ async function handleApi(
     return;
   }
 
-  // Файлы рабочей папки для правой панели чата: дерево, поиск и предпросмотр.
-  // Отдельная ветка до общего разбора области — иначе «файлы» искались бы в памяти.
+  // Папки в меню слева — полки для разговоров, а не рабочие каталоги: своя ветка,
+  // чтобы они не попадали в разбор областей памяти.
+  if (url.pathname === '/panel/api/folders' || url.pathname.startsWith('/panel/api/folders/')) {
+    await handleFoldersApi(req, res, url, { config, userId });
+    return;
+  }
+
+  // Файлы рабочей папки для правой панели чата: дерево и предпросмотр. Отдельная
+  // ветка до общего разбора области — иначе «файлы» искались бы в памяти.
   if (url.pathname === '/panel/api/workspace-files' || url.pathname.startsWith('/panel/api/workspace-files/')) {
     await handleWorkspaceFilesApi(req, res, url, { config, userId });
     return;
