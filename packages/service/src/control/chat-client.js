@@ -314,6 +314,51 @@ function channelName(chat) {
   return '';
 }
 
+/**
+ * Откуда пришла последняя реплика. Файл сессии каналы не различает, поэтому
+ * канал запоминает сервис: шапка показывает отметку последнего хода, а не
+ * «здесь начали разговор» (это видно по метке канала в списке).
+ */
+function viaLabel(turn) {
+  if (!turn) return '';
+  const name = turn.channel === 'telegram' ? 'Telegram' : turn.channel === 'api' ? 'API' : 'панель';
+  const time = turn.at ? timeLabel(turn.at) : '';
+  return 'последняя реплика · ' + name + (time ? ' · ' + time : '');
+}
+
+/** Шапка разговора: канал последней реплики. null — черновик или нет данных. */
+function renderVia(chat) {
+  const node = el('chat-via');
+  if (!node) return;
+  const text = chat ? viaLabel(chat.lastTurn) : '';
+  node.textContent = text;
+  node.hidden = !text;
+  node.dataset.channel = chat && chat.lastTurn ? chat.lastTurn.channel : '';
+  node.title = text ? 'Разговор общий: панель и Telegram пишут в одну сессию' : '';
+}
+
+/**
+ * Что сказать про канал открытого разговора. Из Telegram-разговора ответ в
+ * Telegram не уедет — бот живёт своей стороной, — и молчать об этом нельзя:
+ * человек ждал бы ответ там.
+ */
+function chatHint(chat) {
+  if (chat && chat.channel === 'telegram') {
+    return 'Разговор общий с Telegram: ответ появится здесь и в истории — в Telegram я его не отправлю.';
+  }
+  return '';
+}
+
+/** Ход идёт в другом канале: второй начинать нельзя, а смотреть здесь нечего. */
+function busyInNote(channel) {
+  const where = channel === 'telegram' ? 'в Telegram' : channel === 'api' ? 'через API' : 'в панели';
+  return (
+    'Сейчас ответ идёт ' +
+    where +
+    ' — это тот же разговор и тот же ход. Дождись его и напиши ещё раз: второй ход я не начну.'
+  );
+}
+
 /** Короткая метка в списке диалогов: длинное «только чтение» съедает заголовок. */
 function channelTag(chat) {
   if (!chat) return '';
@@ -643,7 +688,8 @@ async function selectChat(id) {
     renderChats();
     setTitle(currentChat.title);
     setComposer(Boolean(currentChat.readOnly));
-    setNote('');
+    setNote(chatHint(currentChat));
+    renderVia(currentChat);
     renderHistory(data.messages || []);
     // Разговор открылся, а ход всё ещё идёт: цепляемся к живому потоку.
     if (data.live && !streaming()) void attachLive();
@@ -689,6 +735,8 @@ async function createChat() {
   history.replaceState(null, '', '/panel/chat?chat=' + encodeURIComponent(currentId));
   setComposer(false);
   updateComposerHint();
+  setNote('');
+  renderVia(data.chat);
   return data.chat;
 }
 
@@ -707,6 +755,7 @@ function startDraft(workspace = defaultWorkspace) {
   setDraft(true);
   setComposer(false);
   setTitle('Новый чат');
+  renderVia(null);
   showEmpty(true);
   // Выбор workspace — не отдельный экран, а пустое состояние нового чата.
   renderPicker();
@@ -1950,6 +1999,13 @@ function assistantBoxFor(chatId) {
   return box;
 }
 
+/** Реплика не ушла (её не приняли): убираем и пузырь, иначе в ленте останется вопрос без ответа. */
+function dropLastUser() {
+  const nodes = el('chat-messages').querySelectorAll('.turn.user');
+  const last = nodes[nodes.length - 1];
+  if (last) last.remove();
+}
+
 /** Плашка — не ответ, а неудавшийся заход (ход уже занят другим): из ленты её вон. */
 function dropLiveBody(chatId) {
   const box = liveBodies.get(chatId);
@@ -2048,11 +2104,12 @@ function handleEvent(box, event) {
       currentId = event.chat.id;
       setTitle(event.chat.title);
       setComposer(false);
+      renderVia(event.chat);
       rememberChat(event.chat, box.text);
     } else {
       loadChats(true).catch(() => {});
     }
-    setNote(stoppedByUser ? 'остановил — можно писать дальше' : '');
+    setNote(stoppedByUser ? 'остановил — можно писать дальше' : chatHint(currentChat));
     // Агент мог написать файлы в рабочую папку — дерево справа обновляем сами.
     if (box.chatId === currentId) void refreshFilesTree();
     return;
@@ -2136,6 +2193,20 @@ async function sendText(forced) {
         await attachLive();
         return;
       }
+      // Ход идёт в другом канале — смотреть здесь нечего: второй ответ начнётся
+      // только со следующей реплики. Пузырь и плашку убираем, текст возвращаем.
+      if (data.busyIn) {
+        dropLiveBody(turnChatId);
+        dropLastUser();
+        setLive(null);
+        setNote(busyInNote(data.busyIn));
+        if (currentId === turnChatId) {
+          input.value = text;
+          growInput();
+          input.focus();
+        }
+        return;
+      }
       throw new Error((data.error || {}).message || response.statusText || 'ответ не начался: ' + response.status);
     }
 
@@ -2202,6 +2273,7 @@ async function reloadHistory(chatId) {
     const data = await api('/panel/api/chat/history?id=' + encodeURIComponent(chatId));
     if (token !== historyToken || currentId !== chatId) return;
     currentChat = data.chat;
+    renderVia(currentChat);
     renderHistory(data.messages || []);
   } catch (error) {
     setNote('ответ пришёл, но лента не обновилась: ' + error.message);

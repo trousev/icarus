@@ -29,11 +29,14 @@ import {
   createChatRecord,
   findChatRecord,
   isGenericTitle,
+  panelCanWrite,
   readChats,
+  recordTurn,
   sessionEpochsOf,
   sessionIdsOf,
   updateChatTitles,
   type ChatRecord,
+  type ChatTurn,
 } from '../sessions/chats.ts';
 import { sessionFileForId, sessionFilesFor, textOfContent as textOf, type FileSession } from '../sessions/files.ts';
 import type { SessionRegistry } from '../sessions/registry.ts';
@@ -169,8 +172,13 @@ export type ChatSummary = {
   channel: ChatChannel;
   /** Рабочая папка разговора. */
   workspace: string;
-  /** Писать можно только в веб-чат: Telegram и API панель показывает, но не ведёт. */
+  /**
+   * Писать отсюда нельзя. Веб-чат и Telegram панель ведёт (это один разговор),
+   * разговоры через API — только смотрит.
+   */
   readOnly: boolean;
+  /** Откуда пришла последняя реплика: этим подписывается шапка разговора. */
+  lastTurn?: ChatTurn;
 };
 
 export type ChatHistory = { chat: ChatSummary; messages: ChatMessage[] };
@@ -184,6 +192,9 @@ export type ChatApiContext = {
   /** null — панель поднята без докера: чат честно скажет, что ему некуда идти. */
   registry?: SessionRegistry;
 };
+
+/** Отказ писать туда, где историей владеет не панель. */
+const READ_ONLY_CHAT = 'этот разговор идёт через API: в панели он только для чтения';
 
 const PREVIEW_CHARS = 110;
 const DEFAULT_PAGE_SIZE = 30;
@@ -511,7 +522,8 @@ function summaryOf(chat: ChatRecord, digest: SessionDigest | null): ChatSummary 
     updatedAt: digest?.updatedAt || chat.createdAt,
     channel: chat.channel,
     workspace: chat.workspace,
-    readOnly: chat.channel !== 'web',
+    readOnly: !panelCanWrite(chat),
+    ...(chat.lastTurn ? { lastTurn: chat.lastTurn } : {}),
   };
 }
 
@@ -586,7 +598,8 @@ export function summaryAfterTurn(chat: ChatRecord, userText: string, assistantTe
     updatedAt: new Date().toISOString(),
     workspace: chat.workspace,
     channel: chat.channel,
-    readOnly: chat.channel !== 'web',
+    readOnly: !panelCanWrite(chat),
+    ...(chat.lastTurn ? { lastTurn: chat.lastTurn } : {}),
   };
 }
 
@@ -854,7 +867,8 @@ export function readHistory(config: IcarusConfig, user: UserConfig, chatId: stri
       updatedAt: last?.timestamp || chat.createdAt,
       workspace: chat.workspace,
       channel: chat.channel,
-      readOnly: chat.channel !== 'web',
+      readOnly: !panelCanWrite(chat),
+      ...(chat.lastTurn ? { lastTurn: chat.lastTurn } : {}),
     },
     messages,
   };
@@ -898,9 +912,10 @@ async function streamTurn(
     json(res, 404, errorBody('разговор не найден'));
     return;
   }
-  // В Telegram и API панель не пишет: их можно только смотреть.
-  if (chat.channel !== 'web') {
-    json(res, 403, errorBody('разговор начат не в панели: здесь он только для чтения', 'permission_error'));
+  // Telegram панель продолжает: это тот же разговор и та же сессия pi. Читать
+  // отсюда можно только API-вход — его клиент владеет историей сам.
+  if (!panelCanWrite(chat)) {
+    json(res, 403, errorBody(READ_ONLY_CHAT, 'permission_error'));
     return;
   }
 
@@ -912,11 +927,14 @@ async function streamTurn(
     return;
   }
   if (session.busy) {
-    // Ход идёт без зрителя (панель перезагрузили): это не ошибка, а повод
-    // прицепиться к потоку. Отдаём 409 с подсказкой, чтобы клиент знал дорогу.
+    // Ход идёт либо без зрителя (панель перезагрузили), либо в другом канале —
+    // и это один и тот же ход. Прицепиться можно только к своему потоку: у
+    // Telegram-хода его в панели нет, и второй ответ начинать нельзя.
+    const live = Boolean(runningTurn(user.id, chat.id));
     json(res, 409, {
       ...errorBody('в этом разговоре уже идёт ответ', 'conflict_error'),
-      live: true,
+      live,
+      ...(live ? {} : { busyIn: chat.lastTurn?.channel ?? 'telegram' }),
     });
     return;
   }
@@ -1047,6 +1065,9 @@ async function streamTurn(
   });
 
   try {
+    // Канал хода пишем до prompt: файл сессии каналы не различает, а шапка
+    // панели и отбивка в Telegram должны знать, кто говорил последним.
+    recordTurn(config, user, chat.id, 'web');
     await session.prompt(prompt, attachments.images);
     await settled;
 
@@ -1210,8 +1231,9 @@ export async function handleChatApi(
         json(res, 404, errorBody('разговор не найден'));
         return true;
       }
-      // Чужой вход в палитре не нужен: там команды всё равно не отправить.
-      if (chat.channel !== 'web') {
+      // Команды — про разговор, а не про канал: в API-разговоре их всё равно
+      // не отправить, а в Telegram их разбирает бот.
+      if (!panelCanWrite(chat)) {
         json(res, 200, { commands: [] });
         return true;
       }
@@ -1262,10 +1284,10 @@ export async function handleChatApi(
         json(res, 404, errorBody('разговор не найден'));
         return true;
       }
-      // Команды пишут в разговор, поэтому чужие входы здесь так же закрыты, как
-      // и `chat/send`: продолжать разговор можно только там, где он начат.
-      if (chat.channel !== 'web') {
-        json(res, 403, errorBody('разговор начат не в панели: здесь он только для чтения', 'permission_error'));
+      // Команды правят разговор целиком (в том числе общий с Telegram), поэтому
+      // API-вход здесь закрыт так же, как и `chat/send`.
+      if (!panelCanWrite(chat)) {
+        json(res, 403, errorBody(READ_ONLY_CHAT, 'permission_error'));
         return true;
       }
 
@@ -1325,8 +1347,8 @@ export async function handleChatApi(
         json(res, 404, errorBody('разговор не найден'));
         return true;
       }
-      if (chat.channel !== 'web') {
-        json(res, 403, errorBody('разговор начат не в панели: здесь он только для чтения', 'permission_error'));
+      if (!panelCanWrite(chat)) {
+        json(res, 403, errorBody(READ_ONLY_CHAT, 'permission_error'));
         return true;
       }
       const turn = liveTurn(user.id, id);
@@ -1374,15 +1396,15 @@ export async function handleChatApi(
         json(res, 400, errorBody('нужен chatId'));
         return true;
       }
-      // Telegram и API-разговоры панель показывает, но не продолжает: писать в
-      // чужой вход отсюда — значит незаметно подменить канал разговора.
+      // Продолжаем веб-чат и Telegram-разговор: это одна сессия pi, а транспорт —
+      // только труба. API-вход остаётся чужим: там историей владеет клиент.
       const chat = findChatRecord(ctx.config, user, chatId);
       if (!chat) {
         json(res, 404, errorBody('разговор не найден'));
         return true;
       }
-      if (chat.channel !== 'web') {
-        json(res, 403, errorBody('разговор начат не в панели: здесь он только для чтения', 'permission_error'));
+      if (!panelCanWrite(chat)) {
+        json(res, 403, errorBody(READ_ONLY_CHAT, 'permission_error'));
         return true;
       }
       if (text.length > 16_000) {
@@ -1412,8 +1434,8 @@ export async function handleChatApi(
         json(res, 404, errorBody('разговор не найден'));
         return true;
       }
-      if (chat.channel !== 'web') {
-        json(res, 403, errorBody('разговор начат не в панели: здесь он только для чтения', 'permission_error'));
+      if (!panelCanWrite(chat)) {
+        json(res, 403, errorBody(READ_ONLY_CHAT, 'permission_error'));
         return true;
       }
       const session = ctx.registry.get(user.id, chat.id);

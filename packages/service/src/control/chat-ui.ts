@@ -84,6 +84,9 @@ export function chatPage(session: PanelSession, options: ChatPageOptions): strin
     <header class="chat-top">
       <button class="icon-btn menu-btn" id="toggle-side" aria-label="Меню">☰</button>
       <div class="chat-crumbs">Icarus / <b id="chat-title">Новый чат</b></div>
+      <!-- Откуда пришла последняя реплика: сессия у разговора одна на все входы,
+           и по файлу истории этого не видно — канал запоминает сервис. -->
+      <span class="chat-via" id="chat-via" hidden></span>
       <label class="chat-search"><span>⌕</span><input id="chat-search" placeholder="Поиск по названиям" autocomplete="off"></label>
       <div class="top-status"><i></i><span id="chat-status">Агент активен</span></div>
       <button class="icon-btn files-btn" id="toggle-files" aria-label="Файлы workspace" title="Файлы workspace" aria-pressed="false">
