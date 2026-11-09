@@ -89,6 +89,12 @@ export type UserMcpServer = {
   headers?: Record<string, string>;
   /** Постоянные переменные окружения stdio-сервера, тоже без секретов. */
   env?: Record<string, string>;
+  /**
+   * Имена ключей, которые серверу понадобятся (рецепт их знает заранее).
+   * Только имена: значения живут в credentials и человеку показываются пустыми.
+   */
+  credentialEnv?: string[];
+  credentialHeaders?: string[];
   auth: McpAuthType;
   /** Запрошенные scopes: строка через пробел, как в OAuth. */
   scopes?: string;
@@ -130,6 +136,9 @@ export type McpServerInput = {
   args?: string[];
   headers?: Record<string, string>;
   env?: Record<string, string>;
+  /** Чего сервер ждёт от человека: имена ключей из рецепта, без значений. */
+  credentialEnv?: string[];
+  credentialHeaders?: string[];
   auth?: McpAuthType;
   scopes?: string;
   clientId?: string;
@@ -346,6 +355,24 @@ function stringMap(value: unknown, where: string, limit: number, valueLimit: num
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+/** Список имён ключей: рецепт говорит, что спросить, но не подставляет значения. */
+function nameList(value: unknown, where: string, limit: number): string[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) throw new McpError(`${where}: ожидался массив имён`);
+  const out: string[] = [];
+  for (const item of value) {
+    if (typeof item !== 'string') throw new McpError(`${where}: ожидалась строка`);
+    const name = item.trim();
+    if (name === '') continue;
+    if (!/^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/.test(name)) {
+      throw new McpError(`${where}: «${name}» не похоже на имя переменной/заголовка`);
+    }
+    if (!out.includes(name)) out.push(name);
+  }
+  if (out.length > limit) throw new McpError(`${where}: больше ${limit} имён`);
+  return out.length > 0 ? out : undefined;
+}
+
 function httpUrl(value: string, where: string): string {
   if (value.length > URL_LIMIT) throw new McpError(`${where}: длиннее ${URL_LIMIT} символов`);
   let url: URL;
@@ -403,6 +430,7 @@ export function normalizeInput(raw: McpServerInput): McpServerInput {
     if (args.length > ARGS_LIMIT) throw new McpError(`args: больше ${ARGS_LIMIT} аргументов`);
     if (auth === 'oauth') throw new McpError('OAuth бывает только у HTTP-серверов: stdio берёт ключи из окружения');
     const env = stringMap(raw.env, 'env', ENV_LIMIT, ENV_VALUE_LIMIT);
+    const credentialEnv = nameList(raw.credentialEnv, 'credentialEnv', ENV_LIMIT);
     return {
       name,
       ...(description === undefined ? {} : { description }),
@@ -410,6 +438,7 @@ export function normalizeInput(raw: McpServerInput): McpServerInput {
       command,
       ...(args.length > 0 ? { args } : {}),
       ...(env === undefined ? {} : { env }),
+      ...(credentialEnv === undefined ? {} : { credentialEnv }),
       auth,
       shared,
     };
@@ -418,6 +447,9 @@ export function normalizeInput(raw: McpServerInput): McpServerInput {
   if (!raw.url) throw new McpError('для HTTP-сервера нужен адрес');
   const url = httpUrl(text(raw.url, 'url'), 'адрес');
   const headers = stringMap(raw.headers, 'headers', HEADER_LIMIT, HEADER_VALUE_LIMIT);
+  // Ожидания ключей имеют смысл только у «ключа / заголовков»: у OAuth вход
+  // делается через браузер, и список env там был бы ложной подсказкой.
+  const credentialHeaders = auth === 'headers' ? nameList(raw.credentialHeaders, 'credentialHeaders', HEADER_LIMIT) : undefined;
   const scopes = limited(optionalText(raw.scopes, 'scopes'), DESCRIPTION_LIMIT, 'scopes');
   const clientId = limited(optionalText(raw.clientId, 'clientId'), URL_LIMIT, 'clientId');
   const authorizationEndpoint =
@@ -444,6 +476,7 @@ export function normalizeInput(raw: McpServerInput): McpServerInput {
     transport,
     url,
     ...(headers === undefined ? {} : { headers }),
+    ...(credentialHeaders === undefined ? {} : { credentialHeaders }),
     auth,
     ...(scopes === undefined ? {} : { scopes }),
     ...(clientId === undefined ? {} : { clientId }),
@@ -515,8 +548,11 @@ function authStateOf(
 ): { ready: boolean; state: McpView['authState']; message?: string } {
   if (server.auth === 'none') return { ready: true, state: 'none' };
   if (server.auth === 'headers') {
+    // У stdio готовность определяют только личные переменные окружения. Постоянный
+    // env — часть описания, он уезжает всем, с кем сервер поделились: считать его
+    // «ключ настроен» значило бы обещать модели инструменты без доступа.
     const has = server.transport === 'stdio'
-      ? Object.keys(credentials?.env ?? {}).length > 0 || Object.keys(server.env ?? {}).length > 0
+      ? Object.keys(credentials?.env ?? {}).length > 0
       : hasHeaders(server, credentials);
     return has
       ? { ready: true, state: 'ready' }
@@ -617,12 +653,18 @@ export function viewOf(
     authState: auth.state,
     ...(auth.message === undefined ? {} : { authMessage: auth.message }),
     ...(server.mimic === true ? { mimic: true } : {}),
-    ...(Object.keys(credentials?.headers ?? {}).length === 0
-      ? {}
-      : { credentialHeaders: Object.keys(credentials?.headers ?? {}) }),
-    ...(Object.keys(credentials?.env ?? {}).length === 0
-      ? {}
-      : { credentialEnv: Object.keys(credentials?.env ?? {}) }),
+    // Сохранённые имена важнее ожидаемых, но если ключей ещё нет, панель должна
+    // знать, что спросить: иначе «Настроить доступ» откроется пустым.
+    ...(() => {
+      const headers = Object.keys(credentials?.headers ?? {});
+      const names = headers.length > 0 ? headers : (server.credentialHeaders ?? []);
+      return names.length === 0 ? {} : { credentialHeaders: names };
+    })(),
+    ...(() => {
+      const env = Object.keys(credentials?.env ?? {});
+      const names = env.length > 0 ? env : (server.credentialEnv ?? []);
+      return names.length === 0 ? {} : { credentialEnv: names };
+    })(),
     canEdit: ownerIsMe,
     canShare: ownerIsMe,
     canDelete: ownerIsMe,
@@ -774,6 +816,8 @@ export function createServer(config: IcarusConfig, owner: string, raw: McpServer
     ...(input.args === undefined ? {} : { args: input.args }),
     ...(input.headers === undefined ? {} : { headers: input.headers }),
     ...(input.env === undefined ? {} : { env: input.env }),
+    ...(input.credentialEnv === undefined ? {} : { credentialEnv: input.credentialEnv }),
+    ...(input.credentialHeaders === undefined ? {} : { credentialHeaders: input.credentialHeaders }),
     auth: input.auth ?? 'none',
     ...(input.scopes === undefined ? {} : { scopes: input.scopes }),
     ...(input.clientId === undefined ? {} : { clientId: input.clientId }),
@@ -885,6 +929,11 @@ export function updateServer(
   ] as const) {
     if (next[key] === undefined) delete next[key];
   }
+
+  // Ожидания ключей приходят только из рецепта при добавлении. Правка формы
+  // их не шлёт и не должна затирать: иначе «сохранил описание» потеряет подсказку.
+  if (input.credentialEnv !== undefined) next.credentialEnv = input.credentialEnv;
+  if (input.credentialHeaders !== undefined) next.credentialHeaders = input.credentialHeaders;
 
   const wasShared = existing.shared;
   if (!sameEndpoint(existing, next)) {

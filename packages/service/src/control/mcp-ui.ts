@@ -36,6 +36,18 @@ ${settingsAside(session, 'mcp')}
       </div>
       <button class="btn primary" id="mcp-add">Добавить MCP</button>
     </div>
+    <div class="recipes">
+      <div class="recipes-head">
+        <div>
+          <h2>Рецепты</h2>
+          <p class="mcp-rule" id="mcp-rule">Готовые серверы: команда, транспорт и нужные ключи уже известны.</p>
+        </div>
+        <span class="recipes-checked" id="mcp-checked"></span>
+      </div>
+      <div class="recipes-grid" id="mcp-recipes"><p class="mcp-empty">Читаю…</p></div>
+      <p class="mcp-skipped" id="mcp-skipped"></p>
+    </div>
+    <p class="section-title">МОИ СЕРВЕРЫ</p>
     <div class="mcp-notice" id="mcp-notice" hidden></div>
     <div class="mcp-list" id="mcp-list"><p class="mcp-empty">Читаю…</p></div>
   </div>
