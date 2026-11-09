@@ -1,0 +1,63 @@
+<!-- OPDS-поиск книг: https://flibusta.is/opds/search?searchType=books&searchTerm=Мастер и Маргарита, 09.11.2026, две записи из выдачи дословно -->
+<?xml version="1.0" encoding="utf-8"?>
+ <feed xmlns="http://www.w3.org/2005/Atom" xmlns:dc="http://purl.org/dc/terms/" xmlns:os="http://a9.com/-/spec/opensearch/1.1/" xmlns:opds="http://opds-spec.org/2010/catalog"> <id>tag:search:books:Мастер и Маргарита:0</id>
+ <title>Результат поиска</title>
+ <updated>2026-11-09T01:08:47+01:00</updated>
+ <icon>/favicon.ico</icon>
+ <link href="/opds-opensearch.xml" rel="search" type="application/opensearchdescription+xml" />
+ <link href="/opds/search?searchTerm={searchTerms}" rel="search" type="application/atom+xml" />
+ <link href="/opds" rel="start" type="application/atom+xml;profile=opds-catalog" />
+ <link href="/opds/search?searchTerm=%D0%9C%D0%B0%D1%81%D1%82%D0%B5%D1%80%20%D0%B8%20%D0%9C%D0%B0%D1%80%D0%B3%D0%B0%D1%80%D0%B8%D1%82%D0%B0" rel="up" type="application/atom+xml;profile=opds-catalog" />
+ <link href="/opds/search?searchType=books&amp;searchTerm=%D0%9C%D0%B0%D1%81%D1%82%D0%B5%D1%80%20%D0%B8%20%D0%9C%D0%B0%D1%80%D0%B3%D0%B0%D1%80%D0%B8%D1%82%D0%B0&amp;pageNumber=1" rel="next" type="application/atom+xml;profile=opds-catalog" />
+<entry> <updated>2026-11-09T01:08:47+01:00</updated>
+ <title>«Мастер и Маргарита» в иллюстрациях [только иллюстрации, компиляция]</title>
+ <author> <name>Карапетян Андрей Петрович</name>
+ <uri>/a/163774</uri>
+</author>
+ <link href="/opds/author/163774" rel="related" type="application/atom+xml" title="Все книги автора Карапетян Андрей Петрович" />
+ <category term="Живопись, альбомы, иллюстрированные каталоги" label="Живопись, альбомы, иллюстрированные каталоги" />
+ <dc:language>ru</dc:language>
+ <dc:format>docx</dc:format>
+ <dc:issued>2014</dc:issued>
+ <content type="text/html">&lt;p class=book&gt;Андрей Петрович Карапетян. &quot;Мастер и Маргарита&quot; в иллюстрациях. Буклет. Изд.2014г.
+В этот буклет собраны иллюстрации к роману М.А.Булгакова &quot;Мастер и Маргарита&quot; художника-иллюстратора Андрея Карапетяна из его цикла работ к этому произведению.
+Рисунки представлены без текста романа и объединены в отдельные группы по темам с условными названиями «Мастер и Маргарита», «Понтий Пилат» и «Воланд. Фантазии на тему…»
+Эти работы пока не опубликованы в виде &quot;бумажной&quot; книги. Ждём-с...
+Электронное издание:
+Данная сборка не является копией какого-либо полиграфического издания. 
+Это компьютерная компиляция материалов, найденых в Сети, и различных элементов оформления.
+&lt;p&gt;&lt;br/&gt;Год издания: 2014&lt;br/&gt;Формат: docx&lt;br/&gt;Язык: ru&lt;br/&gt;Размер: 8536 Kb&lt;br/&gt;Скачиваний: 9876&lt;br/&gt;</content>
+ <link href="/b/368728/download" rel="http://opds-spec.org/acquisition/open-access" type="application/docx" />
+ <link href="/b/368728" rel="alternate" type="text/html" title="Книга на сайте" />
+ <id>tag:book:382d14a7e56e827e7d4676789566aca0</id>
+</entry>
+<entry> <updated>2026-11-09T01:08:47+01:00</updated>
+ <title>«Мастер и Маргарита». Роман Михаила Булгакова о времени и о себе [litres]</title>
+ <author> <name>Разумов Александр Сергеевич</name>
+ <uri>/a/345792</uri>
+</author>
+ <link href="/opds/author/345792" rel="related" type="application/atom+xml" title="Все книги автора Разумов Александр Сергеевич" />
+ <category term="Критика" label="Критика" />
+ <category term="Литературоведение" label="Литературоведение" />
+ <dc:language>ru</dc:language>
+ <dc:format>fb2+zip</dc:format>
+ <dc:issued>2026</dc:issued>
+ <content type="text/html">&lt;p class=&quot;book&quot;&gt;Творчество Михаила Булгакова – это своеобразная хроника эпохи, переплетённая с мифологией, ироничным взглядом на происходящее и острейшей социальной критикой. В своей литературной деятельности он тонко и часто болезненно осмыслял переломные моменты российской истории.&lt;/p&gt;
+&lt;p class=&quot;book&quot;&gt;Роман «Мастер и Маргарита» стал творческим итогом Михаила Афанасьевича Булгакова. В этом произведении получили продолжение и завершились важнейшие для Булгакова мотивы и стилистические искания, а также его размышления о времени и о себе. Как считает Александр Разумов, в произведении Булгакова зашифрованы события эпохи и люди, окружавшие писателя. Чтобы понять глубинную идею, которую Булгаков вложил в своё главное произведение, необходимо разгадать эти шифры.&lt;/p&gt;
+&lt;p class=&quot;book&quot;&gt;Александр Разумов, опираясь на тексты ранних редакций романа, дневниковые записи Михаила Булгакова и его жены Елены Сергеевны, а также на воспоминания современников писателя, постарался раскрыть эти тайны. Его исследование позволяет не только понять авторскую идею, спрятанную в «древних» главах романа, но и узнать реальные прототипы всех персонажей «Мастера и Маргариты» – от Воланда, Коровьева и кота Бегемота до Алоизия Могарыча, Фриды и Аннушки-Чумы.&lt;/p&gt;
+&lt;p class=&quot;book&quot;&gt;В формате PDF A4 сохранен издательский макет книги.&lt;/p&gt;
+&lt;br/&gt;Год издания: 2026&lt;br/&gt;Формат: fb2&lt;br/&gt;Язык: ru&lt;br/&gt;Размер: 3435 Kb&lt;br/&gt;Скачиваний: 599&lt;br/&gt;</content>
+ <link href="/i/64/890864/cover.jpg" rel="http://opds-spec.org/image" type="image/jpeg" />
+ <link href="/i/64/890864/cover.jpg" rel="x-stanza-cover-image" type="image/jpeg" />
+ <link href="/i/64/890864/cover.jpg" rel="http://opds-spec.org/thumbnail" type="image/jpeg" />
+ <link href="/i/64/890864/cover.jpg" rel="x-stanza-cover-image-thumbnail" type="image/jpeg" />
+ <link href="/b/890864/fb2/opds" rel="http://opds-spec.org/acquisition/open-access" type="application/fb2+zip" />
+ <link href="/b/890864/html/opds" rel="http://opds-spec.org/acquisition/open-access" type="application/html+zip" />
+ <link href="/b/890864/txt/opds" rel="http://opds-spec.org/acquisition/open-access" type="application/txt+zip" />
+ <link href="/b/890864/rtf/opds" rel="http://opds-spec.org/acquisition/open-access" type="application/rtf+zip" />
+ <link href="/b/890864/epub/opds" rel="http://opds-spec.org/acquisition/open-access" type="application/epub+zip" />
+ <link href="/b/890864/mobi/opds" rel="http://opds-spec.org/acquisition/open-access" type="application/x-mobipocket-ebook" />
+ <link href="/b/890864" rel="alternate" type="text/html" title="Книга на сайте" />
+ <id>tag:book:ac29e0fb0197b9d6cce56b5c85ee386c</id>
+</entry>
+ </feed>

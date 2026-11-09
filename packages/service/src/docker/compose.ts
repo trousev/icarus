@@ -109,6 +109,8 @@ export function userVolumes(config: IcarusConfig, user: UserConfig): string[] {
     // серверы: каталог `tools` целиком содержит стенды и логи, которым там нечего
     // делать. Артефакты нужны всегда, Maple — только когда он включён.
     bind(path.join(REPO_ROOT, 'tools', 'artifacts-mcp'), '/opt/icarus/tools/artifacts-mcp', 'ro'),
+    // Книги: сервер ходит на Флибусту сам, ему нужен только собственный код.
+    bind(path.join(REPO_ROOT, 'tools', 'flibusta-mcp'), '/opt/icarus/tools/flibusta-mcp', 'ro'),
     ...(config.mapleDir !== undefined
       ? [bind(path.join(REPO_ROOT, 'tools', 'maple-mcp'), '/opt/icarus/tools/maple-mcp', 'ro')]
       : []),

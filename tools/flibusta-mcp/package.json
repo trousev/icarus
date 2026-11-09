@@ -1,0 +1,17 @@
+{
+  "name": "flibusta-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP-сервер Флибусты: поиск книг, форматы, скачивание с подтверждением и мини-реестр",
+  "bin": {
+    "flibusta-mcp": "./server.mjs"
+  },
+  "scripts": {
+    "test": "node --test ../../packages/service/test/flibusta-mcp.test.ts"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

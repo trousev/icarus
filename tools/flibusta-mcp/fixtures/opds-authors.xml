@@ -1,0 +1,32 @@
+<!-- OPDS-поиск авторов: https://flibusta.is/opds/search?searchType=authors&searchTerm=Булгаков, 09.11.2026, две записи из выдачи дословно -->
+<?xml version="1.0" encoding="utf-8"?>
+ <feed xmlns="http://www.w3.org/2005/Atom" xmlns:dc="http://purl.org/dc/terms/" xmlns:os="http://a9.com/-/spec/opensearch/1.1/" xmlns:opds="http://opds-spec.org/2010/catalog"> <id>tag:search:authors:Булгаков:0</id>
+ <title>Результат поиска</title>
+ <updated>2026-11-09T01:10:46+01:00</updated>
+ <icon>/favicon.ico</icon>
+ <link href="/opds-opensearch.xml" rel="search" type="application/opensearchdescription+xml" />
+ <link href="/opds/search?searchTerm={searchTerms}" rel="search" type="application/atom+xml" />
+ <link href="/opds" rel="start" type="application/atom+xml;profile=opds-catalog" />
+ <link href="/opds/search?searchTerm=%D0%91%D1%83%D0%BB%D0%B3%D0%B0%D0%BA%D0%BE%D0%B2" rel="up" type="application/atom+xml;profile=opds-catalog" />
+ <link href="/opds/search?searchType=authors&amp;searchTerm=%D0%91%D1%83%D0%BB%D0%B3%D0%B0%D0%BA%D0%BE%D0%B2&amp;pageNumber=1" rel="next" type="application/atom+xml;profile=opds-catalog" />
+<entry> <updated>2026-11-09T01:10:46+01:00</updated>
+ <id>tag:author:126237</id>
+ <title>(Булгаков) Митрополит Макарий</title>
+ <content type="text">20 книг</content>
+ <link href="/opds/author/126237" type="application/atom+xml;profile=opds-catalog" />
+ <link href="/ia/82/50482/mak1-0.jpg" rel="http://opds-spec.org/image" type="image/jpeg" />
+ <link href="/ia/82/50482/mak1-0.jpg" rel="x-stanza-cover-image" type="image/jpeg" />
+ <link href="/ia/82/50482/mak1-0.jpg" rel="http://opds-spec.org/image/thumbnail" type="image/jpeg" />
+ <link href="/ia/82/50482/mak1-0.jpg" rel="x-stanza-cover-image-thumbnail" type="image/jpeg" />
+ <link href="/opds/authorsequences/126237" rel="http://www.feedbooks.com/opds/facet" type="application/atom+xml;profile=opds-catalog" title="Книги автора по сериям" />
+ <link href="/opds/authorsequenceless/126237" rel="http://www.feedbooks.com/opds/facet" type="application/atom+xml;profile=opds-catalog" title="Книги автора вне серий" />
+</entry>
+<entry> <updated>2026-11-09T01:10:46+01:00</updated>
+ <id>tag:author:46322</id>
+ <title>Булгаков Александр Григорьевич</title>
+ <content type="text">2 книги</content>
+ <link href="/opds/author/46322" type="application/atom+xml;profile=opds-catalog" />
+ <link href="/opds/authorsequences/46322" rel="http://www.feedbooks.com/opds/facet" type="application/atom+xml;profile=opds-catalog" title="Книги автора по сериям" />
+ <link href="/opds/authorsequenceless/46322" rel="http://www.feedbooks.com/opds/facet" type="application/atom+xml;profile=opds-catalog" title="Книги автора вне серий" />
+</entry>
+ </feed>

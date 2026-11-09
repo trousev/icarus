@@ -1,0 +1,9 @@
+<!-- образец «OPDS поменял схему»: запись есть, ссылки на /b/<id> больше нет -->
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:dc="http://purl.org/dc/terms/" xmlns:os="http://a9.com/-/spec/opensearch/1.1/" xmlns:opds="http://opds-spec.org/2010/catalog">
+ <id>tag:search:books</id>
+ <title>Результат поиска</title>
+ <entry> <title>Мастер и Маргарита</title>
+ <link href="/book/766078" rel="alternate" type="text/html" />
+ </entry>
+ </feed>

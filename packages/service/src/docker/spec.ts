@@ -64,7 +64,7 @@ export function specFor(config: IcarusConfig, user: UserConfig): string {
     mapleDir: config.mapleDir ?? null,
     // Код встроенных MCP монтируется из репозитория: старый контейнер без этого
     // маунта не запустит сервер артефактов, поэтому список — часть отпечатка.
-    tools: ['artifacts-mcp', ...(config.mapleDir === undefined ? [] : ['maple-mcp'])],
+    tools: ['artifacts-mcp', 'flibusta-mcp', ...(config.mapleDir === undefined ? [] : ['maple-mcp'])],
     // Глобальная библиотека артефактов — отдельный маунт /artifacts.
     artifacts: true,
     env: Object.fromEntries(Object.entries(env).sort(([a], [b]) => a.localeCompare(b))),

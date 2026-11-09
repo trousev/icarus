@@ -1,0 +1,11 @@
+<!-- OPDS-поиск книг по запросу без совпадений: https://flibusta.is/opds/search?searchType=books&searchTerm=zzzqqqxxxnonexistentbook, 09.11.2026, дословно -->
+<?xml version="1.0" encoding="utf-8"?>
+ <feed xmlns="http://www.w3.org/2005/Atom" xmlns:dc="http://purl.org/dc/terms/" xmlns:os="http://a9.com/-/spec/opensearch/1.1/" xmlns:opds="http://opds-spec.org/2010/catalog"> <id>tag:search:books:zzzqqqxxxnonexistentbook:0</id>
+ <title>Результат поиска</title>
+ <updated>2026-11-09T01:09:26+01:00</updated>
+ <icon>/favicon.ico</icon>
+ <link href="/opds-opensearch.xml" rel="search" type="application/opensearchdescription+xml" />
+ <link href="/opds/search?searchTerm={searchTerms}" rel="search" type="application/atom+xml" />
+ <link href="/opds" rel="start" type="application/atom+xml;profile=opds-catalog" />
+ <link href="/opds/search?searchTerm=zzzqqqxxxnonexistentbook" rel="up" type="application/atom+xml;profile=opds-catalog" />
+</feed>

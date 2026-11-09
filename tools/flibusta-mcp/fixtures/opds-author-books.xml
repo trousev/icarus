@@ -1,0 +1,59 @@
+<!-- OPDS-книги автора: https://flibusta.is/opds/author/17584/alphabet (Булгаков), 09.11.2026, две записи дословно -->
+<?xml version="1.0" encoding="utf-8"?>
+ <feed xmlns="http://www.w3.org/2005/Atom" xmlns:dc="http://purl.org/dc/terms/" xmlns:os="http://a9.com/-/spec/opensearch/1.1/" xmlns:opds="http://opds-spec.org/2010/catalog"> <id>tag:author:17584:books:alphabet:0</id>
+ <title>Книги по алфавиту</title>
+ <updated>2026-11-09T01:17:31+01:00</updated>
+ <icon>/favicon.ico</icon>
+ <link href="/opds-opensearch.xml" rel="search" type="application/opensearchdescription+xml" />
+ <link href="/opds/search?searchTerm={searchTerms}" rel="search" type="application/atom+xml" />
+ <link href="/opds" rel="start" type="application/atom+xml;profile=opds-catalog" />
+ <link href="/opds/author/17584/alphabet/1" rel="next" type="application/atom+xml;profile=opds-catalog" />
+<entry> <updated>2026-11-09T01:17:31+01:00</updated>
+ <title>«Был май...»</title>
+ <author> <name>Булгаков Михаил Афанасьевич</name>
+ <uri>/a/17584</uri>
+</author>
+ <link href="/opds/author/17584" rel="related" type="application/atom+xml" title="Все книги автора Булгаков Михаил Афанасьевич" />
+ <category term="Советская классическая проза" label="Советская классическая проза" />
+ <dc:language>ru</dc:language>
+ <dc:format>fb2+zip</dc:format>
+ <link href="/opds/sequencebooks/956" rel="related" type="application/atom+xml" title="Все книги серии &quot;Записки покойника&quot;" />
+ <content type="text/html">Формат: fb2&lt;br/&gt;Язык: ru&lt;br/&gt;Размер: 48 Kb&lt;br/&gt;Скачиваний: 10466&lt;br/&gt;Серия: Записки покойника #2&lt;br/&gt;</content>
+ <link href="/i/93/71793/cover.jpg" rel="http://opds-spec.org/image" type="image/jpeg" />
+ <link href="/i/93/71793/cover.jpg" rel="x-stanza-cover-image" type="image/jpeg" />
+ <link href="/i/93/71793/cover.jpg" rel="http://opds-spec.org/thumbnail" type="image/jpeg" />
+ <link href="/i/93/71793/cover.jpg" rel="x-stanza-cover-image-thumbnail" type="image/jpeg" />
+ <link href="/b/71793/fb2/opds" rel="http://opds-spec.org/acquisition/open-access" type="application/fb2+zip" />
+ <link href="/b/71793/html/opds" rel="http://opds-spec.org/acquisition/open-access" type="application/html+zip" />
+ <link href="/b/71793/txt/opds" rel="http://opds-spec.org/acquisition/open-access" type="application/txt+zip" />
+ <link href="/b/71793/rtf/opds" rel="http://opds-spec.org/acquisition/open-access" type="application/rtf+zip" />
+ <link href="/b/71793/epub/opds" rel="http://opds-spec.org/acquisition/open-access" type="application/epub+zip" />
+ <link href="/b/71793/mobi/opds" rel="http://opds-spec.org/acquisition/open-access" type="application/x-mobipocket-ebook" />
+ <link href="/b/71793" rel="alternate" type="text/html" title="Книга на сайте" />
+ <id>tag:book:d0621089573c1a87b89e67415e78a21f</id>
+</entry>
+<entry> <updated>2026-11-09T01:17:31+01:00</updated>
+ <title>«Вода жизни»</title>
+ <author> <name>Булгаков Михаил Афанасьевич</name>
+ <uri>/a/17584</uri>
+</author>
+ <link href="/opds/author/17584" rel="related" type="application/atom+xml" title="Все книги автора Булгаков Михаил Афанасьевич" />
+ <category term="Советская классическая проза" label="Советская классическая проза" />
+ <dc:language>ru</dc:language>
+ <dc:format>fb2+zip</dc:format>
+ <link href="/opds/sequencebooks/949" rel="related" type="application/atom+xml" title="Все книги серии &quot;Москва краснокаменная. Рассказы, фельетоны 20-х годов&quot;" />
+ <content type="text/html">Формат: fb2&lt;br/&gt;Язык: ru&lt;br/&gt;Размер: 32 Kb&lt;br/&gt;Скачиваний: 7876&lt;br/&gt;Серия: Москва краснокаменная. Рассказы, фельетоны 20-х годов #36&lt;br/&gt;</content>
+ <link href="/i/94/71794/cover3.jpg" rel="http://opds-spec.org/image" type="image/jpeg" />
+ <link href="/i/94/71794/cover3.jpg" rel="x-stanza-cover-image" type="image/jpeg" />
+ <link href="/i/94/71794/cover3.jpg" rel="http://opds-spec.org/thumbnail" type="image/jpeg" />
+ <link href="/i/94/71794/cover3.jpg" rel="x-stanza-cover-image-thumbnail" type="image/jpeg" />
+ <link href="/b/71794/fb2/opds" rel="http://opds-spec.org/acquisition/open-access" type="application/fb2+zip" />
+ <link href="/b/71794/html/opds" rel="http://opds-spec.org/acquisition/open-access" type="application/html+zip" />
+ <link href="/b/71794/txt/opds" rel="http://opds-spec.org/acquisition/open-access" type="application/txt+zip" />
+ <link href="/b/71794/rtf/opds" rel="http://opds-spec.org/acquisition/open-access" type="application/rtf+zip" />
+ <link href="/b/71794/epub/opds" rel="http://opds-spec.org/acquisition/open-access" type="application/epub+zip" />
+ <link href="/b/71794/mobi/opds" rel="http://opds-spec.org/acquisition/open-access" type="application/x-mobipocket-ebook" />
+ <link href="/b/71794" rel="alternate" type="text/html" title="Книга на сайте" />
+ <id>tag:book:f28d5f14ff61aa477cd39e6df0f01862</id>
+</entry>
+ </feed>
