@@ -36,6 +36,7 @@ import {
 } from '../src/telegram/api.ts';
 import { MESSAGE_LIMIT, PLACEHOLDER, splitPoint } from '../src/telegram/reply.ts';
 import { userPaths } from '../src/config.ts';
+import { ensureChat, recordTurn } from '../src/sessions/chats.ts';
 import { makeConfig, probe } from './fixtures.ts';
 
 /** Байты, которые «скачались» из Telegram: содержимое в тестах не важно. */
@@ -515,6 +516,34 @@ test('ошибка авторизации MCP даёт в ответе ссыл�
   const text = chatText(state, 42);
   assert.match(text, /Переподключить/);
   assert.match(text, /https:\/\/chat\.example\/panel\/mcp\?server=black-forest/);
+});
+
+test('Telegram предупреждает: в контексте есть реплики из панели', async () => {
+  // Так выглядит «начал в панели → продолжил в телеге»: сессия одна, история
+  // общая. Молча подмешивать панельные реплики в ответ нельзя, иначе Telegram
+  // тихо становится окном в личные файлы, — поэтому бот говорит об этом до ответа.
+  const { bot, state, config } = makeBot();
+  ensureChat(config, probe('probe'), 'telegram-42', 'telegram');
+  recordTurn(config, probe('probe'), 'telegram-42', 'web', new Date('2026-11-01T12:04:00.000Z'));
+
+  await bot.handleUpdate(messageUpdate('а что там по отчёту?'));
+
+  const text = chatText(state, 42);
+  assert.match(text, /Продолжаю разговор, который шёл в панели/);
+  assert.match(text, /эти реплики уже в контексте/);
+  assert.match(text, /\/clear/, 'человеку сразу видно, как начать заново');
+  assert.match(text, /Привет, Саня/, 'ответ модели тоже на месте');
+  assert.ok(text.indexOf('Продолжаю') < text.indexOf('Привет'), 'отбивка стоит до ответа');
+});
+
+test('отбивки нет, если разговор идёт только в Telegram', async () => {
+  const { bot, state, config } = makeBot();
+  ensureChat(config, probe('probe'), 'telegram-42', 'telegram');
+  recordTurn(config, probe('probe'), 'telegram-42', 'telegram', new Date('2026-11-01T12:04:00.000Z'));
+
+  await bot.handleUpdate(messageUpdate('привет'));
+
+  assert.doesNotMatch(chatText(state, 42), /Продолжаю разговор/);
 });
 
 test('незнакомцу бот не открывает чужую память', async () => {

@@ -9,6 +9,7 @@ import { CONTAINER_INCOMING, findUser, userPaths, type IcarusConfig, type UserCo
 import { findWorkspace } from '../workspaces.ts';
 import { buildPrompt } from '../prompt.ts';
 import { compareHistory, normalizeContent, type IncomingMessage as ChatMessage } from '../sessions/divergence.ts';
+import { recordTurn } from '../sessions/chats.ts';
 import { phraseForToolEnd, phraseForToolStart } from '../reasoning.ts';
 import type { SessionRegistry } from '../sessions/registry.ts';
 import type { PiSession } from '../sessions/pi-session.ts';
@@ -296,6 +297,10 @@ export async function handleChatCompletions(
     res.end(JSON.stringify(errorBody('в этом разговоре уже идёт ответ', 'conflict_error')));
     return;
   }
+
+  // Файл сессии не различает входы: канал хода записываем сами, иначе в панели
+  // не понять, кто прислал последнюю реплику — панель, Telegram или API.
+  recordTurn(config, user, conversationId, 'api');
 
   // Сверка истории: сессия pi — истина, расхождение только логируем.
   try {
