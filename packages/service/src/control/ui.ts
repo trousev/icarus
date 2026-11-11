@@ -541,9 +541,11 @@ function askConfirm(message, confirmLabel = 'подтвердить') {
 }
 
 // Общий обработчик: любая ошибка API должна быть видна, а не глохнуть.
+// Событие передаём в действие: обработчики вкладок сами зовут preventDefault,
+// и без аргумента они падали на «event is undefined» вместо перехода.
 const guard = (action) => async (event) => {
   if (event && event.preventDefault) event.preventDefault();
-  try { await action(); } catch (error) { fail(error); }
+  try { await action(event); } catch (error) { fail(error); }
 };
 function fail(error) {
   el('content').innerHTML = '<p class="empty">ошибка: ' + esc(error && error.message ? error.message : error) + '</p>';
