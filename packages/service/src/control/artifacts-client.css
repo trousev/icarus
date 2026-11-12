@@ -73,6 +73,9 @@
 .art-icon-btn:disabled:hover { border-color: var(--line); color: var(--dim); }
 .art-icon-btn.danger { color: var(--danger); }
 .art-icon-btn.danger:hover { border-color: var(--danger); color: var(--danger); }
+/* Режим выбора элемента включён: кнопка должна читаться как включённый тумблер,
+   иначе человек не понимает, почему клики по странице больше не работают. */
+.art-icon-btn[aria-pressed="true"] { background: rgba(122, 162, 247, .18); border-color: var(--accent); color: var(--accent); }
 .art-icon-btn.danger.armed { background: var(--danger); border-color: var(--danger); color: #0f1116; }
 .art-view { flex: 1; min-height: 0; overflow: auto; background: var(--bg); }
 .art-placeholder {
@@ -261,6 +264,28 @@
 .art-chat-log .trace { margin: 0 0 10px; }
 .art-chat-log .reauth-card { margin: 0 0 10px; }
 .art-chat-foot { border-top: 1px solid var(--line); padding: 9px 12px 12px; background: var(--side); flex: 0 0 auto; }
+/* Ссылка на элемент из предпросмотра: чип над композером. Пока он есть, текст
+   уедет в чат вместе с адресом; «×» снимает ссылку, не трогая набранное. */
+.art-chat-ref {
+  display: flex; align-items: center; gap: 7px; margin: 0 0 8px; padding: 6px 8px;
+  border: 1px solid rgba(122, 162, 247, .45); border-radius: 8px;
+  background: rgba(122, 162, 247, .1); min-width: 0;
+}
+.art-chat-ref[hidden] { display: none; }
+.art-chat-ref-label { color: var(--accent); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; flex: 0 0 auto; }
+.art-chat-ref code {
+  font: 11px/1.4 ui-monospace, monospace; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+}
+.art-chat-ref-quote {
+  color: var(--dim); font-size: 11px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; min-width: 0; flex: 1 1 auto;
+}
+.art-chat-ref-clear {
+  flex: 0 0 auto; width: 20px; height: 20px; padding: 0; display: grid; place-items: center;
+  background: none; border: 0; border-radius: 5px; color: var(--dim); font-size: 15px; line-height: 1; cursor: pointer;
+}
+.art-chat-ref-clear:hover { background: var(--raise); color: var(--text); }
 .art-chat-note { min-height: 16px; color: var(--dim); font-size: 11px; line-height: 1.4; margin: 0 0 6px; }
 .art-chat-note.bad { color: var(--danger); }
 .art-chat-note a { color: var(--accent); }

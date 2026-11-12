@@ -7,7 +7,7 @@
 // Команды с косой черты общие с основным чатом: сначала спрашиваем сервер
 // (/panel/api/chat/command), и только его отказ отправляет строку в pi. Иначе
 // /clear уезжал модели как текст и она бодро врала, что контекст очищен.
-/* global artifactMarkdown, artEl, artApi, artEsc, artStamp, artState, artSetStatus, artHideHistory, artLoadList, artRenderView */
+/* global artifactMarkdown, artEl, artApi, artEsc, artStamp, artState, artSetStatus, artHideHistory, artLoadList, artRefresh */
 
 const artChatState = {
   chatId: null,
@@ -16,6 +16,8 @@ const artChatState = {
   controller: null,
   historyToken: 0,
   liveBox: null,
+  // Ссылка на элемент из предпросмотра: уезжает в сообщение вместе с текстом.
+  ref: null,
 };
 
 function artChatLog() {
@@ -104,6 +106,57 @@ function artChatAssistant(iso) {
     steps: [],
   };
 }
+
+/** Ссылка на элемент: её ставит предпросмотр, а человек уже дописывает задачу. */
+function artChatSetRef(selection) {
+  if (!selection || !selection.ref) return;
+  artChatState.ref = {
+    ref: selection.ref,
+    quote: selection.quote || '',
+    tag: selection.tag || '',
+  };
+  artEl('art-chat-ref').hidden = false;
+  artEl('art-chat-ref-path').textContent = selection.ref;
+  artEl('art-chat-ref-path').title = selection.ref;
+  artEl('art-chat-ref-quote').textContent = selection.quote ? '«' + selection.quote + '»' : '';
+  artEl('art-chat-input').placeholder = 'Что сделать с этим элементом?';
+}
+
+/** «Убрать из ссылки»: набранный текст остаётся, адрес из сообщения уходит. */
+function artChatClearRef() {
+  artChatState.ref = null;
+  const chip = artEl('art-chat-ref');
+  if (chip) chip.hidden = true;
+  const input = artEl('art-chat-input');
+  if (input) input.placeholder = 'Что поправить в артефакте?';
+}
+
+/**
+ * Текст сообщения со ссылкой: цитата в blockquote, адрес в `code`. Модель
+ * видит, что это `data-icarus-ref` в исходнике, и правит именно этот блок,
+ * а не похожий соседний.
+ */
+function artChatCompose(text, ref) {
+  const message = String(text || '').trim();
+  if (!ref || !ref.ref) return message;
+  const quote = String(ref.quote || '').replace(/\s+/g, ' ').trim();
+  const line =
+    '> Элемент артефакта `' + ref.ref + '` (data-icarus-ref в исходнике)' +
+    (quote ? ' — «' + quote + '»' : '');
+  return line + '\n\n' + message;
+}
+
+/** Клик по элементу: показать ссылку в чате и открыть его, если закрыт. */
+async function artChatAttachRef(selection) {
+  artChatSetRef(selection);
+  if (artEl('art-chat-panel').hidden) await artChatOpen();
+  else artEl('art-chat-input').focus();
+}
+
+// Скрипт — классический: функции и так глобальные. Явные имена нужны клиенту
+// раздела (он грузится раньше) и тестам: это единственный вход ссылки в чат.
+window.artChatCompose = artChatCompose;
+window.artChatAttachRef = artChatAttachRef;
 
 /** Заглушка «Скажи, что поправить» уходит, как только в ленте появился ход. */
 function artChatDropEmpty() {
@@ -417,6 +470,7 @@ function artChatClose() {
   if (panel.hidden) return;
   panel.hidden = true;
   artEl('art-chat').setAttribute('aria-expanded', 'false');
+  artChatClearRef();
   if (artChatState.controller) {
     artChatState.controller.abort();
     artChatState.controller = null;
@@ -508,10 +562,14 @@ async function artChatSend() {
   if (artChatState.busy) return;
 
   const chatId = artChatState.chatId;
+  const message = artChatCompose(text, artChatState.ref);
   input.value = '';
   input.style.height = 'auto';
   artChatDropEmpty();
-  artChatUser(text);
+  artChatUser(message);
+  // Ссылка одноразовая: ушла с сообщением — чип убираем, иначе следующая
+  // реплика незаметно уедет про тот же элемент.
+  artChatClearRef();
   const box = artChatAssistant();
   artChatState.liveBox = box;
   artChatSetBusy(true);
@@ -523,7 +581,7 @@ async function artChatSend() {
     const response = await fetch('/panel/api/chat/send', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ chatId, text }),
+      body: JSON.stringify({ chatId, text: message }),
       signal: abort.signal,
     });
     if (!response.ok) {
@@ -576,8 +634,7 @@ async function artChatRefreshArtifact() {
   if (!name) return;
   try {
     await artLoadList();
-    const data = await artApi('/panel/artifacts/api/read?artifact=' + encodeURIComponent(name));
-    artRenderView(data);
+    await artRefresh();
   } catch (error) {
     artChatNote('Артефакт изменился, но панель не обновилась: ' + (error && error.message ? error.message : error), true);
   }
@@ -587,6 +644,7 @@ function artChatStart() {
   artEl('art-chat').addEventListener('click', artChatToggle);
   artEl('art-chat-close').addEventListener('click', artChatClose);
   artEl('art-chat-send').addEventListener('click', () => void artChatSend());
+  artEl('art-chat-ref-clear').addEventListener('click', artChatClearRef);
   artEl('art-chat-stop').addEventListener('click', () => void artChatStop());
   const input = artEl('art-chat-input');
   input.addEventListener('keydown', (event) => {

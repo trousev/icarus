@@ -28,6 +28,8 @@ const ICON_DOWNLOAD = '<svg viewBox="0 0 24 24" width="15" height="15" fill="non
 const ICON_DELETE = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M10 4h4"/><path d="M6.5 7l.8 12.1a1 1 0 0 0 1 .9h7.4a1 1 0 0 0 1-.9L17.5 7"/><path d="M10 11v5M14 11v5"/></svg>';
 const ICON_COPY = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg>';
 const ICON_GLOBE = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17"/><path d="M12 3.5c2.2 2.3 3.3 5.2 3.3 8.5s-1.1 6.2-3.3 8.5c-2.2-2.3-3.3-5.2-3.3-8.5s1.1-6.2 3.3-8.5z"/></svg>';
+// Курсор: «выбрать блок на странице» — не «открыть файл».
+const ICON_PICK = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 3 6.5 17 2.4-6.1L20 11.5z"/></svg>';
 
 export type ArtifactsPageOptions = {
   artifact?: string;
@@ -83,6 +85,8 @@ export function artifactsPage(session: PanelSession, options: ArtifactsPageOptio
         <div><strong id="art-name">—</strong><small id="art-meta"></small></div>
       </div>
       <div class="art-actions">
+        <button type="button" class="art-icon-btn" id="art-pick" disabled aria-pressed="false"
+                title="Выбери артефакт" aria-label="Выбрать элемент">${ICON_PICK}</button>
         <button type="button" class="art-icon-btn" id="art-share" disabled title="Выбери артефакт" aria-label="Поделиться">${ICON_SHARE}</button>
         <button type="button" class="art-icon-btn" id="art-history" disabled title="Выбери артефакт" aria-label="История">${ICON_HISTORY}</button>
         <button type="button" class="art-icon-btn" id="art-chat" disabled aria-controls="art-chat-panel" aria-expanded="false"
@@ -129,6 +133,13 @@ export function artifactsPage(session: PanelSession, options: ArtifactsPageOptio
         <div class="art-empty"><b>Скажи, что поправить</b><span>Икар изменит файлы прямо в папке артефакта: «добавь заголовок», «сделай таблицу», «поменяй цвет».</span><span>Команды — как в большом чате: /clear начнёт заново, /compact сожмёт, /stats покажет токены.</span></div>
       </div>
       <div class="art-chat-foot">
+        <div class="art-chat-ref" id="art-chat-ref" hidden>
+          <span class="art-chat-ref-label">элемент</span>
+          <code id="art-chat-ref-path"></code>
+          <span class="art-chat-ref-quote" id="art-chat-ref-quote"></span>
+          <button type="button" class="art-chat-ref-clear" id="art-chat-ref-clear"
+                  title="Убрать из ссылки" aria-label="Убрать из ссылки">×</button>
+        </div>
         <div class="art-chat-note" id="art-chat-note"></div>
         <div class="art-chat-box">
           <textarea id="art-chat-input" rows="1" placeholder="Что поправить в артефакте?" disabled></textarea>
