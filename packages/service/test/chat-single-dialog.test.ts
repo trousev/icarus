@@ -198,25 +198,37 @@ test('панель продолжает Telegram-разговор в той же
   assert.equal(chat?.conversationId, CONVERSATION);
 });
 
-test('ход в Telegram: панель не начинает второй и не дублирует ответ', async () => {
+test('ход в Telegram: реплика из панели встаёт в очередь, а не начинает второй ход', async () => {
   const value = fixture();
   const session = (await value.registry.acquire(value.user, CONVERSATION)) as unknown as StubSession;
   // Ответ сейчас печатается в Telegram: сессия занята, а потока в панели нет.
   session.busy = true;
   recordTurn(value.config, value.user, CONVERSATION, 'telegram');
 
-  await withServer(value, async (_base, send) => {
+  await withServer(value, async (base, send) => {
     const response = await send({ chatId: CONVERSATION, text: 'и ещё' });
-    assert.equal(response.status, 409, 'второй ход в той же сессии не начинается');
-    const body = (await response.json()) as { live?: boolean; busyIn?: string };
+    assert.equal(response.status, 202, 'реплика принята в очередь, а не отбита');
+    const body = (await response.json()) as { queued?: boolean; position?: number; live?: boolean };
+    assert.equal(body.queued, true);
+    assert.equal(body.position, 1);
     assert.equal(body.live, false, 'прицепиться к чужому потоку некуда');
-    assert.equal(body.busyIn, 'telegram', 'видно, где идёт ответ');
+    assert.deepEqual(session.prompts, [], 'реплика из панели не ушла вторым ходом');
+
+    // «Стоп» снимает и очередь: иначе реплика доехала бы без спроса.
+    const stopped = await fetch(`${base}/panel/api/chat/abort`, {
+      method: 'POST',
+      headers: { [PANEL_USER_HEADER]: 'probe', 'content-type': 'application/json' },
+      body: JSON.stringify({ chatId: CONVERSATION }),
+    });
+    const cleared = (await stopped.json()) as { ok?: boolean; dropped?: number };
+    assert.equal(cleared.ok, true);
+    assert.equal(cleared.dropped, 1, 'очередь снята вместе с ходом');
   });
 
-  assert.deepEqual(session.prompts, [], 'реплика из панели не ушла вторым ходом');
+  assert.deepEqual(session.prompts, [], 'второго хода в pi не было');
 });
 
-test('два окна панели: второй смотрит тот же ход, а не начинает второй', async () => {
+test('два окна панели: реплика второго встаёт в очередь и доезжает после первого хода', async () => {
   const value = fixture({ autoRelease: false });
 
   await withServer(value, async (_base, send) => {
@@ -224,15 +236,21 @@ test('два окна панели: второй смотрит тот же хо
     assert.equal(first.status, 200);
 
     const second = await send({ chatId: CONVERSATION, text: 'два' });
-    assert.equal(second.status, 409);
-    const body = (await second.json()) as { live?: boolean; busyIn?: string };
-    assert.equal(body.live, true, 'ход наш, к нему можно прицепиться');
-    assert.equal(body.busyIn, undefined);
+    assert.equal(second.status, 202, 'второй ход поверх первого не начинается');
+    const body = (await second.json()) as { queued?: boolean; position?: number; live?: boolean };
+    assert.equal(body.queued, true);
+    assert.equal(body.position, 1);
+    assert.equal(body.live, true, 'ход наш, к нему можно прицепиться в панели');
+    assert.deepEqual(value.created[0]?.prompts, ['раз'], 'второй реплики в pi пока не было');
 
     value.created[0]?.release();
     const events = await lines(first);
     assert.equal(events.at(-1)?.type, 'done');
-  });
 
-  assert.deepEqual(value.created[0]?.prompts, ['раз'], 'второй реплики в pi не было');
+    // Очередь досылается сама, без второго HTTP-запроса от панели.
+    for (let i = 0; i < 100 && value.created[0]!.prompts.length < 2; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.deepEqual(value.created[0]?.prompts, ['раз', 'два'], 'реплика из очереди доехала вторым ходом');
+  });
 });

@@ -122,7 +122,11 @@ test('скролл в поле ввода — тонкий и в стык с п�
   assert.match(html, /\.composer-box textarea \{[\s\S]*?margin-right: -9px/, 'полоса прижата к границе рамки');
   assert.match(html, /\.composer-box textarea \{[\s\S]*?scrollbar-gutter: stable/, 'место под полосу не прыгает');
   assert.match(html, /\.composer-box textarea::-webkit-scrollbar \{ width: 4px; \}/, 'в поле полоса 4px');
-  assert.match(html, /\.send, \.stop \{ position: absolute;/, 'кнопки не отнимают у поля правый край');
+  assert.match(
+    html,
+    /\.composer-actions \{[\s\S]*?position: absolute;/,
+    'кнопки не отнимают у поля правый край',
+  );
   assert.match(html, /\.composer-box \{[\s\S]*?position: relative/, 'рамка держит кнопки внутри себя');
 });
 

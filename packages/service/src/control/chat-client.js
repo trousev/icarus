@@ -230,6 +230,13 @@ let draft = false;
 let draftWorkspace = 'talk';
 /** Поколение загрузки истории: ответ, пришедший после смены чата, уже не нужен. */
 let historyToken = 0;
+/** Очередь реплик по разговорам: правда живёт на сервере, тут только её вид. */
+const queues = new Map();
+/**
+ * Свой пузырь, нарисованный заранее. Сервер объявляет реплику событием `user`
+ * (по нему её видно после F5), но отправителю рисовать второй такой же незачем.
+ */
+let optimisticUser = null;
 /** Можно ли писать в открытый разговор: Telegram и API в панели только читаются. */
 let writable = Boolean(cfg.enabled);
 /** Список диалогов листается страницами: курсор приносит следующую. */
@@ -412,6 +419,7 @@ function setComposer(readOnly) {
   el('chat-input').disabled = !writable;
   el('chat-send').disabled = !writable;
   el('chat-attach').disabled = !writable;
+  syncNowButton();
   el('chat-input').placeholder = !cfg.enabled
     ? 'Чат недоступен…'
     : locked
@@ -1234,6 +1242,8 @@ async function selectChat(id) {
   restoreEmptyState();
   const token = ++historyToken;
   currentId = id;
+  // Индикатор очереди — про открытый разговор: у чужого он был бы враньём.
+  renderQueue();
   history.replaceState(null, '', '/panel/chat?chat=' + encodeURIComponent(id));
   renderChats();
   // Канал уже известен из списка: композер не должен на миг обещать запись.
@@ -1260,6 +1270,8 @@ async function selectChat(id) {
     setNote(chatHint(currentChat));
     renderVia(currentChat);
     renderHistory(data.messages || []);
+    // Очередь переживает F5: сервер отдаёт её вместе с историей.
+    setQueue(id, data.queue || []);
     // Разговор открылся, а ход всё ещё идёт: цепляемся к живому потоку.
     if (data.live && !streaming()) void attachLive();
     closeMenu();
@@ -1325,6 +1337,7 @@ function startDraft(workspace = defaultWorkspace) {
   setDraft(true);
   setArchiveState(null);
   setComposer(false);
+  renderQueue();
   setTitle('Новый чат');
   renderVia(null);
   showEmpty(true);
@@ -2644,7 +2657,12 @@ function scrollToBottom(force = false) {
   }
 }
 
-function addUser(text, files = []) {
+/**
+ * Реплика человека в ленте. Возвращает узел: отправка убирает его, если сервер
+ * принял текст в очередь (тогда реплика появится сама, уже как ход).
+ * `before` — чтобы реплика из очереди встала выше плашки ответа, а не под ней.
+ */
+function addUser(text, files = [], before = null) {
   const node = document.createElement('div');
   node.className = 'turn user';
   const bubble = document.createElement('div');
@@ -2677,8 +2695,9 @@ function addUser(text, files = []) {
     bubble.append(box);
   }
   node.append(bubble);
-  el('chat-messages').append(node);
+  el('chat-messages').insertBefore(node, before);
   scrollToBottom(true);
+  return node;
 }
 
 function addAssistant() {
@@ -2762,6 +2781,17 @@ function renderLive(box) {
 }
 
 function handleEvent(box, event) {
+  // Реплика — часть журнала хода, а не только наш пузырь: после F5 и после хода
+  // из очереди она приезжает сюда. Встаёт выше ответа, иначе непонятно, на что он.
+  if (event.type === 'user') {
+    const text = String(event.text || '');
+    if (optimisticUser && optimisticUser.chatId === box.chatId && optimisticUser.text === text) {
+      optimisticUser = null;
+      return;
+    }
+    addUser(text, [], box.turn);
+    return;
+  }
   if (event.type === 'text') {
     box.text += event.text || '';
     renderLive(box);
@@ -2845,7 +2875,13 @@ function handleEvent(box, event) {
   }
 }
 
-async function sendText(forced) {
+/**
+ * Отправка реплики. `options.now` — вторая операция: прервать текущий ход и
+ * отправить это немедленно. Без неё занятый разговор не отбивает реплику, а
+ * ставит её в серверную очередь (202) — человек видит её в индикаторе, а ход
+ * начнётся сам, когда освободится.
+ */
+async function sendText(forced, options = {}) {
   const input = el('chat-input');
   const text = String(forced ?? input.value).trim();
   const files = pending.slice();
@@ -2855,8 +2891,7 @@ async function sendText(forced) {
   if (text.startsWith('/') && files.length === 0) {
     if (await runCommand(text)) return;
   }
-  // Отказ только от СВОЕГО занятого разговора: чужие ходы отправке не мешают.
-  if (!writable || (currentId && busyChats.has(currentId))) return;
+  if (!writable) return;
   if (!currentId) {
     try {
       await createChat();
@@ -2882,36 +2917,65 @@ async function sendText(forced) {
     }
   }
 
-  // Запоминаем, чей это ход: пока он идёт, человек может уйти в другой разговор,
-  // и `finally` не должен затирать подписку, которая к тому времени станет чужой.
   const turnChatId = currentId;
-  setLive(turnChatId);
+  const now = options.now === true;
+  // «Сейчас» сначала останавливает чужую работу. Частичный ответ не выбрасываем:
+  // он уже отдан и остаётся в ленте как есть, с пометкой «прервано».
+  if (now) interruptCurrentBox(turnChatId);
+
+  // Живой поток мог остаться от идущего хода: его плашку не переиспользуем, иначе
+  // новый ответ приклеится к старому. Запоминаем, кому вернуть «живое» состояние,
+  // если реплика уедет в очередь, а чужой ход продолжится.
+  const previous = { abort: liveAbort, box: liveBox, chatId: liveChatId };
   const abort = new AbortController();
   liveAbort = abort;
+  liveBox = null;
+  setLive(turnChatId);
   input.value = '';
   growInput();
+  syncNowButton();
   clearPending(false);
   showEmpty(false);
-  addUser(text, files);
-  const box = assistantBoxFor(turnChatId);
-  box.stopped = false;
-  liveBox = box;
+  const userNode = addUser(text, files);
+  // Сервер пришлёт эту же реплику событием хода: свой пузырь у себя не дублируем.
+  optimisticUser = { chatId: turnChatId, text: text || files.map((item) => item.file.name).join(', ') };
+  let box = null;
+  let claimed = true;
 
   try {
     const response = await fetch('/panel/api/chat/send', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ chatId: turnChatId, text, attachments }),
+      body: JSON.stringify({ chatId: turnChatId, text, attachments, ...(now ? { mode: 'now' } : {}) }),
       signal: abort.signal,
     });
+    if (response.status === 202) {
+      // Сервер взял реплику в очередь. Пузырь убираем: ход начнётся сам, и тогда
+      // сервер объявит реплику событием `user` — иначе текст был бы дважды.
+      const data = await response.json().catch(() => ({}));
+      userNode.remove();
+      optimisticUser = null;
+      claimed = false;
+      restoreLive(previous);
+      setQueue(turnChatId, data.queue || []);
+      setNote(
+        now
+          ? 'не удалось прервать — поставил в очередь: ' + (data.position || 1)
+          : 'в очереди: ' + (data.position || 1) + ' — доедет после текущего хода',
+      );
+      return;
+    }
     if (!response.ok) {
       const type = response.headers.get('content-type') || '';
       const data = type.includes('application/json') ? await response.json().catch(() => ({})) : {};
       // Ход уже идёт (кто-то другой написал туда же): это не ошибка, а повод
       // прицепиться к живому потоку вместо того, чтобы падать с 409-кой.
       if (data.live) {
-        dropLiveBody(turnChatId);
-        setLive(null);
+        userNode.remove();
+        optimisticUser = null;
+        if (!input.value) input.value = text;
+        claimed = false;
+        restoreLive(previous);
         await attachLive();
         return;
       }
@@ -2932,23 +2996,144 @@ async function sendText(forced) {
       throw new Error((data.error || {}).message || response.statusText || 'ответ не начался: ' + response.status);
     }
 
+    box = assistantBoxFor(turnChatId);
+    box.stopped = false;
+    liveBox = box;
     await readStream(response, box);
   } catch (error) {
     // Ушли в другой разговор — ответ доедет на сервере, панель его догонит.
-    if (!box.stopped) {
+    if (box && !box.stopped) {
       box.turn.classList.add('error');
       box.text = [box.text, '\n\n[ошибка: ' + error.message + ']'].filter(Boolean).join('');
       box.md.innerHTML = markdown(box.text);
       setNote('');
+    } else if (!box) {
+      // Реплика не ушла вовсе — возвращаем её в поле ввода, чтобы не набирать заново.
+      userNode.remove();
+      optimisticUser = null;
+      if (!input.value) input.value = text;
+      setNote('не отправилось: ' + error.message);
     }
   } finally {
-    if (liveAbort === abort) liveAbort = null;
-    if (liveBox === box) liveBox = null;
-    markRead(turnChatId);
-    if (liveChatId === turnChatId) setLive(null);
-    box.typing.hidden = true;
-    if (currentId === turnChatId) input.focus();
+    if (claimed) {
+      if (liveAbort === abort) liveAbort = null;
+      if (liveBox === box) liveBox = null;
+      markRead(turnChatId);
+      // Ход мог встать и сразу уступить очередь: `busy` по сводке приходит раньше,
+      // чем закрывается наш поток, поэтому догон запускаем и здесь.
+      if (liveChatId === turnChatId) setLive(null);
+      if (currentId === turnChatId && busyChats.has(turnChatId) && !streaming()) void attachLive();
+      if (box) box.typing.hidden = true;
+      if (currentId === turnChatId) input.focus();
+    }
   }
+}
+
+/**
+ * «Сейчас»: прерываем текущий ход и сразу отправляем написанное. Текущая плашка
+ * остаётся в ленте с тем, что Икар успел сказать, — это и есть частичный ответ.
+ */
+function interruptCurrentBox(chatId) {
+  const box = liveBodies.get(chatId) || (liveBox && liveBox.chatId === chatId ? liveBox : null);
+  if (box) {
+    box.stopped = true;
+    box.typing.hidden = true;
+    if (box.text || box.steps.length) {
+      const mark = document.createElement('div');
+      mark.className = 'interrupted';
+      mark.textContent = '⏹ прервано — можно попросить продолжить';
+      box.turn.querySelector('.assistant-body')?.append(mark);
+    } else {
+      box.turn.remove();
+    }
+  }
+  settleLiveBody(chatId);
+  if (liveAbort) {
+    liveAbort.abort();
+    liveAbort = null;
+  }
+  liveBox = null;
+  if (liveChatId === chatId) setLive(null);
+}
+
+/** Вернуть «живой поток» тому, кто его вёл: наша реплика уехала в очередь. */
+function restoreLive(saved) {
+  setLive(saved.chatId);
+  liveAbort = saved.abort;
+  liveBox = saved.box;
+}
+
+/* ── очередь реплик ──────────────────────────────────────────────────────────
+   Очередь живёт на сервере (переживает F5), панель только рисует её вид: счётчик
+   над композером и список того, что доедет после текущего хода. */
+
+/** Очередь разговора: `items` — [{id, text}], пустой список убирает индикатор. */
+function setQueue(chatId, items) {
+  if (!chatId) return;
+  if (items && items.length) queues.set(chatId, items);
+  else queues.delete(chatId);
+  if (chatId === currentId) renderQueue();
+}
+
+function renderQueue() {
+  const items = (currentId && queues.get(currentId)) || [];
+  el('queue-count').textContent = 'В очереди: ' + items.length;
+  el('chat-queue').hidden = items.length === 0;
+  const list = el('queue-list');
+  list.replaceChildren(
+    ...items.map((item, index) => {
+      const row = document.createElement('div');
+      row.className = 'queue-row';
+      const num = document.createElement('span');
+      num.className = 'num';
+      num.textContent = String(index + 1);
+      const text = document.createElement('span');
+      text.className = 'text';
+      text.textContent = item.text;
+      text.title = item.text;
+      const remove = document.createElement('button');
+      remove.className = 'remove';
+      remove.dataset.id = item.id;
+      remove.title = 'Убрать из очереди';
+      remove.setAttribute('aria-label', 'Убрать из очереди');
+      remove.textContent = '×';
+      row.append(num, text, remove);
+      return row;
+    }),
+  );
+}
+
+/** Убрать реплику из очереди: человек передумал до того, как её отправили. */
+async function dropQueuedItem(id) {
+  if (!currentId) return;
+  try {
+    const data = await api('/panel/api/chat/queue/drop', {
+      method: 'POST',
+      body: JSON.stringify({ chatId: currentId, id }),
+    });
+    setQueue(currentId, data.queue || []);
+  } catch (error) {
+    setNote('убрать из очереди не вышло: ' + error.message);
+  }
+}
+
+/** Кнопка «прервать и отправить» живая только когда есть что отправлять. */
+function syncNowButton() {
+  const button = el('chat-now');
+  if (!button) return;
+  button.disabled = !writable || !String(el('chat-input').value || '').trim();
+}
+
+/**
+ * Кнопка «сейчас»: одна операция — прервать чужую работу под свою реплику.
+ * Пустое поле — это не отправка, а «просто стоп»: у него своя кнопка.
+ */
+async function sendNow() {
+  if (!String(el('chat-input').value || '').trim()) {
+    setNote('напиши текст — кнопка прервёт текущий ход и отправит его');
+    return;
+  }
+  await sendText(undefined, { now: true });
 }
 
 /** Строчки NDJSON из потока: общий разбор и для отправки, и для догона хода. */
@@ -2997,6 +3182,7 @@ async function reloadHistory(chatId) {
     currentChat = data.chat;
     renderVia(currentChat);
     renderHistory(data.messages || []);
+    setQueue(chatId, data.queue || []);
   } catch (error) {
     setNote('ответ пришёл, но лента не обновилась: ' + error.message);
   }
@@ -3031,12 +3217,15 @@ async function attachLive() {
   } catch (error) {
     if (!box.stopped) setNote('догнать ответ не вышло: ' + error.message);
   } finally {
-    if (liveAbort === abort) liveAbort = null;
+    // Нас мог обогнать новый ход («прервать и отправить»): тогда «живое»
+    // состояние уже его, и снимать его нельзя — иначе сводка решит, что мы не
+    // подписаны, и прицепит к тому же ходу вторую подписку.
+    if (liveAbort === abort) {
+      liveAbort = null;
+      if (liveChatId === chatId) setLive(null);
+    }
     if (liveBox === box) liveBox = null;
     markRead(chatId);
-    // Подписка могла к этому моменту уже уехать в другой разговор: трогаем
-    // состояние, только если оно всё ещё наше.
-    if (liveChatId === chatId) setLive(null);
     box.typing.hidden = true;
   }
 }
@@ -3049,6 +3238,11 @@ let bulletin = null;
 
 function applyBulletin(event) {
   if (!event || !event.chatId) return;
+  // Очередь изменилась: её взяли в работу, в неё что-то добавили или сняли.
+  if (event.type === 'queue') {
+    setQueue(event.chatId, event.queue || []);
+    return;
+  }
   if (event.type === 'busy') {
     busyChats.add(event.chatId);
     renderChats();
@@ -3126,16 +3320,21 @@ function detachLive() {
 }
 
 /**
- * Пока идёт ответ, на месте «отправить» стоит «стоп»: остановить ход можно и в
- * середине — вместе с субагентами, которые в этот момент работают.
+ * Пока идёт ответ, рядом с «отправить» появляются «стоп» и «прервать и отправить»:
+ * остановить ход можно и в середине — вместе с субагентами, которые работают.
+ * Сам «отправить» не прячется: при занятом разговоре он кладёт реплику в очередь.
  */
 function setLive(chatId) {
   liveChatId = chatId || null;
   const on = Boolean(liveChatId);
+  el('composer-box').classList.toggle('live', on);
   el('chat-stop').hidden = !on;
   el('chat-stop').disabled = false;
-  el('chat-send').hidden = Boolean(on);
-  el('chat-send').disabled = on || !writable;
+  el('chat-now').hidden = !on;
+  el('chat-send').hidden = false;
+  el('chat-send').disabled = !writable;
+  el('chat-send').title = on ? 'Поставить в очередь (Enter)' : 'Отправить (Enter)';
+  syncNowButton();
   if (!on) stoppedByUser = false;
   // Точка «в работе» в сайдбаре — это в том числе наш собственный ход.
   renderChats();
@@ -3150,7 +3349,13 @@ async function stopStream() {
       body: JSON.stringify({ chatId: currentId }),
     });
     stoppedByUser = Boolean(result.ok);
-    if (stoppedByUser) setNote('остановил — можно писать дальше');
+    // «Стоп» снимает и очередь — говорим об этом, а не прячем пропавшие реплики.
+    if (stoppedByUser && result.dropped) {
+      setQueue(currentId, []);
+      setNote(`остановил, очередь снята: ${result.dropped} — можно писать дальше`);
+    } else if (stoppedByUser) {
+      setNote('остановил — можно писать дальше');
+    }
   } catch (error) {
     setNote('остановить не вышло: ' + error.message);
   }
@@ -3271,6 +3476,7 @@ async function ensurePiCommands() {
 /** Ввод в поле: тянем высоту и, если это начало команды, обновляем палитру. */
 function onComposerInput() {
   growInput();
+  syncNowButton();
   // Новый символ — новый фильтр: выбор начинается с первой строки.
   paletteIndex = 0;
   renderPalette();
@@ -3641,6 +3847,12 @@ for (const type of ['click', 'keyup', 'select', 'input']) {
 el('chat-input').addEventListener('keydown', (event) => {
   // Пока открыта палитра, Enter выбирает команду, а не отправляет реплику.
   if (paletteKeydown(event)) return;
+  // Ctrl+Enter — та же вторая операция с клавиатуры: прервать и отправить.
+  if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+    event.preventDefault();
+    sendNow().catch(() => {});
+    return;
+  }
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
     sendText().catch(() => {});
@@ -3657,6 +3869,15 @@ el('chat-send').onclick = () => {
 el('chat-stop').onclick = () => {
   stopStream().catch(() => {});
 };
+el('chat-now').onclick = () => {
+  sendNow().catch(() => {});
+};
+el('chat-queue').addEventListener('click', (event) => {
+  const button = event.target.closest('.queue-row .remove');
+  if (!button) return;
+  event.preventDefault();
+  dropQueuedItem(button.dataset.id).catch(() => {});
+});
 el('chat-search').addEventListener('input', () => {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(() => {

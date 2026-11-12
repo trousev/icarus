@@ -1252,7 +1252,7 @@ test('реплика поверх идущего хода прерывает е�
     }
   };
 
-  const { bot, calls } = makeBot({ session });
+  const { bot, calls, state } = makeBot({ session });
   const first = bot.enqueue(messageUpdate('первое'));
   for (let i = 0; i < 100 && session.prompts.length === 0; i += 1) {
     await new Promise((resolve) => setTimeout(resolve, 5));
@@ -1271,6 +1271,9 @@ test('реплика поверх идущего хода прерывает е�
     calls.some((call) => call.command === 'interrupt'),
     'прерывание идёт через реестр, а не мимо него',
   );
+  // Кнопок в Telegram нет, поэтому операция одна — «сейчас». Но человек должен
+  // видеть, что прошлый ответ оборван, а не потерялся.
+  assert.match(chatText(state, 42), /Прервал прошлый ответ/, 'об прерывании сказано честно');
 });
 
 test('ссылка на файл в ответе уезжает вложением, а путь пропадает из текста', async () => {
