@@ -112,9 +112,13 @@ export function userVolumes(config: IcarusConfig, user: UserConfig): string[] {
     ...(config.mapleDir !== undefined ? [bind(config.mapleDir, config.mapleDir, 'ro')] : []),
     // Код встроенных MCP живёт в репозитории, но в контейнер едут только сами
     // серверы: каталог `tools` целиком содержит стенды и логи, которым там нечего
-    // делать. Артефакты и OPDS нужны всегда, Maple — только когда он включён.
+    // делать. Артефакты, OPDS и Кинозал нужны всегда, Maple — только когда он включён.
     bind(path.join(REPO_ROOT, 'tools', 'artifacts-mcp'), '/opt/icarus/tools/artifacts-mcp', 'ro'),
     bind(path.join(REPO_ROOT, 'tools', 'opds-mcp'), '/opt/icarus/tools/opds-mcp', 'ro'),
+    // Кинозал: сервер маленький, ключи приходят из панели, а не из маунта. Монтируем
+    // всегда: рецепт «Кинозал» добавляется в панели и после сборки конфига, а путь
+    // /opt/icarus/tools/arr-mcp должен существовать к тому моменту.
+    bind(path.join(REPO_ROOT, 'tools', 'arr-mcp'), '/opt/icarus/tools/arr-mcp', 'ro'),
     ...(config.mapleDir !== undefined
       ? [bind(path.join(REPO_ROOT, 'tools', 'maple-mcp'), '/opt/icarus/tools/maple-mcp', 'ro')]
       : []),

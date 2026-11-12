@@ -308,7 +308,58 @@ test('рецепт OPDS: адрес каталога в env, запуск лен
   });
 });
 
+test('Кинозал — обычный рецепт: четыре env-ключа, ленивый, без ручного mcp.arr', async () => {
+  const recipe = recipeById('kinozal');
+  assert.ok(recipe, 'рецепт кинозала есть в каталоге');
+  assert.equal(recipe.category, 'медиа');
+  assert.equal(recipe.transport, 'stdio');
+  assert.equal(recipe.command, 'node');
+  assert.deepEqual(recipe.args, ['/opt/icarus/tools/arr-mcp/server.mjs'], 'сервер едет в контейнер из репозитория');
+  assert.equal(recipe.secretKind, 'env');
+  assert.deepEqual(
+    recipe.secrets.map((secret) => secret.name),
+    ['ARR_RADARR_URL', 'ARR_RADARR_KEY', 'ARR_SONARR_URL', 'ARR_SONARR_KEY'],
+    'адреса и ключи вводит человек: в рецепте только имена',
+  );
 
+  await withServer(async (base, config) => {
+    const editor = (await (await get(base, '/panel/mcp/recipe?id=kinozal')).json()) as Editor;
+    assert.deepEqual(editor.server.env, undefined, 'несекретных значений в рецепте нет — адреса у каждого свои');
+    assert.deepEqual(editor.credentialEnv, ['ARR_RADARR_URL', 'ARR_RADARR_KEY', 'ARR_SONARR_URL', 'ARR_SONARR_KEY']);
+
+    const added = await fetch(`${base}/panel/mcp/add`, {
+      method: 'POST',
+      headers: headers('probe'),
+      body: JSON.stringify(formBody(editor)),
+    });
+    assert.equal(added.status, 200);
+    const created = (await added.json()) as { server: { id: string; ready: boolean } };
+    assert.equal(created.server.ready, false, 'без ключей сервер добавлен, но не готов');
+
+    // Одной пары достаточно: Radarr без Sonarr — рабочая настройка, а пустые
+    // значения формы не должны превращаться в пустые переменные в контейнере.
+    const saved = await post(base, 'probe', 'credentials', {
+      id: created.server.id,
+      env: {
+        ARR_RADARR_URL: 'http://radarr:7878',
+        ARR_RADARR_KEY: 'radarr-key',
+        ARR_SONARR_URL: '',
+        ARR_SONARR_KEY: '',
+      },
+    });
+    assert.equal(saved.status, 200);
+    assert.equal(((await saved.json()) as { server: { ready: boolean } }).server.ready, true);
+
+    const entry = piMcp(config, 'probe').mcpServers[created.server.id];
+    assert.equal(entry.command, 'node');
+    assert.deepEqual(entry.args, ['/opt/icarus/tools/arr-mcp/server.mjs']);
+    assert.equal(entry.lifecycle, 'lazy', 'рецепт не тянет инструменты в каждый разговор');
+    const env = entry.env as Record<string, string>;
+    assert.equal(env.ARR_RADARR_URL, 'http://radarr:7878');
+    assert.equal(env.ARR_RADARR_KEY, 'radarr-key', 'ключ доезжает до сервера');
+    assert.equal(env.ARR_SONARR_URL, undefined, 'пустая вторая пара не уезжает в контейнер');
+  });
+});
 test('страница MCP рисует каталог рецептов, а не только список серверов', async () => {
   await withServer(async (base) => {
     const response = await get(base, '/panel/mcp');
