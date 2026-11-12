@@ -235,6 +235,41 @@ export const MCP_RECIPES: McpRecipe[] = [
     checkedAt: '2026-11-09',
   },
   {
+    id: 'opds',
+    name: 'OPDS-каталог',
+    category: 'книги',
+    when: 'Книги из OPDS-каталога: найти, посмотреть карточку и скачать в папку вложений. Раз в неделю — да, в каждом разговоре — лишний контекст.',
+    description: 'Универсальный книжный каталог по OPDS: поиск, разделы, карточка книги и скачивание файла в incoming.',
+    transport: 'stdio',
+    command: 'node',
+    args: ['/opt/icarus/tools/opds-mcp/server.mjs'],
+    auth: 'none',
+    // Адрес — образец публичного каталога: его видно в форме и можно заменить на
+    // свой (Calibre, домашняя библиотека). Сайт в коде сервера не зашит.
+    env: { OPDS_URL: 'https://www.gutenberg.org/ebooks.opds/' },
+    secrets: [],
+    secretKind: 'env',
+    requires: [
+      'сеть из контейнера до OPDS-каталога',
+      'адрес корня каталога: Project Gutenberg, Calibre или домашняя библиотека с OPDS',
+    ],
+    steps: [
+      'Проверь OPDS_URL: у Project Gutenberg это https://www.gutenberg.org/ebooks.opds/, у Calibre — http://<адрес>:8080/opds/. Адрес самой страницы сайта не подходит: нужен именно OPDS-фид.',
+      'Если каталог закрыт паролем, добавь в переменные окружения OPDS_USER и OPDS_PASSWORD (basic) или OPDS_TOKEN (Bearer).',
+      'Добавь сервер: открытый каталог готов сразу, ключей не нужно.',
+    ],
+    trouble: [
+      '«ответ не Atom/OPDS» — в OPDS_URL вписан не каталог, а HTML-страница: нужен адрес с .opds/ или /opds/.',
+      '401/403 — каталог требует авторизации: добавь OPDS_USER/OPDS_PASSWORD или OPDS_TOKEN.',
+      'Ничего не найдено — каталог разобрался, но по запросу пусто: проверь написание или открой разделы через catalog_browse.',
+      'ECONNREFUSED или таймаут — адрес недоступен из контейнера: 127.0.0.1 внутри контейнера — это он сам, нужен адрес машины с каталогом.',
+    ],
+    caveat:
+      'Скачивание пишет файл в incoming/ и требует confirm: true; лимит размера — OPDS_MAX_DOWNLOAD_MB (по умолчанию 25 МБ). Рецепт — только транспорт: за легальность выбранного каталога отвечает тот, кто его добавил.',
+    docs: 'https://specs.opds.io/',
+    checkedAt: '2026-11-12',
+  },
+  {
     id: 'rss',
     name: 'RSS и новости',
     category: 'новости',
