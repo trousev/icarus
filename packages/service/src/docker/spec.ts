@@ -35,6 +35,8 @@ export function containerEnv(config: IcarusConfig, user: UserConfig): Record<str
     ICARUS_URL: config.url,
     // Глобальная библиотека артефактов: и MCP, и folder-guard читают этот путь.
     ICARUS_ARTIFACTS_DIR: CONTAINER_PATHS.artifacts,
+    // Куда skill_writer кладёт личные скиллы: тот же каталог, что читает pi и панель.
+    ICARUS_SKILLS_DIR: `${CONTAINER_PATHS.piAgent}/skills`,
     // Язык разговора — полным именем (English, Russian). Расширение language шлёт его
     // отдельным системным сообщением: внутри большого русского промпта правило языка
     // не держало (замер — tools/persona-flywheel/smoke-language.mjs).

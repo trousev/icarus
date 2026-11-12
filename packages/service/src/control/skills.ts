@@ -23,6 +23,15 @@ import { resolveInside } from './memory.ts';
 /** Имя файла, который делает каталог скиллом: так велит Agent Skills. */
 const SKILL_FILE = 'SKILL.md';
 
+/**
+ * Куда панель убирает выключенный скилл: pi не обходит скрытые каталоги, поэтому
+ * файл остаётся под git и на виду у панели, но в разговор не попадает.
+ *
+ * Это именно переезд, а не флаг в настройках: каталог скиллов — единственный
+ * источник правды для pi, и «выключен» в нём значит «здесь его нет».
+ */
+export const SKILLS_DISABLED_DIR = '.disabled';
+
 /** Ограничения спецификации: те же числа, что у pi в core/skills.ts. */
 export const SKILL_NAME_LIMIT = 64;
 export const SKILL_DESCRIPTION_LIMIT = 1024;
@@ -40,6 +49,8 @@ export type SkillSummary = {
   description: string;
   /** Скрыт от модели: pi зовёт такой скилл только командой `/skill:имя`. */
   hidden: boolean;
+  /** Включён: файл лежит там, где pi его читает. Выключенный — в `.disabled/`. */
+  enabled: boolean;
   /** Сколько файлов в бандле, включая сам SKILL.md. */
   files: number;
   size: number;
@@ -135,6 +146,32 @@ function relativeId(root: string, file: string): string {
   return path.relative(root, file).split(path.sep).join('/');
 }
 
+/** Каталог выключенных скиллов: лежит внутри репозитория, но pi его не видит. */
+export function disabledSkillsRoot(root: string): string {
+  return path.join(root, SKILLS_DISABLED_DIR);
+}
+
+/** Файл скилла лежит в `.disabled/`: значит, он выключен. */
+function isDisabledFile(root: string, file: string): boolean {
+  const disabled = `${path.resolve(disabledSkillsRoot(root))}${path.sep}`;
+  return path.resolve(file).startsWith(disabled);
+}
+
+/** База, относительно которой скилл лежит: корень каталога или `.disabled/`. */
+function baseRootOf(root: string, file: string): string {
+  return isDisabledFile(root, file) ? disabledSkillsRoot(root) : root;
+}
+
+/**
+ * id, который видит панель и человек: у выключенного скилла служебный префикс
+ * `.disabled/` не показываем — статус и так стоит отдельным полем.
+ */
+function effectiveId(root: string, file: string): string {
+  const id = relativeId(root, file);
+  const prefix = `${SKILLS_DISABLED_DIR}/`;
+  return id.startsWith(prefix) ? id.slice(prefix.length) : id;
+}
+
 /**
  * Человеческое имя скилла по адресу его файла: `pirate-mode/SKILL.md` → `pirate-mode`.
  * Им подписаны коммиты и подтверждения, поэтому оно короткое, а не путь целиком.
@@ -194,6 +231,27 @@ function discover(root: string): Array<{ id: string; file: string }> {
   return found.sort((a, b) => a.id.localeCompare(b.id));
 }
 
+/** Скиллы из `.disabled/`: те же правила обхода, но пометка «выключен». */
+function discoverDisabled(root: string): Array<{ id: string; file: string }> {
+  return discover(disabledSkillsRoot(root));
+}
+
+/**
+ * Где лежит скилл с таким id: сначала включённый, потом выключенный.
+ *
+ * Наружу отдаётся абсолютный путь, но id остаётся публичным (`pirate-mode/SKILL.md`),
+ * поэтому панели и человеку не нужно знать про `.disabled/`.
+ */
+export function resolveSkillFile(root: string, id: string): string | null {
+  if (!id || id === '/' || id.startsWith(`${SKILLS_DISABLED_DIR}/`)) return null;
+  if (id.split('/').includes('.git')) return null;
+  for (const base of [root, disabledSkillsRoot(root)]) {
+    const full = resolveInside(base, id, skillExtensions);
+    if (full && fs.existsSync(full) && fs.statSync(full).isFile()) return full;
+  }
+  return null;
+}
+
 /** Файлы бандла: всё, что лежит рядом со скиллом, — и есть его бандл. */
 function bundleOf(root: string, file: string): SkillFile[] {
   const dir = path.dirname(file);
@@ -216,13 +274,19 @@ function bundleOf(root: string, file: string): SkillFile[] {
   return files.sort((a, b) => a.path.localeCompare(b.path));
 }
 
-function summaryOf(root: string, entry: { id: string; file: string }): SkillSummary {
-  const stat = fs.statSync(entry.file);
-  const raw = fs.readFileSync(entry.file, 'utf8');
+/**
+ * Сводка по файлу скилла.
+ *
+ * `base` — каталог, относительно которого считаются пути бандла: у выключенного
+ * скилла это `.disabled/`, поэтому человек и панель не видят служебный префикс.
+ */
+function summaryOf(base: string, id: string, file: string, enabled: boolean): SkillSummary {
+  const stat = fs.statSync(file);
+  const raw = fs.readFileSync(file, 'utf8');
   const { frontmatter, problem } = splitSkillFile(raw);
 
-  const dirName = path.basename(path.dirname(entry.file));
-  const fallbackName = path.basename(entry.file) === SKILL_FILE ? dirName : path.basename(entry.file, '.md');
+  const dirName = path.basename(path.dirname(file));
+  const fallbackName = path.basename(file) === SKILL_FILE ? dirName : path.basename(file, '.md');
   const name = typeof frontmatter.name === 'string' && frontmatter.name.trim() ? frontmatter.name.trim() : fallbackName;
   const description = typeof frontmatter.description === 'string' ? frontmatter.description.trim() : '';
 
@@ -234,39 +298,52 @@ function summaryOf(root: string, entry: { id: string; file: string }): SkillSumm
   if (!trouble) trouble = validateSkillName(name) ?? undefined;
 
   return {
-    id: entry.id,
+    id,
     name,
     description,
     hidden: frontmatter['disable-model-invocation'] === true,
-    files: bundleOf(root, entry.file).length,
+    enabled,
+    files: bundleOf(base, file).length,
     size: stat.size,
     modified: stat.mtime.toISOString(),
     ...(trouble ? { problem: trouble } : {}),
   };
 }
 
-/** Все скиллы человека: то, что панель показывает списком слева. */
+/**
+ * Все скиллы человека: то, что панель показывает списком слева.
+ *
+ * Включённые и выключенные лежат в одном репозитории, но в разных каталогах:
+ * выключенный скилл виден в панели и правится, а pi его просто не находит.
+ */
 export function listSkills(root: string): SkillSummary[] {
   const summaries: SkillSummary[] = [];
-  for (const entry of discover(root)) {
-    try {
-      summaries.push(summaryOf(root, entry));
-    } catch {
-      // Файл пропал между обходом и чтением — не повод ронять раздел.
+  const collect = (base: string, enabled: boolean, entries: Array<{ id: string; file: string }>): void => {
+    for (const entry of entries) {
+      try {
+        summaries.push(summaryOf(base, entry.id, entry.file, enabled));
+      } catch {
+        // Файл пропал между обходом и чтением — не повод ронять раздел.
+      }
     }
-  }
-  return summaries;
+  };
+
+  collect(root, true, discover(root));
+  collect(disabledSkillsRoot(root), false, discoverDisabled(root));
+  return summaries.sort((a, b) => a.id.localeCompare(b.id));
 }
 
 /** Один скилл целиком: frontmatter, тело и файлы бандла. */
 export function readSkill(root: string, id: string): SkillDetail | null {
-  const full = resolveInside(root, id, skillExtensions);
-  if (!full || !fs.existsSync(full) || !fs.statSync(full).isFile()) return null;
+  const full = resolveSkillFile(root, id);
+  if (!full) return null;
 
+  const base = baseRootOf(root, full);
+  const enabled = !isDisabledFile(root, full);
   const raw = fs.readFileSync(full, 'utf8');
   const { frontmatter, body } = splitSkillFile(raw);
-  const summary = summaryOf(root, { id: relativeId(root, full), file: full });
-  return { ...summary, body, frontmatter, bundle: bundleOf(root, full) };
+  const summary = summaryOf(base, effectiveId(root, full), full, enabled);
+  return { ...summary, body, frontmatter, bundle: bundleOf(base, full) };
 }
 
 /** Ключи, которые панель пишет сама: остальное во frontmatter — чужое, не трогаем. */
@@ -291,20 +368,26 @@ function frontmatterFor(
  * (`группа/скилл/SKILL.md`), и переименование не должно вытаскивать скилл наверх,
  * ломая чужую раскладку.
  */
-function renamedPath(current: string, root: string, name: string): { id: string; file: string } | string {
+function renamedPath(current: string, base: string, name: string): { id: string; file: string } | string {
   const isCanonical = path.basename(current) === SKILL_FILE;
   const currentDir = path.dirname(current);
   // У корневого SKILL.md каталога скилла нет — его собственный каталог и есть корень,
   // поэтому «рядом» для него значит «в корне»: скилл становится обычным каталогом.
-  const parent = currentDir === root ? root : path.dirname(currentDir);
+  const parent = currentDir === base ? base : path.dirname(currentDir);
   const targetDir = isCanonical ? path.join(parent, name) : currentDir;
   const target = isCanonical ? path.join(targetDir, SKILL_FILE) : path.join(currentDir, `${name}.md`);
 
   if (target !== current && fs.existsSync(target)) return `скилл «${name}» уже есть — выбери другое имя`;
+  // Такое же имя могло остаться у выключенного скилла: две записи с одним id
+  // панель бы показала, а pi оставил бы только одну.
+  const otherBase = path.basename(base) === SKILLS_DISABLED_DIR ? path.dirname(base) : disabledSkillsRoot(base);
+  if (target !== current && fs.existsSync(path.join(otherBase, relativeId(base, target)))) {
+    return `скилл «${name}» уже есть — выбери другое имя`;
+  }
   if (isCanonical && targetDir !== currentDir && fs.existsSync(targetDir)) {
     return `каталог «${name}» уже занят — выбери другое имя`;
   }
-  return { id: relativeId(root, target), file: target };
+  return { id: relativeId(base, target), file: target };
 }
 
 /** Заводит или переписывает скилл. Коммит и перезапуск сессий — на стороне маршрута. */
@@ -322,16 +405,24 @@ export function writeSkill(root: string, draft: SkillDraft): SkillResult {
 
   if (!draft.id) {
     file = path.join(root, name, SKILL_FILE);
-    if (fs.existsSync(file) || fs.existsSync(path.join(root, name))) {
+    // Выключенный скилл с тем же именем — тоже занятое имя: иначе в панели
+    // появились бы две записи с одним id, а pi видел бы только включённую.
+    if (
+      fs.existsSync(file) ||
+      fs.existsSync(path.join(root, name)) ||
+      fs.existsSync(path.join(root, `${name}.md`)) ||
+      fs.existsSync(path.join(disabledSkillsRoot(root), name)) ||
+      fs.existsSync(path.join(disabledSkillsRoot(root), `${name}.md`))
+    ) {
       return { ok: false, message: `скилл «${name}» уже есть — открой его в списке` };
     }
     fs.mkdirSync(path.dirname(file), { recursive: true });
   } else {
-    const current = resolveInside(root, draft.id, skillExtensions);
+    const current = resolveSkillFile(root, draft.id);
     if (!current) return { ok: false, message: 'такой скилл трогать нельзя' };
-    if (!fs.existsSync(current)) return { ok: false, message: 'скилла уже нет: обнови страницу' };
 
-    const renamed = renamedPath(current, root, name);
+    const base = baseRootOf(root, current);
+    const renamed = renamedPath(current, base, name);
     if (typeof renamed === 'string') return { ok: false, message: renamed };
     file = renamed.file;
     existing = splitSkillFile(fs.readFileSync(current, 'utf8')).frontmatter;
@@ -339,15 +430,67 @@ export function writeSkill(root: string, draft: SkillDraft): SkillResult {
     if (file !== current) {
       fs.mkdirSync(path.dirname(file), { recursive: true });
       // Канонический скилл — это каталог: переезжает он целиком, вместе с файлами
-      // бандла. Плоский файл переезжает сам.
-      if (path.basename(file) === SKILL_FILE) fs.renameSync(path.dirname(current), path.dirname(file));
-      else fs.renameSync(current, file);
+      // бандла. Плоский файл переезжает сам. Выключенный скилл переезжает внутри
+      // `.disabled/` — включённым он от переименования не становится.
+      if (path.basename(file) === SKILL_FILE && path.dirname(current) !== base) {
+        fs.renameSync(path.dirname(current), path.dirname(file));
+      } else {
+        // Корневой SKILL.md — не каталог: его «каталог» и есть весь каталог скиллов,
+        // и переносить его целиком значило бы унести все скиллы в подпапку.
+        fs.renameSync(current, file);
+      }
     }
   }
 
   fs.writeFileSync(file, renderSkillFile(frontmatterFor(existing, name, description, draft.hidden === true), draft.body));
-  const id = relativeId(root, file);
+  const id = effectiveId(root, file);
   return { ok: true, id, message: `скилл «${name}» сохранён` };
+}
+
+/**
+ * Включает или выключает скилл: это переезд между корнем каталога и `.disabled/`.
+ *
+ * Для pi «выключен» значит «файла нет»: каталог скиллов он читает один раз при
+ * старте, а флага «пропусти этот» в Agent Skills нет. Зато переезд остаётся
+ * видимым в git — в истории скилла будет и выключение, и включение.
+ */
+export function setSkillEnabled(root: string, id: string, enabled: boolean): SkillResult {
+  if (id === SKILL_FILE) {
+    return { ok: false, message: 'корневой SKILL.md не выключается: переименуй его в каталог' };
+  }
+  if (!id || id.startsWith(`${SKILLS_DISABLED_DIR}/`) || id.split('/').includes('.git')) {
+    return { ok: false, message: 'такой скилл трогать нельзя' };
+  }
+
+  // При включении смотрим сначала в `.disabled/`: если в корне уже лежит скилл с
+  // тем же id, это не «уже включён», а занятое место, и перетирать его нельзя.
+  const bases = enabled ? [disabledSkillsRoot(root), root] : [root, disabledSkillsRoot(root)];
+  let current: string | null = null;
+  for (const base of bases) {
+    const candidate = resolveInside(base, id, skillExtensions);
+    if (candidate && fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+      current = candidate;
+      break;
+    }
+  }
+  if (!current) return { ok: false, message: 'скилла уже нет: обнови страницу' };
+
+  const isEnabled = !isDisabledFile(root, current);
+  if (isEnabled === enabled) {
+    return { ok: true, id, message: enabled ? 'скилл уже включён' : 'скилл уже выключен' };
+  }
+
+  const targetBase = enabled ? root : disabledSkillsRoot(root);
+  const target = path.join(targetBase, id);
+  if (fs.existsSync(target)) {
+    return { ok: false, message: `место «${id}» уже занято — включи или выключи его руками` };
+  }
+
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  if (path.basename(current) === SKILL_FILE) fs.renameSync(path.dirname(current), path.dirname(target));
+  else fs.renameSync(current, target);
+
+  return { ok: true, id, message: enabled ? `скилл «${skillLabel(id)}» включён` : `скилл «${skillLabel(id)}» выключен` };
 }
 
 /**
@@ -358,9 +501,8 @@ export function writeSkill(root: string, draft: SkillDraft): SkillResult {
  * поштучно, а бандл рядом оставляем человеку.
  */
 export function removeSkill(root: string, id: string): { ok: boolean; message: string } {
-  const full = resolveInside(root, id, skillExtensions);
-  if (!full) return { ok: false, message: 'такой скилл трогать нельзя' };
-  if (!fs.existsSync(full)) return { ok: false, message: 'скилла уже нет: обнови страницу' };
+  const full = resolveSkillFile(root, id);
+  if (!full) return { ok: false, message: 'скилла уже нет: обнови страницу' };
 
   if (id === SKILL_FILE) {
     fs.rmSync(full);
@@ -384,7 +526,7 @@ export function searchSkills(root: string, query: string, limit = 50): SkillHit[
 
   const hits: SkillHit[] = [];
   for (const skill of listSkills(root)) {
-    const full = resolveInside(root, skill.id, skillExtensions);
+    const full = resolveSkillFile(root, skill.id);
     if (!full) continue;
     const lines = fs.readFileSync(full, 'utf8').split('\n');
     lines.forEach((text, index) => {

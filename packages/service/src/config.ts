@@ -825,6 +825,12 @@ export const CONTAINER_PATHS = {
   /** Карта разговоров для агента: conversationId → sessionId и файл истории. */
   sessionsMap: `${CONTAINER_HOME}/sessions.json`,
   sharedMemory: `${CONTAINER_HOME}/shared-memory`,
+  /**
+   * Снимки скиллов, которыми поделились: глобальный каталог `<dataDir>/skills/shared`,
+   * смонтированный только для чтения. Включённые скиллы оттуда приезжают в
+   * settings.json человека дополнительными путями, а не копируются в его каталог.
+   */
+  sharedSkills: `${CONTAINER_HOME}/shared-skills`,
   agentsMd: `${CONTAINER_HOME}/AGENTS.md`,
   icarusMd: `${CONTAINER_HOME}/icarus.md`,
   /** pi-agent монтируется к pi, а не в рабочее дерево: это его собственный дом. */

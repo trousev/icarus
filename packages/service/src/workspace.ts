@@ -18,6 +18,11 @@ import {
   type UserConfig,
 } from './config.ts';
 import { effectiveServers, ensureOAuthProxyKeys, readStore, storePaths } from './mcp/registry.ts';
+import {
+  enabledSharedPaths,
+  storePaths as skillStorePaths,
+  syncShared,
+} from './skills/registry.ts';
 import { ensureWorkspaces } from './workspaces.ts';
 import { migrateLegacyArtifacts, ensureArtifactsRoot } from './artifacts.ts';
 import { renderSessionsMap } from './sessions/chats.ts';
@@ -55,6 +60,9 @@ export function ensureDirs(config: IcarusConfig, user: UserConfig): void {
   // Глобальная библиотека артефактов живёт в dataDir и монтируется всем как
   // /artifacts. Заводим её до контейнеров: docker иначе создаст точку маунта root-ом.
   ensureArtifactsRoot(config);
+  // Общие скиллы — тоже до контейнеров: каталог монтируется только для чтения,
+  // и если docker создаст его сам, права будут root-овыми, а панель — не сможет писать.
+  fs.mkdirSync(skillStorePaths(config).shared, { recursive: true });
   for (const dir of [
     paths.workspaces,
     paths.icarus,
@@ -75,9 +83,10 @@ export function ensureDirs(config: IcarusConfig, user: UserConfig): void {
   for (const sub of ['people', 'projects', 'journal']) {
     fs.mkdirSync(path.join(paths.memory, sub), { recursive: true });
   }
-  // shared-memory монтируется вложенно внутрь /workspaces/.icarus: точку монтирования
-  // заводим заранее, иначе docker создаст её root-овой внутри маунта.
+  // shared-memory и shared-skills монтируются вложенно внутрь /workspaces/.icarus:
+  // точки монтирования заводим заранее, иначе docker создаст их root-овыми внутри маунта.
   fs.mkdirSync(path.join(paths.icarus, 'shared-memory'), { recursive: true });
+  fs.mkdirSync(path.join(paths.icarus, 'shared-skills'), { recursive: true });
   // Реестр разговоров монтируется в контейнер файлом, а не каталогом: если файла нет,
   // docker создаст на его месте каталог и маунт останется пустым. Пустой реестр — это
   // валидное состояние (разговоров ещё нет), поэтому заводим его сами.
@@ -253,10 +262,18 @@ export function renderAuthJson(config: IcarusConfig): string {
   return JSON.stringify(Object.fromEntries(entries), null, 2) + '\n';
 }
 
-/** Пакеты pi: подключаем MCP-мост только если у человека есть хоть один сервер. */
+/**
+ * Пакеты pi и дополнительные пути к скиллам.
+ *
+ * MCP-мост подключаем только если у человека есть хоть один сервер. Общие скиллы,
+ * которые человек включил, приезжают сюда путями: каталог `~/.pi/agent/skills`
+ * остаётся его личным, а снимки из `shared-skills` pi читает как дополнительные
+ * источники. Выключенный скилл сюда не попадает вовсе — ни в промпт, ни в контекст.
+ */
 export function renderSettingsJson(
   config: IcarusConfig,
   mcpServers: Record<string, McpServerConfig> = config.mcp,
+  skillPaths: string[] = [],
 ): string {
   const servers = Object.keys(mcpServers);
   const settings: Record<string, unknown> = {};
@@ -264,6 +281,7 @@ export function renderSettingsJson(
   // превращается в ловушку: инструменты сервера не активны, а подключить его
   // из разговора нечем (в 1.5.0 был только ручной /mcp:start).
   if (servers.length > 0) settings.packages = ['npm:pi-mcp-extension@1.8.0'];
+  if (skillPaths.length > 0) settings.skills = skillPaths;
   return JSON.stringify(settings, null, 2) + '\n';
 }
 
@@ -385,7 +403,22 @@ export function prepareUser(config: IcarusConfig, user: UserConfig) {
   writeFileSafe(authPath, renderAuthJson(config), 0o600);
   fs.chmodSync(authPath, 0o600);
 
-  writeFileSafe(path.join(paths.piAgent, 'settings.json'), renderSettingsJson(config, mcpServers));
+  // Общие скиллы: сначала догоняем снимки до файлов владельцев (их могли поправить
+  // руками или откатить коммитом), потом отдаём pi только включённые пути.
+  let sharedSkillPaths: string[] = [];
+  try {
+    syncShared(config);
+    sharedSkillPaths = enabledSharedPaths(config, user.id);
+  } catch (error) {
+    // Сломанное хранилище общих скиллов не должно лишать человека разговора:
+    // он просто останется со своими скиллами.
+    log.warn('скиллы: общие не собрались', { user: user.id, error: String(error) });
+  }
+
+  writeFileSafe(
+    path.join(paths.piAgent, 'settings.json'),
+    renderSettingsJson(config, mcpServers, sharedSkillPaths),
+  );
 
   // mcp.json может везти ключ доступа к MCP-серверу, поэтому права те же, что у
   // auth.json: ключ модели и ключ к чужому сервису одинаково не для чужих глаз.
