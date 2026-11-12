@@ -7,6 +7,8 @@ import { ensureArtifactRepos } from './artifacts-git.ts';
 import { backfillChats } from './sessions/chats.ts';
 import { reapStalePi, waitForContainers } from './docker/manager.ts';
 import { SessionRegistry } from './sessions/registry.ts';
+import { ScheduledTasks } from './sessions/scheduled.ts';
+import { taskLauncher } from './sessions/task-launch.ts';
 import { startTelegramBot } from './telegram/bot.ts';
 import { createServer } from './http/server.ts';
 
@@ -68,6 +70,10 @@ const registry = new SessionRegistry(config);
 // Telegram — основной вход к тому же Икару: тот же реестр сессий, та же память.
 // Не настроен (нет токена или маппинга) — бот просто не поднимается.
 const telegram = startTelegramBot(config, registry);
+// Задачи по расписанию: по времени заводят новый разговор и отправляют в него промпт.
+// Агент работает в нём как в обычном чате, и результат человек видит в списке.
+const scheduled = new ScheduledTasks(config, { launch: taskLauncher(config, registry) });
+scheduled.start();
 const server = createServer(config, registry);
 
 server.listen(config.port, config.host, () => {
@@ -76,6 +82,7 @@ server.listen(config.port, config.host, () => {
 
 function shutdown(signal: string): void {
   log.info('останавливаюсь', { signal });
+  scheduled.stop();
   telegram?.stop();
   registry.dispose();
   server.close(() => process.exit(0));

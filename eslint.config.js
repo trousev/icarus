@@ -51,6 +51,7 @@ export default tseslint.config(
       'packages/service/src/control/artifacts-markdown.js',
       'packages/service/src/control/artifacts-chat.js',
       'packages/service/src/control/artifacts-pick.js',
+      'packages/service/src/control/tasks-client.js',
     ],
     languageOptions: {
       sourceType: 'script',
