@@ -315,6 +315,46 @@
    второй крестик не нужен. */
 .files-close { display: none; }
 
+/* Поиск по workspace: над деревом, на всю ширину панели. Результаты занимают
+   место дерева, поэтому поле не «прыгает» при вводе. */
+.files-search {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 7px;
+  margin: 10px 8px 2px; padding: 6px 9px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+}
+.files-search:focus-within { border-color: var(--accent); }
+.files-search span { color: var(--dim); font-size: 14px; line-height: 1; }
+.files-search input {
+  flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text);
+  font: inherit; font-size: 12.5px; outline: none;
+}
+.files-search input::placeholder { color: var(--dim); }
+
+/* Результат поиска: имя файла, путь со строкой и кусок текста вокруг находки.
+   Строка — кнопка: клик открывает предпросмотр того же файла. */
+.srow {
+  display: flex; flex-direction: column; gap: 2px; width: 100%;
+  margin: 1px 0; padding: 7px 8px; border: 1px solid transparent; border-radius: 8px;
+  background: none; color: var(--text); font: inherit; text-align: left; overflow: hidden;
+}
+.srow:hover { background: var(--raise); }
+.srow.active { background: var(--accent-soft); border-color: rgba(122, 162, 247, .55); }
+.shead { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.sname {
+  flex: 0 1 auto; min-width: 0; font-size: 13px; font-weight: 500;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.spath {
+  flex: 1 1 auto; min-width: 0; color: var(--dim); font-size: 10.5px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ssnip {
+  display: block; color: #b9c4d6; font: 11.5px/1.5 ui-monospace, monospace;
+  white-space: pre-wrap; word-break: break-word;
+}
+.ssnip.name { color: var(--dim); font: inherit; font-size: 11.5px; }
+.ssnip mark { background: rgba(122, 162, 247, .22); color: var(--accent); border-radius: 3px; padding: 0 1px; }
+
 /* Дерево: прокручивается отдельно, поэтому предпросмотр под ним не уезжает. */
 .files-tree {
   flex: 1 1 auto; min-height: 90px; overflow: auto;
@@ -436,6 +476,12 @@
   margin: 0; padding: 0; background: none; border: 0; color: var(--text);
   font: 12.5px/1.65 ui-monospace, monospace; white-space: pre-wrap; word-break: break-word;
 }
+/* Классы ставит files-highlight.js: здесь только цвета, разметку он не меняет. */
+.files-code .tok-comment { color: var(--dim); font-style: italic; }
+.files-code .tok-string { color: #9ece6a; }
+.files-code .tok-number { color: #e0af68; }
+.files-code .tok-keyword { color: #bb9af7; }
+.files-code .tok-key { color: #7dcfff; }
 .files-truncated { margin: 0 0 10px; color: var(--dim); font-size: 11.5px; }
 .files-image { display: flex; align-items: center; justify-content: center; padding: 4px 0 10px; }
 /* Ссылка — блочный флекс-элемент во всю ширину: у строчной ширина считается от
@@ -510,6 +556,8 @@
   .files-close { display: grid; position: absolute; top: 8px; right: 8px; z-index: 1; }
   /* Подпись корня не уезжает под крестик. */
   .files-root { padding-right: 36px; }
+  /* Поле поиска тоже: крестик висит в том же верхнем углу. */
+  .files-search { margin-right: 40px; }
   .files-resizer { display: none; }
 }
 @media (max-width: 900px) {

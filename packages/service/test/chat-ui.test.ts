@@ -162,6 +162,18 @@ test('справа у чата — панель файлов рабочей па
   assert.match(html, /const FILES_WIDTH_MAX = 1440/, 'потолок вдвое выше: панель можно растянуть на полэкрана');
   assert.match(html, /aria-valuemax="1440"/, 'ручка знает новый потолок');
   assert.match(html, /@media \(max-width: 1100px\)/, 'на среднем экране панель выдвигается поверх чата');
+  // Поиск и подсветка — вторая половина идеи «просмотр workspace»: файл ищут
+  // по куску текста, не зная папки, а код в предпросмотре читают глазами.
+  assert.match(html, /id="files-search"/, 'в панели есть поиск по файлам');
+  assert.match(html, /function runFilesSearch/, 'поиск ходит в свой маршрут');
+  assert.match(html, /class="srow/, 'находки рисуются строками результата');
+  assert.match(html, /function searchSnippet/, 'совпадение подсвечивается в куске строки');
+  assert.match(html, /filesUrl\(slug, 'search'/, 'маршрут поиска — search, а не дерево');
+  assert.match(html, /function highlightCode/, 'код в предпросмотре подсвечивается');
+  assert.match(html, /\.files-code \.tok-keyword/, 'у токенов есть цвета');
+  const highlightAt = html.indexOf('function highlightCode');
+  const clientAt = html.indexOf('function assistantHtml');
+  assert.ok(highlightAt > 0 && highlightAt < clientAt, 'подсветка едет в страницу до клиента');
 });
 
 test('новый чат — черновик: workspace выбирается прямо в нём', () => {

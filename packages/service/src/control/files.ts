@@ -1,4 +1,4 @@
-// Сайд-панель файлов в чате: дерево рабочей папки и предпросмотр одного файла.
+// Сайд-панель файлов в чате: дерево рабочей папки, поиск и предпросмотр файла.
 //
 // Панель смотрит только в текущий workspace человека — тот же каталог, в котором
 // работает pi (`/workspaces/<slug>`). Служебное (`/workspaces/.icarus`) и чужие
@@ -24,6 +24,24 @@ const SCAN_LIMIT = 2000;
 const PREVIEW_BYTES = 256 * 1024;
 /** По этому куску понятно, текст это или двоичный файл. */
 const SNIFF_BYTES = 8192;
+
+/**
+ * Поиск по workspace. Панель шлёт его на каждый ввод, поэтому у запроса есть
+ * потолки: один поиск не должен гулять по гигабайтам и вешать панель.
+ */
+export const SEARCH_MIN_QUERY = 2;
+const SEARCH_MAX_QUERY = 200;
+const SEARCH_MAX_HITS = 50;
+/** Сколько строк показываем из одного файла: остальные только шумят. */
+const SEARCH_HITS_PER_FILE = 3;
+const SEARCH_MAX_FILES = 4000;
+const SEARCH_MAX_BYTES = 1024 * 1024;
+const SEARCH_MAX_TOTAL_BYTES = 32 * 1024 * 1024;
+/** Максимальная глубина вложенности: защита от папок-матрёшек. */
+const SEARCH_MAX_DEPTH = 16;
+/** Куски строки до и после совпадения: видно контекст, но не весь минифицированный файл. */
+const SEARCH_BEFORE = 60;
+const SEARCH_AFTER = 120;
 
 /** Служебный мусор, который в дереве файлов только мешает. */
 const SKIPPED = new Set(['.git', 'node_modules', '.DS_Store']);
@@ -125,6 +143,26 @@ export type WorkspaceFileTarget = {
 };
 
 export type RawWorkspaceFile = { file: string; name: string; type: string; size: number };
+
+/** Одно совпадение поиска: файл, строка и кусок текста вокруг находки. */
+export type WorkspaceSearchHit = {
+  file: WorkspaceFileEntry;
+  /** Строка с совпадением, с единицы. 0 — совпало только имя файла. */
+  line: number;
+  /** Кусок строки вокруг совпадения; пустой, если совпало только имя. */
+  text: string;
+  /** Где в `text` стоит совпадение: панель подсвечивает именно его. */
+  match: { start: number; length: number } | null;
+};
+
+export type WorkspaceSearchResult = {
+  query: string;
+  hits: WorkspaceSearchHit[];
+  /** Сколько файлов успели посмотреть: по числу видно, что поиск шёл по папке. */
+  scanned: number;
+  /** Упёрлись в потолок: совпадений может быть больше, чем показано. */
+  truncated: boolean;
+};
 
 /** Что именно удалили: панель по этим данным убирает строку из дерева. */
 export type RemovedWorkspaceEntry = {
@@ -350,6 +388,28 @@ export function removeWorkspaceEntry(
 }
 
 /**
+ * Начало файла как текст. Общий для предпросмотра и поиска: оба решают по
+ * первым байтам, текст это или двоичный файл, и оба не читают больше потолка.
+ */
+function readTextHead(
+  full: string,
+  limit: number,
+): { text: string; truncated: boolean; binary: boolean } {
+  const fd = fs.openSync(full, 'r');
+  try {
+    const buffer = Buffer.allocUnsafe(limit + 1);
+    const read = fs.readSync(fd, buffer, 0, buffer.length, 0);
+    const bytes = buffer.subarray(0, Math.min(read, limit));
+    const head = bytes.subarray(0, Math.min(bytes.length, SNIFF_BYTES));
+    // NUL в начале файла — достаточный признак двоичного: так выглядят архивы,
+    // картинки неизвестного формата и всё, что не стоит показывать текстом.
+    return { text: bytes.toString('utf8'), truncated: read > limit, binary: head.includes(0) };
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/**
  * Предпросмотр файла: markdown и текст — строкой, картинки — адресом, всё
  * остальное честно называется двоичным. Большой текст отдаём началом, а не
  * ошибкой: человек чаще хочет заглянуть, чем скачать целиком.
@@ -361,24 +421,170 @@ export function previewWorkspaceFile(root: string, slug: string, relative: strin
     return { file: entry, kind: 'image', url: rawUrl(slug, entry.path), download };
   }
 
-  let fd: number | null = null;
+  let head: { text: string; truncated: boolean; binary: boolean };
   try {
-    fd = fs.openSync(full, 'r');
-    const buffer = Buffer.allocUnsafe(PREVIEW_BYTES + 1);
-    const read = fs.readSync(fd, buffer, 0, buffer.length, 0);
-    const bytes = buffer.subarray(0, Math.min(read, PREVIEW_BYTES));
-    const head = bytes.subarray(0, Math.min(bytes.length, SNIFF_BYTES));
-    // NUL в начале файла — достаточный признак двоичного: так выглядят архивы,
-    // картинки неизвестного формата и всё, что не стоит показывать текстом.
-    if (head.includes(0)) return { file: entry, kind: 'binary', download };
-    const text = bytes.toString('utf8');
-    const kind = MARKDOWN_EXT.has(path.extname(entry.name).toLowerCase()) ? 'markdown' : 'text';
-    return { file: entry, kind, text, truncated: read > PREVIEW_BYTES, download };
+    head = readTextHead(full, PREVIEW_BYTES);
   } catch {
     throw new FilesError('не удалось прочитать файл', 404);
-  } finally {
-    if (fd !== null) fs.closeSync(fd);
   }
+  if (head.binary) return { file: entry, kind: 'binary', download };
+  const kind = MARKDOWN_EXT.has(path.extname(entry.name).toLowerCase()) ? 'markdown' : 'text';
+  return { file: entry, kind, text: head.text, truncated: head.truncated, download };
+}
+
+/** Литерал для регулярки: запрос — текст, а не шаблон. */
+function queryPattern(query: string): string {
+  return query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Кусок строки вокруг совпадения с многоточиями. Смещение считается уже внутри
+ *  куска: панель подсвечивает ровно найденное, а не первую попавшуюся букву. */
+function lineSnippet(line: string, index: number, length: number): { text: string; start: number } {
+  const from = Math.max(0, index - SEARCH_BEFORE);
+  const to = Math.min(line.length, index + length + SEARCH_AFTER);
+  const prefix = from > 0 ? '…' : '';
+  const suffix = to < line.length ? '…' : '';
+  return {
+    text: prefix + line.slice(from, to) + suffix,
+    start: prefix.length + (index - from),
+  };
+}
+
+/** Совпадения в тексте: не больше `limit` строк, каждая — с номером и куском. */
+function textHits(
+  entry: WorkspaceFileEntry,
+  text: string,
+  pattern: string,
+  limit: number,
+): WorkspaceSearchHit[] {
+  const probe = new RegExp(pattern, 'i');
+  const global = new RegExp(pattern, 'gi');
+  const hits: WorkspaceSearchHit[] = [];
+  const lines = text.replace(/\r\n?/g, '\n').split('\n');
+  for (let number = 0; number < lines.length && hits.length < limit; number += 1) {
+    const line = lines[number];
+    if (!probe.test(line)) continue;
+    global.lastIndex = 0;
+    for (let match = global.exec(line); match && hits.length < limit; match = global.exec(line)) {
+      const snippet = lineSnippet(line, match.index, match[0].length);
+      hits.push({
+        file: entry,
+        line: number + 1,
+        text: snippet.text,
+        match: { start: snippet.start, length: match[0].length },
+      });
+      // Пустое совпадение зациклило бы exec; минимальная длина запроса его и так
+      // отсекает, но последний рубеж дешёвый.
+      if (!match[0]) break;
+    }
+  }
+  return hits;
+}
+
+/**
+ * Поиск по всем файлам workspace: по имени и по содержимому. Идёт тем же
+ * обходом, что и дерево: служебные папки и символические ссылки пропускаются,
+ * картинки и двоичные файлы проверяются только по имени — их содержимое
+ * показывать нечем.
+ */
+export function searchWorkspaceFiles(root: string, rawQuery: string): WorkspaceSearchResult {
+  const query = rawQuery.trim();
+  if (query.length < SEARCH_MIN_QUERY) {
+    throw new FilesError(`поиск: нужно хотя бы ${SEARCH_MIN_QUERY} символа`, 400);
+  }
+  if (query.length > SEARCH_MAX_QUERY) throw new FilesError('поиск: слишком длинный запрос', 400);
+
+  const pattern = queryPattern(query);
+  const nameProbe = new RegExp(pattern, 'i');
+  const hits: WorkspaceSearchHit[] = [];
+  let scanned = 0;
+  let bytes = 0;
+  let truncated = false;
+
+  /** Обход в том же порядке, что дерево: сначала файлы, потом папки. */
+  const walk = (relative: string, depth: number): void => {
+    if (hits.length >= SEARCH_MAX_HITS || scanned >= SEARCH_MAX_FILES) {
+      truncated = true;
+      return;
+    }
+    if (depth > SEARCH_MAX_DEPTH) return;
+
+    const dir = resolveIn(root, relative);
+    if (!dir || !realInside(root, dir)) return;
+    let dirents: fs.Dirent[];
+    try {
+      dirents = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    dirents.sort((a, b) => {
+      if (a.isDirectory() !== b.isDirectory()) return a.isDirectory() ? 1 : -1;
+      return a.name.localeCompare(b.name, 'ru', { sensitivity: 'base' });
+    });
+
+    for (const dirent of dirents) {
+      if (hits.length >= SEARCH_MAX_HITS || scanned >= SEARCH_MAX_FILES) {
+        truncated = true;
+        return;
+      }
+      if (SKIPPED.has(dirent.name) || dirent.isSymbolicLink()) continue;
+      const full = path.join(dir, dirent.name);
+      const nested = relative ? path.join(relative, dirent.name) : dirent.name;
+      if (dirent.isDirectory()) {
+        walk(nested, depth + 1);
+        continue;
+      }
+      if (!dirent.isFile()) continue;
+
+      scanned += 1;
+      let stats: fs.Stats;
+      try {
+        stats = fs.statSync(full);
+      } catch {
+        continue;
+      }
+      const entry = entryOf(full, nested, false, stats);
+      if (nameProbe.test(entry.name)) {
+        hits.push({ file: entry, line: 0, text: '', match: null });
+        if (hits.length >= SEARCH_MAX_HITS) {
+          truncated = true;
+          return;
+        }
+      }
+      // Содержимое ищем только у текста: у картинки и двоичного файла его нет,
+      // а огромный файл не должен съесть весь бюджет запроса.
+      if (entry.image || entry.size > SEARCH_MAX_BYTES) continue;
+      const budget = Math.min(SEARCH_MAX_BYTES, SEARCH_MAX_TOTAL_BYTES - bytes);
+      if (budget <= 0) {
+        truncated = true;
+        return;
+      }
+      let head: { text: string; truncated: boolean; binary: boolean };
+      try {
+        head = readTextHead(full, budget);
+      } catch {
+        continue;
+      }
+      bytes += Math.min(entry.size, budget);
+      if (head.binary) continue;
+      const left = Math.min(SEARCH_HITS_PER_FILE, SEARCH_MAX_HITS - hits.length);
+      if (left <= 0) {
+        truncated = true;
+        return;
+      }
+      hits.push(...textHits(entry, head.text, pattern, left));
+    }
+  };
+
+  walk('', 0);
+  return {
+    query,
+    hits,
+    scanned,
+    // Достигнутый потолок ещё не значит, что совпадений больше, но обещать
+    // «это всё» в таком случае нельзя: пусть панель честно скажет про потолок.
+    truncated: truncated || hits.length >= SEARCH_MAX_HITS,
+  };
 }
 
 /** Файл для отдачи браузеру: картинки — как есть, остальное — на скачивание. */
@@ -454,6 +660,19 @@ export async function handleWorkspaceFilesApi(
     if (!rest) {
       const list = listWorkspaceEntries(target.root, relative);
       json(res, 200, { workspace: target.workspace, ...list });
+      return;
+    }
+
+    if (rest === 'search') {
+      const result = searchWorkspaceFiles(target.root, url.searchParams.get('q') ?? '');
+      log.info('файлы: поиск', {
+        user: user.id,
+        workspace: target.workspace.slug,
+        query: result.query,
+        hits: result.hits.length,
+        scanned: result.scanned,
+      });
+      json(res, 200, result);
       return;
     }
 

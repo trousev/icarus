@@ -2,8 +2,8 @@
 // историю — этот файл только рисует их и читает NDJSON-поток ответа.
 //
 // Разметка живёт в chat-markdown.js и подключается раньше: это обычные глобальные
-// функции, а не импорт — сборки в панели нет.
-/* global markdown, linkify, imageSrc */
+// функции, а не импорт — сборки в панели нет. Подсветка кода — так же.
+/* global markdown, linkify, imageSrc, highlightCode */
 const cfg = window.__CHAT_CFG__;
 
 const el = (id) => document.getElementById(id);
@@ -1072,6 +1072,17 @@ let filesPreviewCopy = null;
 let filesCopyTimer = 0;
 /** Идёт удаление: второй клик по корзине не должен отправить второй запрос. */
 let filesDeleting = false;
+/** Поиск по файлам: запрос, находки и защита от гонок при быстром вводе. */
+let filesSearch = '';
+let filesSearchHits = [];
+let filesSearchScanned = 0;
+let filesSearchTruncated = false;
+let filesSearchError = '';
+let filesSearchBusy = false;
+let filesSearchTimer = 0;
+let filesSearchToken = 0;
+/** Меньше двух символов искать бессмысленно: совпадений сотни, а скан на каждый ввод. */
+const FILES_SEARCH_MIN = 2;
 /**
  * Последняя позиция каретки в поле ввода. Путь из предпросмотра вставляем туда,
  * а если человек в поле ещё не вставал — в конец: уже набранное не переписываем.
@@ -1246,6 +1257,57 @@ function treeRows(dir, depth, rows) {
   }
 }
 
+/** Искомый текст длиннее двух символов: только тогда запускаем запрос. */
+function filesSearchActive() {
+  return filesSearch.trim().length >= FILES_SEARCH_MIN;
+}
+
+/** Находка с подсветкой совпадения: esc по кускам, иначе `<mark>` стал бы текстом. */
+function searchSnippet(hit) {
+  const text = String(hit.text || '');
+  const match = hit.match;
+  if (!match) return '<span class="ssnip name">совпало имя файла</span>';
+  const start = Math.max(0, Math.min(text.length, match.start));
+  const end = Math.min(text.length, start + match.length);
+  return (
+    '<span class="ssnip">' + esc(text.slice(0, start)) +
+    '<mark>' + esc(text.slice(start, end)) + '</mark>' +
+    esc(text.slice(end)) + '</span>'
+  );
+}
+
+/** Результаты поиска занимают место дерева: два списка в одной колонке не нужны. */
+function searchRows() {
+  const rows = [];
+  if (filesSearchBusy) rows.push('<p class="files-note">Ищу…</p>');
+  if (filesSearchError) rows.push('<p class="files-error">' + esc(filesSearchError) + '</p>');
+  if (!filesSearchBusy && !filesSearchError && !filesSearchHits.length) {
+    rows.push('<p class="files-note">Ничего не нашлось.</p>');
+  }
+  for (const hit of filesSearchHits) {
+    const file = hit.file || {};
+    const active = Boolean(file.path) && filesSelected === file.path;
+    rows.push(
+      '<button type="button" class="srow' + (active ? ' active' : '') +
+        '" data-path="' + esc(file.path) + '">' +
+        '<span class="shead"><span class="sname">' + esc(file.name) + '</span>' +
+        '<span class="spath">' + esc(file.path) + (hit.line ? ':' + hit.line : '') + '</span></span>' +
+        searchSnippet(hit) +
+        '</button>',
+    );
+  }
+  if (filesSearchScanned || filesSearchTruncated) {
+    rows.push(
+      '<p class="files-more">Просмотрено ' + filesSearchScanned + ' файлов' +
+        (filesSearchTruncated
+          ? ', показаны первые ' + filesSearchHits.length + ' совпадений.'
+          : '.') +
+        '</p>',
+    );
+  }
+  return rows;
+}
+
 function renderFiles() {
   if (!filesOpen) return;
   const tree = el('files-tree');
@@ -1254,15 +1316,22 @@ function renderFiles() {
     '<div class="files-root">' + FOLDER_ICON + '<span>' + esc(filesRootPath || '~/workspace') + '</span></div>',
   ];
   if (filesError) rows.push('<p class="files-error">' + esc(filesError) + '</p>');
-  const root = filesCache.get('');
-  if (!root) {
-    rows.push('<p class="files-note">Читаю папку…</p>');
-  } else if (!root.entries.length) {
-    rows.push('<p class="files-note">Папка пуста.</p>');
+  if (filesSearchActive()) {
+    rows.push(...searchRows());
+  } else if (filesSearch.trim()) {
+    // Один символ дал бы сотни совпадений и скан папки на каждую букву.
+    rows.push('<p class="files-note">Введи хотя бы два символа.</p>');
   } else {
-    treeRows('', 0, rows);
-    if (root.truncated) {
-      rows.push('<p class="files-more">Показаны первые ' + root.entries.length + ' файлов.</p>');
+    const root = filesCache.get('');
+    if (!root) {
+      rows.push('<p class="files-note">Читаю папку…</p>');
+    } else if (!root.entries.length) {
+      rows.push('<p class="files-note">Папка пуста.</p>');
+    } else {
+      treeRows('', 0, rows);
+      if (root.truncated) {
+        rows.push('<p class="files-more">Показаны первые ' + root.entries.length + ' файлов.</p>');
+      }
     }
   }
   tree.innerHTML = rows.join('');
@@ -1280,6 +1349,17 @@ async function loadFilesRoot() {
   filesExpanded.clear();
   filesSelected = null;
   filesError = '';
+  // Поиск относится к прошлому workspace'у: его находки здесь были бы ложью.
+  filesSearch = '';
+  filesSearchHits = [];
+  filesSearchScanned = 0;
+  filesSearchTruncated = false;
+  filesSearchError = '';
+  filesSearchBusy = false;
+  filesSearchToken += 1;
+  clearTimeout(filesSearchTimer);
+  const searchInput = el('files-search');
+  if (searchInput) searchInput.value = '';
   hideFilesPreview();
   renderFiles();
   try {
@@ -1293,6 +1373,45 @@ async function loadFilesRoot() {
     filesError = 'не удалось открыть папку: ' + error.message;
     renderFiles();
   }
+}
+
+/**
+ * Поиск по workspace. Ответы могут прийти не в том порядке, в каком их
+ * отправили, поэтому у каждого запроса свой token: устаревший ответ не должен
+ * затереть находки для уже стёртого запроса.
+ */
+async function runFilesSearch() {
+  if (!filesOpen || !filesWorkspace) return;
+  const query = filesSearch.trim();
+  const token = ++filesSearchToken;
+  if (query.length < FILES_SEARCH_MIN) {
+    filesSearchHits = [];
+    filesSearchScanned = 0;
+    filesSearchTruncated = false;
+    filesSearchError = '';
+    filesSearchBusy = false;
+    renderFiles();
+    return;
+  }
+  const slug = filesWorkspace;
+  filesSearchBusy = true;
+  filesSearchError = '';
+  renderFiles();
+  try {
+    const data = await api(filesUrl(slug, 'search', '', { q: query }));
+    if (token !== filesSearchToken || filesWorkspace !== slug) return;
+    filesSearchHits = data.hits || [];
+    filesSearchScanned = data.scanned || 0;
+    filesSearchTruncated = Boolean(data.truncated);
+  } catch (error) {
+    if (token !== filesSearchToken || filesWorkspace !== slug) return;
+    filesSearchHits = [];
+    filesSearchScanned = 0;
+    filesSearchTruncated = false;
+    filesSearchError = 'поиск не удался: ' + error.message;
+  }
+  filesSearchBusy = false;
+  renderFiles();
 }
 
 /**
@@ -1330,7 +1449,9 @@ async function refreshFilesTree() {
     filesSelected = null;
     hideFilesPreview();
   }
-  renderFiles();
+  // Агент мог написать файл, который сейчас ищут: результаты пересчитываем.
+  if (filesSearchActive()) void runFilesSearch();
+  else renderFiles();
 }
 
 /** Запись из уже загруженного дерева: по ней понятно, файл это или папка. */
@@ -1741,9 +1862,14 @@ function renderFilePreview(data) {
       (data.truncated ? '<p class="files-truncated">Файл большой — показаны первые 256 КБ.</p>' : '') +
       '<div class="md files-md">' + markdown(data.text || '') + '</div>';
   } else if (data.kind === 'text') {
+    // Подсветка знает только те языки, которые панель показывает сама; для
+    // остальных `highlightCode` вернёт null, и текст останется текстом.
+    const highlighted = typeof highlightCode === 'function' ? highlightCode(data.text || '', file.type) : null;
     body =
       (data.truncated ? '<p class="files-truncated">Файл большой — показаны первые 256 КБ.</p>' : '') +
-      '<pre class="files-code">' + esc(data.text || '') + '</pre>';
+      (highlighted === null
+        ? '<pre class="files-code">' + esc(data.text || '') + '</pre>'
+        : '<pre class="files-code hl">' + highlighted + '</pre>');
   } else if (data.kind === 'image') {
     // Вектор тянем на всю ширину: он не мылится. Растр показываем в натуральную
     // величину, но не шире панели — иначе маленькая картинка выглядела бы кашей.
@@ -1806,12 +1932,37 @@ el('files-tree').addEventListener('click', (event) => {
     void deleteFilesEntry(remove.dataset.del);
     return;
   }
+  // Результат поиска — та же цель «открыть файл», но приходит из другой разметки.
+  const result = event.target.closest('.srow');
+  if (result) {
+    event.preventDefault();
+    void openFilesPreview(result.dataset.path);
+    return;
+  }
   // Вся строка — цель клика, не только кнопка с именем: в макете строка широкая,
   // и попадать в неё должно быть просто.
   const row = event.target.closest('.frow');
   if (!row) return;
   if (row.dataset.dir === '1') void toggleFolder(row.dataset.path);
   else void openFilesPreview(row.dataset.path);
+});
+
+// Поиск: пока человек печатает, список обновляется сразу (иначе поле выглядит
+// мёртвым), а запрос уходит с задержкой — на каждую букву сканировать папку незачем.
+const filesSearchInput = el('files-search');
+filesSearchInput.addEventListener('input', () => {
+  filesSearch = filesSearchInput.value;
+  renderFiles();
+  clearTimeout(filesSearchTimer);
+  filesSearchTimer = setTimeout(() => void runFilesSearch(), 250);
+});
+filesSearchInput.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return;
+  event.preventDefault();
+  filesSearchInput.value = '';
+  filesSearch = '';
+  clearTimeout(filesSearchTimer);
+  void runFilesSearch();
 });
 
 // «В чат» в шапке предпросмотра: путь вставляется в поле ввода, а не отправляется.
