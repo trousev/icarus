@@ -2,6 +2,10 @@
    Данные приезжают с /panel/mcp/*; страница не хранит секретов и не рисует их. */
 (function () {
   const el = (id) => document.getElementById(id);
+  // Адрес «мёртвого» loopback приходит со страницы: порт живёт в oauth.ts.
+  // Запасное значение — на случай страницы из кэша, отданной старым сервисом.
+  const MIMIC_CALLBACK =
+    (window.__MCP_CFG__ && window.__MCP_CFG__.mimicCallback) || 'http://localhost:47821/callback';
 
   const api = async (path, options = {}) => {
     const response = await fetch(path, {
@@ -78,6 +82,11 @@
     if (!server.global && !server.shared) badges.push(badge('только мой'));
     badges.push(badge(server.enabled ? 'включён' : 'выключен', server.enabled ? 'on' : 'off'));
     if (server.enabled && !server.ready) badges.push(badge('ждёт доступа', 'wait'));
+    if (server.auth === 'oauth' && server.mimic) {
+      badges.push(
+        '<span class="badge mimic" title="Вход идёт через локальный адрес: адрес из строки браузера нужно вставить в панель">мимикрия</span>',
+      );
+    }
 
     const auth = authText(server);
     const own = !server.global && !server.ownerIsMe && server.owner ? '<div class="mcp-auth">Поделился: ' + esc(server.owner) + '</div>' : '';
@@ -232,16 +241,110 @@
     try {
       const data = await post('oauth/start', { id: server.id });
       if (!data.url) throw new Error('сервер не вернул адрес авторизации');
+      // Мимикрия: браузер уйдёт на мёртвый loopback, поэтому вкладку панели не
+      // трогаем — человек вернётся сюда и вставит адрес руками.
+      if (data.mimic) {
+        openMimicDialog(server, data);
+        return;
+      }
       // В чате настройки открыты iframe'ом, а authorization server обычно
       // запрещает показ в рамке (X-Frame-Options). Уводим верхнюю вкладку:
       // после callback человек попадёт на полноценную страницу MCP.
       const target = window.self !== window.top ? window.top : window;
       target.location.href = data.url;
     } catch (error) {
-      notice('Не удалось начать вход: ' + error.message, true);
+      // Самая частая причина отказа — белый список redirect_uri у сервера.
+      // Подсказываем галочку, но только если она ещё не включена.
+      const hint =
+        !server.mimic && /redirect/i.test(error.message)
+          ? '\n\nПохоже, сервер пускает только свои адреса возврата. Открой «Изменить» и включи «Мимикрировать под Claude».'
+          : '';
+      notice('Не удалось начать вход: ' + error.message + hint, true);
     } finally {
       if (button) button.disabled = false;
     }
+  }
+
+  /**
+   * Ручной вход для серверов с белым списком redirect_uri. Браузер вернётся на
+   * http://localhost:<порт>/callback, где намеренно никто не слушает: покажет
+   * ошибку соединения, но код останется в строке браузера.
+   */
+  function openMimicDialog(server, started) {
+    const callback = started.redirectUri || MIMIC_CALLBACK;
+    const minutes = Math.max(1, Math.round((started.expiresIn || 600) / 60));
+    const opened = dialog(
+      '<h2>Вход в «' + esc(server.name) + '»</h2>' +
+      '<p class="about">Вход идёт в обход белого списка: сервер мог бы не принять адрес возврата нашей панели, ' +
+        'поэтому мы зарегистрировались как локальный клиент — так же, как Claude Code. ' +
+        'Дальше всё вручную, но это три шага.</p>' +
+      '<ol class="mcp-steps">' +
+        '<li>Нажми «Открыть страницу входа». Она откроется в новой вкладке: войди и разреши доступ.</li>' +
+        '<li>В конце браузер вернётся на <code>' + esc(callback) + '</code> и покажет ошибку — ' +
+          '«не удаётся получить доступ к сайту» или пустую страницу. <b>Так и должно быть</b>: ' +
+          'на этом адресе никто не слушает, он нужен только чтобы код остался в адресной строке.</li>' +
+        '<li>Скопируй <b>весь адрес</b> из строки браузера (он начинается с <code>' + esc(callback) + '?…</code>) ' +
+          'и вставь его ниже.</li>' +
+      '</ol>' +
+      '<p class="mcp-note">Ссылка живёт ' + minutes + ' мин. Пароль и код остаются у тебя: ' +
+        'адрес обрабатывает сам Icarus, никуда его не пересылая.</p>' +
+      '<p><a class="mcp-open" id="m-open" target="_blank" rel="noopener noreferrer" href="' + esc(started.url) + '">Открыть страницу входа</a></p>' +
+      '<div class="mcp-form">' +
+        '<div class="field"><label for="m-paste">АДРЕС ИЗ СТРОКИ БРАУЗЕРА</label>' +
+          '<div class="mcp-paste">' +
+            '<input id="m-paste" type="text" spellcheck="false" autocomplete="off" placeholder="' + esc(callback) + '?code=…&amp;state=…">' +
+            '<button type="button" id="m-paste-clip">Вставить</button>' +
+          '</div>' +
+          '<p class="hint">Хватит и части после «?» — например <code>code=…&amp;state=…</code>.</p></div>' +
+        '<div class="mcp-error" id="m-error" hidden></div>' +
+        '<div class="row">' +
+          '<button type="button" data-close>Отмена</button>' +
+          '<button type="button" data-refresh>Новая ссылка</button>' +
+          '<button type="button" class="primary" id="m-done">Продолжить</button>' +
+        '</div>' +
+      '</div>',
+    );
+    const paste = opened.backdrop.querySelector('#m-paste');
+    const error = opened.backdrop.querySelector('#m-error');
+    const done = opened.backdrop.querySelector('#m-done');
+    opened.backdrop.querySelectorAll('[data-close]').forEach((button) => button.addEventListener('click', opened.close));
+    opened.backdrop.querySelector('[data-refresh]').addEventListener('click', () => {
+      opened.close();
+      void startOauth(server);
+    });
+    opened.backdrop.querySelector('#m-paste-clip').addEventListener('click', async () => {
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text.trim()) paste.value = text.trim();
+      } catch {
+        // Браузер мог не дать буфер (нет разрешения или http): тогда Ctrl+V.
+      }
+      paste.focus();
+    });
+    const submit = async () => {
+      const value = paste.value.trim();
+      done.disabled = true;
+      error.hidden = true;
+      try {
+        if (!value) throw new Error('вставь адрес из строки браузера');
+        await post('oauth/complete', { id: server.id, url: value });
+        opened.close();
+        await load();
+        notice('Доступ к «' + server.name + '» получен. Включи сервер переключателем, если он ещё выключен.');
+      } catch (caught) {
+        error.textContent = caught.message;
+        error.hidden = false;
+        done.disabled = false;
+      }
+    };
+    done.addEventListener('click', submit);
+    paste.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        void submit();
+      }
+    });
+    paste.focus();
   }
 
   async function disconnectOauth(server) {
@@ -352,6 +455,7 @@
       tokenEndpoint: auth === 'oauth' ? el('f-token').value.trim() : '',
       registrationEndpoint: auth === 'oauth' ? el('f-registration').value.trim() : '',
       issuer: auth === 'oauth' ? el('f-issuer').value.trim() : '',
+      mimic: auth === 'oauth' && el('f-mimic').checked,
       shared: el('f-shared').checked,
       // Поля скрытых веток не отправляем: иначе переключение с «ключа» на OAuth
       // утащило бы в новый сервер старый заголовок, а он там уже ни к чему.
@@ -397,6 +501,11 @@
         '<div class="field" id="f-oauth-row" hidden><label for="f-scopes">SCOPES (ОПЦИОНАЛЬНО)</label><input id="f-scopes" type="text" spellcheck="false" placeholder="tasks:read tasks:write" value="' + esc(server && server.scopes ? server.scopes : '') + '"></div>' +
         '<div class="field" id="f-client-id-row" hidden><label for="f-client-id">CLIENT ID (ЕСЛИ СЕРВЕР ВЫДАЛ ЗАРАНЕЕ)</label><input id="f-client-id" type="text" spellcheck="false" placeholder="оставь пустым — зарегистрируемся сами" value="' + esc(server && server.clientId ? server.clientId : '') + '"></div>' +
         '<div class="field" id="f-client-secret-row" hidden><label for="f-client-secret">CLIENT SECRET (ЕСЛИ НУЖЕН)</label><input id="f-client-secret" type="password" autocomplete="new-password" placeholder="оставь пустым — не менять"></div>' +
+        '<div class="field" id="f-mimic-row" hidden>' +
+          '<label class="check"><input type="checkbox" id="f-mimic"' + (server && server.mimic ? ' checked' : '') + '> Мимикрировать под Claude — обход белого списка redirect_uri</label>' +
+          '<p class="hint">Некоторые authorization servers (так делает Any.do) пускают только адреса возврата из своего списка и отвергают callback панели. ' +
+            'С этой галочкой мы регистрируемся с адресом <code>' + esc(MIMIC_CALLBACK) + '</code> — тем же, что у Claude Code. ' +
+            'Браузер вернётся на него, покажет ошибку соединения (это нормально), а адрес из строки браузера нужно будет вставить в панель.</p></div>' +
         '<div class="field" id="f-headers-row"><label for="f-headers">ПОСТОЯННЫЕ ЗАГОЛОВКИ — ИМЯ: ЗНАЧЕНИЕ</label><textarea id="f-headers" rows="2" spellcheck="false" placeholder="X-Client: icarus">' + esc(mapToLines(headers, true)) + '</textarea>' +
           '<p class="hint">Эти заголовки — часть описания и уезжают всем, с кем поделишься. Секретный ключ клади ниже.</p></div>' +
         '<div class="field" id="f-credential-headers-row"><label for="f-credential-headers">КЛЮЧ ДОСТУПА — ИМЯ: ЗНАЧЕНИЕ</label><textarea id="f-credential-headers" rows="2" spellcheck="false" placeholder="Authorization: Bearer ...">' + esc(mapToLines(credentialHeaders, false)) + '</textarea><p class="hint">Это личный секрет: он не показывается другим и не шарится. Строки с пустым значением не меняются; «Очистить доступ» — в карточке.</p></div>' +
@@ -422,6 +531,7 @@
     el('f-oauth-row').hidden = auth !== 'oauth';
     el('f-client-id-row').hidden = auth !== 'oauth';
     el('f-client-secret-row').hidden = auth !== 'oauth';
+    el('f-mimic-row').hidden = auth !== 'oauth';
     el('f-advanced').hidden = auth !== 'oauth';
     el('f-headers-row').hidden = stdio;
     el('f-credential-headers-row').hidden = auth !== 'headers' || stdio;

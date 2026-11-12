@@ -288,6 +288,137 @@ test('OAuth целиком: старт, callback, токен в mcp.json', async
   }
 });
 
+test('мимикрия: вход через loopback завершается вставкой адреса в панель', async () => {
+  let tokenBody = '';
+  let registeredRedirects: string[] = [];
+  const as = http.createServer((req, res) => {
+    const origin = `http://127.0.0.1:${(as.address() as AddressInfo).port}`;
+    let body = '';
+    req.on('data', (chunk: Buffer) => {
+      body += chunk.toString('utf8');
+    });
+    req.on('end', () => {
+      const pathname = new URL(req.url ?? '/', origin).pathname;
+      if (pathname === '/mcp') {
+        res.writeHead(401, { 'www-authenticate': `Bearer resource_metadata="${origin}/prm"` });
+        res.end();
+        return;
+      }
+      if (pathname === '/prm') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ resource: `${origin}/mcp`, authorization_servers: [origin] }));
+        return;
+      }
+      if (pathname === '/.well-known/oauth-authorization-server') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            issuer: origin,
+            authorization_endpoint: `${origin}/authorize`,
+            token_endpoint: `${origin}/token`,
+            registration_endpoint: `${origin}/register`,
+            code_challenge_methods_supported: ['S256'],
+            token_endpoint_auth_methods_supported: ['none'],
+          }),
+        );
+        return;
+      }
+      if (pathname === '/register') {
+        const payload = JSON.parse(body) as { redirect_uris?: string[] };
+        registeredRedirects = payload.redirect_uris ?? [];
+        res.writeHead(201, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ client_id: 'client-loop', token_endpoint_auth_method: 'none' }));
+        return;
+      }
+      if (pathname === '/token') {
+        tokenBody = body;
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ access_token: 'access-loop', refresh_token: 'refresh-loop', expires_in: 3600 }));
+        return;
+      }
+      res.writeHead(404);
+      res.end();
+    });
+  });
+  await new Promise<void>((resolve) => as.listen(0, '127.0.0.1', resolve));
+  const asBase = `http://127.0.0.1:${(as.address() as AddressInfo).port}`;
+
+  try {
+    await withServer(async (base, config) => {
+      const created = (await (
+        await add(base, 'probe', {
+          name: 'Any.do MCP',
+          transport: 'streamable-http',
+          url: `${asBase}/mcp`,
+          auth: 'oauth',
+          mimic: true,
+          shared: true,
+        })
+      ).json()) as { server: { id: string; mimic?: boolean } };
+      assert.equal(created.server.mimic, true);
+
+      const started = (await (
+        await post(base, 'probe', 'oauth/start', { id: created.server.id })
+      ).json()) as { url: string; state: string; mimic: boolean; redirectUri: string; expiresIn: number };
+      assert.equal(started.mimic, true);
+      assert.equal(started.redirectUri, 'http://localhost:47821/callback');
+      assert.equal(new URL(started.url).searchParams.get('redirect_uri'), 'http://localhost:47821/callback');
+      assert.deepEqual(registeredRedirects, ['http://localhost:47821/callback'], 'клиент зарегистрирован на loopback');
+      assert.equal(started.expiresIn, 600);
+
+      const pasted = (redirect: string, state = started.state): string =>
+        `${redirect}?code=code-1&state=${encodeURIComponent(state)}`;
+
+      // Чужой человек не завершает чужой вход — даже с валидным адресом.
+      const foreign = await post(base, 'probe2', 'oauth/complete', {
+        id: created.server.id,
+        url: pasted('http://localhost:47821/callback'),
+      });
+      assert.equal(foreign.status, 403);
+
+      // Адрес без кода не тратит одноразовый state.
+      const junk = await post(base, 'probe', 'oauth/complete', {
+        id: created.server.id,
+        url: `http://localhost:47821/callback?state=${encodeURIComponent(started.state)}`,
+      });
+      assert.equal(junk.status, 400);
+
+      // Адрес с другого порта — это не наш вход.
+      const wrong = await post(base, 'probe', 'oauth/complete', {
+        id: created.server.id,
+        url: pasted('http://localhost:9999/callback'),
+      });
+      assert.equal(wrong.status, 400);
+
+      const done = await post(base, 'probe', 'oauth/complete', {
+        id: created.server.id,
+        url: pasted('http://localhost:47821/callback'),
+      });
+      assert.equal(done.status, 200);
+      assert.equal(((await done.json()) as { server: { authState: string } }).server.authState, 'ready');
+
+      const form = new URLSearchParams(tokenBody);
+      assert.equal(form.get('grant_type'), 'authorization_code');
+      assert.equal(form.get('redirect_uri'), 'http://localhost:47821/callback');
+      assert.equal(form.get('code'), 'code-1');
+      assert.ok((form.get('code_verifier') ?? '').length >= 43);
+
+      const entry = piMcp(config, 'probe').mcpServers[created.server.id] as { url?: string; headers?: Record<string, string> };
+      assert.match(entry.url ?? '', /\/mcp-proxy\//, 'токен уезжает через прокси, как у обычного OAuth');
+      assert.equal(entry.headers?.Authorization, undefined);
+
+      // Повторная вставка того же адреса больше не сработает: state одноразовый.
+      const again = await post(base, 'probe', 'oauth/complete', {
+        id: created.server.id,
+        url: pasted('http://localhost:47821/callback'),
+      });
+      assert.equal(again.status, 400);
+    });
+  } finally {
+    as.close();
+  }
+});
+
 test('публичный документ CIMD отдаётся без SSO-заголовка', async () => {
   await withServer(async (base) => {
     const response = await fetch(`${base}/panel/mcp/oauth/client-metadata.json`);

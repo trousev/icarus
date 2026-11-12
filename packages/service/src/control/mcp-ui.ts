@@ -2,13 +2,15 @@
 // клиентский скрипт лежит отдельным файлом: в TypeScript не приходится экранировать
 // бэктики и скобки, а браузер получает тот же JS и локально, и на проде.
 import fs from 'node:fs';
+import { mimicCallbackUrl } from '../mcp/oauth.ts';
 import { settingsAside, shell, type PanelSession } from './ui.ts';
 
 const CLIENT_CSS = fs.readFileSync(new URL('./mcp-client.css', import.meta.url), 'utf8');
 const CLIENT_JS = fs.readFileSync(new URL('./mcp-client.js', import.meta.url), 'utf8');
 
 export function mcpPage(session: PanelSession): string {
-  const config = { user: session.user, section: 'mcp' };
+  // Адрес мимикрии рисует сервер: порт живёт в одном месте, а не в двух файлах.
+  const config = { user: session.user, section: 'mcp', mimicCallback: mimicCallbackUrl() };
   // JSON уезжает в <script>: «<» экранируем, иначе значение с </script> закроет тег.
   const json = JSON.stringify(config).replaceAll('<', '\\u003c');
 

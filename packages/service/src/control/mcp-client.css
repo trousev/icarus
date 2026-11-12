@@ -18,6 +18,7 @@
 .badge.shared { color:var(--accent); border-color:var(--accent-soft); }
 .badge.global { color:#e0af68; border-color:#4a3d2b; }
 .badge.wait { color:#e0af68; border-color:#4a3d2b; }
+.badge.mimic { color:#c4a2f5; border-color:#43305c; }
 .mcp-auth { margin-top:10px; font-size:12px; color:var(--dim); }
 .mcp-auth.bad { color:var(--danger); }
 .mcp-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:14px; }
@@ -68,13 +69,30 @@
               box-shadow:0 12px 40px rgba(0,0,0,.5); }
 .mcp-dialog h2 { margin:0 0 6px; font-size:20px; }
 .mcp-dialog .about { margin:0 0 16px; }
-.mcp-dialog .row { display:flex; gap:8px; justify-content:flex-end; }
+.mcp-dialog .row { display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap; }
 .mcp-dialog .row button { background:var(--raise); color:var(--text); border:1px solid var(--line);
                           border-radius:8px; padding:7px 14px; }
 .mcp-dialog .row button.primary { background:var(--accent); border-color:var(--accent); color:#0f1116; font-weight:500; }
 .mcp-error { color:var(--danger); font-size:13px; padding:0 0 12px; }
 .mcp-notice { padding:11px 14px; border-radius:10px; margin:0 0 16px; max-width:900px;
-              border:1px solid #2b4a36; background:#14231a; color:#9be9b0; }
+              border:1px solid #2b4a36; background:#14231a; color:#9be9b0; white-space:pre-wrap; }
 .mcp-notice.bad { border-color:#4a2b33; background:#241418; color:#f7a2b0; }
+
+/* Ручной вход (мимикрия): инструкция в три шага и поле для вставки адреса. */
+.mcp-steps { margin:0 0 12px; padding-left:20px; color:var(--dim); }
+.mcp-steps li { margin:0 0 7px; }
+.mcp-steps code, .mcp-note code, .mcp-form .hint code {
+  font-family:ui-monospace, monospace; font-size:12px; color:var(--text);
+  background:var(--raise); border-radius:5px; padding:1px 5px; overflow-wrap:anywhere;
+}
+.mcp-note { color:var(--dim); font-size:12px; margin:0 0 14px; }
+.mcp-open { display:inline-block; background:var(--accent); color:#0f1116; font-weight:500;
+            border-radius:8px; padding:8px 14px; text-decoration:none; }
+.mcp-open:hover { filter:brightness(1.08); }
+.mcp-paste { display:flex; gap:8px; align-items:stretch; }
+.mcp-paste input { flex:1 1 auto; min-width:0; }
+.mcp-paste button { flex:0 0 auto; background:var(--raise); color:var(--text);
+                    border:1px solid var(--line); border-radius:9px; padding:9px 12px; cursor:pointer; }
+.mcp-paste button:hover { border-color:var(--accent); }
 .mcp-intro { color:var(--dim); max-width:720px; margin:0 0 18px; }
 .mcp-intro b { color:var(--text); font-weight:500; }

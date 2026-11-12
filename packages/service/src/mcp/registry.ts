@@ -50,6 +50,12 @@ export type McpOAuthCredentials = {
   clientSecret?: string;
   tokenEndpointAuthMethod?: 'none' | 'client_secret_post' | 'client_secret_basic';
   /**
+   * С каким адресом возврата регистрировали клиента. В режиме мимикрии это
+   * мёртвый loopback, иначе публичный callback панели. Хранится, чтобы повторный
+   * вход не подсунул серверу другой redirect_uri: он обязан совпадать.
+   */
+  redirectUri?: string;
+  /**
    * Ключ локального прокси сервиса. По нему pi ходит в /mcp-proxy/<ключ>, а
    * сервис подставляет свежий Bearer на каждом запросе. В mcp.json токена нет.
    */
@@ -93,6 +99,12 @@ export type UserMcpServer = {
   tokenEndpoint?: string;
   registrationEndpoint?: string;
   issuer?: string;
+  /**
+   * Сервер пускает только «свои» адреса возврата (так делает Any.do: у него
+   * белый список redirect_uri). Тогда вход идёт на мёртвый loopback — тот же,
+   * что у Claude Code, — а адрес из строки браузера человек вставляет в панель.
+   */
+  mimic?: boolean;
   owner: string;
   shared: boolean;
   createdAt: string;
@@ -125,6 +137,7 @@ export type McpServerInput = {
   tokenEndpoint?: string;
   registrationEndpoint?: string;
   issuer?: string;
+  mimic?: boolean;
   shared?: boolean;
   credentials?: McpCredentials;
 };
@@ -148,6 +161,8 @@ export type McpView = {
   ready: boolean;
   authState: 'none' | 'ready' | 'needed' | 'expired' | 'error';
   authMessage?: string;
+  /** Вход идёт через мёртвый loopback: карточка просит вставить адрес вручную. */
+  mimic?: boolean;
   /** Имена уже сохранённых секретов: значения в панель не уезжают. */
   credentialHeaders?: string[];
   credentialEnv?: string[];
@@ -436,6 +451,8 @@ export function normalizeInput(raw: McpServerInput): McpServerInput {
     ...(tokenEndpoint === undefined ? {} : { tokenEndpoint }),
     ...(registrationEndpoint === undefined ? {} : { registrationEndpoint }),
     ...(issuer === undefined ? {} : { issuer }),
+    // Мимикрия бывает только у OAuth: она меняет redirect_uri, а без входа он не нужен.
+    ...(auth === 'oauth' && raw.mimic === true ? { mimic: true } : {}),
     shared,
   };
 }
@@ -599,6 +616,7 @@ export function viewOf(
     ready: auth.ready,
     authState: auth.state,
     ...(auth.message === undefined ? {} : { authMessage: auth.message }),
+    ...(server.mimic === true ? { mimic: true } : {}),
     ...(Object.keys(credentials?.headers ?? {}).length === 0
       ? {}
       : { credentialHeaders: Object.keys(credentials?.headers ?? {}) }),
@@ -763,6 +781,7 @@ export function createServer(config: IcarusConfig, owner: string, raw: McpServer
     ...(input.tokenEndpoint === undefined ? {} : { tokenEndpoint: input.tokenEndpoint }),
     ...(input.registrationEndpoint === undefined ? {} : { registrationEndpoint: input.registrationEndpoint }),
     ...(input.issuer === undefined ? {} : { issuer: input.issuer }),
+    ...(input.mimic === true ? { mimic: true } : {}),
     owner,
     shared: input.shared === true,
     createdAt: now,
@@ -842,6 +861,9 @@ export function updateServer(
     tokenEndpoint: input.tokenEndpoint,
     registrationEndpoint: input.registrationEndpoint,
     issuer: input.issuer,
+    // false значит «снять галочку», а не «оставить как было»: иначе выключить
+    // мимикрию было бы нечем.
+    mimic: input.mimic === true ? true : undefined,
     shared: input.shared === true,
     updatedAt: new Date().toISOString(),
   };
@@ -859,6 +881,7 @@ export function updateServer(
     'tokenEndpoint',
     'registrationEndpoint',
     'issuer',
+    'mimic',
   ] as const) {
     if (next[key] === undefined) delete next[key];
   }
