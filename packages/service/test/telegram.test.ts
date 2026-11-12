@@ -210,6 +210,9 @@ function fakeApi(files: Record<string, Buffer> = {}) {
     topicsEnabled: false,
     /** Переименования: chatId, топик, новое имя. */
     renames: [] as Array<{ chatId: number; threadId: number; name: string }>,
+    /** Отправленные вложения: фотографии и документы — отдельно, как в Telegram. */
+    photos: [] as Array<{ chatId: number; threadId: number | null; name: string; bytes: Buffer; caption?: string }>,
+    documents: [] as Array<{ chatId: number; threadId: number | null; name: string; bytes: Buffer; caption?: string }>,
     /** Telegram отбивает отправку в топик: так выглядит «ответ не доехал». */
     failTopics: false,
     /** Telegram отбивает разметку: так выглядит наш промах в HTML. */
@@ -265,6 +268,25 @@ function fakeApi(files: Record<string, Buffer> = {}) {
       const file = state.files.get(filePath.replace(/^files\//, ''));
       if (!file) throw new TelegramError('файл не скачался', 404);
       return file;
+    },
+    /** Вложения: файл уезжает байтами, а не строкой — так же, как в Bot API. */
+    async sendPhoto(
+      chatId: number,
+      file: { bytes: Buffer; name: string },
+      options: { caption?: string; threadId?: number | null } = {},
+    ) {
+      const sent = { chatId, threadId: options.threadId ?? null, name: file.name, bytes: file.bytes };
+      state.photos.push({ ...sent, ...(options.caption ? { caption: options.caption } : {}) });
+      return { message_id: state.nextId++ };
+    },
+    async sendDocument(
+      chatId: number,
+      file: { bytes: Buffer; name: string },
+      options: { caption?: string; threadId?: number | null } = {},
+    ) {
+      const sent = { chatId, threadId: options.threadId ?? null, name: file.name, bytes: file.bytes };
+      state.documents.push({ ...sent, ...(options.caption ? { caption: options.caption } : {}) });
+      return { message_id: state.nextId++ };
     },
   } as unknown as TelegramApi;
   return { api, state };
@@ -1249,4 +1271,57 @@ test('реплика поверх идущего хода прерывает е�
     calls.some((call) => call.command === 'interrupt'),
     'прерывание идёт через реестр, а не мимо него',
   );
+});
+
+test('ссылка на файл в ответе уезжает вложением, а путь пропадает из текста', async () => {
+  const config = makeConfig({ telegram: { token: 'bot-token', mapping: { trousev: 'probe' } } });
+  const talk = path.join(userPaths(config, probe()).workspaces, 'talk');
+  fs.mkdirSync(talk, { recursive: true });
+  fs.writeFileSync(path.join(talk, 'chart.png'), Buffer.from('PNG-байты'));
+  fs.writeFileSync(path.join(talk, 'смета.pdf'), Buffer.from('PDF-байты'));
+  const steps: Step[] = [
+    {
+      type: 'message_update',
+      assistantMessageEvent: {
+        type: 'text_delta',
+        delta: 'Готово!\n\n![график цен](/workspaces/talk/chart.png)\n\n[смета за март](/workspaces/talk/смета.pdf)',
+      },
+    },
+    { type: 'agent_settled' },
+  ];
+  const { bot, state } = makeBot({ steps, config });
+
+  await bot.handleUpdate(messageUpdate('построй график и приложи смету'));
+
+  const text = chatText(state, 42);
+  assert.doesNotMatch(text, /\/workspaces\//, 'локальный путь в тексте не остался');
+  assert.equal(text.trim(), 'Готово!', 'ссылки отдельными строками ушли во вложения целиком');
+
+  assert.equal(state.photos.length, 1, 'картинка ушла фотографией');
+  assert.equal(state.photos[0]?.name, 'график цен.png', 'имя человеческое и с расширением');
+  assert.equal(state.photos[0]?.caption, 'график цен');
+  assert.equal(state.photos[0]?.bytes.toString(), 'PNG-байты');
+
+  assert.equal(state.documents.length, 1, 'PDF ушёл документом');
+  assert.equal(state.documents[0]?.name, 'смета за март.pdf');
+  assert.equal(state.documents[0]?.bytes.toString(), 'PDF-байты');
+});
+
+test('файл из ответа не теряется молча: бот говорит, почему его нет', async () => {
+  const config = makeConfig({ telegram: { token: 'bot-token', mapping: { trousev: 'probe' } } });
+  fs.mkdirSync(path.join(userPaths(config, probe()).workspaces, 'talk'), { recursive: true });
+  const steps: Step[] = [
+    {
+      type: 'message_update',
+      assistantMessageEvent: { type: 'text_delta', delta: 'Готово!\n\n![схема](/workspaces/talk/нет-такой.png)' },
+    },
+    { type: 'agent_settled' },
+  ];
+  const { bot, state } = makeBot({ steps, config });
+
+  await bot.handleUpdate(messageUpdate('покажи схему'));
+
+  assert.equal(state.photos.length, 0);
+  assert.match(chatText(state, 42), /Не смог отправить файл/, 'человек узнал, что вложения не будет');
+  assert.match(chatText(state, 42), /файл не найден/);
 });

@@ -9,6 +9,7 @@ import { userPaths } from '../src/config.ts';
 import { sessionIdFor } from '../src/sessions/pi-session.ts';
 import { appendChatSession, ensureChat, findChatRecord, sessionIdsOf } from '../src/sessions/chats.ts';
 import {
+  chatAttachmentFile,
   chatImageFile,
   createChat,
   finishChat,
@@ -349,6 +350,36 @@ test('картинка отдаётся из вложений и рабочих 
   assert.equal(chatImageFile(config, user, '/workspaces/.icarus/icarus.md'), null);
   assert.equal(chatImageFile(config, user, '/workspaces/talk/.maple/plots/plot.mw'), null, 'не картинка — не отдаём');
   assert.equal(chatImageFile(config, user, '/workspaces/.icarus/incoming/нет-такой.png'), null);
+});
+
+test('файл из ответа агента скачивается ссылкой, а не ищется статикой', async () => {
+  const { config, user } = fixture();
+  const plots = path.join(userPaths(config, user).workspaces, 'talk', '.maple', 'plots');
+  fs.mkdirSync(plots, { recursive: true });
+  fs.writeFileSync(path.join(plots, 'смета.pdf'), Buffer.from('%PDF-1.4'));
+
+  // Прямая проверка разбора: тот же путь, что и у картинки, но файл любой.
+  const found = chatAttachmentFile(config, user, '/workspaces/talk/.maple/plots/смета.pdf');
+  assert.equal(found?.type, 'application/pdf');
+  assert.equal(chatAttachmentFile(config, user, '/etc/passwd'), null);
+
+  const server = createServer(config, {} as never);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address() as AddressInfo;
+  const headers = { [PANEL_USER_HEADER]: 'probe' };
+  try {
+    const base = `http://127.0.0.1:${port}`;
+    const url = `/panel/api/chat/file?path=${encodeURIComponent('/workspaces/talk/.maple/plots/смета.pdf')}`;
+    const file = await fetch(`${base}${url}`, { headers });
+    assert.equal(file.status, 200);
+    assert.match(file.headers.get('content-disposition') ?? '', /attachment;/);
+    assert.equal(await file.text(), '%PDF-1.4');
+
+    const outside = await fetch(`${base}/panel/api/chat/file?path=%2Fetc%2Fpasswd`, { headers });
+    assert.equal(outside.status, 404, 'за пределы рабочей папки не пускаем');
+  } finally {
+    server.close();
+  }
 });
 
 test('вложения из браузера ложатся в incoming, картинки уходят и в files, и в images', () => {

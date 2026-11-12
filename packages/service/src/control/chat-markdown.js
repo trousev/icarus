@@ -21,6 +21,30 @@ function imageSrc(raw) {
   return '/panel/api/chat/image?path=' + encodeURIComponent(value);
 }
 
+/**
+ * Локальный файл из ответа агента отдаёт сервер скачиванием. Внешнюю ссылку
+ * человек откроет сам, а путь внутри контейнера браузеру недоступен.
+ */
+function fileSrc(raw) {
+  const value = String(raw ?? '').trim();
+  if (!/^(?:file:\/\/|\/workspaces\/|\/workspace\/|workspaces\/|\/artifacts\/|artifacts\/|incoming\/)/.test(value)) {
+    return null;
+  }
+  return '/panel/api/chat/file?path=' + encodeURIComponent(value);
+}
+
+/**
+ * Адрес из скобок ссылки. Разметка уже экранирована, поэтому заголовок приходит
+ * как `&quot;…&quot;`, а угловые скобки — как `&lt;…&gt;`: срезаем и их.
+ */
+function hrefOf(inside) {
+  return String(inside ?? '')
+    .trim()
+    .replace(/\s+(?:"[^"]*"|&quot;[\s\S]*?&quot;)$/, '')
+    .replace(/^(?:<|&lt;)|(?:>|&gt;)$/g, '')
+    .trim();
+}
+
 /** Что можно поставить в конец адреса, но что адресу не принадлежит. */
 const URL_TAIL = /[?!.,:*_~]/;
 /** Парная скобка: закрывающая остаётся в адресе, только если открывающая тоже есть. */
@@ -102,16 +126,27 @@ function inline(raw) {
   };
 
   let text = escapeHtml(raw);
-  text = text.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_, alt, src) =>
-    hold('<img class="md-image" src="' + imageSrc(src) + '" alt="' + alt + '">'),
+  text = text.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, src) =>
+    hold('<img class="md-image" src="' + imageSrc(hrefOf(src)) + '" alt="' + alt + '">'),
   );
   // `код` — раньше ссылок: адрес в примере кода ссылкой быть не должен.
   text = text.replace(/`([^`\n]+)`/g, (_, code) => hold('<code>' + code + '</code>'));
-  text = text.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (_, label, href) =>
-    hold(
-      '<a href="' + href + '" target="_blank" rel="noopener noreferrer">' + emphasize(label) + '</a>',
-    ),
-  );
+  text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (whole, label, inside) => {
+    // В именах файлов бывают пробелы: `[смета](…/смета за март.pdf)` — тоже ссылка.
+    const href = hrefOf(inside);
+    if (/^https?:\/\/\S+$/.test(href)) {
+      return hold(
+        '<a href="' + href + '" target="_blank" rel="noopener noreferrer">' + emphasize(label) + '</a>',
+      );
+    }
+    // Ссылка на файл, который агент сделал руками: отдаём его скачиванием, а не
+    // оставляем в тексте сырой markdown — иначе человек видит скобки и мёртвый путь.
+    const local = fileSrc(href);
+    if (!local) return whole;
+    return hold(
+      '<a class="md-file" href="' + local + '" download>📎 ' + emphasize(label) + '</a>',
+    );
+  });
   // Голые адреса — тоже в слоты: иначе `_` или `*` внутри адреса станут курсивом.
   text = autolink(text, hold);
 

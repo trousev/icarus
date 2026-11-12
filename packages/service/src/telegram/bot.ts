@@ -46,6 +46,7 @@ import {
   type TelegramUpdate,
 } from './api.ts';
 import { TelegramReply } from './reply.ts';
+import { answerFiles, deliverFiles, filesFailedText, stripLocalRefs, type FileRef } from './outgoing.ts';
 
 // Тексты и разбор команд общие с веб-чатом (sessions/commands.ts). Реэкспорт
 // оставляет прежний вход тем, кто уже берёт их из бота, — и тестам тоже.
@@ -713,11 +714,18 @@ export class TelegramBot {
     const toolArgs = new Map<string, Record<string, unknown>>();
     const reauth = new Map<string, { name: string; url: string }>();
 
+    // Ответ копится целиком: по нему видно, на какие файлы сослался агент, а по
+    // частям deltas этого не понять — путь приезжает кусками.
+    let answer = '';
+
     const unsubscribe = session.onEvent((event) => {
       switch (event.type) {
         case 'message_update': {
           const delta = event.assistantMessageEvent as { type?: string; delta?: string } | undefined;
-          if (delta?.type === 'text_delta' && delta.delta) reply.push(delta.delta);
+          if (delta?.type === 'text_delta' && delta.delta) {
+            answer += delta.delta;
+            reply.push(delta.delta);
+          }
           break;
         }
         case 'tool_execution_start': {
@@ -787,9 +795,34 @@ export class TelegramBot {
       }
       dropTurn();
       unsubscribe();
+      // Ссылки на локальные файлы в тексте заменяем вложениями: текст без них
+      // понятнее, а сам файл человек увидит отдельным сообщением (см. outgoing.ts).
+      const files = answerFiles(answer);
+      if (files.length > 0) reply.mapTail(stripLocalRefs);
       await reply.finish();
+      if (files.length > 0) await this.deliverAnswerFiles(message, user, files, route);
       await this.reportUndelivered(message, route, reply);
     }
+  }
+
+  /**
+   * Файлы, на которые сослался агент, — вложениями после текста. Ошибку не прячем:
+   * если агент написал «вот график», человек должен знать, почему графика нет.
+   */
+  private async deliverAnswerFiles(
+    message: TelegramMessage,
+    user: UserConfig,
+    files: FileRef[],
+    route: Route,
+  ): Promise<void> {
+    const delivered = await deliverFiles(this.api, this.config, user, message.chat.id, files, {
+      threadId: route.threadId,
+    });
+    if (delivered.sent > 0) {
+      log.info('телеграм: файлы из ответа отправлены', { user: user.id, sent: delivered.sent });
+    }
+    if (delivered.errors.length === 0) return;
+    await this.say(message.chat.id, filesFailedText(delivered.errors), route.threadId, route.anchor);
   }
 
   /**

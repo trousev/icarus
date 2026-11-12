@@ -111,6 +111,16 @@ export class TelegramReply {
     this.schedule();
   }
 
+  /**
+   * Преобразует ещё не показанный хвост ответа. Так бот убирает из текста ссылки
+   * на файлы: сами файлы он отправляет вложением, а путь в сообщении человеку
+   * не нужен. Уже разосланные куски не трогаем — их не переписать.
+   */
+  mapTail(transform: (tail: string) => string): void {
+    this.tail = transform(this.tail);
+    this.schedule();
+  }
+
   /** Чем Икар занят прямо сейчас (фраза про тул). В ответ не попадает. */
   setStatus(text: string): void {
     this.status = text.replace(/\s+/g, ' ').trim().slice(0, STATUS_LIMIT);
