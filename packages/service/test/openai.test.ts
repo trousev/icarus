@@ -79,6 +79,8 @@ test('контейнер монтирует память, сессии и реп
   // Код сервера артефактов нужен контейнеру всегда, даже без Maple; остальной
   // каталог tools (стенды и логи) в контейнер не едет.
   assert.match(joined, /\/tools\/artifacts-mcp:\/opt\/icarus\/tools\/artifacts-mcp:ro/);
+  // OPDS-сервер — рецепт из каталога: без маунта команда из рецепта не найдёт файл.
+  assert.match(joined, /\/tools\/opds-mcp:\/opt\/icarus\/tools\/opds-mcp:ro/);
   assert.doesNotMatch(joined, /\/tools:\/opt\/icarus\/tools:ro/);
 });
 

@@ -1,0 +1,17 @@
+{
+  "name": "opds-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP-прокси к OPDS-каталогу: поиск, разделы, карточки книг и скачивание",
+  "bin": {
+    "opds-mcp": "./server.mjs"
+  },
+  "scripts": {
+    "test": "node test.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}

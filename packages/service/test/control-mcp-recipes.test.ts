@@ -124,7 +124,8 @@ test('каталог: id и имена уникальны, команда и т�
     assert.ok(recipe.trouble.length > 0, `${recipe.id}: есть «если не поднялся»`);
     assert.match(recipe.docs, /^https:\/\//, `${recipe.id}: документация по https`);
     assert.match(recipe.checkedAt, /^\d{4}-\d{2}-\d{2}$/, `${recipe.id}: дата проверки`);
-    assert.equal(recipe.checkedAt, RECIPE_CHECKED_AT, `${recipe.id}: проверяли вместе с каталогом`);
+    // Каталог собран 09.11; новый рецепт могли проверить позже — важно, что не раньше.
+    assert.ok(recipe.checkedAt >= RECIPE_CHECKED_AT, `${recipe.id}: дата проверки не раньше каталога`);
   }
 
   assert.ok(RECIPE_RULE.includes('раз в неделю'), 'критерий отбора виден в тексте правила');
@@ -273,6 +274,37 @@ test('рецепт без ключей добавляется готовым: п
     const entry = piMcp(config, 'probe').mcpServers[created.server.id];
     assert.equal((entry.env as Record<string, string>).WEATHER_UNITS, 'metric');
     assert.equal((entry.env as Record<string, string>).ENABLED_TOOLS, 'basic');
+  });
+});
+
+
+test('рецепт OPDS: адрес каталога в env, запуск ленивый', async () => {
+  const recipe = recipeById('opds');
+  assert.ok(recipe, 'рецепт OPDS в каталоге');
+  assert.equal(recipe.category, 'книги');
+  assert.equal(recipe.transport, 'stdio');
+  assert.equal(recipe.command, 'node');
+  assert.deepEqual(recipe.args, ['/opt/icarus/tools/opds-mcp/server.mjs']);
+  assert.ok(recipe.env?.OPDS_URL, 'адрес каталога — несекретная настройка в env');
+  assert.deepEqual(recipe.secrets, [], 'открытый каталог не требует ключей');
+  assert.equal(recipe.auth, 'none');
+
+  await withServer(async (base, config) => {
+    const editor = (await (await get(base, '/panel/mcp/recipe?id=opds')).json()) as Editor;
+    const response = await fetch(`${base}/panel/mcp/add`, {
+      method: 'POST',
+      headers: headers('probe'),
+      body: JSON.stringify(formBody(editor)),
+    });
+    assert.equal(response.status, 200);
+    const created = (await response.json()) as { server: { id: string; ready: boolean } };
+    assert.equal(created.server.ready, true, 'ключей нет — каталог готов сразу');
+
+    const entry = piMcp(config, 'probe').mcpServers[created.server.id];
+    assert.equal(entry.command, 'node');
+    assert.deepEqual(entry.args, ['/opt/icarus/tools/opds-mcp/server.mjs']);
+    assert.equal(entry.lifecycle, 'lazy', 'сервер стартует по требованию, а не при старте pi');
+    assert.deepEqual(entry.env, { OPDS_URL: recipe.env?.OPDS_URL }, 'адрес каталога доехал до сервера');
   });
 });
 

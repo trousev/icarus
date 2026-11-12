@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:opds="http://opds-spec.org/2010/catalog" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:relevance="http://a9.com/-/opensearch/extensions/relevance/1.0/">
+<id>http://www.gutenberg.org/ebooks/98.opds</id>
+<updated>2026-11-12T20:36:12Z</updated>
+<title>A Tale of Two Cities by Charles Dickens</title>
+<subtitle>Free eBooks since 1971.</subtitle>
+<author>
+<name>Project Gutenberg</name>
+<uri>https://www.gutenberg.org</uri>
+<email>webmaster@gutenberg.org</email>
+</author>
+<icon>https://www.gutenberg.org/gutenberg/favicon.ico</icon>
+<link rel="search" type="application/opensearchdescription+xml" title="Project Gutenberg Catalog Search" href="https://www.gutenberg.org/catalog/osd-books.xml"/>
+<link rel="self" title="This Page" type="application/atom+xml;profile=opds-catalog" href="/ebooks/98.opds"/>
+<link rel="alternate" type="text/html" title="HTML Page" href="/ebooks/98"/>
+<link rel="start" title="Start Page" type="application/atom+xml;profile=opds-catalog" href="/ebooks.opds/"/>
+<opensearch:itemsPerPage>25</opensearch:itemsPerPage>
+<opensearch:startIndex>1</opensearch:startIndex>
+<entry>
+<updated>2026-11-12T20:36:12Z</updated>
+<title>A Tale of Two Cities</title>
+<content type="xhtml">
+<div xmlns="http://www.w3.org/1999/xhtml">
+<p>This edition had all images removed.</p>
+<p>
+Title:
+A Tale of Two Cities
+</p>
+<p>
+Note:
+Wikipedia page about this book: https:<a href="//en.wikipedia.org/wiki/A_Tale_of_Two_Cities">//en.wikipedia.org/wiki/A_Tale_of_Two_Cities</a>
+</p>
+<p>
+Credits:
+Judith Boss and David Widger
+</p>
+<p>
+Summary:
+"A Tale of Two Cities" by Charles Dickens is a historical novel published in 1859. Set in London and Paris during the tumultuous French Revolution, it follows Dr. Alexandre Manette after his mysterious 18-year imprisonment in the Bastille and his reunion with his daughter Lucie. Their lives become entangled with a French aristocrat fleeing his heritage and a dissolute English lawyer who harbors secret devotion. Against the backdrop of revolutionary terror and violence, personal sacrifices and hidden connections shape their intertwined fates. (This is an automatically generated summary.)
+</p>
+<p>
+Reading Level:
+Reading ease score: 78.2 (7th grade). Fairly easy to read.
+</p>
+<p>Author: Dickens, Charles, 1812-1870</p>
+<p>EBook No.: 98</p>
+<p>Published: Jan 1, 1994</p>
+<p>Downloads: 74778</p>
+<p>Language: English</p>
+<p>Subject: Historical fiction</p><p>Subject: France -- History -- Revolution, 1789-1799 -- Fiction</p><p>Subject: London (England) -- History -- 18th century -- Fiction</p><p>Subject: War stories</p><p>Subject: Executions and executioners -- Fiction</p><p>Subject: French -- England -- London -- Fiction</p><p>Subject: Lookalikes -- Fiction</p><p>Subject: British -- France -- Paris -- Fiction</p><p>Subject: Paris (France) -- History -- 1789-1799 -- Fiction</p>
+<p>LoCC: Language and Literatures: English literature</p>
+<p>Category: Text</p>
+<p>Rights: Public domain in the USA.</p>
+</div>
+</content>
+<id>urn:gutenberg:98:2</id>
+<published>1994-01-01T00:00:00+00:00</published>
+<rights>Public domain in the USA.</rights>
+<author>
+<name>Dickens, Charles</name>
+</author>
+<category scheme="http://purl.org/dc/terms/LCSH" term="Historical fiction"/><category scheme="http://purl.org/dc/terms/LCSH" term="France -- History -- Revolution, 1789-1799 -- Fiction"/><category scheme="http://purl.org/dc/terms/LCSH" term="London (England) -- History -- 18th century -- Fiction"/><category scheme="http://purl.org/dc/terms/LCSH" term="War stories"/><category scheme="http://purl.org/dc/terms/LCSH" term="Executions and executioners -- Fiction"/><category scheme="http://purl.org/dc/terms/LCSH" term="French -- England -- London -- Fiction"/><category scheme="http://purl.org/dc/terms/LCSH" term="Lookalikes -- Fiction"/><category scheme="http://purl.org/dc/terms/LCSH" term="British -- France -- Paris -- Fiction"/><category scheme="http://purl.org/dc/terms/LCSH" term="Paris (France) -- History -- 1789-1799 -- Fiction"/>
+<category scheme="http://purl.org/dc/terms/LCC" term="PR" label="Language and Literatures: English literature"/>
+<category scheme="http://purl.org/dc/terms/DCMIType" term="Text"/>
+<dcterms:language>en</dcterms:language>
+<relevance:score>1</relevance:score>
+<link type="application/epub+zip" rel="http://opds-spec.org/acquisition" title="EPUB (older e-readers, no images)" length="487766" href="https://www.gutenberg.org/ebooks/98.epub.noimages"/>
+<link type="application/x-mobipocket-ebook" rel="http://opds-spec.org/acquisition" title="Kindle (no images)" length="626450" href="https://www.gutenberg.org/ebooks/98.kindle.noimages"/>
+<link type="image/jpeg" rel="http://opds-spec.org/image" href="https://www.gutenberg.org/cache/epub/98/pg98.cover.medium.jpg"/>
+<link type="image/jpeg" rel="http://opds-spec.org/image/thumbnail" href="https://www.gutenberg.org/cache/epub/98/pg98.cover.small.jpg"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/author/37.opds" title="By Dickens, Charles…"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/subject/60.opds" title="On Historical fiction…"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/subject/69.opds" title="On France -- History -- Revolution, 1789-1799 -- Fiction…"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/subject/465.opds" title="On London (England) -- History -- 18th century -- Fiction…"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/subject/808.opds" title="On War stories…"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/subject/2626.opds" title="On Executions and executioners -- Fiction…"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/subject/3502.opds" title="On French -- England -- London -- Fiction…"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/subject/5580.opds" title="On Lookalikes -- Fiction…"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/subject/8746.opds" title="On British -- France -- Paris -- Fiction…"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/subject/8747.opds" title="On Paris (France) -- History -- 1789-1799 -- Fiction…"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/bookshelf/41.opds" title="In Historical Fiction…"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/bookshelf/635.opds" title="In Category: Historical Novels…"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/bookshelf/649.opds" title="In Category: Classics of Literature…"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/bookshelf/653.opds" title="In Category: British Literature…"/>
+</entry>
+<entry>
+<updated>2026-11-12T20:36:12Z</updated>
+<title>A Tale of Two Cities</title>
+<content type="xhtml">
+<div xmlns="http://www.w3.org/1999/xhtml">
+<p>This edition has images.</p>
+<p>
+Title:
+A Tale of Two Cities
+</p>
+<p>
+Note:
+Wikipedia page about this book: https:<a href="//en.wikipedia.org/wiki/A_Tale_of_Two_Cities">//en.wikipedia.org/wiki/A_Tale_of_Two_Cities</a>
+</p>
+<p>
+Credits:
+Judith Boss and David Widger
+</p>
+<p>
+Summary:
+"A Tale of Two Cities" by Charles Dickens is a historical novel published in 1859. Set in London and Paris during the tumultuous French Revolution, it follows Dr. Alexandre Manette after his mysterious 18-year imprisonment in the Bastille and his reunion with his daughter Lucie. Their lives become entangled with a French aristocrat fleeing his heritage and a dissolute English lawyer who harbors secret devotion. Against the backdrop of revolutionary terror and violence, personal sacrifices and hidden connections shape their intertwined fates. (This is an automatically generated summary.)
+</p>
+<p>
+Reading Level:
+Reading ease score: 78.2 (7th grade). Fairly easy to read.
+</p>
+<p>Author: Dickens, Charles, 1812-1870</p>
+<p>EBook No.: 98</p>
+<p>Published: Jan 1, 1994</p>
+<p>Downloads: 74778</p>
+<p>Language: English</p>
+<p>Subject: Historical fiction</p><p>Subject: France -- History -- Revolution, 1789-1799 -- Fiction</p><p>Subject: London (England) -- History -- 18th century -- Fiction</p><p>Subject: War stories</p><p>Subject: Executions and executioners -- Fiction</p><p>Subject: French -- England -- London -- Fiction</p><p>Subject: Lookalikes -- Fiction</p><p>Subject: British -- France -- Paris -- Fiction</p><p>Subject: Paris (France) -- History -- 1789-1799 -- Fiction</p>
+<p>LoCC: Language and Literatures: English literature</p>
+<p>Category: Text</p>
+<p>Rights: Public domain in the USA.</p>
+</div>
+</content>
+<id>urn:gutenberg:98:3</id>
+<published>1994-01-01T00:00:00+00:00</published>
+<rights>Public domain in the USA.</rights>
+<author>
+<name>Dickens, Charles</name>
+</author>
+<category scheme="http://purl.org/dc/terms/LCSH" term="Historical fiction"/><category scheme="http://purl.org/dc/terms/LCSH" term="France -- History -- Revolution, 1789-1799 -- Fiction"/><category scheme="http://purl.org/dc/terms/LCSH" term="London (England) -- History -- 18th century -- Fiction"/><category scheme="http://purl.org/dc/terms/LCSH" term="War stories"/><category scheme="http://purl.org/dc/terms/LCSH" term="Executions and executioners -- Fiction"/><category scheme="http://purl.org/dc/terms/LCSH" term="French -- England -- London -- Fiction"/><category scheme="http://purl.org/dc/terms/LCSH" term="Lookalikes -- Fiction"/><category scheme="http://purl.org/dc/terms/LCSH" term="British -- France -- Paris -- Fiction"/><category scheme="http://purl.org/dc/terms/LCSH" term="Paris (France) -- History -- 1789-1799 -- Fiction"/>
+<category scheme="http://purl.org/dc/terms/LCC" term="PR" label="Language and Literatures: English literature"/>
+<category scheme="http://purl.org/dc/terms/DCMIType" term="Text"/>
+<dcterms:language>en</dcterms:language>
+<relevance:score>1</relevance:score>
+<link type="application/epub+zip" rel="http://opds-spec.org/acquisition" title="EPUB3 (E-readers incl. Send-to-Kindle)" length="7923060" href="https://www.gutenberg.org/ebooks/98.epub3.images"/>
+<link type="application/epub+zip" rel="http://opds-spec.org/acquisition" title="EPUB (older e-readers)" length="7915239" href="https://www.gutenberg.org/ebooks/98.epub.images"/>
+<link type="application/x-mobipocket-ebook" rel="http://opds-spec.org/acquisition" title="Kindles (kf8)" length="8395724" href="https://www.gutenberg.org/ebooks/98.kf8.images"/>
+<link type="application/x-mobipocket-ebook" rel="http://opds-spec.org/acquisition" title="Older Kindles" length="8324480" href="https://www.gutenberg.org/ebooks/98.kindle.images"/>
+<link type="image/jpeg" rel="http://opds-spec.org/image" href="https://www.gutenberg.org/cache/epub/98/pg98.cover.medium.jpg"/>
+<link type="image/jpeg" rel="http://opds-spec.org/image/thumbnail" href="https://www.gutenberg.org/cache/epub/98/pg98.cover.small.jpg"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/author/37.opds" title="By Dickens, Charles…"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/subject/60.opds" title="On Historical fiction…"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/subject/69.opds" title="On France -- History -- Revolution, 1789-1799 -- Fiction…"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/subject/465.opds" title="On London (England) -- History -- 18th century -- Fiction…"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/subject/808.opds" title="On War stories…"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/subject/2626.opds" title="On Executions and executioners -- Fiction…"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/subject/3502.opds" title="On French -- England -- London -- Fiction…"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/subject/5580.opds" title="On Lookalikes -- Fiction…"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/subject/8746.opds" title="On British -- France -- Paris -- Fiction…"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/subject/8747.opds" title="On Paris (France) -- History -- 1789-1799 -- Fiction…"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/bookshelf/41.opds" title="In Historical Fiction…"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/bookshelf/635.opds" title="In Category: Historical Novels…"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/bookshelf/649.opds" title="In Category: Classics of Literature…"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/bookshelf/653.opds" title="In Category: British Literature…"/>
+</entry>
+</feed>
