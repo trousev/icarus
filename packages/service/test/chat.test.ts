@@ -7,7 +7,13 @@ import type { AddressInfo } from 'node:net';
 import { createServer } from '../src/http/server.ts';
 import { userPaths } from '../src/config.ts';
 import { sessionIdFor } from '../src/sessions/pi-session.ts';
-import { appendChatSession, ensureChat, findChatRecord, sessionIdsOf } from '../src/sessions/chats.ts';
+import {
+  appendChatSession,
+  ensureChat,
+  findChatRecord,
+  sessionIdsOf,
+  setChatArchived,
+} from '../src/sessions/chats.ts';
 import {
   chatAttachmentFile,
   chatImageFile,
@@ -308,6 +314,81 @@ test('разговор через API читается, но из панели �
 
     const legacy = await fetch(`${base}/panel/api/chat/history?id=${encodeURIComponent(`session:${sessionId}`)}`, { headers });
     assert.equal(legacy.status, 200, 'старая ссылка на файл сессии продолжает открываться');
+  } finally {
+    server.close();
+  }
+});
+
+test('архивный разговор уходит из общего списка в свою страницу', () => {
+  const { config, user } = fixture();
+  const stay = createChat(config, user, 'talk', new Date('2026-11-01T10:00:00.000Z'));
+  const hidden = createChat(config, user, 'talk', new Date('2026-11-02T10:00:00.000Z'));
+  setChatArchived(config, user, hidden.id, true, new Date('2026-11-03T10:00:00.000Z'));
+
+  const everyday = listChatPage(config, user);
+  assert.deepEqual(everyday.chats.map((chat) => chat.id), [stay.id], 'архивный в ежедневном списке не виден');
+  assert.equal(everyday.chats[0]?.archived, false);
+  assert.equal(everyday.total, 1);
+
+  const archive = listChatPage(config, user, '', 30, null, null, true);
+  assert.deepEqual(archive.chats.map((chat) => chat.id), [hidden.id], 'и живёт только в архиве');
+  assert.equal(archive.chats[0]?.archived, true);
+  assert.equal(archive.total, 1);
+
+  // История архивного разговора открывается по прямой ссылке: архив — не удаление.
+  assert.equal(readHistory(config, user, hidden.id)?.chat.archived, true);
+});
+
+test('архив через API: разговор уезжает из списка, возвращается и переживает реестр', async () => {
+  const { config, user } = fixture();
+  const chat = createChat(config, user, 'talk', new Date('2026-11-01T10:00:00.000Z'));
+  const server = createServer(config, {} as never);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address() as AddressInfo;
+  const headers = { [PANEL_USER_HEADER]: 'probe', 'content-type': 'application/json' };
+
+  try {
+    const base = `http://127.0.0.1:${port}`;
+    const archive = await fetch(`${base}/panel/api/chat/archive`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ chatId: chat.id }),
+    });
+    assert.equal(archive.status, 200);
+    assert.deepEqual(await archive.json(), { chat: { id: chat.id, archived: true } });
+
+    const everyday = (await (await fetch(`${base}/panel/api/chats`, { headers })).json()) as {
+      chats: Array<{ id: string }>;
+      total: number;
+    };
+    assert.equal(everyday.total, 0, 'в обычном списке разговора больше нет');
+
+    const arhiveList = (await (await fetch(`${base}/panel/api/chats?archived=1`, { headers })).json()) as {
+      chats: Array<{ id: string; archived: boolean }>;
+      total: number;
+    };
+    assert.deepEqual(arhiveList.chats.map((item) => item.id), [chat.id]);
+    assert.equal(arhiveList.chats[0]?.archived, true);
+    assert.equal(readChats(config, user)[0]?.archivedAt !== undefined, true, 'отметка лежит в chats.json');
+
+    const restore = await fetch(`${base}/panel/api/chat/archive`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ chatId: chat.id, archived: false }),
+    });
+    assert.deepEqual(await restore.json(), { chat: { id: chat.id, archived: false } });
+    const back = (await (await fetch(`${base}/panel/api/chats`, { headers })).json()) as {
+      chats: Array<{ id: string }>;
+      total: number;
+    };
+    assert.equal(back.total, 1, 'вернулся в общий список');
+
+    const missing = await fetch(`${base}/panel/api/chat/archive`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ chatId: 'web-нет-такого' }),
+    });
+    assert.equal(missing.status, 404);
   } finally {
     server.close();
   }

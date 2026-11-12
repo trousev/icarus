@@ -69,6 +69,19 @@ export function chatPage(session: PanelSession, options: ChatPageOptions): strin
 
     <div class="chat-list" id="chat-list"><p class="side-empty">Пока пусто. Начни новый чат.</p></div>
 
+    <!-- Архив — секция того же списка, а не отдельная страница: разговор уходит
+         из ежедневного списка, но остаётся под рукой вместе с историей и файлами. -->
+    <div class="archive-zone" id="archive-zone">
+      <button class="archive-toggle" id="archive-toggle" type="button"
+              aria-expanded="false" aria-controls="archive-list">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="5" rx="1.5"/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9"/><path d="M10 13h4"/></svg>
+        <span class="archive-label">Архив</span>
+        <span class="archive-count" id="archive-count" hidden></span>
+        <span class="archive-chevron" aria-hidden="true">▸</span>
+      </button>
+      <div class="archive-list" id="archive-list" hidden></div>
+    </div>
+
     <!-- Настройки — одна дверь. Сами разделы живут на своей странице, и там же
          в этой панели появляется их меню: два списка настроек человеку не нужны.
          Артефакты — не настройка, поэтому стоят рядом с «Настройками», а не внутри. -->
@@ -90,12 +103,18 @@ export function chatPage(session: PanelSession, options: ChatPageOptions): strin
   <main class="chat-main">
     <header class="chat-top">
       <button class="icon-btn menu-btn" id="toggle-side" aria-label="Меню">☰</button>
-      <div class="chat-crumbs">Icarus / <b id="chat-title">Новый чат</b></div>
+      <div class="chat-crumbs">Icarus / <b id="chat-title">Новый чат</b><span class="chat-archived-tag" id="chat-archived-tag" hidden>в архиве</span></div>
       <!-- Откуда пришла последняя реплика: сессия у разговора одна на все входы,
            и по файлу истории этого не видно — канал запоминает сервис. -->
       <span class="chat-via" id="chat-via" hidden></span>
       <label class="chat-search"><span>⌕</span><input id="chat-search" placeholder="Поиск по названиям" autocomplete="off"></label>
       <div class="top-status"><i></i><span id="chat-status">Агент активен</span></div>
+      <!-- Архив открытого разговора: убрать с глаз, не теряя историю. Кнопка
+           меняет смысл, когда разговор уже в архиве, — «вернуть» ищут там же. -->
+      <button class="archive-btn" id="toggle-archive" type="button" aria-pressed="false" disabled>
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="5" rx="1.5"/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9"/><path d="M10 13h4"/></svg>
+        <span id="archive-button-label">В архив</span>
+      </button>
       <button class="icon-btn files-btn" id="toggle-files" aria-label="Файлы workspace" title="Файлы workspace" aria-pressed="false">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M15 4v16"/></svg>
       </button>

@@ -63,6 +63,17 @@ test('чат — это лента с композером и диалогами
   assert.doesNotMatch(html, /демо-режим/i, 'чат настоящий, без имитации');
 });
 
+test('архив — секция того же сайдбара, а не отдельная страница', () => {
+  const html = chatPage(SESSION, { enabled: true });
+  // Разговор убирают с глаз, но не теряют: секция свёрнута, внутри тот же список,
+  // а счётчик виден и в свёрнутом виде.
+  assert.match(html, /id="archive-toggle"/);
+  assert.match(html, /id="archive-list"[^>]*hidden/, 'по умолчанию архив свёрнут');
+  assert.match(html, /id="archive-count"[^>]*hidden/, 'счётчик появляется только когда есть что считать');
+  assert.match(html, /id="toggle-archive"[^>]*disabled/, 'в черновике архивировать нечего');
+  assert.match(html, /id="chat-archived-tag"[^>]*hidden/, 'метка «в архиве» скрыта у обычного разговора');
+});
+
 test('в сайдбаре чата «Артефакты» и «Настройки» — на одном уровне', () => {
   const html = chatPage(SESSION, { enabled: true });
   // Разделы настроек живут на своей странице; в чате — две двери одного уровня.
@@ -1288,4 +1299,89 @@ test('поиск показывает совпадения и в свёрнут�
   await new Promise((resolve) => setTimeout(resolve, 320));
 
   assert.match(app.sidebar(), /chat-item-title">Сводка по «Атласу»/, 'найденное видно и в свёрнутой папке');
+});
+
+/* ── архив ───────────────────────────────────────────────────────────────────
+   Архив — это не удаление: разговор уходит из ежедневного списка, но история
+   остаётся, и вернуть его можно оттуда же. Проверяем на живом клиенте. */
+type FakeChat = { id: string; title: string; workspace: string; preview: string };
+
+/** Заглушка сервера чата: список и история делят один набор архивных отметок. */
+function archiveRoutes(all: FakeChat[], archived: Set<string>) {
+  return {
+    '/panel/api/chat/status': () => ({ busy: [] }),
+    '/panel/api/chat/archive': (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as { chatId: string; archived?: boolean };
+      const next = body.archived !== false;
+      if (next) archived.add(body.chatId);
+      else archived.delete(body.chatId);
+      return { chat: { id: body.chatId, archived: next } };
+    },
+    '/panel/api/chat/history': (url: string) => {
+      const id = new URL(url, 'http://panel').searchParams.get('id');
+      const chat = all.find((item) => item.id === id) ?? all[0];
+      return { chat: { ...chat, archived: archived.has(chat.id) }, messages: [], live: false };
+    },
+    '/panel/api/chats': (url: string) => {
+      const wantArchive = url.includes('archived=1');
+      const list = all.filter((chat) => archived.has(chat.id) === wantArchive);
+      return { chats: list.map((chat) => ({ ...chat, archived: archived.has(chat.id) })), total: list.length };
+    },
+  };
+}
+
+const архиве = (app: Awaited<ReturnType<typeof driveChat>>, id: string) =>
+  app.document.getElementById(id);
+
+test('«В архив» убирает разговор из списка, а не удаляет его', async () => {
+  const archived = new Set<string>();
+  const all: FakeChat[] = [
+    { id: 'web-1', title: 'Налоги', workspace: 'talk', preview: 'Разбери документы' },
+    { id: 'web-2', title: 'Отпуск', workspace: 'talk', preview: 'Куда поехать' },
+  ];
+  const app = await driveChat({ chatId: 'web-1', routes: archiveRoutes(all, archived) });
+
+  assert.match(app.sidebar(), /Налоги/, 'до архива разговор в списке');
+  архиве(app, 'toggle-archive').click();
+  await new Promise((resolve) => setTimeout(resolve, 40));
+
+  assert.doesNotMatch(app.sidebar(), /Налоги/, 'архивный ушёл из ежедневного списка');
+  assert.match(app.sidebar(), /Отпуск/, 'остальные разговоры на месте');
+  assert.ok(
+    app.requests.some((request) => request.method === 'POST' && request.url.includes('/panel/api/chat/archive')),
+    'архив — это отметка на сервере, а не локальная хитрость',
+  );
+  assert.equal(архиве(app, 'archive-count').textContent, '1', 'счётчик виден и в свёрнутой секции');
+  assert.equal(архиве(app, 'archive-button-label').textContent, 'Вернуть', 'кнопка предлагает вернуть разговор');
+
+  архиве(app, 'archive-toggle').click();
+  assert.match(архиве(app, 'archive-list').innerHTML, /Налоги/, 'разговор лежит в архиве');
+  assert.match(архиве(app, 'archive-list').innerHTML, /data-restore/, 'и его можно вернуть');
+});
+
+test('архивный разговор открывается из архива и возвращается в ежедневный список', async () => {
+  const archived = new Set(['web-old']);
+  const all: FakeChat[] = [
+    { id: 'web-1', title: 'Новый', workspace: 'talk', preview: 'привет' },
+    { id: 'web-old', title: 'Прошлогодний план', workspace: 'talk', preview: 'старое' },
+  ];
+  const app = await driveChat({ chatId: 'web-1', routes: archiveRoutes(all, archived) });
+
+  assert.doesNotMatch(app.sidebar(), /Прошлогодний план/, 'архивный не висит в обычном списке');
+  архиве(app, 'archive-toggle').click();
+  const row = app.document.querySelector('#archive-list .chat-item');
+  assert.ok(row, 'строка архива есть');
+  assert.match(row?.innerHTML ?? '', /Прошлогодний план/);
+  row?.click();
+  await new Promise((resolve) => setTimeout(resolve, 60));
+
+  assert.equal(архиве(app, 'chat-title').textContent, 'Прошлогодний план', 'архивный разговор открылся');
+  assert.equal(архиве(app, 'chat-archived-tag').hidden, false, 'шапка говорит, что разговор в архиве');
+  assert.equal(архиве(app, 'archive-button-label').textContent, 'Вернуть');
+
+  архиве(app, 'toggle-archive').click();
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.match(app.sidebar(), /Прошлогодний план/, 'вернулся в ежедневный список');
+  assert.equal(архиве(app, 'archive-count').textContent, '0', 'в архиве пусто');
+  assert.equal(архиве(app, 'chat-archived-tag').hidden, true, 'метка в шапке снята');
 });
