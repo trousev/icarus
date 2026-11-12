@@ -84,10 +84,10 @@ test('сохранение языка пишет профиль и доезжа�
   await withServer(async (base, config) => {
     const saved = await save(base, { language: 'en' });
     assert.equal(saved.status, 200);
-    assert.deepEqual(await saved.json(), { user: 'probe', language: 'en' });
+    assert.deepEqual(await saved.json(), { user: 'probe', language: 'en', uiLanguage: 'ru' });
 
     // Файл профиля — на диске человека, рядом с памятью.
-    assert.deepEqual(readProfile(config, probe('probe')), { language: 'en' });
+    assert.deepEqual(readProfile(config, probe('probe')), { language: 'en', uiLanguage: 'ru' });
 
     // И главное: следующий старт контейнера положит в AGENTS.md требование
     // отвечать по-английски. Без этого настройка была бы кнопкой в пустоту.

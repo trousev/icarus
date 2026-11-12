@@ -19,13 +19,20 @@ function cleanPreview(text) {
 }
 
 const plural = (n, one, few, many) => {
+  // Старый вызов передаёт три строки, новый — формы из словаря.
+  const words = typeof one === 'string' ? { one, few, many } : one;
+  if (cfg.ui.lang !== 'ru') return n === 1 ? words.one : words.many;
   const tens = n % 100;
   const ones = n % 10;
-  if (tens >= 11 && tens <= 14) return many;
-  if (ones === 1) return one;
-  if (ones >= 2 && ones <= 4) return few;
-  return many;
+  if (tens >= 11 && tens <= 14) return words.many;
+  if (ones === 1) return words.one;
+  if (ones >= 2 && ones <= 4) return words.few;
+  return words.many;
 };
+
+/** Подстановка в шаблон словаря: «{name}» → значение. Тот же приём, что в ui.ts. */
+const fill = (template, values) =>
+  Object.entries(values).reduce((text, [key, value]) => text.split('{' + key + '}').join(String(value)), template);
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -36,7 +43,7 @@ async function api(path, options = {}) {
   if (!response.ok || !type.includes('application/json')) {
     const message = type.includes('application/json')
       ? ((await response.json().catch(() => ({}))).error || {}).message || response.statusText
-      : 'сессия входа истекла — обнови страницу';
+      : cfg.ui.sessionExpired;
     throw new Error(message);
   }
   return response.json();
@@ -64,10 +71,10 @@ function timeLabel(iso) {
 
 function groupLabel(iso) {
   const days = daysAgo(iso);
-  if (days <= 0) return 'Сегодня';
-  if (days === 1) return 'Вчера';
-  if (days < 7) return 'На этой неделе';
-  return 'Раньше';
+  if (days <= 0) return cfg.ui.today;
+  if (days === 1) return cfg.ui.yesterday;
+  if (days < 7) return cfg.ui.thisWeek;
+  return cfg.ui.earlier;
 }
 
 const SUB_MARK = { queued: '·', running: '◐', ok: '✓', error: '✕', aborted: '■', skipped: '–' };
@@ -362,9 +369,9 @@ function channelName(chat) {
  */
 function viaLabel(turn) {
   if (!turn) return '';
-  const name = turn.channel === 'telegram' ? 'Telegram' : turn.channel === 'api' ? 'API' : 'панель';
+  const name = turn.channel === 'telegram' ? 'Telegram' : turn.channel === 'api' ? 'API' : cfg.ui.viaPanel;
   const time = turn.at ? timeLabel(turn.at) : '';
-  return 'последняя реплика · ' + name + (time ? ' · ' + time : '');
+  return fill(cfg.ui.viaLast, { name }) + (time ? ' · ' + time : '');
 }
 
 /** Шапка разговора: канал последней реплики. null — черновик или нет данных. */
@@ -375,7 +382,7 @@ function renderVia(chat) {
   node.textContent = text;
   node.hidden = !text;
   node.dataset.channel = chat && chat.lastTurn ? chat.lastTurn.channel : '';
-  node.title = text ? 'Разговор общий: панель и Telegram пишут в одну сессию' : '';
+  node.title = text ? cfg.ui.viaTitle : '';
 }
 
 /**
@@ -385,19 +392,16 @@ function renderVia(chat) {
  */
 function chatHint(chat) {
   if (chat && chat.channel === 'telegram') {
-    return 'Разговор общий с Telegram: ответ появится здесь и в истории — в Telegram я его не отправлю.';
+    return cfg.ui.telegramHint;
   }
   return '';
 }
 
 /** Ход идёт в другом канале: второй начинать нельзя, а смотреть здесь нечего. */
 function busyInNote(channel) {
-  const where = channel === 'telegram' ? 'в Telegram' : channel === 'api' ? 'через API' : 'в панели';
-  return (
-    'Сейчас ответ идёт ' +
-    where +
-    ' — это тот же разговор и тот же ход. Дождись его и напиши ещё раз: второй ход я не начну.'
-  );
+  const where =
+    channel === 'telegram' ? cfg.ui.busyInTelegram : channel === 'api' ? cfg.ui.busyInApi : cfg.ui.busyInPanel;
+  return fill(cfg.ui.busyInNote, { where });
 }
 
 /** Короткая метка в списке диалогов: длинное «только чтение» съедает заголовок. */
@@ -421,23 +425,21 @@ function setComposer(readOnly) {
   el('chat-attach').disabled = !writable;
   syncNowButton();
   el('chat-input').placeholder = !cfg.enabled
-    ? 'Чат недоступен…'
+    ? cfg.ui.chatUnavailablePlaceholder
     : locked
-      ? 'Разговор только для чтения'
-      : 'Написать Icarus...';
+      ? cfg.ui.readOnlyPlaceholder
+      : cfg.ui.inputPlaceholder;
   el('chat-locked').hidden = !locked || !cfg.enabled;
   el('chat-locked').textContent =
     locked && cfg.enabled
-      ? 'Этот разговор начат в ' +
-        (label || 'другом входе') +
-        '. Здесь он только для чтения — продолжить можно там, где он начат.'
+      ? fill(cfg.ui.lockedNote, { label: label || cfg.ui.lockedOther })
       : '';
-  el('chat-status').textContent = !cfg.enabled ? 'Чат выключен' : locked ? 'Только чтение' : 'Агент активен';
+  el('chat-status').textContent = !cfg.enabled ? cfg.ui.chatOffStatus : locked ? cfg.ui.readOnlyStatus : cfg.ui.agentActive;
 }
 
 function setTitle(title) {
-  el('chat-title').textContent = title || 'Новый чат';
-  document.title = 'Icarus · ' + (title || 'Новый чат');
+  el('chat-title').textContent = title || cfg.ui.newChat;
+  document.title = 'Icarus · ' + (title || cfg.ui.newChat);
 }
 
 /** /rename: новое имя сразу в шапке и в сайдбаре, без перезагрузки ленты. */
@@ -469,7 +471,7 @@ function showEmpty(show) {
 }
 
 /** «Входящие» — не папка в реестре, а всё, что осталось без полки. */
-const INBOX_FOLDER = { id: '', name: 'Входящие', collapsed: false };
+const INBOX_FOLDER = { id: '', name: cfg.ui.folderInbox, collapsed: false };
 
 /** Одна строка списка: сам разговор, а кнопки «✎» и «⋯» — рядом, не внутри кнопки. */
 function chatRowHtml(chat) {
@@ -480,7 +482,7 @@ function chatRowHtml(chat) {
       '<div class="chat-row" data-id="' + esc(chat.id) + '">' +
       '<div class="chat-item editing"><div class="chat-item-top">' +
       '<input class="chat-item-input" maxlength="128" value="' + esc(chat.title) +
-      '" aria-label="Новое имя разговора" /></div></div></div>'
+      '" aria-label="' + esc(cfg.ui.chatRenamePlaceholder) + '" /></div></div></div>'
     );
   }
   // Точка одна и она старше видит занятость: жёлтая — ход идёт, зелёная — есть
@@ -501,10 +503,10 @@ function chatRowHtml(chat) {
     '</div><div class="chat-item-preview">' + esc(cleanPreview(chat.preview || '')) + '</div></button>' +
     // Переименование — здесь же: имя человек видит в списке и хочет поправить тут.
     '<button class="chat-rename" type="button" data-id="' + esc(chat.id) +
-    '" title="Переименовать разговор" aria-label="Переименовать разговор">✎</button>' +
+    '" title="' + esc(cfg.ui.chatRename) + '" aria-label="' + esc(cfg.ui.chatRename) + '">✎</button>' +
     // Перенос доступен и мышью, и с клавиатуры: кнопка открывает меню с папками.
     '<button class="chat-more" type="button" data-id="' + esc(chat.id) +
-    '" title="Переместить в папку" aria-label="Переместить в папку">⋯</button>' +
+    '" title="' + esc(cfg.ui.chatMove) + '" aria-label="' + esc(cfg.ui.chatMove) + '">⋯</button>' +
     '</div>'
   );
 }
@@ -542,15 +544,15 @@ function folderHeadHtml(folder, count) {
     '<span class="folder-caret" aria-hidden="true">▾</span>' +
     (renaming
       ? '<input class="folder-rename" data-folder="' + esc(folder.id) + '" value="' + esc(folder.name) +
-        '" maxlength="64" autocomplete="off" aria-label="Название папки">'
+        '" maxlength="64" autocomplete="off" aria-label="' + esc(cfg.ui.folderName) + '">'
       : '<span class="folder-name">' + esc(folder.name) + '</span>') +
     '<span class="folder-count">' + count + '</span>' +
     (folder.id
       ? '<span class="folder-actions">' +
         '<button class="folder-act" type="button" data-act="rename" data-folder="' + esc(folder.id) +
-        '" title="Переименовать папку" aria-label="Переименовать папку">✎</button>' +
+        '" title="' + esc(cfg.ui.folderRename) + '" aria-label="' + esc(cfg.ui.folderRename) + '">✎</button>' +
         '<button class="folder-act" type="button" data-act="delete" data-folder="' + esc(folder.id) +
-        '" title="Удалить папку" aria-label="Удалить папку">×</button></span>'
+        '" title="' + esc(cfg.ui.folderDelete) + '" aria-label="' + esc(cfg.ui.folderDelete) + '">×</button></span>'
       : '') +
     '</div>'
   );
@@ -569,22 +571,22 @@ function renderChats() {
   if (!chats.length && !folders.length && !folderDraft) {
     // В черновике подсказка «начни новый чат» лишняя: он уже начат.
     box.innerHTML = query
-      ? '<p class="side-empty">Ничего не найдено.</p>'
+      ? '<p class="side-empty">' + esc(cfg.ui.chatListEmptySearch) + '</p>'
       : draft
         ? ''
-        : '<p class="side-empty">Пока пусто. Начни новый чат.</p>';
+        : '<p class="side-empty">' + esc(cfg.ui.chatListEmpty) + '</p>';
     return;
   }
 
   let html = '';
   if (folderDraft) {
-    html += '<div class="folder-new"><input id="folder-new-name" placeholder="Название папки" maxlength="64" autocomplete="off"></div>';
+    html += '<div class="folder-new"><input id="folder-new-name" placeholder="' + esc(cfg.ui.folderName) + '" maxlength="64" autocomplete="off"></div>';
   }
 
   if (!folders.length) {
     // Папок ещё нет — список живёт как раньше. Заводить «Входящие» на весь
     // список незачем: заголовок появится, когда появится первая папка.
-    html += chatItemsHtml(chats, true) || (query ? '<p class="side-empty">Ничего не найдено.</p>' : '');
+    html += chatItemsHtml(chats, true) || (query ? '<p class="side-empty">' + esc(cfg.ui.chatListEmptySearch) + '</p>' : '');
   } else {
     for (const folder of folders) {
       const items = chats.filter((chat) => chat.folder === folder.id);
@@ -597,7 +599,7 @@ function renderChats() {
         ? chatItemsHtml(items, true)
         : query
           ? ''
-          : '<p class="side-empty folder-empty">Перетащи чат сюда</p>';
+          : '<p class="side-empty folder-empty">' + esc(cfg.ui.folderDrop) + '</p>';
     }
     // Разговоры без папки и те, чья папка уже удалена с другого устройства.
     const inbox = chats.filter((chat) => !folders.some((folder) => folder.id === chat.folder));
@@ -606,8 +608,8 @@ function renderChats() {
       ? chatItemsHtml(inbox, true)
       : query
         ? ''
-        : '<p class="side-empty folder-empty">Здесь новые чаты. Перетащи их в папку.</p>';
-    if (query && !chats.length) html += '<p class="side-empty">Ничего не найдено.</p>';
+        : '<p class="side-empty folder-empty">' + esc(cfg.ui.folderEmpty) + '</p>';
+    if (query && !chats.length) html += '<p class="side-empty">' + esc(cfg.ui.chatListEmptySearch) + '</p>';
   }
 
   box.innerHTML = html;
@@ -852,12 +854,12 @@ function openChatMenu(chatId, anchor) {
   menu.id = 'chat-menu';
   menu.setAttribute('role', 'menu');
   menu.innerHTML =
-    '<p class="chat-menu-title">Переместить в</p>' +
+    '<p class="chat-menu-title">' + esc(cfg.ui.folderMoveTitle) + '</p>' +
     (folders.length
       ? folders.map((folder) => option(folder.id, folder.name)).join('')
-      : '<p class="chat-menu-empty">Папок пока нет</p>') +
-    option('', 'Входящие') +
-    '<button type="button" class="chat-menu-new" data-new="1">+ Новая папка…</button>';
+      : '<p class="chat-menu-empty">' + esc(cfg.ui.folderNone) + '</p>') +
+    option('', cfg.ui.folderInbox) +
+    '<button type="button" class="chat-menu-new" data-new="1">' + esc(cfg.ui.folderMenuNew) + '</button>';
   document.body.appendChild(menu);
 
   // Ставим рядом с кнопкой, но не даём вылезти за окно.
@@ -909,7 +911,7 @@ function archivedRowHtml(chat) {
     '</div></button>' +
     '<button class="chat-row-action" type="button" data-restore="' +
     esc(chat.id) +
-    '" title="Вернуть из архива" aria-label="Вернуть из архива">↩</button>' +
+    '" title="' + esc(cfg.ui.archiveRestoreTitle) + '" aria-label="' + esc(cfg.ui.archiveRestoreTitle) + '">↩</button>' +
     '</div>'
   );
 }
@@ -927,7 +929,7 @@ function renderArchive() {
   box.hidden = !archiveOpen;
   if (!archiveOpen) return;
   if (!archivedChats.length) {
-    box.innerHTML = '<p class="side-empty">Архив пуст.</p>';
+    box.innerHTML = '<p class="side-empty">' + esc(cfg.ui.archiveEmpty) + '</p>';
     return;
   }
   box.innerHTML = archivedChats.map(archivedRowHtml).join('');
@@ -945,7 +947,7 @@ async function loadArchived() {
     archivedChats = data.chats || [];
     renderArchive();
   } catch (error) {
-    el('archive-list').innerHTML = '<p class="side-empty">Архив не загрузился: ' + esc(error.message) + '</p>';
+    el('archive-list').innerHTML = '<p class="side-empty">' + esc(cfg.ui.archiveLoadFailed) + esc(error.message) + '</p>';
   }
 }
 
@@ -955,8 +957,8 @@ function setArchiveState(chat) {
   const button = el('toggle-archive');
   button.disabled = !chat;
   button.setAttribute('aria-pressed', archived ? 'true' : 'false');
-  button.title = archived ? 'Вернуть из архива' : 'В архив';
-  el('archive-button-label').textContent = archived ? 'Вернуть' : 'В архив';
+  button.title = archived ? cfg.ui.archiveRestoreTitle : cfg.ui.archiveAdd;
+  el('archive-button-label').textContent = archived ? cfg.ui.archiveRestore : cfg.ui.archiveAdd;
   el('chat-archived-tag').hidden = !archived;
 }
 
@@ -983,9 +985,7 @@ async function toggleArchive() {
   try {
     await setArchived(currentId, archived);
     setNote(
-      archived
-        ? 'Разговор в архиве. Из списка он ушёл, история и файлы остались на месте.'
-        : 'Разговор вернулся в список.',
+      archived ? cfg.ui.archiveAddedNote : cfg.ui.archiveRemovedNote,
     );
   } catch (error) {
     setNote('не удалось изменить архив: ' + error.message);
@@ -995,7 +995,7 @@ async function toggleArchive() {
 async function restoreArchived(chatId) {
   try {
     await setArchived(chatId, false);
-    setNote('Разговор вернулся из архива.');
+    setNote(cfg.ui.archiveRestoredNote);
   } catch (error) {
     setNote('не удалось вернуть из архива: ' + error.message);
   }
@@ -1114,13 +1114,13 @@ function rememberChat(chat, liveText) {
 }
 
 function baseName(file) {
-  return String(file || '').split(/[\\/]/).pop() || 'файл';
+  return String(file || '').split(/[\\/]/).pop() || cfg.ui.filesWord.one;
 }
 
 function fileSizeText(bytes) {
-  if (bytes >= 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + ' МБ';
-  if (bytes >= 1024) return Math.round(bytes / 1024) + ' КБ';
-  return bytes + ' Б';
+  if (bytes >= 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + cfg.ui.megabytesShort;
+  if (bytes >= 1024) return Math.round(bytes / 1024) + cfg.ui.kilobytesShort;
+  return bytes + cfg.ui.bytesShort;
 }
 
 function renderPending() {
@@ -1140,7 +1140,7 @@ function renderPending() {
         esc(item.file.name) +
         '</span><button class="remove" data-index="' +
         index +
-        '" aria-label="Убрать">×</button></div>',
+        '" aria-label="' + esc(cfg.ui.filesRemove) + '">×</button></div>',
     )
     .join('');
   box.querySelectorAll('.remove').forEach((button) => {
@@ -1338,7 +1338,7 @@ function startDraft(workspace = defaultWorkspace) {
   setArchiveState(null);
   setComposer(false);
   renderQueue();
-  setTitle('Новый чат');
+  setTitle(cfg.ui.newChat);
   renderVia(null);
   showEmpty(true);
   // Выбор workspace — не отдельный экран, а пустое состояние нового чата.
@@ -1361,17 +1361,17 @@ function wsLabel(slug) {
 }
 
 function wsKindLabel(ws) {
-  if (ws.kind === 'talk') return 'по умолчанию';
-  if (ws.kind === 'private') return 'только чтение';
-  return 'свой';
+  if (ws.kind === 'talk') return cfg.ui.wsDefaultKind;
+  if (ws.kind === 'private') return cfg.ui.wsPrivateKind;
+  return cfg.ui.wsCustomKind;
 }
 
 function wsDescription(ws) {
-  if (ws.kind === 'talk') return 'Своя рабочая папка и свой AGENTS.md. Память общая.';
+  if (ws.kind === 'talk') return cfg.ui.wsTalkDescription;
   if (ws.kind === 'private') {
-    return 'Приватный workspace: только чтение и никакой записи в память.';
+    return cfg.ui.wsPrivateDescription;
   }
-  return 'Отдельная рабочая папка со своим AGENTS.md.';
+  return cfg.ui.wsCustomDescription;
 }
 
 function wsGlyph(ws) {
@@ -1389,7 +1389,7 @@ async function loadWorkspaces() {
 function wsCard(ws) {
   const remove =
     ws.kind === 'custom'
-      ? '<button class="ws-del" data-del="' + esc(ws.slug) + '" title="Удалить workspace" aria-label="Удалить workspace">' +
+      ? '<button class="ws-del" data-del="' + esc(ws.slug) + '" title="' + esc(cfg.ui.wsDeleteTitle) + '" aria-label="' + esc(cfg.ui.wsDeleteTitle) + '">' +
         '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 7h16M9 7V5h6v2M7 7l1 13h8l1-13"/></svg>' +
         '</button>'
       : '';
@@ -1409,45 +1409,39 @@ function newWsCard(open) {
   if (!open) {
     return (
       '<button class="ws-card ws-new" id="ws-new">' +
-      '<div class="ws-top"><span class="ws-glyph ws-plus">+</span><span class="ws-name">Новый workspace</span>' +
-      '<span class="ws-kind">своя папка</span></div>' +
-      '<p class="ws-desc">Назовите пространство — оно получит отдельную рабочую папку.</p>' +
+      '<div class="ws-top"><span class="ws-glyph ws-plus">+</span><span class="ws-name">' + esc(cfg.ui.wsNewTitle) + '</span>' +
+      '<span class="ws-kind">' + esc(cfg.ui.wsNewKind) + '</span></div>' +
+      '<p class="ws-desc">' + esc(cfg.ui.wsNewDescription) + '</p>' +
       '</button>'
     );
   }
   return (
     '<div class="ws-card ws-new open">' +
-    '<input id="ws-name" placeholder="Название workspace" maxlength="64" autocomplete="off">' +
-    '<div class="ws-form"><button class="ws-create" id="ws-create">Создать</button>' +
-    '<button class="ws-cancel" id="ws-cancel">Отмена</button></div>' +
-    '<p class="ws-hint">Новый workspace получит отдельную рабочую папку со своим AGENTS.md.</p>' +
+    '<input id="ws-name" placeholder="' + esc(cfg.ui.wsNewPlaceholder) + '" maxlength="64" autocomplete="off">' +
+    '<div class="ws-form"><button class="ws-create" id="ws-create">' + esc(cfg.ui.wsCreate) + '</button>' +
+    '<button class="ws-cancel" id="ws-cancel">' + esc(cfg.ui.wsCancel) + '</button></div>' +
+    '<p class="ws-hint">' + esc(cfg.ui.wsNewHint) + '</p>' +
     '</div>'
   );
 }
 
-const WS_PROMPTS = [
-  'Собери план на сегодня',
-  'Что ты помнишь о Марке?',
-  'Подготовь сводку по проекту «Атлас»',
-  'Напомни про дни рождения в июне',
-];
+// Готовые запросы берём из словаря: подпись в панели, а не текст памяти.
+const wsPrompts = () => cfg.ui.wsPrompts;
 
 /** Подпись над готовыми запросами: они уйдут в выбранную папку, а не всегда в «Разговор». */
 function suggestTitle() {
-  return 'НАЧАТЬ В «' + wsLabel(currentWorkspace).toUpperCase() + '»';
+  return fill(cfg.ui.wsStartIn, { name: wsLabel(currentWorkspace).toUpperCase() });
 }
 
 function pickerHtml() {
   return (
     '<div class="ws-screen">' +
-    '<h2>Выберите workspace</h2>' +
-    '<p class="ws-about">Workspace — это рабочая папка агента. У каждого своя папка и свой ' +
-    'AGENTS.md, поэтому поведение отличается. «Приватный» — исключение: папка только для чтения, ' +
-    'а запись в память запрещена.</p>' +
+    '<h2>' + esc(cfg.ui.wsPickTitle) + '</h2>' +
+    '<p class="ws-about">' + esc(cfg.ui.wsPickAbout) + '</p>' +
     '<div class="ws-grid">' + workspaces.map(wsCard).join('') + newWsCard(false) + '</div>' +
     '<p class="ws-suggest-title" id="ws-suggest-title">' + esc(suggestTitle()) + '</p>' +
     '<div class="suggestions ws-suggestions">' +
-    WS_PROMPTS.map((prompt) => '<button data-prompt="' + esc(prompt) + '">' + esc(prompt) + '</button>').join('') +
+    wsPrompts().map((prompt) => '<button data-prompt="' + esc(prompt) + '">' + esc(prompt) + '</button>').join('') +
     '</div>' +
     '</div>'
   );
@@ -1538,7 +1532,7 @@ async function submitWorkspace() {
   const input = el('ws-name');
   const name = (input ? input.value : '').trim();
   if (!name) {
-    setNote('нужно название workspace');
+    setNote(cfg.ui.wsNameRequired);
     return;
   }
   const data = await api('/panel/api/workspaces', { method: 'POST', body: JSON.stringify({ name }) });
@@ -1574,7 +1568,7 @@ async function startPrompt(prompt) {
 
 function updateComposerHint() {
   const input = el('chat-input');
-  if (input) input.placeholder = 'Написать в «' + wsLabel(currentWorkspace) + '»';
+  if (input) input.placeholder = fill(cfg.ui.wsInputPlaceholder, { name: wsLabel(currentWorkspace) });
   // Разговор мог переехать в другую рабочую папку — дерево файлов меняется следом.
   syncFilesWorkspace();
 }
@@ -1600,11 +1594,10 @@ function askDeleteWorkspace(slug) {
   overlay.className = 'ws-modal';
   overlay.innerHTML =
     '<div class="ws-modal-card" role="dialog" aria-modal="true">' +
-    '<h2>Удалить workspace?</h2>' +
-    '<p>Workspace «' + esc(ws.name) + '» будет удалён. Диалоги останутся и вернутся в «' +
-    esc(wsLabel('talk')) + '». Рабочая папка на диске не затрагивается.</p>' +
-    '<div class="ws-modal-actions"><button class="ws-ghost" data-cancel>Отмена</button>' +
-    '<button class="ws-danger" data-ok>Удалить</button></div>' +
+    '<h2>' + esc(cfg.ui.wsDeleteTitle) + '</h2>' +
+    '<p>' + esc(fill(cfg.ui.wsDeleteBody, { name: ws.name, talk: wsLabel('talk') })) + '</p>' +
+    '<div class="ws-modal-actions"><button class="ws-ghost" data-cancel>' + esc(cfg.ui.wsCancel) + '</button>' +
+    '<button class="ws-danger" data-ok>' + esc(cfg.ui.deleteLabel) + '</button></div>' +
     '</div>';
   document.body.appendChild(overlay);
   const close = () => overlay.remove();
@@ -1689,7 +1682,7 @@ const COPY_ICON =
   '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/></svg>';
 const COPIED_ICON =
   '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7"/></svg>';
-const COPY_TITLE = 'Скопировать содержимое в буфер обмена';
+const COPY_TITLE = cfg.ui.filesCopy;
 
 const filesNarrow = () => window.matchMedia('(max-width: 1100px)').matches;
 
@@ -1829,12 +1822,12 @@ function treeRows(dir, depth, rows) {
         (entry.removable === false
           ? ''
           : '<button type="button" class="fdel" data-del="' + esc(entry.path) +
-            '" title="Удалить" aria-label="Удалить ' + esc(entry.name) + '">' + TRASH_ICON + '</button>') +
+            '" title="' + esc(cfg.ui.deleteLabel) + '" aria-label="' + esc(cfg.ui.deleteLabel + ' ' + entry.name) + '">' + TRASH_ICON + '</button>') +
         '</div>',
     );
     if (!expanded) continue;
     if (!filesCache.has(entry.path)) {
-      rows.push('<p class="files-note" style="margin-left:' + (16 + depth * 16) + 'px">Читаю…</p>');
+      rows.push('<p class="files-note" style="margin-left:' + (16 + depth * 16) + 'px">' + esc(cfg.ui.loading) + '</p>');
       continue;
     }
     treeRows(entry.path, depth + 1, rows);
@@ -1850,7 +1843,7 @@ function filesSearchActive() {
 function searchSnippet(hit) {
   const text = String(hit.text || '');
   const match = hit.match;
-  if (!match) return '<span class="ssnip name">совпало имя файла</span>';
+  if (!match) return '<span class="ssnip name">' + esc(cfg.ui.filesNameMatch) + '</span>';
   const start = Math.max(0, Math.min(text.length, match.start));
   const end = Math.min(text.length, start + match.length);
   return (
@@ -1863,10 +1856,10 @@ function searchSnippet(hit) {
 /** Результаты поиска занимают место дерева: два списка в одной колонке не нужны. */
 function searchRows() {
   const rows = [];
-  if (filesSearchBusy) rows.push('<p class="files-note">Ищу…</p>');
+  if (filesSearchBusy) rows.push('<p class="files-note">' + esc(cfg.ui.filesSearching) + '</p>');
   if (filesSearchError) rows.push('<p class="files-error">' + esc(filesSearchError) + '</p>');
   if (!filesSearchBusy && !filesSearchError && !filesSearchHits.length) {
-    rows.push('<p class="files-note">Ничего не нашлось.</p>');
+    rows.push('<p class="files-note">' + esc(cfg.ui.emptyNoResults) + '</p>');
   }
   for (const hit of filesSearchHits) {
     const file = hit.file || {};
@@ -1882,9 +1875,9 @@ function searchRows() {
   }
   if (filesSearchScanned || filesSearchTruncated) {
     rows.push(
-      '<p class="files-more">Просмотрено ' + filesSearchScanned + ' файлов' +
+      '<p class="files-more">' + esc(fill(cfg.ui.filesScanned, { n: filesSearchScanned })) +
         (filesSearchTruncated
-          ? ', показаны первые ' + filesSearchHits.length + ' совпадений.'
+          ? esc(fill(cfg.ui.filesFirstHits, { n: filesSearchHits.length }))
           : '.') +
         '</p>',
     );
@@ -1904,17 +1897,17 @@ function renderFiles() {
     rows.push(...searchRows());
   } else if (filesSearch.trim()) {
     // Один символ дал бы сотни совпадений и скан папки на каждую букву.
-    rows.push('<p class="files-note">Введи хотя бы два символа.</p>');
+    rows.push('<p class="files-note">' + esc(cfg.ui.filesTwoChars) + '</p>');
   } else {
     const root = filesCache.get('');
     if (!root) {
-      rows.push('<p class="files-note">Читаю папку…</p>');
+      rows.push('<p class="files-note">' + esc(cfg.ui.readingFolder) + '</p>');
     } else if (!root.entries.length) {
-      rows.push('<p class="files-note">Папка пуста.</p>');
+      rows.push('<p class="files-note">' + esc(cfg.ui.filesEmptyFolder) + '</p>');
     } else {
       treeRows('', 0, rows);
       if (root.truncated) {
-        rows.push('<p class="files-more">Показаны первые ' + root.entries.length + ' файлов.</p>');
+        rows.push('<p class="files-more">' + esc(fill(cfg.ui.filesFirstEntries, { n: root.entries.length })) + '</p>');
       }
     }
   }
@@ -2149,19 +2142,18 @@ function askDeleteEntry(entry, nonEmpty) {
   return new Promise((resolve) => {
     const overlay = document.createElement('div');
     overlay.className = 'ws-modal';
-    const title = entry.dir ? 'Удалить папку?' : 'Удалить файл?';
+    const title = entry.dir ? cfg.ui.filesDeleteFolder : cfg.ui.filesDeleteFile;
     const text = entry.dir
       ? nonEmpty
-        ? 'Папка «' + esc(entry.name) + '» не пуста. Вместе с ней удалятся все файлы внутри. ' +
-          'Вернуть их будет нельзя.'
-        : 'Папка «' + esc(entry.name) + '» будет удалена.'
-      : 'Файл «' + esc(entry.path) + '» будет удалён. Вернуть его будет нельзя.';
+        ? esc(fill(cfg.ui.filesFolderNotEmpty, { name: entry.name }))
+        : esc(fill(cfg.ui.filesFolderWillDelete, { name: entry.name }))
+      : esc(fill(cfg.ui.filesFileWillDelete, { path: entry.path }));
     overlay.innerHTML =
       '<div class="ws-modal-card" role="dialog" aria-modal="true">' +
-      '<h2>' + title + '</h2>' +
+      '<h2>' + esc(title) + '</h2>' +
       '<p>' + text + '</p>' +
-      '<div class="ws-modal-actions"><button class="ws-ghost" data-cancel>Отмена</button>' +
-      '<button class="ws-danger" data-ok>Удалить</button></div>' +
+      '<div class="ws-modal-actions"><button class="ws-ghost" data-cancel>' + esc(cfg.ui.cancel) + '</button>' +
+      '<button class="ws-danger" data-ok>' + esc(cfg.ui.deleteLabel) + '</button></div>' +
       '</div>';
     document.body.appendChild(overlay);
     function onKey(event) {
@@ -2411,8 +2403,8 @@ async function copyPreviewContent(button) {
   setNote('');
   // Ответ на клик: иконка на секунду становится галочкой, иначе непонятно, сработало ли.
   button.classList.add('copied');
-  button.title = 'Скопировано';
-  button.setAttribute('aria-label', 'Скопировано');
+  button.title = cfg.ui.filesCopied;
+  button.setAttribute('aria-label', cfg.ui.filesCopied);
   button.innerHTML = COPIED_ICON;
   clearTimeout(filesCopyTimer);
   filesCopyTimer = setTimeout(() => {
@@ -2434,23 +2426,23 @@ function renderFilePreview(data) {
     : '';
   const actions =
     '<button type="button" class="files-send" data-send="' + esc(file.path || '') +
-    '" title="Послать агенту: вставить путь в чат" aria-label="Послать агенту">' +
-    SEND_TO_CHAT_ICON + '<span>В чат</span></button>' +
+    '" title="' + esc(cfg.ui.filesToChatTitle) + '" aria-label="' + esc(cfg.ui.filesToChatTitle) + '">' +
+    SEND_TO_CHAT_ICON + '<span>' + esc(cfg.ui.filesToChat) + '</span></button>' +
     copy +
-    '<a class="files-dl" href="' + esc(data.download || '#') + '" download title="Скачать файл">↓</a>';
+    '<a class="files-dl" href="' + esc(data.download || '#') + '" download title="' + esc(cfg.ui.filesDownload) + '">↓</a>';
   const head =
     '<div class="files-preview-head"><b>' + esc(file.path || '') + '</b>' + actions + '</div>';
   let body;
   if (data.kind === 'markdown') {
     body =
-      (data.truncated ? '<p class="files-truncated">Файл большой — показаны первые 256 КБ.</p>' : '') +
+      (data.truncated ? '<p class="files-truncated">' + esc(cfg.ui.filesTruncated) + '</p>' : '') +
       '<div class="md files-md">' + markdown(data.text || '') + '</div>';
   } else if (data.kind === 'text') {
     // Подсветка знает только те языки, которые панель показывает сама; для
     // остальных `highlightCode` вернёт null, и текст останется текстом.
     const highlighted = typeof highlightCode === 'function' ? highlightCode(data.text || '', file.type) : null;
     body =
-      (data.truncated ? '<p class="files-truncated">Файл большой — показаны первые 256 КБ.</p>' : '') +
+      (data.truncated ? '<p class="files-truncated">' + esc(cfg.ui.filesTruncated) + '</p>' : '') +
       (highlighted === null
         ? '<pre class="files-code">' + esc(data.text || '') + '</pre>'
         : '<pre class="files-code hl">' + highlighted + '</pre>');
@@ -2463,8 +2455,8 @@ function renderFilePreview(data) {
       '<img src="' + esc(data.url || '') + '" alt="' + esc(file.name || '') + '"></a></div>';
   } else {
     body =
-      '<div class="files-binary"><p>Двоичный файл — текстом его не показать.</p>' +
-      '<a class="files-dl" href="' + esc(data.download || '#') + '" download>Скачать файл</a></div>';
+      '<div class="files-binary"><p>' + esc(cfg.ui.filesBinary) + '</p>' +
+      '<a class="files-dl" href="' + esc(data.download || '#') + '" download>' + esc(cfg.ui.filesDownload) + '</a></div>';
   }
   showFilesPreview(head + body);
   filesPreviewCopy = copyable
@@ -2489,7 +2481,7 @@ async function openFilesPreview(relative) {
   }
   filesSelected = relative;
   renderFiles();
-  showFilesPreview('<p class="files-note">Читаю файл…</p>');
+  showFilesPreview('<p class="files-note">' + esc(cfg.ui.filesReadingFile) + '</p>');
   const token = ++filesPreviewToken;
   const slug = filesWorkspace;
   try {
@@ -3077,7 +3069,7 @@ function setQueue(chatId, items) {
 
 function renderQueue() {
   const items = (currentId && queues.get(currentId)) || [];
-  el('queue-count').textContent = 'В очереди: ' + items.length;
+  el('queue-count').textContent = fill(cfg.ui.queueCount, { n: items.length });
   el('chat-queue').hidden = items.length === 0;
   const list = el('queue-list');
   list.replaceChildren(
@@ -3094,8 +3086,8 @@ function renderQueue() {
       const remove = document.createElement('button');
       remove.className = 'remove';
       remove.dataset.id = item.id;
-      remove.title = 'Убрать из очереди';
-      remove.setAttribute('aria-label', 'Убрать из очереди');
+      remove.title = cfg.ui.queueRemove;
+      remove.setAttribute('aria-label', cfg.ui.queueRemove);
       remove.textContent = '×';
       row.append(num, text, remove);
       return row;
@@ -3130,7 +3122,7 @@ function syncNowButton() {
  */
 async function sendNow() {
   if (!String(el('chat-input').value || '').trim()) {
-    setNote('напиши текст — кнопка прервёт текущий ход и отправит его');
+    setNote(cfg.ui.nowTitle);
     return;
   }
   await sendText(undefined, { now: true });

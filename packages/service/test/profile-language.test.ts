@@ -35,12 +35,12 @@ test('без профиля язык берётся из конфига, а бе
 
 test('профиль человека старше умолчания конфига', () => {
   const config = makeConfig({ userLanguage: 'ru' });
-  writeProfile(config, probe(), { language: 'en' });
+  writeProfile(config, probe(), { language: 'en', uiLanguage: 'ru' });
   assert.equal(languageOf(config, probe()), 'en');
 
   // И обратно: конфиг английский, человек выбрал русский.
   const english = makeConfig({ userLanguage: 'en' });
-  writeProfile(english, probe(), { language: 'ru' });
+  writeProfile(english, probe(), { language: 'ru', uiLanguage: 'ru' });
   assert.equal(languageOf(english, probe()), 'ru');
 });
 
@@ -49,9 +49,9 @@ test('профиль лежит рядом с памятью человека, �
   const file = profilePath(config, probe());
   assert.match(file, /users\/probe\/workspaces\/\.icarus\/profile\.json$/);
 
-  writeProfile(config, probe(), { language: 'en' });
+  writeProfile(config, probe(), { language: 'en', uiLanguage: 'ru' });
   assert.equal(fs.existsSync(file), true);
-  assert.deepEqual(readProfile(config, probe()), { language: 'en' });
+  assert.deepEqual(readProfile(config, probe()), { language: 'en', uiLanguage: 'ru' });
 
   // Права закрытые: в профиле может появиться что-то личное, и открытым на чтение
   // он быть не должен по той же причине, что auth.json и mcp.json.

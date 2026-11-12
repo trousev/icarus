@@ -12,7 +12,17 @@
 //
 // Состояние живёт в адресе (?scope=…&file=…&tab=…), поэтому ссылку на конкретную
 // запись или историю файла можно переслать, а «назад» в браузере работает как надо.
+import { panelStrings, type PanelStrings } from './strings.ts';
+import { DEFAULT_UI_LANGUAGE, isUiLanguage, type UiLanguage } from '../profile.ts';
+
 export type PanelSection = { id: string; label: string };
+
+/** Язык интерфейса из сессии. Неизвестное или отсутствующее значение — русский. */
+export function sessionUiLanguage(session: PanelSession): UiLanguage {
+  return isUiLanguage(session.uiLanguage) ? session.uiLanguage : DEFAULT_UI_LANGUAGE;
+}
+
+export const sessionStrings = (session: PanelSession): PanelStrings => panelStrings(sessionUiLanguage(session));
 
 /** Отказ доступа: что случилось и что с этим делать. */
 export type PanelDenial = { status: 401 | 403; message: string; hint: string };
@@ -32,6 +42,8 @@ export type PanelSession = {
   admin?: boolean;
   /** Язык ответов этого человека: «ru» или «en». Раздел «Пользователь» им и занят. */
   language?: string;
+  /** Язык интерфейса панели: отдельная настройка, «ru» или «en». */
+  uiLanguage?: string;
 };
 
 export type PanelView = PanelSession | PanelDenial;
@@ -48,24 +60,16 @@ export type PanelPage = {
   tab?: 'notes' | 'history';
 };
 
-const SCOPE_LABELS: Record<string, string> = {
-  personal: 'Личная',
-  shared: 'Семейная',
+/**
+ * Подпись области. Сервер присылает её уже на языке человека; здесь остаётся
+ * запасной вариант для старых вызовов и тестов без `scopeLabels`.
+ */
+const scopeLabel = (session: PanelSession, scope: string): string => {
+  const ui = sessionStrings(session);
+  return session.scopeLabels?.[scope] ?? (scope === 'personal' ? ui.scopePersonal : scope === 'shared' ? ui.scopeShared : scope);
 };
 
-const scopeLabel = (session: PanelSession, scope: string): string =>
-  session.scopeLabels?.[scope] ?? SCOPE_LABELS[scope] ?? scope;
-
 const PANEL_TITLE = 'Icarus Control Panel';
-
-/** Подписи раздела памяти: они одинаковы для личной и семейной области. */
-const MEMORY_ABOUT =
-  'Профиль, предпочтения и распорядок дня — то, что агент учитывает в первую очередь.';
-const PROFILE_ABOUT =
-  'Как Икар говорит с тобой. Язык меняет только язык ответов: характер, шутки и память остаются прежними.';
-const SKILLS_ABOUT =
-  'Скиллы Икара: он видит их имена и описания и читает инструкцию, когда задача совпала. ' +
-  'Сохранённый скилл уезжает в следующий же ответ — идущий разговор не рвётся.';
 
 function isDenial(view: PanelView): view is PanelDenial {
   return 'status' in view;
@@ -75,10 +79,13 @@ export function panelHtml(view: PanelView, page: PanelPage = { section: 'memory'
   return isDenial(view) ? denialPage(view) : sessionPage(view, page);
 }
 
-/** Оболочка страницы: шапка документа и стили одни на всех. */
-export function shell(body: string): string {
+/**
+ * Оболочка страницы: шапка документа и стили одни на всех. `lang` — язык
+ * интерфейса: от него зависит переносы, озвучка и то, как браузер ищет по странице.
+ */
+export function shell(body: string, lang: string = DEFAULT_UI_LANGUAGE): string {
   return `<!doctype html>
-<html lang="ru">
+<html lang="${escapeHtml(lang)}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -165,6 +172,8 @@ export function shell(body: string): string {
                padding:11px 16px; border-bottom:1px solid var(--line); color:var(--dim);
                font-size:10px; letter-spacing:.14em; }
   .lead-box { padding:17px 18px 18px; }
+  /* Две настройки языка — два блока: черта между ними не даёт прочитать их как одну. */
+  .lead-box + .lead-box { border-top:1px solid var(--line); }
   .lead-box h3 { font-size:17px; margin:0 0 7px; }
 
   /* Правая колонка: открытый файл целиком — с шапкой, вкладками и записями. */
@@ -340,6 +349,7 @@ export function settingsAside(
   active: string,
   options: { scope?: string; foot?: Array<[string, string]> } = {},
 ): string {
+  const ui = sessionStrings(session);
   const nav = session.sections
     .map((item) => {
       // Память помнит открытую область: возвращаясь из другого раздела, человек
@@ -352,18 +362,18 @@ export function settingsAside(
     })
     .join('');
   const foot = options.foot ?? [
-    ['модель', session.model ?? '—'],
-    ['хранилище', session.storage ?? 'git · local'],
+    [ui.modelLabel, session.model ?? '—'],
+    [ui.storageLabel, session.storage ?? 'git · local'],
   ];
   return `<aside>
   <div class="brand">
     <div class="logo">I</div>
-    <div><b>Icarus</b><span>агент · чат и настройки</span></div>
+    <div><b>Icarus</b><span>${escapeHtml(ui.brandTagline)}</span></div>
   </div>
   <div class="nav-box">
-    <a class="nav-back" href="/panel/chat">← Назад в чат</a>
+    <a class="nav-back" href="/panel/chat">${escapeHtml(ui.backToChat)}</a>
     <hr class="nav-sep">
-    <p class="nav-title">НАСТРОЙКИ</p>
+    <p class="nav-title">${escapeHtml(ui.settingsNavTitle)}</p>
     <nav class="nav">${nav}</nav>
   </div>
   <div class="foot">
@@ -375,6 +385,7 @@ export function settingsAside(
 }
 
 function sessionPage(session: PanelSession, page: PanelPage): string {
+  const ui = sessionStrings(session);
   const scopes = Object.keys(session.scopes);
   const scope = page.scope && session.scopes[page.scope] ? page.scope : scopes[0];
   const skills = page.section === 'skills';
@@ -384,9 +395,13 @@ function sessionPage(session: PanelSession, page: PanelPage): string {
   // Режим — свойство раздела. Он решает, какие маршруты зовёт страница и каким
   // рендером рисуется правая колонка: память правится построчно, скиллы — файлом.
   const mode = skills ? 'skills' : profile ? 'profile' : 'memory';
-  const sectionLabel = session.sections.find((item) => item.id === page.section)?.label ?? 'Память';
-  const title = skills ? 'Скиллы' : profile ? 'Пользователь' : scopeLabel(session, scope);
-  const about = skills ? SKILLS_ABOUT : profile ? PROFILE_ABOUT : MEMORY_ABOUT;
+  const sectionLabel = session.sections.find((item) => item.id === page.section)?.label ?? ui.sectionMemory;
+  const title = skills ? ui.sectionSkills : profile ? ui.sectionProfile : scopeLabel(session, scope);
+  const about = skills ? ui.aboutSkills : profile ? ui.aboutProfile : ui.aboutMemory;
+  // Память остаётся на языке контекста. Английский интерфейс не должен создавать
+  // впечатление, что её сейчас переведут: подписываем решение прямо в разделе.
+  const memoryNote =
+    !skills && !profile && ui.lang !== 'ru' ? `<p class="hint">${escapeHtml(ui.memoryLanguageNote)}</p>` : '';
   // Крошки не повторяют заголовок, когда раздел назван так же: «Скиллы / Скиллы»
   // не сообщает ничего.
   const breadcrumbs = [`Icarus`, sectionLabel, ...(skills || profile ? [] : [title])];
@@ -420,6 +435,9 @@ function sessionPage(session: PanelSession, page: PanelPage): string {
     // моделью — там кнопки нет вовсе, а не «есть, но всегда отказывает».
     draftSkills: Boolean(session.draftSkills),
     labels: Object.fromEntries(scopes.map((name) => [name, scopeLabel(session, name)])),
+    // Строки клиентского скрипта: тот же словарь, что у серверной разметки, чтобы
+    // «Читаю…» в шаблоне и «Ничего не нашлось» после поиска не разъезжались.
+    ui,
   };
 
   return shell(`<div class="app">
@@ -432,23 +450,24 @@ ${settingsAside(session, page.section, { scope })}
       )
       .join(' / ')}</div>
     <div class="search">
-      ${profile ? '' : `<input id="q" placeholder="${skills ? 'Поиск по скиллам' : 'Поиск по памяти'}" size="30">`}
+      ${profile ? '' : `<input id="q" placeholder="${escapeHtml(skills ? ui.searchSkills : ui.searchMemory)}" size="30">`}
     </div>
-    <div class="status"><i></i>Агент активен</div>
+    <div class="status"><i></i>${escapeHtml(ui.agentActive)}</div>
   </div>
   <div class="content">
-    <p class="section-title">${skills ? 'СКИЛЛЫ АГЕНТА' : profile ? 'НАСТРОЙКИ' : 'ПАМЯТЬ АГЕНТА'}</p>
+    <p class="section-title">${escapeHtml(skills ? ui.kickerSkills : profile ? ui.kickerSettings : ui.kickerMemory)}</p>
     <div class="head">
       <div class="lead">
         <h1>${escapeHtml(title)}</h1>
-        <p class="about">${about}</p>
+        <p class="about">${escapeHtml(about)}</p>
+        ${memoryNote}
       </div>
-      ${skills ? '<button class="btn primary" id="new-skill">Новый скилл</button>' : areas}
+      ${skills ? `<button class="btn primary" id="new-skill">${escapeHtml(ui.newSkill)}</button>` : areas}
     </div>
     <div class="cols${profile ? ' single' : ''}">
       ${profile ? '' : `<div class="card">
-        <div class="card-head"><span>${skills ? 'СКИЛЛЫ' : 'ФАЙЛЫ'}</span><span id="files-count"></span></div>
-        <div id="files"><p class="empty">Читаю…</p></div>
+        <div class="card-head"><span>${escapeHtml(skills ? ui.headingSkills : ui.headingFiles)}</span><span id="files-count"></span></div>
+        <div id="files"><p class="empty">${escapeHtml(ui.loading)}</p></div>
       </div>`}
       <div class="card" id="content-card">
         <div class="file-head" id="file-head"${profile || page.file || page.fresh ? ' hidden' : ''}>
@@ -458,10 +477,10 @@ ${settingsAside(session, page.section, { scope })}
           </div>
           <div class="head-actions">
             <div class="tabs" id="tabs" hidden>
-              <a class="tab${config.tab === 'notes' ? ' active' : ''}" href="#" data-tab="notes">${skills ? 'Скилл' : 'Записи'}</a>
-              <a class="tab${config.tab === 'history' ? ' active' : ''}" href="#" data-tab="history">История</a>
+              <a class="tab${config.tab === 'notes' ? ' active' : ''}" href="#" data-tab="notes">${escapeHtml(skills ? ui.tabSkill : ui.tabNotes)}</a>
+              <a class="tab${config.tab === 'history' ? ' active' : ''}" href="#" data-tab="history">${escapeHtml(ui.tabHistory)}</a>
             </div>
-            <button class="btn" id="download" hidden>Скачать</button>
+            <button class="btn" id="download" hidden>${escapeHtml(ui.download)}</button>
           </div>
         </div>
         <div class="file-body" id="content"></div>
@@ -486,26 +505,32 @@ const api = async (path, options = {}) => {
   if (!response.ok || !type.includes('application/json')) {
     const message = type.includes('application/json')
       ? (await response.json().catch(() => ({}))).error?.message || response.statusText
-      : 'сессия входа истекла — обнови страницу';
+      : cfg.ui.sessionExpired;
     throw new Error(message);
   }
   return response.json();
 };
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const el = (id) => document.getElementById(id);
-const humanSize = (bytes) => bytes < 1024 ? bytes + ' б' : (bytes / 1024).toFixed(1) + ' Кб';
+const humanSize = (bytes) => bytes < 1024 ? bytes + cfg.ui.bytesShort : (bytes / 1024).toFixed(1) + cfg.ui.kilobytesShort;
 const day = (iso) => { const [y, m, d] = String(iso).split('-'); return y && m && d ? d + '.' + m + '.' + y : String(iso); };
 const stamp = (iso) => String(iso).slice(0, 16).replace('T', ' ');
 const isImage = (path) => /\\.(gif|jpe?g|bmp)$/i.test(path);
-// Русское число: «1 скилл», «2 скилла», «5 скиллов». Считаем по правилу, а не по
-// остатку от деления: 11 и 12 — исключение, и без него панель писала бы «11 скилл».
-const plural = (n, one, few, many) => {
+// Число со словом: русскому нужны три формы («1 скилл», «2 скилла», «11 скиллов»),
+// английскому хватает двух. Формы приходят из словаря панели, правило — здесь.
+const plural = (n, words) => {
+  if (cfg.ui.lang !== 'ru') return n === 1 ? words.one : words.many;
   const tens = n % 100, ones = n % 10;
-  if (tens >= 11 && tens <= 14) return many;
-  if (ones === 1) return one;
-  if (ones >= 2 && ones <= 4) return few;
-  return many;
+  if (tens >= 11 && tens <= 14) return words.many;
+  if (ones === 1) return words.one;
+  if (ones >= 2 && ones <= 4) return words.few;
+  return words.many;
 };
+// Подстановка в шаблон словаря: «{n} {word}» и подобные. Без регулярок: строки
+// приходят из JSON, и экранировать тут нечего.
+const fill = (template, values) =>
+  Object.entries(values).reduce((text, [key, value]) => text.split('{' + key + '}').join(String(value)), template);
+const countLabel = (n, words) => fill(cfg.ui.countLabel, { n, word: plural(n, words) });
 // Адрес запроса: раздел задаёт корень, область уточняет память. У скиллов и
 // математики области нет, и scope в их запросах только сбивал бы с толку.
 const endpoint = (name, extra = {}) => {
@@ -533,7 +558,7 @@ function go(patch) {
 
 // Свой диалог вместо window.confirm: браузер глушит нативные модалки, если
 // вкладка не активна, и нативный confirm молча возвращает false — кнопки «не работают».
-function askConfirm(message, confirmLabel = 'подтвердить') {
+function askConfirm(message, confirmLabel = cfg.ui.confirm) {
   return new Promise((resolve) => {
     const backdrop = document.createElement('div');
     backdrop.className = 'backdrop';
@@ -544,7 +569,7 @@ function askConfirm(message, confirmLabel = 'подтвердить') {
     const row = document.createElement('div');
     row.className = 'row';
     const cancel = document.createElement('button');
-    cancel.textContent = 'отмена';
+    cancel.textContent = cfg.ui.cancel;
     const confirmButton = document.createElement('button');
     confirmButton.className = 'danger';
     confirmButton.textContent = confirmLabel;
@@ -578,7 +603,7 @@ const guard = (action) => async (event) => {
   try { await action(event); } catch (error) { fail(error); }
 };
 function fail(error) {
-  el('content').innerHTML = '<p class="empty">ошибка: ' + esc(error && error.message ? error.message : error) + '</p>';
+  el('content').innerHTML = '<p class="empty">' + esc(cfg.ui.errorPrefix) + esc(error && error.message ? error.message : error) + '</p>';
 }
 
 // Счётчики у областей и разделов: сколько в каждой файлов. Обновляются после правок.
@@ -594,10 +619,10 @@ async function loadCounts() {
 
 async function loadFiles() {
   const data = await api(endpoint('files'));
-  el('files-count').textContent = data.files.length + ' ' + plural(data.files.length, 'файл', 'файла', 'файлов');
+  el('files-count').textContent = countLabel(data.files.length, cfg.ui.filesWord);
   const box = el('files');
   if (!data.files.length) {
-    box.innerHTML = '<p class="empty">Память пока пуста.</p>';
+    box.innerHTML = '<p class="empty">' + esc(cfg.ui.emptyMemory) + '</p>';
     return;
   }
   // Файлы группируем по полкам: в памяти это осмысленные разделы (люди, дела,
@@ -631,10 +656,10 @@ async function loadFiles() {
 function skillTags(skill) {
   const tags = [];
   if (skill.ownerIsMe) tags.push('<span class="tag' + (skill.shared ? ' shared' : '') + '">' +
-    (skill.shared ? 'поделился' : 'только мой') + '</span>');
-  else tags.push('<span class="tag shared">от ' + esc(skill.owner) + '</span>');
+    (skill.shared ? cfg.ui.skillTagShared : cfg.ui.skillTagMine) + '</span>');
+  else tags.push('<span class="tag shared">' + esc(fill(cfg.ui.skillTagFrom, { owner: skill.owner })) + '</span>');
   tags.push('<span class="tag ' + (skill.enabled ? 'on' : 'off') + '">' +
-    (skill.enabled ? 'включён' : 'выключен') + '</span>');
+    (skill.enabled ? cfg.ui.skillEnabled : cfg.ui.skillDisabled) + '</span>');
   if (skill.problem) tags.push('<span class="flag" title="' + esc(skill.problem) + '">⚠</span>');
   return tags.join('');
 }
@@ -642,10 +667,10 @@ function skillTags(skill) {
 async function loadSkills() {
   const data = await api(endpoint('files'));
   const skills = data.skills || [];
-  el('files-count').textContent = skills.length + ' ' + plural(skills.length, 'скилл', 'скилла', 'скиллов');
+  el('files-count').textContent = countLabel(skills.length, cfg.ui.skillsWord);
   const box = el('files');
   if (!skills.length) {
-    box.innerHTML = '<p class="empty">Скиллов пока нет: нажми «Новый скилл» и напиши первый.</p>';
+    box.innerHTML = '<p class="empty">' + esc(cfg.ui.emptyNoSkills) + '</p>';
     return;
   }
   box.innerHTML = '<div class="files">' + skills.map((skill) => {
@@ -658,10 +683,10 @@ async function loadSkills() {
       '<a class="grow" href="#" data-open><b>' + esc(skill.name) + '</b>' +
       (skill.description ? '<small>' + esc(skill.description) + '</small>' : '') + '</a>' +
       '<span class="tags">' + skillTags(skill) +
-      (skill.problem ? '' : '<span class="tag">' + skill.files + ' ' + plural(skill.files, 'файл', 'файла', 'файлов') + '</span>') +
+      (skill.problem ? '' : '<span class="tag">' + countLabel(skill.files, cfg.ui.filesWord) + '</span>') +
       '</span>' +
       (switchable
-        ? '<label class="switch" title="' + (skill.enabled ? 'выключить' : 'включить') + '">' +
+        ? '<label class="switch" title="' + (skill.enabled ? cfg.ui.skillToggleOff : cfg.ui.skillToggleOn) + '">' +
           '<input type="checkbox" data-toggle' + (skill.enabled ? ' checked' : '') + '><span></span></label>'
         : '') +
       '</div>';
@@ -704,30 +729,30 @@ function skillForm() {
   // Блок «напиши за меня» — только у нового скилла и только когда есть кому писать.
   // У открытого скилла он бы значил «перепиши моё», а это уже другая кнопка.
   const generator = cfg.draftSkills && !cfg.file
-    ? '<div class="generator"><div class="field"><label for="skill-idea">НАПИСАТЬ ЗА МЕНЯ</label>' +
-      '<textarea id="skill-idea" rows="2" placeholder="Расскажи идею словами: «разбирать голосовые в текст и складывать в журнал»"></textarea></div>' +
-      '<div class="row"><span class="grow">Модель придумает имя, описание и инструкцию — останется проверить и сохранить.</span>' +
-      '<button class="btn" id="skill-write">Напиши за меня</button></div></div>'
+    ? '<div class="generator"><div class="field"><label for="skill-idea">' + esc(cfg.ui.skillIdeaLabel) + '</label>' +
+      '<textarea id="skill-idea" rows="2" placeholder="' + esc(cfg.ui.skillIdeaPlaceholder) + '"></textarea></div>' +
+      '<div class="row"><span class="grow">' + esc(cfg.ui.skillGeneratorHint) + '</span>' +
+      '<button class="btn" id="skill-write">' + esc(cfg.ui.skillWrite) + '</button></div></div>'
     : '';
 
   return generator +
     '<div class="bar" id="skill-bar"><span class="grow" id="skill-status">' +
-    (cfg.draftSkills && !cfg.file ? 'Опиши идею — или заполни поля сам.' : 'Скилл уедет Икару после сохранения.') +
+    (cfg.draftSkills && !cfg.file ? esc(cfg.ui.skillNewStatus) : esc(cfg.ui.skillExistingStatus)) +
     '</span>' +
-    '<button class="primary" id="skill-save">Сохранить</button>' +
-    '<button class="danger" id="skill-delete"' + (cfg.file ? '' : ' hidden') + '>Удалить</button></div>' +
-    '<div class="field"><label for="skill-name">ИМЯ — КАТАЛОГ СКИЛЛА</label>' +
+    '<button class="primary" id="skill-save">' + esc(cfg.ui.save) + '</button>' +
+    '<button class="danger" id="skill-delete"' + (cfg.file ? '' : ' hidden') + '>' + esc(cfg.ui.deleteLabel) + '</button></div>' +
+    '<div class="field"><label for="skill-name">' + esc(cfg.ui.skillNameLabel) + '</label>' +
     '<input id="skill-name" type="text" spellcheck="false" autocomplete="off" placeholder="pirate-mode"></div>' +
-    '<p class="hint">Строчные латинские буквы, цифры и дефис: имя становится именем каталога, а в разговоре — командой <code>/skill:имя</code>.</p>' +
-    '<div class="field"><label for="skill-description">КОГДА ПРИМЕНЯТЬ</label>' +
-    '<textarea id="skill-description" rows="2" placeholder="Что делает скилл и в какой момент его звать."></textarea></div>' +
-    '<p class="hint">По этой строке Икар и решает, что пора открыть инструкцию: без описания pi скилл пропустит.</p>' +
-    '<div class="field"><label for="skill-body">ИНСТРУКЦИЯ (SKILL.MD)</label>' +
+    '<p class="hint">' + cfg.ui.skillNameHint + '</p>' +
+    '<div class="field"><label for="skill-description">' + esc(cfg.ui.skillDescriptionLabel) + '</label>' +
+    '<textarea id="skill-description" rows="2" placeholder="' + esc(cfg.ui.skillDescriptionPlaceholder) + '"></textarea></div>' +
+    '<p class="hint">' + esc(cfg.ui.skillDescriptionHint) + '</p>' +
+    '<div class="field"><label for="skill-body">' + esc(cfg.ui.skillBodyLabel) + '</label>' +
     '<textarea id="skill-body" spellcheck="false" placeholder="# Как это делать&#10;&#10;1. …"></textarea></div>' +
-    '<label class="check"><input type="checkbox" id="skill-hidden"> скрыть от модели: звать только командой <code>/skill:имя</code></label>' +
+    '<label class="check"><input type="checkbox" id="skill-hidden"> ' + cfg.ui.skillHidden + '</label>' +
     // Шаринг — только у своего скилла. У чужого этой строки нет: владелец решает сам.
     '<label class="check" id="skill-share-row"><input type="checkbox" id="skill-share"> ' +
-    'поделиться с другими — приедет им выключенным</label>';
+    esc(cfg.ui.skillShareLabel) + '</label>';
 }
 
 function fillSkill(data) {
@@ -769,23 +794,23 @@ function skillStatus(text, bad) {
 async function writeForMe() {
   const idea = el('skill-idea').value.trim();
   if (idea.length < 3) {
-    skillStatus('Опиши идею хотя бы парой слов', true);
+    skillStatus(cfg.ui.skillIdeaTooShort, true);
     return;
   }
 
   const button = el('skill-write');
   button.disabled = true;
-  skillStatus('Пишу… на это уходит до полутора минут');
+  skillStatus(cfg.ui.skillWriting);
   try {
     const draft = await api(endpoint('draft'), { method: 'POST', body: JSON.stringify({ idea }) });
     el('skill-name').value = draft.name || '';
     el('skill-description').value = draft.description || '';
     el('skill-body').value = draft.body || '';
-    skillStatus(draft.note ? 'Написано · ' + draft.note : 'Написано · проверь и сохрани');
+    skillStatus(draft.note ? cfg.ui.skillWritten + draft.note : cfg.ui.skillWrittenCheck);
     // Имя не вышло — ведём человека туда, где от него что-то нужно.
     (draft.name ? el('skill-body') : el('skill-name')).focus();
   } catch (error) {
-    skillStatus('Не вышло: ' + (error && error.message ? error.message : error), true);
+    skillStatus(cfg.ui.skillWriteFailed + (error && error.message ? error.message : error), true);
   } finally {
     button.disabled = false;
   }
@@ -800,7 +825,7 @@ async function saveSkill(id) {
     hidden: el('skill-hidden').checked,
   };
   if (id) payload.id = id;
-  skillStatus('Сохраняю…');
+  skillStatus(cfg.ui.saving);
 
   let result;
   try {
@@ -808,7 +833,7 @@ async function saveSkill(id) {
   } catch (error) {
     // Отказ проверки показываем строкой состояния, а не вместо редактора: иначе
     // вместе с «нет описания» пропал бы и текст, который человек только что написал.
-    skillStatus('Не сохранилось: ' + (error && error.message ? error.message : error), true);
+    skillStatus(cfg.ui.saveFailedPrefix + (error && error.message ? error.message : error), true);
     return;
   }
 
@@ -819,12 +844,12 @@ async function saveSkill(id) {
   history.replaceState(null, '', '/panel/skills?file=' + encodeURIComponent(result.id));
   await Promise.all([loadCounts(), loadSkills()]);
   await renderSkill();
-  skillStatus(result.committed ? 'Сохранено · коммит ' + String(result.commit || '').slice(0, 7) : 'Сохранено, но коммит не вышел — загляни в историю');
+  skillStatus(result.committed ? cfg.ui.savedCommit + String(result.commit || '').slice(0, 7) : cfg.ui.savedNoCommit);
 }
 
 async function deleteSkill(data) {
   if (!data) return;
-  if (!(await askConfirm('Удалить скилл «' + data.name + '»?\\n\\nВместе с файлами бандла. Это коммит: вернуть можно откатом в истории.', 'удалить'))) return;
+  if (!(await askConfirm(fill(cfg.ui.deleteSkillPrompt, { name: data.name }), cfg.ui.confirmDelete))) return;
   await api(endpoint('delete'), { method: 'POST', body: JSON.stringify({ id: data.id }) });
   go({ file: null, fresh: false, tab: 'notes' });
 }
@@ -837,11 +862,11 @@ async function renderSkill() {
   if (!cfg.file) {
     if (!cfg.fresh) {
       showFileHead(null, null, false);
-      el('content').innerHTML = '<p class="empty">Выбери скилл слева или заведи новый: «Новый скилл».</p>';
+      el('content').innerHTML = '<p class="empty">' + esc(cfg.ui.emptyPickSkill) + '</p>';
       return;
     }
     // Пустой редактор: скачивать пока нечего, вкладок истории ещё нет.
-    showFileHead('Новый скилл', 'ещё не сохранён', false, false);
+    showFileHead(cfg.ui.newSkill, cfg.ui.notSaved, false, false);
     el('content').innerHTML = skillForm();
     fillSkill(null);
     // Новый скилл ещё никому не принадлежит, кроме автора: шаринг появится после
@@ -863,10 +888,10 @@ async function renderSkill() {
   const data = await api(skillUrl);
   // Дата изменения — день, а не метка времени: в шапке рядом с путём и числом
   // файлов часы только шумят.
-  const byWhom = data.ownerIsMe ? '' : ' · от ' + data.owner;
-  const state = data.enabled ? 'включён' : 'выключен';
-  const meta = data.id + byWhom + ' · ' + state + ' · ' + data.files + ' ' + plural(data.files, 'файл', 'файла', 'файлов') +
-    ' · изменён ' + day(String(data.modified).slice(0, 10)) + (data.problem ? ' · ⚠ ' + data.problem : '');
+  const byWhom = data.ownerIsMe ? '' : ' · ' + fill(cfg.ui.skillTagFrom, { owner: data.owner });
+  const state = data.enabled ? cfg.ui.skillEnabled : cfg.ui.skillDisabled;
+  const meta = data.id + byWhom + ' · ' + state + ' · ' + countLabel(data.files, cfg.ui.filesWord) +
+    ' · ' + cfg.ui.changedOn + ' ' + day(String(data.modified).slice(0, 10)) + (data.problem ? ' · ⚠ ' + data.problem : '');
   // Чужой скилл — только для чтения: редактор показывает содержимое, но поля
   // выключены. Включить/выключить его себе можно: это личный переключатель, а не
   // правка чужого файла. Историю чужого репозитория не показываем: она про файлы,
@@ -883,8 +908,7 @@ async function renderSkill() {
   }
   const banner = editable
     ? ''
-    : '<p class="hint">Скилл принадлежит <b>' + esc(data.owner) + '</b>: его можно включить или выключить, ' +
-      'но не править. Правки делает владелец, и они доезжают сюда сами.</p>';
+    : '<p class="hint">' + esc(fill(cfg.ui.skillOwnerBanner, { owner: data.owner })) + '</p>';
   el('content').innerHTML = banner + skillForm();
   fillSkill(data);
   // Корневой SKILL.md — не отдельный скилл, а весь каталог: делиться им нельзя.
@@ -893,7 +917,7 @@ async function renderSkill() {
     ['skill-name', 'skill-description', 'skill-body', 'skill-hidden'].forEach((id) => { el(id).disabled = true; });
     el('skill-save').hidden = true;
     el('skill-delete').hidden = true;
-    skillStatus('Только чтение: скилл принадлежит ' + data.owner);
+    skillStatus(fill(cfg.ui.skillReadOnly, { owner: data.owner }));
     return;
   }
   el('skill-save').onclick = guard(() => saveSkill(data.id));
@@ -913,7 +937,7 @@ async function openFile(path) {
 el('download').onclick = guard(async () => {
   if (!cfg.file) return;
   const response = await fetch(endpoint('file', { path: cfg.file, download: '1' }));
-  if (!response.ok) throw new Error('файл не отдался: ' + response.status);
+  if (!response.ok) throw new Error(cfg.ui.downloadFailedPrefix + response.status);
   const link = document.createElement('a');
   link.href = URL.createObjectURL(await response.blob());
   link.download = cfg.file.split('/').pop();
@@ -947,10 +971,10 @@ function renderEntries(data) {
 
   el('content').innerHTML =
     '<div class="bar' + (selection.size ? ' on' : '') + '" id="bar"><span class="grow">' + barText(data) + '</span>' +
-    '<button id="clear"' + (selection.size ? '' : ' hidden') + '>Снять выделение</button>' +
-    '<button class="danger" id="remove"' + (selection.size ? '' : ' hidden') + '>Удалить (' + selection.size + ')</button></div>' +
+    '<button id="clear"' + (selection.size ? '' : ' hidden') + '>' + esc(cfg.ui.clearSelection) + '</button>' +
+    '<button class="danger" id="remove"' + (selection.size ? '' : ' hidden') + '>' + esc(fill(cfg.ui.deleteCount, { n: selection.size })) + '</button></div>' +
     '<div class="rows">' + rows + '</div>' +
-    (data.capped ? '<p class="note">Показаны не все записи: файл длиннее, чем помещается в панель.</p>' : '');
+    (data.capped ? '<p class="note">' + esc(cfg.ui.cappedNote) + '</p>' : '');
 
   el('content').querySelectorAll('.row.note').forEach((row) => {
     const box = row.querySelector('input');
@@ -970,8 +994,8 @@ function renderEntries(data) {
 
 function barText(data) {
   return selection.size
-    ? 'Выбрано ' + selection.size + ' из ' + data.total
-    : 'Выберите строки, чтобы удалить · всего ' + data.total + ' ' + (data.total === 1 ? 'запись' : 'записей');
+    ? fill(cfg.ui.selectedOf, { n: selection.size, total: data.total })
+    : fill(cfg.ui.selectRows, { n: data.total, word: plural(data.total, cfg.ui.entriesWord) });
 }
 
 function updateBar(data) {
@@ -980,14 +1004,14 @@ function updateBar(data) {
   bar.querySelector('.grow').textContent = barText(data);
   el('clear').hidden = !selection.size;
   el('remove').hidden = !selection.size;
-  el('remove').textContent = 'Удалить (' + selection.size + ')';
+  el('remove').textContent = fill(cfg.ui.deleteCount, { n: selection.size });
 }
 
 async function removeSelected(data) {
   const lines = [...selection].sort((a, b) => a - b);
   if (!lines.length) return;
-  const word = lines.length === 1 ? 'запись' : 'записей: ' + lines.length;
-  if (!(await askConfirm('Убрать из памяти ' + word + '?\\n\\nЭто коммит: вернуть можно откатом в истории.', 'убрать'))) return;
+  const what = lines.length === 1 ? cfg.ui.entryOne : cfg.ui.entryManyPrefix + lines.length;
+  if (!(await askConfirm(fill(cfg.ui.removeMemoryPrompt, { what }), cfg.ui.confirmRemove))) return;
   await api(endpoint('forget-many'), {
     method: 'POST',
     body: JSON.stringify({ path: data.path, lines }),
@@ -1008,7 +1032,7 @@ async function renderHistory() {
         '<small>' + esc(commit.short) + ' · ' + esc(commit.author) + ' · ' + stamp(commit.date) +
         '</small></div><span><span class="plus">+' + commit.added + '</span> <span class="minus">−' + commit.removed + '</span></span></div>',
       ).join('') + '</div>'
-    : '<p class="empty">' + (cfg.mode === 'skills' ? 'Скиллы ещё не меняли: истории нет.' : 'Истории у этого файла пока нет.') + '</p>';
+    : '<p class="empty">' + esc(cfg.mode === 'skills' ? cfg.ui.emptyHistorySkills : cfg.ui.emptyHistoryFile) + '</p>';
   el('content').querySelectorAll('.commit').forEach((node) => node.onclick = guard(() => showCommit(node.dataset.hash, node)));
 }
 
@@ -1017,9 +1041,9 @@ async function showCommit(hash, node) {
   el('content').querySelectorAll('.commit').forEach((other) => other.classList.toggle('active', other === node));
   const data = await api(endpoint('show', { commit: hash }));
   node.insertAdjacentHTML('afterend',
-    '<div class="diff"><pre class="diff">' + esc(data.patch || 'пустой дифф') + '</pre>' +
-    '<div class="diff-actions"><button class="primary" id="revert">Откатить</button>' +
-    '<button data-close>Закрыть</button></div></div>');
+    '<div class="diff"><pre class="diff">' + esc(data.patch || cfg.ui.emptyDiff) + '</pre>' +
+    '<div class="diff-actions"><button class="primary" id="revert">' + esc(cfg.ui.revert) + '</button>' +
+    '<button data-close>' + esc(cfg.ui.close) + '</button></div></div>');
 
   const diff = node.nextElementSibling;
   diff.querySelector('[data-close]').onclick = (event) => {
@@ -1028,7 +1052,7 @@ async function showCommit(hash, node) {
     node.classList.remove('active');
   };
   diff.querySelector('#revert').onclick = guard(async () => {
-    if (!(await askConfirm('Откатить коммит ' + hash.slice(0, 8) + '? Изменения вернутся обратным коммитом.', 'откатить'))) return;
+    if (!(await askConfirm(fill(cfg.ui.revertCommitPrompt, { hash: hash.slice(0, 8) }), cfg.ui.confirmRevert))) return;
     await api(endpoint('revert'), { method: 'POST', body: JSON.stringify({ commit: hash }) });
     selection = new Set();
     location.reload();
@@ -1068,16 +1092,16 @@ async function renderContent() {
   const path = cfg.file;
   if (!path) {
     showFileHead(null, null, false);
-    el('content').innerHTML = '<p class="empty">Выбери файл слева или найди что-нибудь поиском.</p>';
+    el('content').innerHTML = '<p class="empty">' + esc(cfg.ui.emptyPickFile) + '</p>';
     return;
   }
 
   // Картинку тянем байтами и показываем как <img>: base64 в JSON раздул бы ответ
   // втрое, а картинки бывают на сотни килобайт.
   if (isImage(path)) {
-    showFileHead(path, 'картинка', false);
+    showFileHead(path, cfg.ui.imageMeta, false);
     const response = await fetch(endpoint('file', { path, raw: '1' }));
-    if (!response.ok) { el('content').innerHTML = '<p class="empty">Картинка не открылась.</p>'; return; }
+    if (!response.ok) { el('content').innerHTML = '<p class="empty">' + esc(cfg.ui.emptyImage) + '</p>'; return; }
     const url = URL.createObjectURL(await response.blob());
     el('content').innerHTML = '<img class="plot" alt="' + esc(path) + '">';
     el('content').querySelector('img').src = url;
@@ -1085,51 +1109,71 @@ async function renderContent() {
   }
 
   const data = await api(endpoint('entries', { path }));
-  const tells = data.total + ' ' + (data.total === 1 ? 'запись' : 'записей');
-  showFileHead(path, tells, true);
+  showFileHead(path, countLabel(data.total, cfg.ui.entriesWord), true);
   if (cfg.tab === 'history') await renderHistory();
   else renderEntries(data);
 }
 
 // ── настройки: пользователь ──────────────────────────────────────────────────
-// Одна настройка — язык ответов. Сохраняем сразу по клику: отдельная кнопка
-// «Сохранить» у переключателя из двух вариантов только заставляет гадать, применилось
-// ли. Статус пишем туда же, где человек смотрит, — рядом с выбором.
+// Две независимые настройки языка: ответы и интерфейс. Сохраняем сразу по клику —
+// отдельная кнопка «Сохранить» у переключателя из двух вариантов только заставляет
+// гадать, применилось ли. Статус пишем туда же, где человек смотрит.
 async function renderProfile() {
   const data = await api('/panel/profile/api');
-  const current = data.language;
-  const options = data.languages.map((code) =>
-    '<label class="' + (code === current ? 'on' : '') + '" data-code="' + esc(code) + '">' +
-      '<input type="radio" name="language" value="' + esc(code) + '"' + (code === current ? ' checked' : '') + '>' +
-      '<b>' + esc((data.labels || {})[code] || code) + '</b>' +
-      '<small>' + esc(code) + '</small>' +
-    '</label>',
-  ).join('');
+  // Поля uiLanguage может не быть (старый сервер, заглушка в тесте): панель должна
+  // открыться, а не остаться пустой из-за отсутствующего ключа.
+  const languages = data.languages || ['ru', 'en'];
+  const labels = data.labels || {};
+  const uiLanguages = data.uiLanguages || languages;
+  const uiLabels = data.uiLabels || labels;
+
+  const choice = (name, codes, codeLabels, current) =>
+    '<div class="choice" data-choice="' + name + '">' + codes.map((code) =>
+      '<label class="' + (code === current ? 'on' : '') + '" data-code="' + esc(code) + '">' +
+        '<input type="radio" name="' + name + '" value="' + esc(code) + '"' + (code === current ? ' checked' : '') + '>' +
+        '<b>' + esc(codeLabels[code] || code) + '</b>' +
+        '<small>' + esc(code) + '</small>' +
+      '</label>',
+    ).join('') + '</div>';
 
   el('content').innerHTML =
     '<div class="lead-box">' +
-      '<p class="field-label">ЯЗЫК ОТВЕТОВ</p>' +
-      '<div class="choice">' + options + '</div>' +
-      '<p class="hint" id="profile-status">На этом языке Икар будет говорить с тобой — ' +
-        'характер и память не меняются.</p>' +
+      '<p class="field-label">' + esc(cfg.ui.answerLanguageLabel) + '</p>' +
+      choice('language', languages, labels, data.language) +
+      '<p class="hint" id="profile-status">' + esc(cfg.ui.answerLanguageHint) + '</p>' +
+    '</div>' +
+    '<div class="lead-box">' +
+      '<p class="field-label">' + esc(cfg.ui.interfaceLanguageLabel) + '</p>' +
+      choice('uiLanguage', uiLanguages, uiLabels, data.uiLanguage || cfg.ui.lang) +
+      '<p class="hint" id="ui-status">' + esc(cfg.ui.interfaceLanguageHint) + '</p>' +
     '</div>';
 
-  el('content').querySelectorAll('.choice input').forEach((input) => {
-    input.onchange = guard(async () => {
-      const status = el('profile-status');
-      status.textContent = 'Сохраняю…';
-      try {
-        await api('/panel/profile/api', { method: 'POST', body: JSON.stringify({ language: input.value }) });
-        el('content').querySelectorAll('.choice label').forEach((label) =>
-          label.classList.toggle('on', label.dataset.code === input.value));
-        cfg.language = input.value;
-        // Следующая реплика поднимает pi заново: AGENTS.md читается при старте.
-        status.textContent = 'Сохранено. Следующий ответ будет на новом языке.';
-      } catch (error) {
-        status.textContent = 'Не сохранилось: ' + error.message;
-      }
+  const bind = (name, statusId, saved) => {
+    el('content').querySelectorAll('[data-choice="' + name + '"] input').forEach((input) => {
+      input.onchange = guard(async () => {
+        const status = el(statusId);
+        status.textContent = cfg.ui.saving;
+        try {
+          await api('/panel/profile/api', { method: 'POST', body: JSON.stringify({ [name]: input.value }) });
+          el('content').querySelectorAll('[data-choice="' + name + '"] label').forEach((label) =>
+            label.classList.toggle('on', label.dataset.code === input.value));
+          saved(input.value);
+        } catch (error) {
+          status.textContent = cfg.ui.saveFailedPrefix + error.message;
+        }
+      });
     });
+  };
+
+  bind('language', 'profile-status', (value) => {
+    cfg.language = value;
+    // Следующая реплика поднимает pi заново: AGENTS.md читается при старте.
+    el('profile-status').textContent = cfg.ui.savedAnswer;
   });
+  // Язык интерфейса меняет всю страницу, включая разметку, которую рисует сервер.
+  // Перезагрузка — самый честный способ переключить её разом, без второго словаря
+  // на клиенте.
+  bind('uiLanguage', 'ui-status', () => location.reload());
 }
 
 // ── поиск ────────────────────────────────────────────────────────────────────
@@ -1144,24 +1188,24 @@ async function doSearch() {
     return;
   }
   const data = await api(endpoint('search', { q: query }));
-  showFileHead('Поиск', '«' + query + '» · найдено: ' + data.hits.length, false, false);
+  showFileHead(cfg.ui.searchTitle, fill(cfg.ui.searchMeta, { query, n: data.hits.length }), false, false);
   el('content').innerHTML = data.hits.length
     ? '<div class="files">' + data.hits.map((hit) =>
         '<div class="hit" data-path="' + esc(hit.path) + '"><b>' + esc(hit.path) + ':' + hit.line + '</b><div>' + esc(hit.text) + '</div></div>',
       ).join('') + '</div>'
-    : '<p class="empty">Ничего не нашлось.</p>';
+    : '<p class="empty">' + esc(cfg.ui.emptyNoResults) + '</p>';
   el('content').querySelectorAll('.hit').forEach((node) => node.onclick = guard(() => go({ file: node.dataset.path, tab: 'notes' })));
 }
 
 /** Поиск по скиллам: находка открывает сам скилл, а не строку в файле. */
 async function searchSkills(query) {
   const data = await api(endpoint('search', { q: query }));
-  showFileHead('Поиск', '«' + query + '» · найдено: ' + data.hits.length, false, false);
+  showFileHead(cfg.ui.searchTitle, fill(cfg.ui.searchMeta, { query, n: data.hits.length }), false, false);
   el('content').innerHTML = data.hits.length
     ? '<div class="files">' + data.hits.map((hit) =>
         '<div class="hit" data-id="' + esc(hit.id) + '"><b>' + esc(hit.name) + ':' + hit.line + '</b><div>' + esc(hit.text) + '</div></div>',
       ).join('') + '</div>'
-    : '<p class="empty">Ничего не нашлось.</p>';
+    : '<p class="empty">' + esc(cfg.ui.emptyNoResults) + '</p>';
   el('content').querySelectorAll('.hit').forEach((node) => node.onclick = guard(() => go({ file: node.dataset.id, fresh: false, tab: 'notes' })));
 }
 
@@ -1181,7 +1225,7 @@ if (el('new-skill')) el('new-skill').onclick = guard(() => go({ file: null, fres
   document.title = '${PANEL_TITLE} · ' + cfg.user;
   await Promise.all([loadCounts(), cfg.mode === 'skills' ? loadSkills() : cfg.mode === 'profile' ? Promise.resolve() : loadFiles(), renderContent()]);
 })().catch(fail);
-</script>`);
+</script>`, sessionUiLanguage(session));
 }
 
 /** Экранирование для недоверенных значений: имя человека из заголовка и тексты отказа. */
