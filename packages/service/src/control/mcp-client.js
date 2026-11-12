@@ -186,7 +186,7 @@
         ' ' + plural(data.servers.length, 'сервер', 'сервера', 'серверов') +
         ' · включено ' + data.enabled + ' · готово ' + data.ready;
       if (!data.servers.length) {
-        box.innerHTML = '<p class="mcp-empty">Пока пусто. Нажми «Добавить MCP» — адрес и способ входа подскажет сам сервер.</p>';
+        box.innerHTML = '<p class="mcp-empty">Пока пусто. Возьми рецепт выше, если готового сервера хватает, или нажми «Добавить MCP» — адрес и способ входа подскажет сам сервер.</p>';
         return;
       }
       for (const server of data.servers) box.append(card(server));
@@ -460,24 +460,47 @@
       // Поля скрытых веток не отправляем: иначе переключение с «ключа» на OAuth
       // утащило бы в новый сервер старый заголовок, а он там уже ни к чему.
       headers: stdio ? {} : linesToMap(el('f-headers').value),
+      // Постоянные переменные stdio — часть описания, а не секрет: порты, адреса,
+      // режимы. Рецепты кладут сюда то, что человеку не надо придумывать.
+      env: stdio ? linesToMap(el('f-env').value) : {},
       credentialHeaders: auth === 'headers' && !stdio ? linesToMap(el('f-credential-headers').value) : {},
       credentialEnv: auth === 'headers' && stdio ? linesToMap(el('f-credential-env').value) : {},
       clientSecret: auth === 'oauth' ? el('f-client-secret').value.trim() : '',
     };
   }
 
-  function formHtml(editor) {
+  // Что человеку важно знать до сохранения: условия, порядок действий и куда
+  // смотреть, если сервер не поднялся. В карточке каталога это не помещается.
+  function recipeBrief(recipe) {
+    const list = (items) => '<ul>' + items.map((item) => '<li>' + esc(item) + '</li>').join('') + '</ul>';
+    return '<div class="recipe-brief">' +
+      '<p><b>Когда нужен.</b> ' + esc(recipe.when) + '</p>' +
+      (recipe.requires.length ? '<p><b>Что должно быть снаружи</b></p>' + list(recipe.requires) : '') +
+      (recipe.caveat ? '<p class="recipe-caveat">' + esc(recipe.caveat) + '</p>' : '') +
+      (recipe.steps.length ? '<p><b>Что сделать</b></p>' + list(recipe.steps) : '') +
+      (recipe.trouble.length ? '<details><summary>Если не поднялся</summary>' + list(recipe.trouble) + '</details>' : '') +
+      '<p class="hint">Проверено ' + esc(recipe.checkedAt) + ' · <a href="' + esc(recipe.docs) + '" target="_blank" rel="noopener">документация сервера</a></p>' +
+    '</div>';
+  }
+
+  function formHtml(editor, recipe) {
     const server = editor ? editor.server : null;
-    const isEdit = Boolean(server);
+    // Рецепт приезжает в форме редактора, но это не сохранённый сервер: заголовок
+    // и кнопка должны говорить «добавить», иначе человек испугается, что перепишет чужое.
+    const isEdit = Boolean(server) && !recipe;
     const transport = server ? server.transport : 'streamable-http';
     const auth = server ? server.auth : 'none';
     const headers = server && server.headers ? server.headers : {};
+    const env = server && server.env ? server.env : {};
     const credentialHeaders = Object.fromEntries((editor && editor.credentialHeaders ? editor.credentialHeaders : []).map((name) => [name, '']));
     const credentialEnv = Object.fromEntries((editor && editor.credentialEnv ? editor.credentialEnv : []).map((name) => [name, '']));
     const args = server && Array.isArray(server.args) ? server.args.join('\n') : '';
     return '' +
-      '<h2>' + (isEdit ? 'Изменить MCP' : 'Добавить MCP') + '</h2>' +
-      '<p class="about">Адрес и способ входа сервер обычно рассказывает сам. Ручные endpoints нужны только упрямым.</p>' +
+      '<h2>' + (recipe ? 'Добавить: ' + esc(recipe.name) : isEdit ? 'Изменить MCP' : 'Добавить MCP') + '</h2>' +
+      '<p class="about">' + (recipe
+        ? 'Команда, транспорт и несекретные настройки уже подставлены рецептом. Заполни ключи — если они нужны.'
+        : 'Адрес и способ входа сервер обычно рассказывает сам. Ручные endpoints нужны только упрямым.') + '</p>' +
+      (recipe ? recipeBrief(recipe) : '') +
       '<div class="mcp-form">' +
         '<div class="mcp-error" id="f-error" hidden></div>' +
         '<div class="field"><label for="f-name">НАЗВАНИЕ</label><input id="f-name" type="text" placeholder="Todoist" value="' + esc(server ? server.name : '') + '"></div>' +
@@ -498,6 +521,8 @@
           '<p class="hint">Ключ в query-параметре уедет всем, с кем поделишься. Лучше положи его в «ключ доступа» ниже.</p></div>' +
         '<div class="field" id="f-command-row" hidden><label for="f-command">КОМАНДА</label><input id="f-command" type="text" spellcheck="false" placeholder="npx" value="' + esc(server && server.command ? server.command : '') + '"></div>' +
         '<div class="field" id="f-args-row" hidden><label for="f-args">АРГУМЕНТЫ — ПО ОДНОМУ В СТРОКЕ</label><textarea id="f-args" rows="3" spellcheck="false" placeholder="-y&#10;@modelcontextprotocol/server-filesystem&#10;/workspace">' + esc(args) + '</textarea></div>' +
+        '<div class="field" id="f-env-row" hidden><label for="f-env">ПОСТОЯННЫЕ ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ — ИМЯ: ЗНАЧЕНИЕ</label><textarea id="f-env" rows="3" spellcheck="false" placeholder="PROTONMAIL_IMAP_HOST: 127.0.0.1">' + esc(mapToLines(env, true)) + '</textarea>' +
+          '<p class="hint">Не секреты: адреса, порты, режимы. Ключи — ниже, они не показываются другим.</p></div>' +
         '<div class="field" id="f-oauth-row" hidden><label for="f-scopes">SCOPES (ОПЦИОНАЛЬНО)</label><input id="f-scopes" type="text" spellcheck="false" placeholder="tasks:read tasks:write" value="' + esc(server && server.scopes ? server.scopes : '') + '"></div>' +
         '<div class="field" id="f-client-id-row" hidden><label for="f-client-id">CLIENT ID (ЕСЛИ СЕРВЕР ВЫДАЛ ЗАРАНЕЕ)</label><input id="f-client-id" type="text" spellcheck="false" placeholder="оставь пустым — зарегистрируемся сами" value="' + esc(server && server.clientId ? server.clientId : '') + '"></div>' +
         '<div class="field" id="f-client-secret-row" hidden><label for="f-client-secret">CLIENT SECRET (ЕСЛИ НУЖЕН)</label><input id="f-client-secret" type="password" autocomplete="new-password" placeholder="оставь пустым — не менять"></div>' +
@@ -528,6 +553,7 @@
     el('f-url-row').hidden = stdio;
     el('f-command-row').hidden = !stdio;
     el('f-args-row').hidden = !stdio;
+    el('f-env-row').hidden = !stdio;
     el('f-oauth-row').hidden = auth !== 'oauth';
     el('f-client-id-row').hidden = auth !== 'oauth';
     el('f-client-secret-row').hidden = auth !== 'oauth';
@@ -538,9 +564,10 @@
     el('f-credential-env-row').hidden = auth !== 'headers' || !stdio;
   }
 
-  async function openForm(id) {
-    let editor = null;
-    if (id) {
+  async function openForm(id, preset) {
+    // preset — рецепт в форме редактора: команда и настройки заполнены, ключи пустые.
+    let editor = preset || null;
+    if (id && !editor) {
       try {
         editor = await api('/panel/mcp/server?id=' + encodeURIComponent(id));
       } catch (error) {
@@ -548,7 +575,13 @@
         return;
       }
     }
-    const opened = dialog(formHtml(editor));
+    const recipe = editor && editor.recipe ? editor.recipe : null;
+    // Что сервер ждёт от человека: пригодится и после сохранения, чтобы
+    // «Настроить доступ» открылся с нужными именами, а не пустым полем.
+    const expects = recipe
+      ? { expectsEnv: editor.expectsEnv || [], expectsHeaders: editor.expectsHeaders || [] }
+      : {};
+    const opened = dialog(formHtml(editor, recipe));
     const dialogNode = opened.backdrop;
     dialogNode.querySelectorAll('[data-close]').forEach((button) => button.addEventListener('click', opened.close));
     el('f-transport').addEventListener('change', syncForm);
@@ -561,7 +594,7 @@
       button.disabled = true;
       error.hidden = true;
       try {
-        const body = formBody();
+        const body = { ...formBody(), ...expects };
         if (!body.name) throw new Error('название не может быть пустым');
         const result = id
           ? await post('update', { id, ...body })
@@ -662,8 +695,63 @@
     });
   }
 
+  // ── рецепты ──────────────────────────────────────────────────────────────
+  // Каталог общий и ничего не знает о человеке: карточка показывает, когда сервер
+  // нужен и что понадобится снаружи. Кнопка открывает обычную форму, где пустыми
+  // остаются только значения ключей.
+  function recipeCard(recipe) {
+    const node = document.createElement('article');
+    node.className = 'recipe-card';
+    node.dataset.recipe = recipe.id;
+    const keys = recipe.secrets.length === 0
+      ? 'без ключей'
+      : recipe.secretKind === 'header'
+        ? 'попросит ключ'
+        : 'попросит ' + recipe.secrets.length + ' ' + plural(recipe.secrets.length, 'ключ', 'ключа', 'ключей');
+    node.innerHTML =
+      '<div class="recipe-head">' + badge(recipe.category) + badge(keys, recipe.secrets.length ? 'wait' : 'on') + '</div>' +
+      '<h3>' + esc(recipe.name) + '</h3>' +
+      '<p class="recipe-when">' + esc(recipe.when) + '</p>' +
+      (recipe.caveat ? '<p class="recipe-caveat">' + esc(recipe.caveat) + '</p>' : '') +
+      '<div class="recipe-foot"><code>' + esc(transportLabel(recipe.transport)) + '</code>' +
+        '<button type="button" data-recipe="' + esc(recipe.id) + '">Добавить</button></div>';
+    node.querySelector('[data-recipe]').addEventListener('click', (event) => openRecipe(recipe.id, event.currentTarget));
+    return node;
+  }
+
+  async function openRecipe(id, button) {
+    if (button) button.disabled = true;
+    try {
+      const preset = await api('/panel/mcp/recipe?id=' + encodeURIComponent(id));
+      await openForm(null, preset);
+    } catch (error) {
+      notice('Не удалось открыть рецепт: ' + error.message, true);
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
+  async function loadRecipes() {
+    const box = el('mcp-recipes');
+    if (!box) return;
+    try {
+      const data = await api('/panel/mcp/recipes');
+      if (data.rule) el('mcp-rule').textContent = data.rule;
+      if (data.checkedAt) el('mcp-checked').textContent = 'проверено ' + data.checkedAt;
+      if (data.skipped) {
+        el('mcp-skipped').textContent = data.skipped;
+        el('mcp-skipped').hidden = false;
+      }
+      box.innerHTML = '';
+      for (const recipe of data.recipes) box.append(recipeCard(recipe));
+    } catch (error) {
+      box.innerHTML = '<p class="mcp-empty">Не удалось прочитать рецепты: ' + esc(error.message) + '</p>';
+    }
+  }
+
   // ── запуск ───────────────────────────────────────────────────────────────
   el('mcp-add').addEventListener('click', () => openForm(null));
+  loadRecipes();
   load();
 
   const params = new URLSearchParams(location.search);

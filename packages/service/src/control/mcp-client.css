@@ -96,3 +96,41 @@
 .mcp-paste button:hover { border-color:var(--accent); }
 .mcp-intro { color:var(--dim); max-width:720px; margin:0 0 18px; }
 .mcp-intro b { color:var(--text); font-weight:500; }
+
+/* Рецепты: каталог пресетов над личными серверами. Карточки мельче карточек
+   серверов — их читают глазами, а не настраивают. */
+.recipes { margin:0 0 26px; max-width:940px; }
+.recipes-head { display:flex; gap:16px; align-items:flex-start; justify-content:space-between; margin:0 0 12px; }
+.recipes-head h2 { margin:0 0 4px; font-size:15px; }
+.mcp-rule { margin:0; color:var(--dim); max-width:660px; font-size:13px; line-height:1.5; }
+.recipes-checked { color:var(--dim); font-size:11px; white-space:nowrap; padding-top:3px; }
+.recipes-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(270px, 1fr)); gap:12px; }
+.recipe-card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px 16px;
+              display:flex; flex-direction:column; gap:8px; }
+.recipe-card h3 { margin:0; font-size:15px; }
+.recipe-head { display:flex; gap:6px; flex-wrap:wrap; }
+.recipe-when { margin:0; color:var(--dim); font-size:13px; line-height:1.5; }
+.recipe-caveat { margin:0; color:#e0af68; font-size:12px; line-height:1.5; }
+/* В карточке предупреждение обрезано до четырёх строк: иначе одна proton-mail
+   растянула бы всю сетку. Полный текст — в форме, там же и шаги. */
+.recipe-card .recipe-caveat { display:-webkit-box; -webkit-line-clamp:4; -webkit-box-orient:vertical; overflow:hidden; }
+.recipe-card .recipe-foot { display:flex; gap:10px; align-items:center; justify-content:space-between;
+                            margin-top:auto; padding-top:6px; }
+.recipe-foot code { font-family:ui-monospace, monospace; font-size:11px; color:var(--dim); }
+.recipe-foot button { background:var(--accent); border:1px solid var(--accent); color:#0f1116;
+                      border-radius:8px; padding:6px 14px; font-weight:500; cursor:pointer; }
+.recipe-foot button:hover { filter:brightness(1.08); }
+.recipe-foot button:disabled { opacity:.6; cursor:default; }
+.mcp-skipped { margin:12px 0 0; color:var(--dim); font-size:12px; line-height:1.5; }
+
+/* Что понадобится и что делать, если не поднялся — в форме, а не в карточке:
+   карточка должна оставаться короткой. */
+.recipe-brief { border:1px solid var(--line); border-radius:10px; padding:12px 14px; margin:0 0 16px;
+                background:var(--bg); font-size:13px; }
+.recipe-brief p { margin:0 0 8px; }
+.recipe-brief ul { margin:4px 0 10px; padding-left:20px; color:var(--dim); }
+.recipe-brief li { margin:2px 0; }
+.recipe-brief details { border:0; padding:0; margin:0 0 8px; }
+.recipe-brief summary { font-size:12px; }
+.recipe-brief .hint { margin:0; }
+.recipe-brief a { color:var(--accent); }

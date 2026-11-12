@@ -50,6 +50,14 @@ import {
   type FetchLike,
 } from '../mcp/oauth.ts';
 import { probeMcp } from '../mcp/probe.ts';
+import {
+  MCP_RECIPES,
+  RECIPE_CHECKED_AT,
+  RECIPE_RULE,
+  RECIPE_SKIPPED,
+  recipeById,
+  recipeEditor,
+} from '../mcp/recipes.ts';
 
 type McpPanelContext = {
   config: IcarusConfig;
@@ -148,8 +156,16 @@ function credentialsOf(body: Record<string, unknown>): McpCredentials | undefine
   };
 }
 
+/** Имена ключей из рецепта: массив строк, без значений. */
+function namesOf(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.filter((item): item is string => typeof item === 'string');
+}
+
 function inputOf(body: Record<string, unknown>): McpServerInput {
   const transport = textOf(body.transport);
+  const expectsEnv = namesOf(body.expectsEnv);
+  const expectsHeaders = namesOf(body.expectsHeaders);
   return {
     name: textOf(body.name),
     description: optional(body.description) ?? '',
@@ -159,6 +175,8 @@ function inputOf(body: Record<string, unknown>): McpServerInput {
     ...(argsOf(body.args) === undefined ? {} : { args: argsOf(body.args) }),
     ...(rowsOf(body.headers) === undefined ? {} : { headers: rowsOf(body.headers) }),
     ...(rowsOf(body.env) === undefined ? {} : { env: rowsOf(body.env) }),
+    ...(expectsEnv === undefined ? {} : { credentialEnv: expectsEnv }),
+    ...(expectsHeaders === undefined ? {} : { credentialHeaders: expectsHeaders }),
     auth: textOf(body.auth) === 'oauth' ? 'oauth' : textOf(body.auth) === 'headers' ? 'headers' : 'none',
     ...(optional(body.scopes) === undefined ? {} : { scopes: optional(body.scopes) }),
     ...(optional(body.clientId) === undefined ? {} : { clientId: optional(body.clientId) }),
@@ -291,6 +309,30 @@ export async function handleMcpApi(
         return;
       }
       json(res, 200, editor);
+      return;
+    }
+
+    // Рецепты — общий каталог, не личный: он одинаков для всех и ничего не знает
+    // о человеке. Секретов в нём нет, только имена ключей.
+    if (req.method === 'GET' && name === 'recipes') {
+      json(res, 200, {
+        recipes: MCP_RECIPES,
+        rule: RECIPE_RULE,
+        skipped: RECIPE_SKIPPED,
+        checkedAt: RECIPE_CHECKED_AT,
+      });
+      return;
+    }
+
+    // Рецепт в виде, который понимает форма: заполнены команда, транспорт и
+    // несекретные настройки, пустыми остаются только значения ключей.
+    if (req.method === 'GET' && name === 'recipe') {
+      const recipe = recipeById(url.searchParams.get('id') ?? '');
+      if (!recipe) {
+        json(res, 404, errorBody('такого рецепта нет', 'not_found'));
+        return;
+      }
+      json(res, 200, recipeEditor(recipe));
       return;
     }
 

@@ -128,7 +128,8 @@ mcp:
   echo:
     command: node
     args: ['/opt/icarus/mcp/echo-server.mjs']
-    lifecycle: eager
+    # Даже демо-сервер не поднимаем на старте: eager — только осознанный выбор.
+    lifecycle: lazy
   # Артефакты: общая библиотека /artifacts для всей семьи — страницы, документы,
   # картинки. Сервер заводит папку и права через artifact_new, объясняет структуру
   # (index.html | index.md | index.png + обязательный index.ai.md) и выдаёт ссылку.
