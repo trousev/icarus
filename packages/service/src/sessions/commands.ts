@@ -64,6 +64,9 @@ export const WEB_HELP = [
   '/rename <имя> — переименовать текущий чат',
   '/skills — что можно позвать сверх разговора: скиллы, шаблоны и команды pi',
   '',
+  'Пока я думаю, писать можно: Enter ставит реплику в очередь, а «прервать и отправить»',
+  'останавливает текущий ответ и берётся за неё сразу.',
+  '',
   'Ещё я понимаю файлы и картинки, помню прошлые разговоры и умею искать в интернете.',
   'Всё остальное — просто пиши словами.',
 ].join('\n');
@@ -99,17 +102,21 @@ export function compactText(outcome: CompactOutcome): string {
 }
 
 /** Что ответить на /stop. */
-export function stopText(outcome: AbortOutcome): string {
-  switch (outcome.status) {
-    case 'stopped':
-      return 'Остановился. Скажи, если нужно иначе.';
-    case 'idle':
-      return 'Я и так ничего не делаю — можно писать.';
-    case 'no-session':
-      return 'Останавливать нечего: разговор ещё не начат или уже закрыт.';
-    case 'failed':
-      return `Не получилось остановиться: ${outcome.error}`;
-  }
+export function stopText(outcome: AbortOutcome, dropped = 0): string {
+  const base = ((): string => {
+    switch (outcome.status) {
+      case 'stopped':
+        return 'Остановился. Скажи, если нужно иначе.';
+      case 'idle':
+        return 'Я и так ничего не делаю — можно писать.';
+      case 'no-session':
+        return 'Останавливать нечего: разговор ещё не начат или уже закрыт.';
+      case 'failed':
+        return `Не получилось остановиться: ${outcome.error}`;
+    }
+  })();
+  // Очередь снимается вместе с ходом: не молчим об этом, реплики человек писал сам.
+  return dropped > 0 ? `${base}\nИз очереди снял: ${dropped}.` : base;
 }
 
 /** Что ответить на /stats: цифры разговора человеческими словами. */

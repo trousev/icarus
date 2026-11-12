@@ -167,6 +167,13 @@ export function crossChannelNote(channel: ChatChannel): string {
   return `🧵 Продолжаю разговор, который шёл ${from}: эти реплики уже в контексте. /clear — начать с чистого листа.\n\n`;
 }
 
+/**
+ * Реплика поверх идущего хода. В Telegram кнопок нет, поэтому операция одна —
+ * «сейчас»: прошлый ответ обрывается. Молчать об этом нельзя, иначе выглядит,
+ * будто Икар просто перестал отвечать.
+ */
+export const INTERRUPTED_NOTE = '⏹ Прервал прошлый ответ, чтобы взяться за твоё сообщение.\n\n';
+
 export function unknownUser(username: string): string {
   return (
     `Не знаю тебя: @${username} не привязан ни к кому в конфиге. ` +
@@ -300,6 +307,8 @@ export class TelegramBot {
    * мешает писать поверх, и ждать пять минут ответа субагентов он не станет.
    */
   private turns = new Map<string, { interrupt: () => Promise<void> }>();
+  /** Чаты, где новая реплика уже прервала ход: в ответе надо сказать об этом. */
+  private interrupted = new Set<string>();
   /**
    * Топик, который человек только что завёл из общей ленты: клиент создаёт топик, а
    * само сообщение приезжает как сообщение корня — см. resolveThread.
@@ -457,6 +466,8 @@ export class TelegramBot {
       const running = this.turns.get(key);
       if (running) {
         log.info('телеграм: новое сообщение прерывает текущий ход', { key });
+        // Ответ на это сообщение начнётся с честной строки: прошлый ответ прерван.
+        this.interrupted.add(key);
         void running.interrupt().catch((error) => {
           log.warn('телеграм: прервать ход не вышло', { error: describeTelegramError(error) });
         });
@@ -666,6 +677,9 @@ export class TelegramBot {
         await this.registry.interrupt(user, conversationId);
       },
     };
+    // Вторая операция тут одна: этот ход уже прервал прошлый. Говорим об этом
+    // первой строкой ответа — в Telegram нет ни кнопки «в очередь», ни индикатора.
+    if (this.interrupted.delete(turnKey)) reply.push(INTERRUPTED_NOTE);
     this.turns.set(turnKey, turn);
     const dropTurn = (): void => {
       if (this.turns.get(turnKey) === turn) this.turns.delete(turnKey);

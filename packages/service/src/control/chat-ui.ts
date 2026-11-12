@@ -138,16 +138,27 @@ export function chatPage(session: PanelSession, options: ChatPageOptions): strin
 
     <div class="composer">
       <div class="pending" id="chat-pending" hidden></div>
+      <!-- Очередь реплик, написанных во время хода: живёт на сервере, поэтому
+           переживает F5. Каждую можно снять, пока она не отправилась. -->
+      <div class="queue" id="chat-queue" hidden>
+        <div class="queue-head"><b id="queue-count">В очереди: 0</b><span class="queue-hint">доедет после текущего хода</span></div>
+        <div class="queue-list" id="queue-list"></div>
+      </div>
       <div class="composer-locked" id="chat-locked" hidden></div>
-      <div class="composer-box">
+      <div class="composer-box" id="composer-box">
         <!-- Палитра команд: всплывает над полем, как только человек набрал «/».
              Список команд чата известен сразу, команды pi подгружаются следом. -->
         <div class="cmd-palette" id="cmd-palette" role="listbox" aria-label="Команды чата" hidden></div>
         <button class="icon-btn attach" id="chat-attach" aria-label="Приложить файл" title="Приложить файл"${options.enabled ? '' : ' disabled'}><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
         <input id="chat-files" type="file" multiple hidden>
         <textarea id="chat-input" rows="1" placeholder="Написать Icarus..."${options.enabled ? '' : ' disabled'}></textarea>
-        <button class="stop" id="chat-stop" aria-label="Остановить" title="Остановить ответ" hidden>■</button>
-        <button class="send" id="chat-send" aria-label="Отправить"${options.enabled ? '' : ' disabled'}>↑</button>
+        <div class="composer-actions">
+          <!-- Две разные операции: «сейчас» отменяет чужую работу, «отправить»
+               при идущем ходе ставит реплику в очередь. -->
+          <button class="now" id="chat-now" title="Прервать текущий ход и отправить это сообщение сейчас" hidden>Прервать и отправить</button>
+          <button class="stop" id="chat-stop" aria-label="Остановить" title="Остановить ответ" hidden>■</button>
+          <button class="send" id="chat-send" aria-label="Отправить"${options.enabled ? '' : ' disabled'}>↑</button>
+        </div>
       </div>
       <div class="composer-foot">
         <!-- Под полем ввода — только отказы и подтверждения. Прогресс хода

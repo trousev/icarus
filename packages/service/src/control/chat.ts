@@ -70,7 +70,27 @@ import {
   WEB_HELP,
 } from '../sessions/commands.ts';
 import { mcpReauthNotice } from '../mcp/reauth.ts';
-import { broadcast, emit, finishTurn, liveTurn, runningTurn, startTurn, subscribe, watchAll } from './chat-live.ts';
+import {
+  broadcast,
+  emit,
+  finishTurn,
+  liveTurn,
+  runningTurn,
+  startTurn,
+  subscribe,
+  watchAll,
+  whenTurnDone,
+  type Turn,
+} from './chat-live.ts';
+import {
+  QUEUE_LIMIT,
+  clearQueue,
+  dropQueued,
+  enqueue,
+  queueView,
+  queued,
+  takeNext,
+} from './chat-queue.ts';
 import { log } from '../log.ts';
 
 export { readChats };
@@ -214,6 +234,9 @@ export type ChatApiContext = {
 
 /** Отказ писать туда, где историей владеет не панель. */
 const READ_ONLY_CHAT = 'этот разговор идёт через API: в панели он только для чтения';
+
+/** Сколько ждём, пока прерванный ход допишется, прежде чем начать новый. */
+const INTERRUPT_WAIT_MS = 10_000;
 
 const PREVIEW_CHARS = 110;
 const DEFAULT_PAGE_SIZE = 30;
@@ -947,60 +970,70 @@ async function bodyOf(req: IncomingMessage): Promise<Record<string, unknown>> {
   }
 }
 
+/** Ключ разговора: им же пользуется hub, чтобы не путать людей. */
+function turnKey(userId: string, chatId: string): string {
+  return `${userId}\u0000${chatId}`;
+}
+
+/** Кто сейчас досылает очередь: второй заход в тот же разговор ни к чему. */
+const draining = new Set<string>();
+
 /**
- * Живой ход: NDJSON-поток событий, который читает chat-client.js. Формат намеренно
- * простой — по строке на событие, без SSE-обёрток: браузеру не нужен EventSource,
- * достаточно fetch + reader, а POST с текстом так короче.
+ * Разговор занят операцией «сейчас»: прерванный ход дописывается, и очередь не
+ * должна влезть в этот зазор. Без защёлки очередная реплика стартовала бы в тот
+ * же момент, и в ленте перемешались бы два ответа.
  */
-async function streamTurn(
-  req: IncomingMessage,
-  res: ServerResponse,
-  config: IcarusConfig,
-  user: UserConfig,
-  registry: SessionRegistry,
-  chatId: string,
-  text: string,
-  attachments: UploadedAttachments,
-): Promise<void> {
-  const prompt = buildPrompt(text, attachments.files);
-  const chat = findChatRecord(config, user, chatId);
-  if (!chat) {
-    json(res, 404, errorBody('разговор не найден'));
-    return;
-  }
-  // Telegram панель продолжает: это тот же разговор и та же сессия pi. Читать
-  // отсюда можно только API-вход — его клиент владеет историей сам.
-  if (!panelCanWrite(chat)) {
-    json(res, 403, errorBody(READ_ONLY_CHAT, 'permission_error'));
-    return;
-  }
+const starting = new Set<string>();
 
-  let session;
+/** Идёт ли ход в разговоре: hub знает про ход, реестр — про занятую сессию. */
+function inTurn(registry: SessionRegistry, userId: string, chatId: string): boolean {
+  if (runningTurn(userId, chatId)) return true;
+  const session = registry.get(userId, chatId);
+  return Boolean(session && (session.busy || session.compacting));
+}
+
+/**
+ * Прерывание только просит pi остановиться — ход дописывает ответ и закрывает
+ * журнал ещё мгновение. Ждём именно конца: иначе новая реплика влезет в занятую
+ * сессию и получит 409.
+ */
+async function waitTurnEnd(userId: string, chatId: string, timeoutMs: number): Promise<void> {
+  const turn = runningTurn(userId, chatId);
+  if (!turn) return;
+  let timer: NodeJS.Timeout | undefined;
   try {
-    session = await registry.acquire(user, chatId, chat.workspace, chat.artifact);
-  } catch (error) {
-    json(res, 503, errorBody(`сессия недоступна: ${String(error)}`, 'server_error'));
-    return;
+    await Promise.race([
+      whenTurnDone(turn),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, timeoutMs);
+        timer.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
-  if (session.busy) {
-    // Ход идёт либо без зрителя (панель перезагрузили), либо в другом канале —
-    // и это один и тот же ход. Прицепиться можно только к своему потоку: у
-    // Telegram-хода его в панели нет, и второй ответ начинать нельзя.
-    const live = Boolean(runningTurn(user.id, chat.id));
-    json(res, 409, {
-      ...errorBody('в этом разговоре уже идёт ответ', 'conflict_error'),
-      live,
-      ...(live ? {} : { busyIn: chat.lastTurn?.channel ?? 'telegram' }),
-    });
-    return;
-  }
+}
 
-  res.writeHead(200, {
-    'content-type': 'application/x-ndjson; charset=utf-8',
-    'cache-control': 'no-cache, no-transform',
-    connection: 'keep-alive',
-    'x-accel-buffering': 'no',
-  });
+/** Один ход: реплика человека, события pi и запись ответа в разговор. */
+type TurnJob = {
+  config: IcarusConfig;
+  user: UserConfig;
+  /** Реестр — только ради живого заголовка: разовый вызов дешёвой модели. */
+  registry: SessionRegistry;
+  chatId: string;
+  session: Awaited<ReturnType<SessionRegistry['acquire']>>;
+  text: string;
+  attachments: UploadedAttachments;
+};
+
+/**
+ * Запускает ход и отдаёт его журнал и обещание конца. HTTP-ответ сюда не входит:
+ * ход из очереди живёт без запроса, а панель цепляется к журналу через сводку.
+ * Ошибки не выбрасываются — они уезжают событием `error`, как и раньше.
+ */
+function beginTurn(job: TurnJob): { turn: Turn; finished: Promise<void> } {
+  const { config, user, registry, chatId, session, text, attachments } = job;
+  const prompt = buildPrompt(text, attachments.files);
 
   let done = false;
   let answer = '';
@@ -1013,24 +1046,16 @@ async function streamTurn(
   const toolArgs = new Map<string, Record<string, unknown>>();
   const reauthSent = new Set<string>();
 
-  // Ход переживает зрителя: события копит hub, а этот ответ — лишь один из
+  // Ход переживает зрителя: события копит hub, а HTTP-ответ — лишь один из
   // подписчиков. F5 вычеркнет его, ход продолжит идти, а панель потом догонит.
   const turn = startTurn(user.id, chatId);
   // Сайдбар других разговоров должен узнать, что тут начали думать.
   broadcast({ userId: user.id, chatId, type: 'busy' });
   const send = (event: Record<string, unknown>): void => emit(turn, event);
-  const settle = (): void => {
-    if (done) return;
-    done = true;
-    resolveSettled();
-  };
-
-  /** Пишем зрителю, только пока он есть; остальное уже накоплено в hub. */
-  const writeTo = (target: ServerResponse, event: Record<string, unknown>): void => {
-    if (target.writableEnded) return;
-    target.write(`${JSON.stringify(event)}\n`);
-  };
-  const unsubscribe = subscribe(turn, (event) => writeTo(res, event));
+  // Реплика — часть журнала хода, а не только DOM отправителя: панель после F5
+  // доигрывает ход и должна показать, на что это ответ. Отправитель свой пузырь
+  // уже нарисовал и это событие пропустит (см. клиент).
+  send({ type: 'user', text: text || attachments.names.join(', ') });
 
   const unsubscribeSession = session.onEvent((event) => {
     switch (event.type) {
@@ -1112,7 +1137,10 @@ async function streamTurn(
         break;
       }
       case 'agent_settled': {
-        settle();
+        if (!done) {
+          done = true;
+          resolveSettled();
+        }
         break;
       }
       default:
@@ -1120,53 +1148,197 @@ async function streamTurn(
     }
   });
 
-  try {
-    // Канал хода пишем до prompt: файл сессии каналы не различает, а шапка
-    // панели и отбивка в Telegram должны знать, кто говорил последним.
-    recordTurn(config, user, chat.id, 'web');
-    await session.prompt(prompt, attachments.images);
-    await settled;
+  const finished = (async () => {
+    try {
+      // Канал хода пишем до prompt: файл сессии каналы не различает, а шапка
+      // панели и отбивка в Telegram должны знать, кто говорил последним.
+      recordTurn(config, user, chatId, 'web');
+      await session.prompt(prompt, attachments.images);
+      await settled;
 
-    const userText = text || attachments.names.join(', ');
-    // `finishChat` не только даёт запись с заголовком, но и шлёт в сводку
-    // `idle` — поэтому он обязан стоять до `done`, иначе гонка: ответ дошёл,
-    // а точка в сайдбаре ещё жёлтая.
-    const record = finishChat(config, user, chatId, userText);
-    const summary = record ? summaryAfterTurn(record, userText, answer) : null;
-    send({ type: 'done', chat: summary, steps });
-    // Ход встал: догоняющий зритель получит хвост и закроет соединение сам.
-    finishTurn(turn);
-    unsubscribe();
-    unsubscribeSession();
-    if (!res.writableEnded) res.end();
-    // Заголовок догоняет ответ: имя от модели приезжает отдельным событием
-    // сводки, поэтому человек не ждёт модель ради названия разговора.
-    void refineChatTitle(
-      config,
-      user,
-      (prompt) => registry.oneShot(user, prompt, { timeoutMs: AUTO_TITLE_TIMEOUT_MS }),
-      chatId,
-    ).catch((error: unknown) => {
-      log.warn('чат: живой заголовок не вышел', { user: user.id, chatId, error: String(error) });
-    });
-    log.info('чат: ход завершён', {
-      user: user.id,
-      chatId,
-      chars: answer.length,
-      steps: steps.length,
-      attachments: attachments.files.length,
-    });
+      const userText = text || attachments.names.join(', ');
+      // `finishChat` не только даёт запись с заголовком, но и шлёт в сводку
+      // `idle` — поэтому он обязан стоять до `done`, иначе гонка: ответ дошёл,
+      // а точка в сайдбаре ещё жёлтая.
+      const record = finishChat(config, user, chatId, userText);
+      const summary = record ? summaryAfterTurn(record, userText, answer) : null;
+      send({ type: 'done', chat: summary, steps });
+      // Заголовок догоняет ответ: имя от модели приезжает отдельным событием
+      // сводки, поэтому человек не ждёт модель ради названия разговора.
+      void refineChatTitle(
+        config,
+        user,
+        (ask) => registry.oneShot(user, ask, { timeoutMs: AUTO_TITLE_TIMEOUT_MS }),
+        chatId,
+      ).catch((error: unknown) => {
+        log.warn('чат: живой заголовок не вышел', { user: user.id, chatId, error: String(error) });
+      });
+      log.info('чат: ход завершён', {
+        user: user.id,
+        chatId,
+        chars: answer.length,
+        steps: steps.length,
+        attachments: attachments.files.length,
+      });
+    } catch (error) {
+      log.error('чат: ход сорвался', { user: user.id, chatId, error: String(error) });
+      send({ type: 'error', message: error instanceof Error ? error.message : String(error) });
+      // Сорвавшийся ход тоже «встал»: `finishChat` в него не доходит, поэтому
+      // `idle` шлём здесь — иначе разговор залипнет жёлтым навсегда.
+      finishChat(config, user, chatId, text || attachments.names.join(', '));
+    } finally {
+      // Ход встал: догоняющий зритель получит хвост и закроет соединение сам,
+      // а очередь узнает, что можно брать следующую реплику.
+      finishTurn(turn);
+      unsubscribeSession();
+    }
+  })();
+
+  return { turn, finished };
+}
+
+/**
+ * Один ход в ответ на HTTP: проверяет разговор, поднимает сессию, пишет поток и
+ * закрывает ответ, когда ход встал. Дальше очередь может взять следующую реплику.
+ */
+async function streamTurn(
+  req: IncomingMessage,
+  res: ServerResponse,
+  config: IcarusConfig,
+  user: UserConfig,
+  registry: SessionRegistry,
+  chatId: string,
+  text: string,
+  attachments: UploadedAttachments,
+): Promise<void> {
+  const chat = findChatRecord(config, user, chatId);
+  if (!chat) {
+    json(res, 404, errorBody('разговор не найден'));
+    return;
+  }
+  // Telegram панель продолжает: это тот же разговор и та же сессия pi. Читать
+  // отсюда можно только API-вход — его клиент владеет историей сам.
+  if (!panelCanWrite(chat)) {
+    json(res, 403, errorBody(READ_ONLY_CHAT, 'permission_error'));
+    return;
+  }
+
+  let session;
+  try {
+    session = await registry.acquire(user, chatId, chat.workspace, chat.artifact);
   } catch (error) {
-    log.error('чат: ход сорвался', { user: user.id, chatId, error: String(error) });
-    send({ type: 'error', message: error instanceof Error ? error.message : String(error) });
-    // Сорвавшийся ход тоже "встал": `finishChat` в него не доходит, поэтому
-    // `idle` шлём здесь — иначе разговор залипнет жёлтым навсегда.
-    finishChat(config, user, chatId, text || attachments.names.join(', '));
-    finishTurn(turn);
+    json(res, 503, errorBody(`сессия недоступна: ${String(error)}`, 'server_error'));
+    return;
+  }
+  if (session.busy) {
+    // Ход идёт либо без зрителя (панель перезагрузили), либо в другом канале —
+    // и это один и тот же ход. Прицепиться можно только к своему потоку: у
+    // Telegram-хода его в панели нет, и второй ответ начинать нельзя. Живой
+    // ход панель догонит сама, а чужой — увидит пометку канала.
+    const live = Boolean(runningTurn(user.id, chat.id));
+    json(res, 409, {
+      ...errorBody('в этом разговоре уже идёт ответ', 'conflict_error'),
+      live,
+      ...(live ? {} : { busyIn: chat.lastTurn?.channel ?? 'telegram' }),
+    });
+    return;
+  }
+
+  res.writeHead(200, {
+    'content-type': 'application/x-ndjson; charset=utf-8',
+    'cache-control': 'no-cache, no-transform',
+    connection: 'keep-alive',
+    'x-accel-buffering': 'no',
+  });
+
+  const { turn, finished } = beginTurn({ config, user, registry, chatId, session, text, attachments });
+  // Пишем зрителю, только пока он есть; остальное уже накоплено в hub.
+  const unsubscribe = subscribe(turn, (event) => {
+    if (res.writableEnded) return;
+    res.write(`${JSON.stringify(event)}\n`);
+  });
+
+  try {
+    await finished;
+  } finally {
     unsubscribe();
-    unsubscribeSession();
     if (!res.writableEnded) res.end();
   }
+}
+
+/**
+ * Досылает очередь: после конца хода берём следующую реплику и начинаем её.
+ *
+ * Ход из очереди живёт без HTTP-ответа — его события копит hub, и панель цепляется
+ * к ним через сводку. Поэтому очередь и переживает F5: реплика лежит здесь, а не в
+ * браузере, и ждёт только конца чужого хода.
+ */
+async function drainQueued(
+  config: IcarusConfig,
+  user: UserConfig,
+  registry: SessionRegistry,
+  chatId: string,
+): Promise<void> {
+  const key = turnKey(user.id, chatId);
+  if (draining.has(key) || starting.has(key)) return;
+  draining.add(key);
+  try {
+    for (;;) {
+      const head = queued(user.id, chatId)[0];
+      if (!head) return;
+      // Ход уже идёт — он сам позовёт очередь, когда встанет. «Сейчас» держит
+      // защёлку, пока его ход не начнётся: иначе мы влезем в зазор прерывания.
+      if (runningTurn(user.id, chatId) || starting.has(key)) return;
+      const chat = findChatRecord(config, user, chatId);
+      if (!chat || !panelCanWrite(chat)) {
+        clearQueued(user, chatId);
+        return;
+      }
+      let session;
+      try {
+        session = await registry.acquire(user, chatId, chat.workspace, chat.artifact);
+      } catch (error) {
+        // Сессии нет — очередь не выкидываем: человек увидит её и решит сам.
+        log.warn('чат: очередь не смогла поднять сессию', {
+          user: user.id,
+          chatId,
+          error: String(error),
+        });
+        return;
+      }
+      // Сжатие — не ход, но сессия занята им же: ждём, а не отказываем.
+      if (session.compacting) await session.compacting;
+      // Пока поднимали сессию, разговор мог занять кто-то другой.
+      if (session.busy || runningTurn(user.id, chatId) || starting.has(key)) return;
+
+      takeNext(user.id, chatId);
+      broadcastQueue(user.id, chatId);
+      const { finished } = beginTurn({
+        config,
+        user,
+        registry,
+        chatId,
+        session,
+        text: head.text,
+        attachments: head.attachments,
+      });
+      await finished;
+    }
+  } finally {
+    draining.delete(key);
+  }
+}
+
+/** Очередь изменилась — говорим об этом панели, чтобы индикатор не врал. */
+function broadcastQueue(userId: string, chatId: string): void {
+  broadcast({ userId, chatId, type: 'queue', queue: queueView(userId, chatId) });
+}
+
+/** Снимает очередь разговора и сообщает об этом панели. */
+function clearQueued(user: UserConfig, chatId: string): number {
+  const dropped = clearQueue(user.id, chatId).length;
+  if (dropped > 0) broadcastQueue(user.id, chatId);
+  return dropped;
 }
 
 export async function handleChatApi(
@@ -1305,7 +1477,13 @@ export async function handleChatApi(
       // историей, чтобы клиент цеплялся к потоку, а не гадал, почему тихо.
       // Только про идущий ход: доигранный ответ уже лежит в истории, и второй
       // раз рисовать его из потока нельзя.
-      json(res, 200, { ...history, live: Boolean(runningTurn(user.id, id)) });
+      json(res, 200, {
+        ...history,
+        live: Boolean(runningTurn(user.id, id)),
+        // Очередь живёт на сервере: перезагруженная панель должна увидеть, что
+        // написанное во время хода никуда не пропало.
+        queue: queueView(user.id, id),
+      });
       return true;
     }
 
@@ -1451,7 +1629,10 @@ export async function handleChatApi(
         return true;
       }
       if (command.name === 'stop') {
-        json(res, 200, { handled: true, text: stopText(await ctx.registry.abort(user, chatId)) });
+        // «Стоп» — это «останови всё»: реплики, ждущие очереди, человек уже
+        // отменил, иначе через секунду Икар снова начнёт думать без спроса.
+        const dropped = clearQueued(user, chatId);
+        json(res, 200, { handled: true, text: stopText(await ctx.registry.abort(user, chatId), dropped) });
         return true;
       }
       if (command.name === 'stats') {
@@ -1459,6 +1640,7 @@ export async function handleChatApi(
         return true;
       }
       if (command.name === 'clear') {
+        clearQueued(user, chatId);
         const outcome = await ctx.registry.clear(user, chatId);
         // Ленту не перечитываем: старые сообщения остаются, клиент рисует
         // разделитель «контекст очищен». `cleared` говорит, что он уместен.
@@ -1576,7 +1758,61 @@ export async function handleChatApi(
         json(res, 400, errorBody('нужны text или вложения'));
         return true;
       }
-      await streamTurn(req, res, ctx.config, user, ctx.registry, chat.id, text, attachments);
+      // Две разные операции, а не одна: «в очередь» — обещание доехать после
+      // текущего хода, «сейчас» — отмена чужой работы под свою реплику. Без
+      // параметра считаем, что человек просто написал: тогда при занятом
+      // разговоре реплика встаёт в очередь, а не пропадает молча.
+      const now = body.mode === 'now';
+      // Защёлка: пока мы прерываем прошлый ход и начинаем свой, очередь молчит.
+      const nowKey = now ? turnKey(user.id, chat.id) : '';
+      if (nowKey) starting.add(nowKey);
+      try {
+        if (inTurn(ctx.registry, user.id, chat.id)) {
+          if (now) {
+            if (ctx.registry.get(user.id, chat.id)?.compacting) {
+              json(res, 409, {
+                ...errorBody('сжимаю контекст — это не ход, прерывать его не стоит', 'conflict_error'),
+                retry: true,
+              });
+              return true;
+            }
+            const outcome = await ctx.registry.interrupt(user, chat.id);
+            if (outcome.status === 'failed') {
+              json(res, 409, { ...errorBody(`ход не прервался: ${outcome.error}`, 'conflict_error'), retry: true });
+              return true;
+            }
+            // Дождались: прежний ход дописал частичный ответ, и только теперь
+            // можно начинать новый, не влезая в занятую сессию.
+            if (outcome.status === 'stopped') await waitTurnEnd(user.id, chat.id, INTERRUPT_WAIT_MS);
+          }
+          // Не прервали (гонка в конце хода) — реплика всё равно не пропадает:
+          // она встаёт в очередь и доедет, когда разговор освободится.
+          if (inTurn(ctx.registry, user.id, chat.id)) {
+            const placed = enqueue(user.id, chat.id, { text, attachments });
+            if (!placed) {
+              json(
+                res,
+                429,
+                errorBody(`в очереди уже ${QUEUE_LIMIT} реплик — дождись хотя бы одной`, 'rate_limit_error'),
+              );
+              return true;
+            }
+            broadcastQueue(user.id, chat.id);
+            json(res, 202, {
+              queued: true,
+              position: placed.position,
+              queue: queueView(user.id, chat.id),
+              live: Boolean(runningTurn(user.id, chat.id)),
+            });
+            return true;
+          }
+        }
+        await streamTurn(req, res, ctx.config, user, ctx.registry, chat.id, text, attachments);
+      } finally {
+        if (nowKey) starting.delete(nowKey);
+      }
+      // Ход встал — следующая реплика из очереди, если она есть.
+      await drainQueued(ctx.config, user, ctx.registry, chat.id);
       return true;
     }
 
@@ -1594,7 +1830,33 @@ export async function handleChatApi(
       }
       const session = ctx.registry.get(user.id, chat.id);
       const ok = session ? await session.abort() : false;
-      json(res, 200, { ok });
+      // Кнопка «стоп» останавливает всё: иначе через мгновение начнётся первая
+      // реплика из очереди, а человек уже нажал «хватит».
+      const dropped = clearQueued(user, chat.id);
+      json(res, 200, { ok, dropped });
+      return true;
+    }
+
+    // Убрать одну реплику из очереди: человек передумал до того, как её отправили.
+    if (pathname === '/panel/api/chat/queue/drop' && req.method === 'POST') {
+      const body = await bodyOf(req);
+      const chatId = chatIdOf(body.chatId);
+      const chat = chatId ? findChatRecord(ctx.config, user, chatId) : null;
+      if (!chat) {
+        json(res, 404, errorBody('разговор не найден'));
+        return true;
+      }
+      if (!panelCanWrite(chat)) {
+        json(res, 403, errorBody(READ_ONLY_CHAT, 'permission_error'));
+        return true;
+      }
+      const id = typeof body.id === 'string' ? body.id : '';
+      if (!id || !dropQueued(user.id, chat.id, id)) {
+        json(res, 404, errorBody('такой реплики в очереди нет'));
+        return true;
+      }
+      broadcastQueue(user.id, chat.id);
+      json(res, 200, { queue: queueView(user.id, chat.id) });
       return true;
     }
   } catch (error) {

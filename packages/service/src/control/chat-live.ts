@@ -26,10 +26,13 @@ export type BulletinEvent = {
   /**
    * `title` — у разговора уточнилось имя (модель придумала его после хода или
    * человек переименовал из списка): панель меняет шапку и строку сайдбара.
+   * `queue` — поменялось то, что ждёт хода: панель перерисовывает «В очереди: N».
    */
-  type: 'busy' | 'idle' | 'title';
+  type: 'busy' | 'idle' | 'title' | 'queue';
   /** id/payload обновлённой записи разговора — для `idle` и `title`. */
   chat?: unknown;
+  /** Что стоит в очереди, — только для `queue`. */
+  queue?: Array<{ id: string; text: string }>;
 };
 
 type Watcher = (event: BulletinEvent) => void;
@@ -56,7 +59,8 @@ export function broadcast(event: BulletinEvent): void {
   }
 }
 
-type Turn = {
+/** Живой ход одного разговора. */
+export type Turn = {
   /** Накопленные события с начала хода: по ним новый зритель догоняет ход. */
   events: LiveEvent[];
   /** Кто сейчас смотрит: писцы HTTP-ответов. Ушёл — просто вычеркнули. */
@@ -64,6 +68,9 @@ type Turn = {
   /** Ход встал: replay отдаст хвост и закроет соединение. */
   done: boolean;
   startedAt: number;
+  /** Обещание конца хода: его ждут очередь и «прервать и отправить». */
+  finished: Promise<void>;
+  finish: () => void;
 };
 
 const turns = new Map<string, Turn>();
@@ -74,7 +81,11 @@ function key(userId: string, chatId: string): string {
 }
 
 export function startTurn(userId: string, chatId: string): Turn {
-  const turn: Turn = { events: [], subscribers: new Set(), done: false, startedAt: Date.now() };
+  let finish: () => void = () => {};
+  const finished = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const turn: Turn = { events: [], subscribers: new Set(), done: false, startedAt: Date.now(), finished, finish };
   turns.set(key(userId, chatId), turn);
   return turn;
 }
@@ -123,6 +134,15 @@ export function subscribe(turn: Turn, subscriber: Subscriber, replayFrom = 0): (
 
 export function finishTurn(turn: Turn): void {
   turn.done = true;
+  turn.finish();
+}
+
+/**
+ * Ход действительно встал. Прерывание только просит pi остановиться, а `busy`
+ * снимается раньше, чем ход дописал ответ: ждать конца нужно по этому обещанию.
+ */
+export function whenTurnDone(turn: Turn): Promise<void> {
+  return turn.finished;
 }
 
 /** Ход идёт прямо сейчас, а не только доигран минуту назад для запоздавшего зрителя. */
