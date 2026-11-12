@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { userPaths } from '../src/config.ts';
+import { createServer } from '../src/mcp/registry.ts';
 import { prepareUser, renderAgentsMd, renderMcpJson, renderSettingsJson } from '../src/workspace.ts';
 import { makeConfig, probe } from './fixtures.ts';
 
@@ -96,6 +97,42 @@ test('AGENTS.md зовёт подключать ленивый MCP только 
   assert.match(md, /`homeassistant` — Умный дом: свет, климат, сцены/);
   assert.match(md, /`mcp_connect`/);
   assert.match(md, /`mcp_status`/);
+});
+
+// Коннект идемпотентен и наружу ничего не меняет — значит и разрешения не требует.
+// Без этого правила модель перестраховывается и начинает каждый разговор с
+// «подключить MCP?», хотя человек уже разрешил, включив сервер в панели.
+test('AGENTS.md не просит разрешения на подключение и требует честной отбивки', () => {
+  const md = renderAgentsMd(
+    makeConfig({ mcp: { homeassistant: { url: 'http://10.0.0.16/api/mcp', description: 'Умный дом' } } }),
+  );
+
+  assert.match(md, /Подключение — не действие/);
+  assert.match(md, /разрешения на него не спрашивай/);
+  // Отбивка постфактум, а не просьба разрешить.
+  assert.match(md, /одна короткая строка в ответе/);
+  // Не поднялся — сказать честно и уйти другим маршрутом, а не выдумывать.
+  assert.match(md, /Не поднялся — скажи честно/);
+  assert.match(md, /другим маршрутом/);
+  // Вход по OAuth — отдельный шаг человека в браузере, а не разрешение модели.
+  assert.match(md, /делает его человек в браузере/);
+});
+
+// Активация без спроса — только для серверов, у которых доступ уже есть. OAuth без
+// входа в окружение не попадает вовсе: «молча» его не поднять, вход даёт человек.
+test('OAuth-сервер без входа в подсказку не попадает: его поднимает не модель', () => {
+  const config = makeConfig();
+  createServer(config, 'probe', {
+    name: 'Black Forest',
+    transport: 'streamable-http',
+    url: 'https://mcp.bfl.ai',
+    auth: 'oauth',
+  });
+  prepareUser(config, probe());
+
+  const md = fs.readFileSync(userPaths(config, probe()).agentsMd, 'utf8');
+  assert.doesNotMatch(md, /MCP-инструменты по требованию/);
+  assert.doesNotMatch(md, /black-forest/);
 });
 
 test('AGENTS.md не зовёт подключать eager-сервер: его инструменты уже есть', () => {
