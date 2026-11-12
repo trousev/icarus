@@ -751,7 +751,8 @@
     if (!box) return;
     try {
       const data = await api('/panel/mcp/recipes');
-      if (data.rule) el('mcp-rule').textContent = data.rule;
+      // Правило — подпись интерфейса, а не содержимое рецепта: она уже пришла
+      // из словаря страницы и переключается вместе с языком.
       if (data.checkedAt) el('mcp-checked').textContent = fill(ui.mcpChecked, { date: data.checkedAt });
       if (data.skipped) {
         el('mcp-skipped').textContent = data.skipped;
