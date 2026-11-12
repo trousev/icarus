@@ -26,6 +26,7 @@ import {
   type UserConfig,
 } from '../config.ts';
 import { containerEnv, LABEL_MANAGED, LABEL_SPEC, LABEL_USER, specFor } from './spec.ts';
+import { storePaths as skillStorePaths } from '../skills/registry.ts';
 
 /** Имя compose-проекта: по этой метке compose отличает свои контейнеры от чужих. */
 export const COMPOSE_PROJECT = 'icarus';
@@ -88,9 +89,13 @@ export function userVolumes(config: IcarusConfig, user: UserConfig): string[] {
     // Он лежит внутри уже смонтированного корня, поэтому docker накладывает его
     // поверх; порядок в списке задаёт родителя раньше ребёнка.
     bind(path.join(paths.workspaces, PRIVATE_WORKSPACE), containerWorkspace(PRIVATE_WORKSPACE), 'ro'),
-    // shared-memory — единственный каталог, который не принадлежит человеку:
+    // shared-memory — единственный каталог памяти, который не принадлежит человеку:
     // он общий на весь инстанс и лежит вне его дерева.
     bind(paths.sharedMemory, CONTAINER_PATHS.sharedMemory),
+    // Снимки расшаренных скиллов: общие на инстанс и только для чтения. Свой
+    // каталог `pi-agent/skills` остаётся личным, поэтому чужой скилл нельзя
+    // переписать или удалить из контейнера получателя.
+    bind(skillStorePaths(config).shared, CONTAINER_PATHS.sharedSkills, 'ro'),
     // Глобальная библиотека артефактов: одна на всех, лежит в dataDir и видна
     // каждому контейнеру как /artifacts. Права внутри папок проверяют панель,
     // MCP и folder-guard, а не docker.

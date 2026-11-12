@@ -41,6 +41,8 @@ export type PanelPage = {
   section: string;
   scope?: string;
   file?: string;
+  /** Владелец открытого скилла: у расшаренного он чужой и править его нельзя. */
+  owner?: string;
   /** Пустой редактор нового скилла: файла ещё нет, а страница уже есть. */
   fresh?: boolean;
   tab?: 'notes' | 'history';
@@ -250,6 +252,26 @@ export function shell(body: string): string {
   .file.skill .grow small { display:block; margin:2px 0 0; font-family:ui-sans-serif, system-ui, sans-serif;
                             font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .file .flag { color:var(--danger); margin-left:12px; cursor:help; }
+  /* Статус и владелец скилла в списке: включён/выключен и «поделился/расшарен» —
+     те же две вещи, что у MCP, поэтому и выглядят знакомо. */
+  .file.skill.off .grow { opacity:.55; }
+  .file .tags { display:flex; flex-direction:column; align-items:flex-end; gap:4px; flex:0 0 auto; }
+  .tag { display:inline-block; padding:1px 7px; border-radius:5px; font-size:10px; letter-spacing:.02em;
+         background:var(--raise); color:var(--dim); white-space:nowrap; }
+  .tag.on { background:#16301f; color:#9ece6a; }
+  .tag.off { background:#33222a; color:var(--danger); }
+  .tag.shared { background:var(--accent-soft); color:var(--accent); }
+  /* Переключатель — тот же, что в формах: маленький, чтобы не спорить с описанием. */
+  .switch { position:relative; display:inline-flex; width:34px; height:19px; flex:0 0 auto; }
+  .switch input { position:absolute; opacity:0; width:100%; height:100%; margin:0; cursor:pointer; z-index:1; }
+  .switch span { position:absolute; inset:0; border-radius:999px; background:var(--raise);
+                 border:1px solid var(--line); transition:background .15s; }
+  .switch span::after { content:''; position:absolute; top:2px; left:2px; width:13px; height:13px;
+                        border-radius:50%; background:var(--dim); transition:transform .15s, background .15s; }
+  .switch input:checked + span { background:var(--accent-soft); border-color:var(--accent); }
+  .switch input:checked + span::after { transform:translateX(15px); background:var(--accent); }
+  .switch input:disabled { cursor:default; }
+  .switch input:disabled + span { opacity:.5; }
 
   /* Редактор скилла: поля вместо построчных записей — тут пишут файл целиком. */
   .field { display:flex; flex-direction:column; gap:7px; padding:0 0 14px; }
@@ -271,6 +293,8 @@ export function shell(body: string): string {
   /* Подпись к блоку настроек — тот же начерк, что у заголовков карточек. */
   .field-label { color:var(--dim); font-size:10px; letter-spacing:.14em; margin:0 0 10px; }
   .check { display:flex; gap:9px; align-items:center; color:var(--dim); font-size:13px; padding:0 0 16px; }
+  /* display:flex сильнее атрибута hidden, поэтому прячем строку шаринга явно. */
+  .check[hidden] { display:none; }
   .check input { accent-color:var(--accent); margin:0; }
   .hint code, .check code { font-family:ui-monospace, monospace; color:var(--text); }
   .hit { padding:9px 12px; border-radius:8px; cursor:pointer; }
@@ -385,6 +409,9 @@ function sessionPage(session: PanelSession, page: PanelPage): string {
     section: page.section,
     scope,
     file: page.file ?? null,
+    // У своего скилла владелец — сам человек, у расшаренного — автор. Панель по
+    // этому полю решает, показывать редактор или только чтение.
+    owner: page.owner ?? session.user,
     fresh: Boolean(page.fresh),
     tab: page.tab === 'history' ? 'history' : 'notes',
     mode,
@@ -490,11 +517,14 @@ const endpoint = (name, extra = {}) => {
 // Адрес — это и есть состояние: файл, вкладку и пустой редактор видно в ссылке,
 // «назад» работает.
 function go(patch) {
-  const next = { scope: cfg.scope, file: cfg.file, tab: cfg.tab, fresh: cfg.fresh, ...patch };
+  const next = { scope: cfg.scope, file: cfg.file, owner: cfg.owner, tab: cfg.tab, fresh: cfg.fresh, ...patch };
   const query = new URLSearchParams();
   // Область в адресе есть только у памяти: у скиллов и математики её нет вовсе.
   if (cfg.mode === 'memory') query.set('scope', next.scope);
   if (next.file) query.set('file', next.file);
+  // Владельца пишем только у чужого скилла: у своего это лишний параметр, который
+  // ещё и сломает старые ссылки на «мой скилл».
+  if (next.file && next.owner && next.owner !== cfg.user) query.set('owner', next.owner);
   if (next.fresh) query.set('new', '1');
   if (next.file && next.tab === 'history') query.set('tab', 'history');
   const suffix = query.toString();
@@ -597,6 +627,18 @@ async function loadFiles() {
 // Скилл — это не файл в списке, а единица работы: имя, описание и инструкция.
 // Поэтому список показывает скиллы (с описанием — по нему модель и решает, когда
 // скилл открывать), а правая колонка — редактор файла целиком.
+/** Бейджи скилла: чей он, включён ли и не сломан ли. */
+function skillTags(skill) {
+  const tags = [];
+  if (skill.ownerIsMe) tags.push('<span class="tag' + (skill.shared ? ' shared' : '') + '">' +
+    (skill.shared ? 'поделился' : 'только мой') + '</span>');
+  else tags.push('<span class="tag shared">от ' + esc(skill.owner) + '</span>');
+  tags.push('<span class="tag ' + (skill.enabled ? 'on' : 'off') + '">' +
+    (skill.enabled ? 'включён' : 'выключен') + '</span>');
+  if (skill.problem) tags.push('<span class="flag" title="' + esc(skill.problem) + '">⚠</span>');
+  return tags.join('');
+}
+
 async function loadSkills() {
   const data = await api(endpoint('files'));
   const skills = data.skills || [];
@@ -606,22 +648,55 @@ async function loadSkills() {
     box.innerHTML = '<p class="empty">Скиллов пока нет: нажми «Новый скилл» и напиши первый.</p>';
     return;
   }
-  box.innerHTML = '<div class="files">' + skills.map((skill) =>
-    '<a class="file skill' + (skill.id === cfg.file ? ' active' : '') + '" href="#" data-id="' + esc(skill.id) + '">' +
-    '<span class="grow"><b>' + esc(skill.name) + '</b>' +
-    (skill.description ? '<small>' + esc(skill.description) + '</small>' : '') + '</span>' +
-    // Сломанный скилл pi пропустит молча — здесь об этом говорит пометка, а
-    // подробность («нет описания», «frontmatter не разбирается») лежит в подсказке.
-    (skill.problem
-      ? '<small class="flag" title="' + esc(skill.problem) + '">⚠</small>'
-      : '<small>' + skill.files + ' ' + plural(skill.files, 'файл', 'файла', 'файлов') + '</small>') +
-    '</a>').join('') + '</div>';
-  box.querySelectorAll('.file').forEach((node) => node.onclick = guard(() => openSkill(node.dataset.id)));
+  box.innerHTML = '<div class="files">' + skills.map((skill) => {
+    const owner = skill.owner || cfg.user;
+    const active = skill.id === cfg.file && owner === cfg.owner;
+    // Корневой SKILL.md — сам каталог скиллов: выключать его переездом нельзя.
+    const switchable = skill.id !== 'SKILL.md';
+    return '<div class="file skill' + (skill.enabled ? '' : ' off') + (active ? ' active' : '') +
+      '" data-id="' + esc(skill.id) + '" data-owner="' + esc(owner) + '">' +
+      '<a class="grow" href="#" data-open><b>' + esc(skill.name) + '</b>' +
+      (skill.description ? '<small>' + esc(skill.description) + '</small>' : '') + '</a>' +
+      '<span class="tags">' + skillTags(skill) +
+      (skill.problem ? '' : '<span class="tag">' + skill.files + ' ' + plural(skill.files, 'файл', 'файла', 'файлов') + '</span>') +
+      '</span>' +
+      (switchable
+        ? '<label class="switch" title="' + (skill.enabled ? 'выключить' : 'включить') + '">' +
+          '<input type="checkbox" data-toggle' + (skill.enabled ? ' checked' : '') + '><span></span></label>'
+        : '') +
+      '</div>';
+  }).join('') + '</div>';
+  box.querySelectorAll('[data-open]').forEach((node) => node.onclick = guard(() => {
+    const row = node.closest('.file');
+    openSkill(row.dataset.id, row.dataset.owner);
+  }));
+  box.querySelectorAll('[data-toggle]').forEach((node) => node.onchange = guard(() => toggleSkill(node)));
 }
 
-function openSkill(id) {
-  if (id === cfg.file && !cfg.fresh) return;
-  go({ file: id, fresh: false, tab: 'notes' });
+function openSkill(id, owner) {
+  if (id === cfg.file && owner === cfg.owner && !cfg.fresh) return;
+  go({ file: id, owner: owner || cfg.user, fresh: false, tab: 'notes' });
+}
+
+/** Переключатель в списке: включить/выключить скилл себе, не открывая редактор. */
+async function toggleSkill(input) {
+  const row = input.closest('.file');
+  const owner = row.dataset.owner || cfg.user;
+  const payload = { id: row.dataset.id, enabled: input.checked };
+  if (owner !== cfg.user) payload.owner = owner;
+  input.disabled = true;
+  try {
+    await api(endpoint('toggle'), { method: 'POST', body: JSON.stringify(payload) });
+    await Promise.all([loadCounts(), loadSkills()]);
+    // Открыт этот же скилл — редактор должен показать новый статус.
+    if (row.dataset.id === cfg.file && owner === cfg.owner && !cfg.fresh) await renderSkill();
+  } catch (error) {
+    // Не получилось — возвращаем галочку, чтобы она не врала о состоянии.
+    input.checked = !input.checked;
+    throw error;
+  } finally {
+    input.disabled = false;
+  }
 }
 
 /** Разметка редактора: статичная, значения подставляет fillSkill. */
@@ -649,7 +724,10 @@ function skillForm() {
     '<p class="hint">По этой строке Икар и решает, что пора открыть инструкцию: без описания pi скилл пропустит.</p>' +
     '<div class="field"><label for="skill-body">ИНСТРУКЦИЯ (SKILL.MD)</label>' +
     '<textarea id="skill-body" spellcheck="false" placeholder="# Как это делать&#10;&#10;1. …"></textarea></div>' +
-    '<label class="check"><input type="checkbox" id="skill-hidden"> скрыть от модели: звать только командой <code>/skill:имя</code></label>';
+    '<label class="check"><input type="checkbox" id="skill-hidden"> скрыть от модели: звать только командой <code>/skill:имя</code></label>' +
+    // Шаринг — только у своего скилла. У чужого этой строки нет: владелец решает сам.
+    '<label class="check" id="skill-share-row"><input type="checkbox" id="skill-share"> ' +
+    'поделиться с другими — приедет им выключенным</label>';
 }
 
 function fillSkill(data) {
@@ -657,6 +735,22 @@ function fillSkill(data) {
   el('skill-description').value = data ? data.description : '';
   el('skill-body').value = data ? data.body : '';
   el('skill-hidden').checked = Boolean(data && data.hidden);
+  el('skill-share').checked = Boolean(data && data.shared);
+}
+
+/** Поделиться или спрятать открытый скилл: то же, что бейдж в списке, но по-человечески. */
+async function toggleShare(checkbox) {
+  checkbox.disabled = true;
+  try {
+    await api(endpoint('share'), { method: 'POST', body: JSON.stringify({ id: cfg.file, shared: checkbox.checked }) });
+    await Promise.all([loadCounts(), loadSkills()]);
+    await renderSkill();
+  } catch (error) {
+    checkbox.checked = !checkbox.checked;
+    throw error;
+  } finally {
+    checkbox.disabled = false;
+  }
 }
 
 function skillStatus(text, bad) {
@@ -750,6 +844,9 @@ async function renderSkill() {
     showFileHead('Новый скилл', 'ещё не сохранён', false, false);
     el('content').innerHTML = skillForm();
     fillSkill(null);
+    // Новый скилл ещё никому не принадлежит, кроме автора: шаринг появится после
+    // сохранения, когда у скилла будет файл.
+    if (el('skill-share-row')) el('skill-share-row').hidden = true;
     el('skill-save').onclick = guard(() => saveSkill(null));
     if (el('skill-write')) el('skill-write').onclick = guard(writeForMe);
     // Начинать тут логично с идеи: поля ниже заполнятся сами.
@@ -757,20 +854,51 @@ async function renderSkill() {
     return;
   }
 
-  const data = await api(endpoint('skill', { id: cfg.file }));
+  // Свой скилл открывается без владельца в адресе: это старый контракт, и он
+  // должен продолжать работать. Чужой — с owner: иначе два одинаковых id
+  // не различить.
+  const skillUrl = cfg.owner && cfg.owner !== cfg.user
+    ? endpoint('skill', { id: cfg.file, owner: cfg.owner })
+    : endpoint('skill', { id: cfg.file });
+  const data = await api(skillUrl);
   // Дата изменения — день, а не метка времени: в шапке рядом с путём и числом
   // файлов часы только шумят.
-  const meta = data.id + ' · ' + data.files + ' ' + plural(data.files, 'файл', 'файла', 'файлов') +
+  const byWhom = data.ownerIsMe ? '' : ' · от ' + data.owner;
+  const state = data.enabled ? 'включён' : 'выключен';
+  const meta = data.id + byWhom + ' · ' + state + ' · ' + data.files + ' ' + plural(data.files, 'файл', 'файла', 'файлов') +
     ' · изменён ' + day(String(data.modified).slice(0, 10)) + (data.problem ? ' · ⚠ ' + data.problem : '');
-  showFileHead(data.name, meta, true);
-  if (cfg.tab === 'history') {
+  // Чужой скилл — только для чтения: редактор показывает содержимое, но поля
+  // выключены. Включить/выключить его себе можно: это личный переключатель, а не
+  // правка чужого файла. Историю чужого репозитория не показываем: она про файлы,
+  // которых у получателя нет.
+  const editable = data.canEdit !== false;
+  // У чужого скилла нет ни истории, ни скачивания: и то и другое ходит в личный
+  // репозиторий, а файл лежит в общем снимке, который только читается. У своего
+  // выключенного скачивание тоже не предлагаем: файл лежит в .disabled/, а
+  // маршрут файла ищет его в корне.
+  showFileHead(data.name, meta, editable, editable && data.enabled);
+  if (cfg.tab === 'history' && editable) {
     await renderHistory();
     return;
   }
-  el('content').innerHTML = skillForm();
+  const banner = editable
+    ? ''
+    : '<p class="hint">Скилл принадлежит <b>' + esc(data.owner) + '</b>: его можно включить или выключить, ' +
+      'но не править. Правки делает владелец, и они доезжают сюда сами.</p>';
+  el('content').innerHTML = banner + skillForm();
   fillSkill(data);
+  // Корневой SKILL.md — не отдельный скилл, а весь каталог: делиться им нельзя.
+  if (el('skill-share-row')) el('skill-share-row').hidden = !editable || data.id === 'SKILL.md';
+  if (!editable) {
+    ['skill-name', 'skill-description', 'skill-body', 'skill-hidden'].forEach((id) => { el(id).disabled = true; });
+    el('skill-save').hidden = true;
+    el('skill-delete').hidden = true;
+    skillStatus('Только чтение: скилл принадлежит ' + data.owner);
+    return;
+  }
   el('skill-save').onclick = guard(() => saveSkill(data.id));
   el('skill-delete').onclick = guard(() => deleteSkill(data));
+  if (el('skill-share')) el('skill-share').onchange = guard(() => toggleShare(el('skill-share')));
 }
 
 async function openFile(path) {

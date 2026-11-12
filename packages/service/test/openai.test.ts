@@ -70,6 +70,11 @@ test('контейнер монтирует память, сессии и реп
   const joined = userVolumes(config, { id: 'probe' }).join(' ');
   assert.match(joined, /\/data\/users\/probe\/workspaces:\/workspaces/);
   assert.match(joined, /\/data\/artifacts:\/artifacts/, 'глобальная библиотека артефактов — отдельным маунтом');
+  assert.match(
+    joined,
+    /\/data\/skills\/shared:\/workspaces\/\.icarus\/shared-skills:ro/,
+    'общие скиллы — только для чтения, чтобы получатель не мог переписать чужой',
+  );
   assert.match(joined, /\/data\/users\/probe\/workspaces\/private:\/workspaces\/private:ro/);
   // Код сервера артефактов нужен контейнеру всегда, даже без Maple; остальной
   // каталог tools (стенды и логи) в контейнер не едет.

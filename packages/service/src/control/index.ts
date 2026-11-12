@@ -45,15 +45,27 @@ import { commitAll, ensureRepo, fileHistory, hasChanges, log, revert, show } fro
 import { identifyPanelUser } from './identity.ts';
 import { parseSkillDraft, SKILL_IDEA_LIMIT } from './skill-draft.ts';
 import {
+  SKILLS_DISABLED_DIR,
   listSkills,
-  readSkill,
   removeSkill,
   searchSkills,
+  setSkillEnabled,
   skillExtensions,
   skillLabel,
   skillScope,
   writeSkill,
 } from './skills.ts';
+import {
+  SkillStoreError,
+  isShared as isSkillShared,
+  listVisible as listVisibleSkills,
+  readVisible as readVisibleSkill,
+  renameShare,
+  setShared as setSkillShared,
+  setSharedEnabled as setSkillSharedEnabled,
+  countVisible as countVisibleSkills,
+  syncShared as syncSharedSkills,
+} from '../skills/registry.ts';
 import { panelHtml, type PanelPage, type PanelSession } from './ui.ts';
 import { chatPage } from './chat-ui.ts';
 import { handleKeysApi } from './keys.ts';
@@ -112,6 +124,25 @@ const SCOPE_LABELS: Record<string, string> = {
 function json(res: ServerResponse, status: number, payload: unknown): void {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(payload));
+}
+
+/**
+ * Отказ хранилища общих скиллов.
+ *
+ * Ошибку формата (битый registry.json) человеку надо показать текстом, а не
+ * уронить весь раздел: он тогда поймёт, что чинить, и не решит, что скиллы пропали.
+ */
+function skillError(res: ServerResponse, error: unknown): void {
+  if (error instanceof SkillStoreError) {
+    json(
+      res,
+      error.status,
+      errorBody(error.message, error.status >= 500 ? 'server_error' : 'invalid_request_error'),
+    );
+    return;
+  }
+  logger.warn('скиллы: запрос панели не вышел', { error: String(error) });
+  json(res, 500, errorBody(error instanceof Error ? error.message : String(error), 'server_error'));
 }
 
 /**
@@ -303,8 +334,14 @@ function countsFor(config: IcarusConfig, userId: string): Record<string, number>
     shared: countFiles(paths.sharedMemory, memoryExtensions),
     // У скиллов считаем не файлы, а сами скиллы: бандл из десятка файлов —
     // это один скилл, и число рядом с разделом должно значить именно это.
+    // В счёт входят и расшаренные: панель показывает их в том же списке.
     skills: listSkills(paths.skills).length,
   };
+  try {
+    counts.skills = countVisibleSkills(config, userId);
+  } catch (error) {
+    logger.warn('скиллы: счётчик не собрался', { user: userId, error: String(error) });
+  }
   try {
     counts.mcp = countVisible(config, userId);
   } catch (error) {
@@ -538,6 +575,9 @@ async function sectionPage(
     // значит показывать раздел в виде, которого не бывает.
     scope: scopeFor(page.section, url.searchParams.get('scope')),
     file: url.searchParams.get('file') ?? undefined,
+    // Владелец открытого скилла: у своего он совпадает с человеком, у расшаренного
+    // приезжает в адресе. Без него два скилла с одинаковым id не различить.
+    owner: url.searchParams.get('owner') ?? undefined,
     // Пустой редактор нового скилла — тоже состояние, и живёт оно в адресе: ссылку
     // «заведи скилл» можно переслать, а «назад» возвращает к списку.
     fresh: url.searchParams.get('new') === '1',
@@ -673,7 +713,13 @@ async function handleApi(
     // У скиллов «файлы» — это сами скиллы: каталог с SKILL.md внутри и его бандл.
     // Панель показывает их списком, а не россыпью файлов, из которых они собраны.
     if (mode === 'skills') {
-      json(res, 200, { user: userId, scope, mode, root, skills: listSkills(root) });
+      try {
+        // Свои и расшаренные — в одном списке: человеку не важно, откуда скилл,
+        // ему важно, включён ли он и можно ли его править.
+        json(res, 200, { user: userId, scope, mode, root, skills: listVisibleSkills(config, userId) });
+      } catch (error) {
+        skillError(res, error);
+      }
       return;
     }
     json(res, 200, { user: userId, scope, mode, root, files: listFiles(root, '', allowed) });
@@ -686,12 +732,17 @@ async function handleApi(
   // «забудь строку» и «удали файл» полезли бы в SKILL.md.
   if (mode === 'skills') {
     if (req.method === 'GET' && name === 'skill') {
-      const skill = readSkill(root, url.searchParams.get('id') ?? '');
-      if (!skill) {
-        json(res, 404, errorBody('скилл не найден или недоступен'));
-        return;
+      const owner = url.searchParams.get('owner') ?? userId;
+      try {
+        const skill = readVisibleSkill(config, userId, owner, url.searchParams.get('id') ?? '');
+        if (!skill) {
+          json(res, 404, errorBody('скилл не найден или недоступен'));
+          return;
+        }
+        json(res, 200, skill);
+      } catch (error) {
+        skillError(res, error);
       }
-      json(res, 200, skill);
       return;
     }
 
@@ -723,7 +774,14 @@ async function handleApi(
 
       // Занятые имена знает только диск: модель про них ничего не знает и вполне
       // может предложить имя существующего скилла.
-      const taken = new Set(listSkills(root).map((skill) => skillLabel(skill.id)));
+      let taken: Set<string>;
+      try {
+        // Имена расшаренных скиллов тоже заняты: pi не должен получить два скилла
+        // с одним именем — он молча оставит только первый.
+        taken = new Set(listVisibleSkills(config, userId).map((skill) => skill.name));
+      } catch {
+        taken = new Set(listSkills(root).map((skill) => skillLabel(skill.id)));
+      }
       const parsed = parseSkillDraft(answer, taken);
       if (!parsed.ok) {
         logger.warn('панель: черновик скилла не разобрался', { user: userId, message: parsed.message });
@@ -753,8 +811,23 @@ async function handleApi(
     }
 
     if (req.method === 'POST' && name === 'save') {
+      // Чужой скилл только читается и включается. Править его у себя — значит
+      // незаметно разойтись с автором, поэтому панель отказывает, а не копирует.
+      const owner = typeof body.owner === 'string' && body.owner ? body.owner : userId;
+      if (owner !== userId) {
+        json(res, 403, errorBody('чужой скилл правит только его владелец', 'permission_error'));
+        return;
+      }
+      const previousId = typeof body.id === 'string' && body.id ? body.id : '';
+      let wasShared: boolean;
+      try {
+        wasShared = previousId !== '' && isSkillShared(config, userId, previousId);
+      } catch (error) {
+        skillError(res, error);
+        return;
+      }
       const result = writeSkill(root, {
-        ...(typeof body.id === 'string' && body.id ? { id: body.id } : {}),
+        ...(previousId ? { id: previousId } : {}),
         name: String(body.name ?? ''),
         description: String(body.description ?? ''),
         body: String(body.body ?? ''),
@@ -762,6 +835,17 @@ async function handleApi(
       });
       if (!result.ok) {
         json(res, 400, errorBody(result.message, 'invalid_request_error'));
+        return;
+      }
+      // Скилл был расшарен — снимок у остальных обязан догнать правку. Сначала
+      // переезд (имя могло смениться), потом снимок нового файла.
+      try {
+        if (wasShared) {
+          if (previousId !== result.id) renameShare(config, userId, previousId, result.id);
+          setSkillShared(config, userId, result.id, true);
+        }
+      } catch (error) {
+        skillError(res, error);
         return;
       }
       // Коммит — часть сохранения: у скиллов та же история и тот же откат, что у памяти.
@@ -776,19 +860,93 @@ async function handleApi(
     }
 
     if (req.method === 'POST' && name === 'delete') {
+      const owner = typeof body.owner === 'string' && body.owner ? body.owner : userId;
+      if (owner !== userId) {
+        json(res, 403, errorBody('чужой скилл удаляет только его владелец', 'permission_error'));
+        return;
+      }
       const id = String(body.id ?? '');
       const label = skillLabel(id);
       // Файлы бандла человек мог положить руками и не закоммитить: удалять их
       // безвозвратно нельзя, поэтому сначала фиксируем то, чего ещё нет в истории,
       // — тогда откат удаления вернёт скилл целиком, а не один SKILL.md.
-      if (await hasChanges(root, skillScope(id))) {
+      const skillPath = skillScope(id);
+      // Выключенный скилл лежит в `.disabled/`, и незакоммиченный бандл там тоже
+      // надо зафиксировать: иначе откат удаления вернёт один SKILL.md.
+      if ((await hasChanges(root, skillPath)) || (await hasChanges(root, `${SKILLS_DISABLED_DIR}/${skillPath}`))) {
         await commitAll(root, `skills: ${label} перед удалением`);
+      }
+      try {
+        // Снимаем шаринг до удаления: снимок у остальных не должен пережить скилл.
+        setSkillShared(config, userId, id, false);
+      } catch (error) {
+        skillError(res, error);
+        return;
       }
       const result = removeSkill(root, id);
       if (result.ok) await commitAll(root, `skills: удалить «${label}»`);
       if (result.ok) bumpResources(ctx, userId);
       logger.info('панель: скилл удалён', { user: userId, id, ok: result.ok });
       json(res, result.ok ? 200 : 400, result);
+      return;
+    }
+
+    // Включение/выключение. Свой скилл переезжает между корнем и `.disabled/`,
+    // чужой — просто флаг у меня: сам файл лежит в общем снимке и только читается.
+    if (req.method === 'POST' && name === 'toggle') {
+      const id = String(body.id ?? '');
+      const owner = typeof body.owner === 'string' && body.owner ? body.owner : userId;
+      if (typeof body.enabled !== 'boolean') {
+        json(res, 400, errorBody('enabled: ожидалось true или false', 'invalid_request_error'));
+        return;
+      }
+      try {
+        if (owner !== userId) {
+          setSkillSharedEnabled(config, userId, owner, id, body.enabled);
+        } else {
+          const shared = isSkillShared(config, userId, id);
+          const result = setSkillEnabled(root, id, body.enabled);
+          if (!result.ok) {
+            json(res, 400, errorBody(result.message, 'invalid_request_error'));
+            return;
+          }
+          // У владельца скилл может быть расшарен: снимок должен знать, что файл
+          // переехал в `.disabled/`, иначе у остальных он останется старым.
+          if (shared) setSkillShared(config, userId, result.id, true);
+          await commitAll(root, `skills: ${body.enabled ? 'включить' : 'выключить'} «${skillLabel(id)}»`);
+        }
+      } catch (error) {
+        skillError(res, error);
+        return;
+      }
+      bumpResources(ctx, userId);
+      logger.info('панель: скилл переключён', { user: userId, owner, id, enabled: body.enabled });
+      json(res, 200, { ok: true, id, owner, enabled: body.enabled });
+      return;
+    }
+
+    // Поделиться или спрятать. Только владелец: чужой скилл — не его имущество.
+    if (req.method === 'POST' && name === 'share') {
+      const id = String(body.id ?? '');
+      if (typeof body.shared !== 'boolean') {
+        json(res, 400, errorBody('shared: ожидалось true или false', 'invalid_request_error'));
+        return;
+      }
+      try {
+        setSkillShared(config, userId, id, body.shared);
+      } catch (error) {
+        skillError(res, error);
+        return;
+      }
+      bumpResources(ctx, userId);
+      logger.info('панель: скилл расшарен', { user: userId, id, shared: body.shared });
+      let detail: ReturnType<typeof readVisibleSkill> = null;
+      try {
+        detail = readVisibleSkill(config, userId, userId, id);
+      } catch {
+        // Шаринг уже случился; ответ без детали — не повод отдавать ошибку.
+      }
+      json(res, 200, detail ?? { ok: true });
       return;
     }
 
@@ -806,7 +964,17 @@ async function handleApi(
 
     if (req.method === 'POST' && name === 'revert') {
       const result = await revert(root, String(body.commit ?? ''));
-      if (result.ok) bumpResources(ctx, userId);
+      if (result.ok) {
+        // Откат мог вернуть удалённый скилл или убрать существующий: снимки у
+        // остальных обязаны это догнать, иначе они получат инструкцию, которой
+        // у автора уже нет.
+        try {
+          syncSharedSkills(config);
+        } catch (error) {
+          logger.warn('скиллы: снимки не обновились после отката', { user: userId, error: String(error) });
+        }
+        bumpResources(ctx, userId);
+      }
       logger.info('панель: откат скиллов', { user: userId, ok: result.ok });
       json(res, result.ok ? 200 : 400, result);
       return;

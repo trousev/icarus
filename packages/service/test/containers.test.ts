@@ -161,8 +161,13 @@ test('стек: контейнер человека — образ, маунты
     'приватный workspace монтируется только для чтения',
   );
   assert.ok(service.volumes.includes('/data/shared:/workspaces/.icarus/shared-memory'));
+  assert.ok(
+    service.volumes.includes('/data/skills/shared:/workspaces/.icarus/shared-skills:ro'),
+    'общие скиллы смонтированы только для чтения',
+  );
   assert.equal(service.environment.ICARUS_MODEL_FAST, 'deepinfra/deepseek-ai/DeepSeek-V4.1-Flash:low');
   assert.equal(service.environment.ICARUS_USER_ID, 'probe');
+  assert.equal(service.environment.ICARUS_SKILLS_DIR, '/home/node/.pi/agent/skills');
 });
 
 // Смысл переезда: рабочие папки — в /workspaces, а служебное собрано в
