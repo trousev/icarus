@@ -389,6 +389,32 @@ export function workspaceForConversation(
   )?.workspace;
 }
 
+/**
+ * Переключает разговор в другой workspace. Папка живёт в chats.json рядом с
+ * разговором, поэтому выбор видят все входы и он переживает перезапуск сервиса.
+ * Сессия pi о переезде узнаёт при следующем ходе: реестр сверяет папку живой
+ * сессии с записью и поднимает её заново в новой (см. SessionRegistry.acquire).
+ */
+export function setChatWorkspace(
+  config: IcarusConfig,
+  user: UserConfig,
+  conversationId: string,
+  workspace: string,
+): ChatRecord {
+  // Запись может быть ещё не заведена: /workspace — законная первая команда
+  // в новом разговоре, до первого хода.
+  ensureChat(config, user, conversationId, channelForConversation(conversationId), workspace);
+  const chats = readChats(config, user);
+  const chat = chats.find((item) => item.conversationId === conversationId || item.id === conversationId);
+  // ensureChat только что записал разговор, так что находим его всегда; если
+  // файл всё же не прочитался, пусть вызывающий не делает вид, что переключил.
+  if (!chat) throw new Error(`разговор ${conversationId} не записался в реестр`);
+  if (chat.workspace === workspace) return chat;
+  chat.workspace = workspace;
+  writeChats(config, user, chats);
+  return chat;
+}
+
 /** Артефакт разговора: у обычного чата его нет, у правки артефакта — есть. */
 export function artifactForConversation(
   config: IcarusConfig,

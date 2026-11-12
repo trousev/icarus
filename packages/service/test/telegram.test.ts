@@ -26,6 +26,9 @@ import {
   NO_USERNAME,
   RENAME_NEEDS_NAME,
   UNKNOWN_COMMAND,
+  WORKSPACE_PRIVATE_REFUSED,
+  workspaceUnknown,
+  workspacesText,
 } from '../src/telegram/bot.ts';
 import {
   TelegramApi,
@@ -36,7 +39,8 @@ import {
 } from '../src/telegram/api.ts';
 import { MESSAGE_LIMIT, PLACEHOLDER, splitPoint } from '../src/telegram/reply.ts';
 import { userPaths } from '../src/config.ts';
-import { ensureChat, recordTurn } from '../src/sessions/chats.ts';
+import { ensureChat, readChats, recordTurn, workspaceForConversation } from '../src/sessions/chats.ts';
+import { createWorkspace } from '../src/workspaces.ts';
 import { makeConfig, probe } from './fixtures.ts';
 
 /** Байты, которые «скачались» из Telegram: содержимое в тестах не важно. */
@@ -768,6 +772,7 @@ test('/start и /help рассказывают, что бот умеет, и в 
   assert.match(chatText(state, 42), /\/stop — остановиться/);
   assert.match(chatText(state, 42), /\/stats —/);
   assert.equal(HELP.includes('/clear'), true);
+  assert.match(HELP, /\/workspace <имя> — переключить разговор в другую папку/, 'команда видна в /help');
   assert.deepEqual(session.prompts, [], 'команды в разговор не уезжают');
 });
 
@@ -877,6 +882,91 @@ test('/skills перечисляет, что можно позвать в чат
   assert.deepEqual(calls, [{ command: 'skills', user: 'probe', conversationId: 'telegram-42' }]);
   assert.match(text, /\/skill:brave-search — поиск в интернете/);
   assert.match(text, /\/fix-tests — починить тесты/);
+});
+
+test('/workspace показывает текущую папку и список, а приватного в списке нет', async () => {
+  const config = makeConfig({ telegram: { token: 'bot-token', mapping: { trousev: 'probe' } } });
+  const { bot, state } = makeBot({ config });
+  createWorkspace(config, probe(), 'Работа');
+
+  await bot.handleUpdate(messageUpdate('/workspace'));
+
+  const text = chatText(state, 42);
+  assert.match(text, /^Сейчас: Разговор$/m);
+  assert.match(text, /^Разговор$/m);
+  assert.match(text, /^Работа$/m);
+  assert.doesNotMatch(text, /Приватный/, 'приватный в переключателе не участвует');
+});
+
+test('/workspace переключает разговор и запоминает папку в chats.json', async () => {
+  const config = makeConfig({ telegram: { token: 'bot-token', mapping: { trousev: 'probe' } } });
+  const { bot, state, calls, session } = makeBot({ config });
+  const work = createWorkspace(config, probe(), 'Работа');
+
+  await bot.handleUpdate(messageUpdate('/workspace Работа'));
+
+  assert.equal(chatText(state, 42), 'Переключил на «Работа».');
+  assert.equal(workspaceForConversation(config, probe(), 'telegram-42'), work.slug, 'папка разговора — в реестре');
+  assert.deepEqual(calls, [], 'переключение не тратит ход модели');
+  assert.deepEqual(session.prompts, [], 'и не уезжает в pi репликой');
+
+  // По slug тоже можно: в панели папка называется «Работа», а на диске — rabota.
+  await bot.handleUpdate(messageUpdate('/workspace talk'));
+  assert.equal(chatText(state, 42), ['Переключил на «Работа».', 'Переключил на «Разговор».'].join('\n'));
+  assert.equal(workspaceForConversation(config, probe(), 'telegram-42'), 'talk');
+});
+
+test('привязка workspace переживает перезапуск бота: её читают из chats.json', async () => {
+  const config = makeConfig({ telegram: { token: 'bot-token', mapping: { trousev: 'probe' } } });
+  createWorkspace(config, probe(), 'Работа');
+
+  const first = makeBot({ config });
+  await first.bot.handleUpdate(messageUpdate('/workspace Работа'));
+
+  // Новый процесс помнит только chats.json: ни очередей, ни живых сессий у него нет.
+  const second = makeBot({ config });
+  await second.bot.handleUpdate(messageUpdate('/workspace'));
+
+  assert.match(chatText(second.state, 42), /^Сейчас: Работа$/m);
+});
+
+test('в топиках у каждого разговора своя папка, а корень чата не переключается', async () => {
+  const config = makeConfig({ telegram: { token: 'bot-token', mapping: { trousev: 'probe' } } });
+  createWorkspace(config, probe(), 'Работа');
+  const { bot } = makeBot({ config });
+
+  await bot.handleUpdate(messageUpdate('/workspace Работа', { threadId: 17 }));
+
+  assert.equal(workspaceForConversation(config, probe(), 'telegram-42-17'), 'rabota');
+  assert.equal(workspaceForConversation(config, probe(), 'telegram-42'), undefined, 'корень живёт своей папкой');
+});
+
+test('в приватный workspace переключиться нельзя — ни по slug, ни по имени', async () => {
+  const config = makeConfig({ telegram: { token: 'bot-token', mapping: { trousev: 'probe' } } });
+  const { bot, state } = makeBot({ config });
+
+  await bot.handleUpdate(messageUpdate('/workspace private'));
+  await bot.handleUpdate(messageUpdate('/workspace Приватный'));
+
+  assert.equal(
+    chatText(state, 42),
+    [WORKSPACE_PRIVATE_REFUSED, WORKSPACE_PRIVATE_REFUSED].join('\n'),
+  );
+  assert.deepEqual(readChats(config, probe()), [], 'неприкосновенный workspace не заводит привязку');
+});
+
+test('/workspace с неизвестным именем не выдумывает папку', async () => {
+  const config = makeConfig({ telegram: { token: 'bot-token', mapping: { trousev: 'probe' } } });
+  const { bot, state } = makeBot({ config });
+
+  await bot.handleUpdate(messageUpdate('/workspace Луна'));
+
+  assert.equal(chatText(state, 42), workspaceUnknown('Луна'));
+  assert.deepEqual(readChats(config, probe()), []);
+});
+
+test('/workspace без единой папки говорит об этом, а не показывает пустоту', () => {
+  assert.equal(workspacesText('Разговор', []), 'Переключать некуда: рабочих папок нет.');
 });
 
 test('в группе у каждого человека свой разговор', () => {
