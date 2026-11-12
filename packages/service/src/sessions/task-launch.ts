@@ -1,9 +1,11 @@
 // Запуск задачи по расписанию: новый разговор и промпт в него — тем же путём, что и
 // реплика из панели (SessionRegistry), только человек ничего не нажимает.
 //
-// Новый разговор — обычный чат, а не служебный тред: он появляется в списке, его можно
-// открыть, продолжить и убрать в архив. Заголовок берём из промпта сразу: человек
-// видит в списке, что именно запустилось, ещё до первого слова модели.
+// Новый разговор помечен задачей: в общем списке таких чатов нет, панель собирает
+// их в виртуальное дерево «Задачи → имя задачи → дата запуска». Заголовок берём из
+// промпта сразу: человек видит в дереве, что именно запустилось, ещё до первого
+// слова модели. Своего имени у задачи нет — имя ветки и заголовок растут из одного
+// и того же промпта.
 import { DEFAULT_WORKSPACE, type IcarusConfig, type UserConfig } from '../config.ts';
 import { log, redact } from '../log.ts';
 import { createChatRecord, recordTurn } from './chats.ts';
@@ -23,7 +25,11 @@ export function taskLauncher(config: IcarusConfig, registry: SessionRegistry): T
     busy: (user: UserConfig) => registry.busyConversations(user.id).length > 0,
     launch: async (user, task) => {
       const workspace = task.workspace ?? DEFAULT_WORKSPACE;
-      const chat = createChatRecord(config, user, workspace, new Date(), { title: titleFor(task.prompt) });
+      const name = titleFor(task.prompt);
+      const chat = createChatRecord(config, user, workspace, new Date(), {
+        title: name,
+        task: { id: task.id, name },
+      });
       const chatId = chat.conversationId ?? chat.id;
       try {
         // Реестр заводит сессию pi в этом разговоре; промпт уезжает в неё как обычная

@@ -53,6 +53,14 @@ export type ChatTelegram = {
   threadId: number | null;
 };
 
+/**
+ * Разговор завела задача по расписанию. Это не папка: человек такой чат руками
+ * не перекладывает, а панель собирает из меток виртуальное дерево «Задачи».
+ * Имя храним здесь, а не берём из задачи: задачу могли удалить, а подпись ветки
+ * должна остаться прежней.
+ */
+export type ChatTaskMark = { id: string; name: string };
+
 export type ChatRecord = {
   id: string;
   title: string;
@@ -79,6 +87,13 @@ export type ChatRecord = {
    * разговоров и у старых записей — до первого сообщения бота.
    */
   telegram?: ChatTelegram;
+  /**
+   * Признак «чат создан задачей». В общем списке такой разговор не показывается,
+   * а живёт в виртуальном дереве «Задачи»; в folders.json про него ничего нет.
+   */
+  task?: ChatTaskMark;
+  /** Когда задача запустилась: по этой дате разговор лежит в ветке дерева. */
+  runAt?: string;
   /**
    * Артефакт, который правит этот разговор. Обычный чат работает в workspace,
    * а артефактный — строго в папке артефакта, поэтому одной только workspace
@@ -210,6 +225,13 @@ function normalize(value: unknown): ChatRecord | null {
       ? { channel: turn.channel, at: turn.at }
       : null;
 
+  // Метка задачи без id или имени бесполезна: такой чат некуда положить в дерево,
+  // и он честно остаётся обычным разговором.
+  const task = item.task && typeof item.task === 'object' ? (item.task as Record<string, unknown>) : null;
+  const taskId = task && typeof task.id === 'string' ? task.id.trim() : '';
+  const taskName = task && typeof task.name === 'string' ? task.name.trim() : '';
+  const taskMark: ChatTaskMark | null = taskId && taskName ? { id: taskId, name: taskName } : null;
+
   return {
     id: item.id,
     title: typeof item.title === 'string' && item.title.trim() ? item.title : defaultTitle(channel),
@@ -221,6 +243,9 @@ function normalize(value: unknown): ChatRecord | null {
     ...(sessions.length > 0 ? { sessions } : {}),
     // Пустой папки не бывает: ссылка на удалённую папку равносильна «Входящим».
     ...(typeof item.folder === 'string' && item.folder !== '' ? { folder: item.folder } : {}),
+    ...(taskMark ? { task: taskMark } : {}),
+    // Дату запуска без метки не храним: у обычного чата её роль играет createdAt.
+    ...(taskMark && typeof item.runAt === 'string' && item.runAt ? { runAt: item.runAt } : {}),
     // Пустая строка — это «обычный чат», а не артефакт с пустым именем.
     ...(typeof item.artifact === 'string' && item.artifact !== '' ? { artifact: item.artifact } : {}),
     ...(telegram ? { telegram } : {}),
@@ -587,7 +612,7 @@ export function createChatRecord(
   user: UserConfig,
   workspace: string = DEFAULT_WORKSPACE,
   now = new Date(),
-  options: { title?: string; artifact?: string } = {},
+  options: { title?: string; artifact?: string; task?: ChatTaskMark } = {},
 ): ChatRecord {
   const id = `web-${now.getTime().toString(36)}-${crypto.randomBytes(3).toString('hex')}`;
   const chat: ChatRecord = {
@@ -598,6 +623,8 @@ export function createChatRecord(
     workspace,
     conversationId: id,
     ...(options.artifact ? { artifact: options.artifact } : {}),
+    // Дата запуска — момент создания: у чата задачи это одно и то же событие.
+    ...(options.task ? { task: options.task, runAt: now.toISOString() } : {}),
   };
   const chats = readChats(config, user);
   chats.unshift(chat);

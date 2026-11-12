@@ -60,6 +60,11 @@ test('запуск заводит новый разговор: заголово�
   assert.equal(chats[0].workspace, 'talk');
   // Заголовок — промпт, а не «Новый чат»: в списке видно, что запустилось.
   assert.equal(chats[0].title, PROMPT);
+  // Метка задачи: по ней панель убирает разговор из общего списка в дерево
+  // «Задачи → имя задачи → дата запуска».
+  assert.deepEqual(chats[0].task, { id: 'task-1', name: PROMPT });
+  assert.ok(chats[0].runAt, 'дата запуска сохранена для ветки дерева');
+  assert.equal(chats[0].folder, undefined, 'задача не превращается в папку меню');
   // Промпт уехал целиком, а не заголовком.
   assert.deepEqual(sent, [PROMPT]);
   assert.deepEqual(acquired, [{ conversationId: outcome.chatId, workspace: 'talk' }]);
