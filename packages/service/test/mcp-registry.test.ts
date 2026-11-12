@@ -12,6 +12,7 @@ import path from 'node:path';
 import { userPaths } from '../src/config.ts';
 import { prepareUser, renderAgentsMd, renderMcpJson } from '../src/workspace.ts';
 import {
+  clearCredentials,
   createServer,
   deleteServer,
   editorOf,
@@ -329,4 +330,84 @@ test('сервер не может занять имя общего из config.
   });
   assert.notEqual(server.id, 'echo');
   assert.equal(config.mcp.echo?.command, 'node', 'общий сервер не подменён');
+});
+
+// --- общий сервер из config.yaml: секреты у каждого свои ----------------------
+
+function globalConfig() {
+  return configWith({
+    mcp: {
+      homeassistant: {
+        transport: 'streamable-http',
+        url: 'http://ha.local/api/mcp',
+        secrets: ['Authorization'],
+        description: 'Умный дом',
+      },
+    },
+  });
+}
+
+test('общий MCP с секретом ждёт доступа, пока человек не ввёл свой ключ', () => {
+  const config = globalConfig();
+  const view = viewOf(config, readStore(config), 'probe', 'homeassistant');
+  assert.ok(view);
+  assert.equal(view.auth, 'headers', 'объявленный секрет — это ключ доступа');
+  assert.equal(view.authState, 'needed', 'без ключа сервер не готов');
+  assert.equal(view.ready, false);
+  assert.deepEqual(view.credentialHeaders, ['Authorization'], 'панель знает, что спросить');
+  assert.equal(view.enabled, true, 'включён себе по умолчанию');
+  assert.equal(view.canEdit, false, 'команду и адрес задаёт config.yaml');
+  assert.equal(view.canDelete, false, 'удалить общий сервер нельзя');
+  assert.equal(view.canShare, false);
+
+  const effective = effectiveServers(config, readStore(config), 'probe');
+  assert.deepEqual(Object.keys(effective.servers), [], 'без доступа сервер не попадает в mcp.json');
+  assert.deepEqual(effective.skipped, ['homeassistant']);
+});
+
+test('общий MCP: у двух людей разные значения одного секрета', () => {
+  const config = globalConfig();
+  saveCredentials(config, 'probe', 'homeassistant', { headers: { Authorization: 'Bearer first' } });
+  saveCredentials(config, 'probe2', 'homeassistant', { headers: { Authorization: 'Bearer second' } });
+
+  const first = effectiveServers(config, readStore(config), 'probe').servers.homeassistant;
+  const second = effectiveServers(config, readStore(config), 'probe2').servers.homeassistant;
+  assert.equal(first?.headers?.Authorization, 'Bearer first');
+  assert.equal(second?.headers?.Authorization, 'Bearer second');
+  assert.equal(first?.url, 'http://ha.local/api/mcp', 'адрес общий — из config.yaml');
+
+  const firstView = viewOf(config, readStore(config), 'probe', 'homeassistant');
+  assert.equal(firstView?.authState, 'ready');
+  assert.deepEqual(firstView?.credentialHeaders, ['Authorization']);
+});
+
+test('общий MCP: очистить доступ — снова ждёт доступа, чужой ключ не подхватывается', () => {
+  const config = globalConfig();
+  saveCredentials(config, 'probe', 'homeassistant', { headers: { Authorization: 'Bearer mine' } });
+  saveCredentials(config, 'probe2', 'homeassistant', { headers: { Authorization: 'Bearer other' } });
+
+  clearCredentials(config, 'probe', 'homeassistant');
+  assert.equal(viewOf(config, readStore(config), 'probe', 'homeassistant')?.authState, 'needed');
+  assert.deepEqual(Object.keys(effectiveServers(config, readStore(config), 'probe').servers), []);
+  assert.equal(
+    effectiveServers(config, readStore(config), 'probe2').servers.homeassistant?.headers?.Authorization,
+    'Bearer other',
+    'у второго доступ остался',
+  );
+});
+
+test('общий MCP без объявленных секретов: ключа нет, всё как раньше', () => {
+  const config = configWith({
+    mcp: { legacy: { url: 'http://legacy.local/mcp', headers: { Authorization: 'Bearer shared' } } },
+  });
+  assert.equal(viewOf(config, readStore(config), 'probe', 'legacy')?.authState, 'ready');
+  assert.equal(
+    effectiveServers(config, readStore(config), 'probe').servers.legacy?.headers?.Authorization,
+    'Bearer shared',
+    'общий ключ из config.yaml продолжает работать',
+  );
+  assert.throws(
+    () => saveCredentials(config, 'probe', 'legacy', { headers: { Authorization: 'Bearer mine' } }),
+    /нет объявленных секретов/,
+  );
 });

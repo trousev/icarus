@@ -105,9 +105,8 @@ users:
   assert.deepEqual(config.users, [{ id: 'probe' }, { id: 'probe2' }]);
 });
 
-// HTTP-MCP с ключом доступа: заголовок авторизации собирается подстановкой, как всё
-// секретное в конфиге — сам ключ лежит в .env, а не в config.yaml (он в git).
-test('mcp.headers: заголовки HTTP-сервера, ключ подставляется из окружения', () => {
+// Секреты общего MCP: в конфиге только имена, значения — у каждого человека свои.
+test('mcp.secrets: имена секретов доезжают до панели, значений в конфиге нет', () => {
   const file = writeConfig(`apiKey: token
 models: [{ provider: deepinfra, id: flash, tier: fast }]
 mcp:
@@ -115,15 +114,48 @@ mcp:
     url: http://10.0.0.16/api/mcp
     description: Умный дом
     headers:
-      Authorization: Bearer \${HOMEASSISTANT_TOKEN}
+      X-Client: icarus
+    secrets: [Authorization]
 users: [probe]
 `);
-  const config = loadConfig(file, { HOMEASSISTANT_TOKEN: 'llat' } as NodeJS.ProcessEnv);
+  const config = loadConfig(file, {} as NodeJS.ProcessEnv);
 
   assert.equal(config.mcp.homeassistant?.url, 'http://10.0.0.16/api/mcp');
-  assert.deepEqual(config.mcp.homeassistant?.headers, { Authorization: 'Bearer llat' });
+  assert.deepEqual(config.mcp.homeassistant?.secrets, ['Authorization']);
+  assert.deepEqual(config.mcp.homeassistant?.headers, { 'X-Client': 'icarus' }, 'постоянные заголовки остались');
   assert.equal(config.mcp.homeassistant?.description, 'Умный дом');
   assert.equal(config.mcp.homeassistant?.transport, undefined, 'транспорт выведет mcp.json: url — это HTTP');
+});
+
+// Ключ MCP больше не приходит из .env: иначе он был бы один на всех и мимо панели.
+test('mcp: подстановка ${VAR} и env: в заголовках и env ломается с понятной ошибкой', () => {
+  for (const block of [
+    '    headers:\n      Authorization: Bearer ${HOMEASSISTANT_TOKEN}\n',
+    '    env:\n      TODOIST_API_KEY: env:TODOIST_TOKEN\n',
+  ]) {
+    const file = writeConfig(`apiKey: token
+models: [{ provider: deepinfra, id: flash, tier: fast }]
+mcp:
+  homeassistant:
+    url: http://10.0.0.16/api/mcp
+${block}users: [probe]
+`);
+    assert.throws(() => loadConfig(file, { HOMEASSISTANT_TOKEN: 'llat' }), /подстановка из окружения в MCP больше не работает/);
+  }
+});
+
+test('mcp.secrets: значение секрета в config.yaml — ошибка, а не тихая утечка', () => {
+  const file = writeConfig(`apiKey: token
+models: [{ provider: deepinfra, id: flash, tier: fast }]
+mcp:
+  homeassistant:
+    url: http://10.0.0.16/api/mcp
+    secrets: [Authorization]
+    headers:
+      Authorization: Bearer llat
+users: [probe]
+`);
+  assert.throws(() => loadConfig(file, {}), /mcp\.homeassistant\.secrets: «Authorization» объявлен секретом/);
 });
 
 test('mcp.headers: не строка — ошибка с путём до заголовка', () => {

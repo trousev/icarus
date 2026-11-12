@@ -528,6 +528,42 @@ export function isHidden(config: IcarusConfig, id: string): boolean {
   return config.mcp?.[id]?.hidden === true;
 }
 
+/**
+ * Общий сервер из config.yaml в том же виде, что и личный: панель, проверка
+ * доступа и mcp.json должны видеть одно и то же.
+ *
+ * Секретов в config.yaml нет — только имена: у stdio это переменные окружения,
+ * у HTTP — заголовки. Значения приходят из credentials.json этого человека,
+ * поэтому у одного и того же общего сервера ключ у каждого свой.
+ */
+export function globalServerOf(config: IcarusConfig, id: string): UserMcpServer | null {
+  const server = config.mcp?.[id];
+  if (!server) return null;
+  const transport = server.transport ?? (server.url ? 'streamable-http' : 'stdio');
+  const names = server.secrets ?? [];
+  const own = names.length > 0;
+  return {
+    id,
+    name: id,
+    description: server.description ?? '',
+    transport,
+    ...(server.url === undefined ? {} : { url: server.url }),
+    ...(server.command === undefined ? {} : { command: server.command }),
+    ...(server.args === undefined ? {} : { args: server.args }),
+    ...(server.headers === undefined ? {} : { headers: server.headers }),
+    ...(server.env === undefined ? {} : { env: server.env }),
+    ...(own && transport !== 'stdio' ? { credentialHeaders: names } : {}),
+    ...(own && transport === 'stdio' ? { credentialEnv: names } : {}),
+    // Без объявленных секретов сервер живёт как раньше: заголовки из config.yaml
+    // общие на всех, и настраивать человеку нечего.
+    auth: own || server.headers ? 'headers' : 'none',
+    owner: '',
+    shared: true,
+    createdAt: '',
+    updatedAt: '',
+  };
+}
+
 function enabledFor(store: McpStore, userId: string, id: string, fallback: boolean): boolean {
   return store.prefs[userId]?.[id] ?? fallback;
 }
@@ -594,9 +630,27 @@ export function maskUrl(raw: string): string {
 
 export function maskTarget(server: UserMcpServer): string {
   if (server.transport === 'stdio') {
-    return [server.command ?? '', ...(server.args ?? [])].filter(Boolean).join(' ');
+    // Постоянные env — часть описания и они не секреты. Без них два сервера
+    // одного рецепта (два OPDS-каталога) выглядели бы в панели одинаково.
+    const env = Object.entries(server.env ?? {}).map(([name, value]) => `${name}=${value}`);
+    return [server.command ?? '', ...(server.args ?? []), ...env].filter(Boolean).join(' ');
   }
   return maskUrl(server.url ?? '');
+}
+
+/**
+ * Имена секретов для панели: сохранённые важнее ожидаемых (рецепт знает, что
+ * спросить, а человек — что уже ввёл). Значения сюда не уезжают никогда.
+ */
+function credentialNames(credentials: McpCredentials | undefined, server: UserMcpServer): Partial<McpView> {
+  const headers = Object.keys(credentials?.headers ?? {});
+  const env = Object.keys(credentials?.env ?? {});
+  const headerNames = headers.length > 0 ? headers : (server.credentialHeaders ?? []);
+  const envNames = env.length > 0 ? env : (server.credentialEnv ?? []);
+  return {
+    ...(headerNames.length === 0 ? {} : { credentialHeaders: headerNames }),
+    ...(envNames.length === 0 ? {} : { credentialEnv: envNames }),
+  };
 }
 
 export function viewOf(
@@ -607,23 +661,29 @@ export function viewOf(
   now = Date.now(),
 ): McpView | null {
   if (isGlobal(config, id)) {
-    const server = config.mcp[id];
+    const server = globalServerOf(config, id);
     if (!server || isHidden(config, id)) return null;
     const enabled = enabledFor(store, userId, id, true);
+    const credentials = store.credentials[userId]?.[id];
+    const auth = authStateOf(server, credentials, now);
     return {
       id,
       name: id,
-      description: server.description ?? '',
-      transport: server.transport ?? (server.url ? 'streamable-http' : 'stdio'),
-      target: server.url ? maskUrl(server.url) : [server.command ?? '', ...(server.args ?? [])].join(' '),
-      auth: server.headers ? 'headers' : 'none',
+      description: server.description,
+      transport: server.transport,
+      target: maskTarget(server),
+      auth: server.auth,
       global: true,
       owner: null,
       ownerIsMe: false,
       shared: true,
       enabled,
-      ready: true,
-      authState: server.headers ? 'ready' : 'none',
+      ready: auth.ready,
+      authState: auth.state,
+      ...(auth.message === undefined ? {} : { authMessage: auth.message }),
+      ...credentialNames(credentials, server),
+      // Команду и адрес задаёт config.yaml, поэтому «Изменить» у общего сервера
+      // нет. Своё у него — ключи (если объявлены секреты) и включённость.
       canEdit: false,
       canShare: false,
       canDelete: false,
@@ -653,18 +713,7 @@ export function viewOf(
     authState: auth.state,
     ...(auth.message === undefined ? {} : { authMessage: auth.message }),
     ...(server.mimic === true ? { mimic: true } : {}),
-    // Сохранённые имена важнее ожидаемых, но если ключей ещё нет, панель должна
-    // знать, что спросить: иначе «Настроить доступ» откроется пустым.
-    ...(() => {
-      const headers = Object.keys(credentials?.headers ?? {});
-      const names = headers.length > 0 ? headers : (server.credentialHeaders ?? []);
-      return names.length === 0 ? {} : { credentialHeaders: names };
-    })(),
-    ...(() => {
-      const env = Object.keys(credentials?.env ?? {});
-      const names = env.length > 0 ? env : (server.credentialEnv ?? []);
-      return names.length === 0 ? {} : { credentialEnv: names };
-    })(),
+    ...credentialNames(credentials, server),
     canEdit: ownerIsMe,
     canShare: ownerIsMe,
     canDelete: ownerIsMe,
@@ -722,6 +771,21 @@ export function mcpProxyBase(config: IcarusConfig): string {
   return `${base.replace(/\/+$/, '')}/mcp-proxy`;
 }
 
+/**
+ * Дополняет описание общего сервера личными секретами этого человека. Постоянные
+ * заголовки и env остаются: секреты их не заменяют, а ложатся рядом.
+ */
+function withUserCredentials(server: McpServerConfig, credentials: McpCredentials | undefined): McpServerConfig {
+  if (!credentials) return server;
+  const transport = server.transport ?? (server.url ? 'streamable-http' : 'stdio');
+  if (transport === 'stdio') {
+    const env = { ...(server.env ?? {}), ...(credentials.env ?? {}) };
+    return { ...server, ...(Object.keys(env).length === 0 ? {} : { env }) };
+  }
+  const headers = { ...(server.headers ?? {}), ...(credentials.headers ?? {}) };
+  return { ...server, ...(Object.keys(headers).length === 0 ? {} : { headers }) };
+}
+
 export function effectiveServers(
   config: IcarusConfig,
   store: McpStore,
@@ -738,7 +802,16 @@ export function effectiveServers(
       skipped.push(id);
       continue;
     }
-    servers[id] = server;
+    const credentials = store.credentials[userId]?.[id];
+    const global = globalServerOf(config, id);
+    // Секреты объявлены, а человек их ещё не ввёл — сервер ждёт доступа и не
+    // попадает ни в mcp.json, ни в AGENTS.md: иначе модель звала бы инструменты,
+    // на которые сервер ответит 401.
+    if (server.hidden !== true && global && !authStateOf(global, credentials, now).ready) {
+      skipped.push(id);
+      continue;
+    }
+    servers[id] = withUserCredentials(server, credentials);
   }
 
   for (const server of Object.values(store.servers)) {
@@ -1062,10 +1135,14 @@ export function editorOf(
   if (server.owner !== userId && !server.shared) return null;
   if (server.owner !== userId) return null;
   const credentials = store.credentials[userId]?.[id];
+  // Форма должна показать имена и тогда, когда значений ещё нет: рецепт их знает
+  // заранее (OPDS спрашивает логин каталога, даже если тот открыт).
+  const savedHeaders = Object.keys(credentials?.headers ?? {});
+  const savedEnv = Object.keys(credentials?.env ?? {});
   return {
     server,
-    credentialHeaders: Object.keys(credentials?.headers ?? {}),
-    credentialEnv: Object.keys(credentials?.env ?? {}),
+    credentialHeaders: savedHeaders.length > 0 ? savedHeaders : (server.credentialHeaders ?? []),
+    credentialEnv: savedEnv.length > 0 ? savedEnv : (server.credentialEnv ?? []),
     oauth: credentials?.oauth
       ? {
           ...credentials.oauth,
@@ -1101,7 +1178,15 @@ export function saveCredentials(
 ): void {
   const store = readStore(config);
   if (!isVisible(config, store, userId, id)) throw new McpError('такого MCP нет или он не расшарен', 404);
-  if (isGlobal(config, id)) throw new McpError('у общего MCP из config.yaml доступ задаётся там же', 400);
+  if (isGlobal(config, id)) {
+    // Общий сервер живёт в config.yaml, но личный ключ ему нужен так же, как
+    // пользовательскому: команду и адрес панель не трогает, секреты — да.
+    const global = globalServerOf(config, id);
+    const declared = [...(global?.credentialHeaders ?? []), ...(global?.credentialEnv ?? [])];
+    if (declared.length === 0) {
+      throw new McpError('у этого общего MCP нет объявленных секретов: всё, что ему нужно, задано в config.yaml', 400);
+    }
+  }
   const clean = sanitizeCredentials({
     ...(patch.headers === undefined ? {} : { headers: patch.headers }),
     ...(patch.env === undefined ? {} : { env: patch.env }),

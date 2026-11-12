@@ -36,12 +36,17 @@ export type McpServerConfig = {
   env?: Record<string, string>;
   url?: string;
   /**
-   * Заголовки HTTP-транспорта (streamable-http, sse). Так MCP-серверы принимают
-   * ключ доступа: у Home Assistant это `Authorization: Bearer <ключ>`. В config.yaml
-   * сам ключ не пишем — он там же, где остальные секреты, то есть в .env:
-   * `Authorization: Bearer ${HOMEASSISTANT_TOKEN}`.
+   * Постоянные заголовки HTTP-транспорта (streamable-http, sse): X-Client, Accept —
+   * то, что одинаково у всех. Ключ доступа сюда не пишется: его имя объявляют в
+   * secrets, а значение вводит человек в панели.
    */
   headers?: Record<string, string>;
+  /**
+   * Имена секретов, которые серверу нужны от человека: у stdio это переменные
+   * окружения, у HTTP — заголовки. Значений здесь нет и быть не может: их вводит
+   * каждый в настройках MCP, и они ложатся в credentials.json под его userId.
+   */
+  secrets?: string[];
   lifecycle?: 'eager' | 'lazy';
   /**
    * Служебный сервер: он есть у всех и всегда включён, а в панели его нет.
@@ -301,6 +306,28 @@ function stringMap(value: unknown, what: string, env: NodeJS.ProcessEnv): Record
 }
 
 /**
+ * Карта строк MCP-сервера. Подстановок `env:VAR` и `${VAR}` здесь нет: ключи MCP
+ * объявляются в `secrets` и вводятся в панели, а всё остальное (адреса, порты,
+ * режимы) пишется буквально. Иначе «общий ключ из .env» остался бы чёрным ходом
+ * мимо панели — ровно то, от чего уходим.
+ */
+function literalMap(value: unknown, what: string): Record<string, string> {
+  const record = value === undefined || value === null ? {} : asRecord(value, what);
+  return Object.fromEntries(
+    Object.entries(record).map(([key, item]) => {
+      const text = requiredString(item, `${what}.${key}`);
+      if (/\$\{[A-Za-z0-9_]+\}/.test(text) || /^env:[A-Za-z0-9_]+$/.test(text)) {
+        throw new Error(
+          `${what}.${key}: подстановка из окружения в MCP больше не работает — ` +
+            'объяви имя в secrets этого сервера и введи значение в панели (MCP → «Настроить доступ»)',
+        );
+      }
+      return [key, text];
+    }),
+  );
+}
+
+/**
  * Провайдер pi → переменная окружения с его ключом. Список повторяет карту pi
  * (@earendil-works/pi-ai, env-api-keys), чтобы провайдера из models не приходилось
  * дублировать в config.yaml: положил ключ в .env — он уже в auth.json. Провайдера
@@ -475,7 +502,27 @@ function parseDns(value: unknown): string[] {
   });
 }
 
-function parseMcp(value: unknown, env: NodeJS.ProcessEnv): Record<string, McpServerConfig> {
+/** Имя заголовка/переменной: и для secrets, и для проверки «секрет не задан значением». */
+const SECRET_NAME = /^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/;
+
+/**
+ * Имена секретов общего сервера. Только имена: значение у каждого человека своё,
+ * поэтому в config.yaml ему делать нечего.
+ */
+function parseSecrets(value: unknown, what: string): string[] | undefined {
+  const names = asArray(value, what).map((item, index) => requiredString(item, `${what}[${index}]`));
+  const out: string[] = [];
+  for (const name of names) {
+    if (!SECRET_NAME.test(name)) {
+      throw new Error(`${what}: «${name}» не похоже на имя заголовка или переменной окружения`);
+    }
+    if (out.includes(name)) throw new Error(`${what}: «${name}» повторяется`);
+    out.push(name);
+  }
+  return out.length === 0 ? undefined : out;
+}
+
+function parseMcp(value: unknown): Record<string, McpServerConfig> {
   const record = value === undefined || value === null ? {} : asRecord(value, 'mcp');
   const servers: Record<string, McpServerConfig> = {};
   for (const [name, item] of Object.entries(record)) {
@@ -500,15 +547,25 @@ function parseMcp(value: unknown, env: NodeJS.ProcessEnv): Record<string, McpSer
     const args = asArray(server.args, `${where}.args`).map((arg, index) =>
       requiredString(arg, `${where}.args[${index}]`),
     );
+    const env = literalMap(server.env, `${where}.env`);
+    const headers = literalMap(server.headers, `${where}.headers`);
+    const secrets = parseSecrets(server.secrets, `${where}.secrets`);
+    for (const secret of secrets ?? []) {
+      if (Object.hasOwn(env, secret) || Object.hasOwn(headers, secret)) {
+        throw new Error(
+          `${where}.secrets: «${secret}» объявлен секретом, значит значения в env/headers быть не должно — ` +
+            'его вводит человек в панели и оно хранится в его credentials.json',
+        );
+      }
+    }
     servers[name] = {
       ...(transport === undefined ? {} : { transport }),
       ...(command === undefined ? {} : { command }),
       ...(args.length === 0 ? {} : { args }),
-      ...(server.env === undefined ? {} : { env: stringMap(server.env, `${where}.env`, env) }),
+      ...(Object.keys(env).length === 0 ? {} : { env }),
       ...(url === undefined ? {} : { url }),
-      ...(server.headers === undefined
-        ? {}
-        : { headers: stringMap(server.headers, `${where}.headers`, env) }),
+      ...(Object.keys(headers).length === 0 ? {} : { headers }),
+      ...(secrets === undefined ? {} : { secrets }),
       ...(lifecycle === undefined ? {} : { lifecycle }),
       ...(description === undefined ? {} : { description }),
       ...(hidden ? { hidden: true } : {}),
@@ -750,7 +807,7 @@ export function loadConfig(file: string, env: NodeJS.ProcessEnv = process.env): 
     // Нужен чужой репозиторий — чекаут в workspace, а не маунт с хоста.
     log.warn('mounts в конфиге больше не поддерживаются и пропущены', { file: resolved });
   }
-  const mcp = parseMcp(raw.mcp, env);
+  const mcp = parseMcp(raw.mcp);
   const mapleDir = resolveMapleDir(mcp, env);
 
   return {

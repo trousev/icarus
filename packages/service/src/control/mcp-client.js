@@ -136,7 +136,14 @@
       // только ждать, когда сервер «сам починится».
       add('Сбросить доступ', 'disconnect');
     }
-    if (!server.global && server.auth === 'headers') add('Настроить доступ', 'credentials', server.ready ? '' : 'primary');
+    // Ключ личный и у общего сервера из config.yaml: адрес и команду задаёт
+    // конфиг, а секрет человек вводит сам — иначе один ключ был бы на всех.
+    // Секреты бывают и необязательными (закрытый OPDS): тогда сервер готов и без них.
+    const asksSecrets =
+      (server.credentialHeaders || []).length > 0 || (server.credentialEnv || []).length > 0;
+    if (server.auth === 'headers' || asksSecrets) {
+      add('Настроить доступ', 'credentials', server.auth === 'headers' && !server.ready ? 'primary' : '');
+    }
     if (server.canEdit) add('Изменить', 'edit');
     if (server.canShare) add(server.shared ? 'Скрыть от других' : 'Поделиться', 'share');
     if (server.canDelete) add('Удалить', 'delete', 'danger');
@@ -474,8 +481,10 @@
       // Постоянные переменные stdio — часть описания, а не секрет: порты, адреса,
       // режимы. Рецепты кладут сюда то, что человеку не надо придумывать.
       env: stdio ? linesToMap(el('f-env').value) : {},
-      credentialHeaders: auth === 'headers' && !stdio ? linesToMap(el('f-credential-headers').value) : {},
-      credentialEnv: auth === 'headers' && stdio ? linesToMap(el('f-credential-env').value) : {},
+      // Строки секретов отправляем, только если ветка видна: у OAuth их нет, а у
+      // рецепта с необязательными ключами (OPDS) — есть, хотя auth там none.
+      credentialHeaders: !el('f-credential-headers-row').hidden ? linesToMap(el('f-credential-headers').value) : {},
+      credentialEnv: !el('f-credential-env-row').hidden ? linesToMap(el('f-credential-env').value) : {},
       clientSecret: auth === 'oauth' ? el('f-client-secret').value.trim() : '',
     };
   }
@@ -545,8 +554,8 @@
             'Браузер вернётся на него, покажет ошибку соединения (это нормально), а адрес из строки браузера нужно будет вставить в панель.</p></div>' +
         '<div class="field" id="f-headers-row"><label for="f-headers">ПОСТОЯННЫЕ ЗАГОЛОВКИ — ИМЯ: ЗНАЧЕНИЕ</label><textarea id="f-headers" rows="2" spellcheck="false" placeholder="X-Client: icarus">' + esc(mapToLines(headers, true)) + '</textarea>' +
           '<p class="hint">Эти заголовки — часть описания и уезжают всем, с кем поделишься. Секретный ключ клади ниже.</p></div>' +
-        '<div class="field" id="f-credential-headers-row"><label for="f-credential-headers">КЛЮЧ ДОСТУПА — ИМЯ: ЗНАЧЕНИЕ</label><textarea id="f-credential-headers" rows="2" spellcheck="false" placeholder="Authorization: Bearer ...">' + esc(mapToLines(credentialHeaders, false)) + '</textarea><p class="hint">Это личный секрет: он не показывается другим и не шарится. Строки с пустым значением не меняются; «Очистить доступ» — в карточке.</p></div>' +
-        '<div class="field" id="f-credential-env-row" hidden><label for="f-credential-env">ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ — ИМЯ: ЗНАЧЕНИЕ</label><textarea id="f-credential-env" rows="2" spellcheck="false" placeholder="TODOIST_API_KEY: ...">' + esc(mapToLines(credentialEnv, false)) + '</textarea></div>' +
+        '<div class="field" id="f-credential-headers-row"' + (auth === 'none' && Object.keys(credentialHeaders).length > 0 ? ' data-optional="1"' : '') + '><label for="f-credential-headers">КЛЮЧ ДОСТУПА — ИМЯ: ЗНАЧЕНИЕ</label><textarea id="f-credential-headers" rows="2" spellcheck="false" placeholder="Authorization: Bearer ...">' + esc(mapToLines(credentialHeaders, false)) + '</textarea><p class="hint">Это личный секрет: он не показывается другим и не шарится. Строки с пустым значением не меняются; «Очистить доступ» — в карточке.</p></div>' +
+        '<div class="field" id="f-credential-env-row" hidden' + (auth === 'none' && Object.keys(credentialEnv).length > 0 ? ' data-optional="1"' : '') + '><label for="f-credential-env">ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ — ИМЯ: ЗНАЧЕНИЕ</label><textarea id="f-credential-env" rows="2" spellcheck="false" placeholder="TODOIST_API_KEY: ...">' + esc(mapToLines(credentialEnv, false)) + '</textarea></div>' +
         '<details id="f-advanced"><summary>Ручные OAuth endpoints — если сервер ничего не рассказывает</summary>' +
           '<div class="field"><label for="f-authorization">AUTHORIZATION ENDPOINT</label><input id="f-authorization" type="text" spellcheck="false" value="' + esc(server && server.authorizationEndpoint ? server.authorizationEndpoint : '') + '"></div>' +
           '<div class="field"><label for="f-token">TOKEN ENDPOINT</label><input id="f-token" type="text" spellcheck="false" value="' + esc(server && server.tokenEndpoint ? server.tokenEndpoint : '') + '"></div>' +
@@ -572,8 +581,12 @@
     el('f-mimic-row').hidden = auth !== 'oauth';
     el('f-advanced').hidden = auth !== 'oauth';
     el('f-headers-row').hidden = stdio;
-    el('f-credential-headers-row').hidden = auth !== 'headers' || stdio;
-    el('f-credential-env-row').hidden = auth !== 'headers' || !stdio;
+    // Необязательные секреты (закрытый OPDS при auth none) показываем, если имена
+    // уже известны: иначе после добавления рецепта их некуда вписать.
+    el('f-credential-headers-row').hidden =
+      stdio || (auth !== 'headers' && el('f-credential-headers-row').dataset.optional !== '1');
+    el('f-credential-env-row').hidden =
+      !stdio || (auth !== 'headers' && el('f-credential-env-row').dataset.optional !== '1');
   }
 
   async function openForm(id, preset) {
@@ -717,14 +730,17 @@
     node.dataset.recipe = recipe.id;
     const keys = recipe.secrets.length === 0
       ? ui.mcpRecipeNoKeys
-      : recipe.secretKind === 'header'
+      : recipe.secretsOptional
+        ? 'ключи по желанию'
+        : recipe.secretKind === 'header'
         ? ui.mcpRecipeHeaderKey
         : fill(ui.mcpRecipeKeys, {
             n: recipe.secrets.length,
             word: plural(recipe.secrets.length, ui.keysWord),
           });
     node.innerHTML =
-      '<div class="recipe-head">' + badge(recipe.category) + badge(keys, recipe.secrets.length ? 'wait' : 'on') + '</div>' +
+      '<div class="recipe-head">' + badge(recipe.category) +
+        badge(keys, recipe.secrets.length > 0 && !recipe.secretsOptional ? 'wait' : 'on') + '</div>' +
       '<h3>' + esc(recipe.name) + '</h3>' +
       '<p class="recipe-when">' + esc(recipe.when) + '</p>' +
       (recipe.caveat ? '<p class="recipe-caveat">' + esc(recipe.caveat) + '</p>' : '') +
