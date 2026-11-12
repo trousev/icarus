@@ -10,7 +10,10 @@ import { SessionRegistry } from '../src/sessions/registry.ts';
 import {
   backfillChats,
   ensureChat,
+  lastTurnOf,
+  panelCanWrite,
   readChats,
+  recordTurn,
   refreshChatTitle,
   renderSessionsMap,
   sessionIdOf,
@@ -137,6 +140,61 @@ test('заголовок Telegram-разговора берётся из пер�
 
   const [chat] = readChats(config, user);
   assert.equal(chat?.title, 'Собери отчёт для мамы');
+});
+
+test('канал последней реплики пишется по ходу и переживает чтение реестра', () => {
+  const { config, user } = fixture();
+  ensureChat(config, user, 'telegram-42', 'telegram');
+
+  recordTurn(config, user, 'telegram-42', 'telegram', new Date('2026-11-01T12:04:00.000Z'));
+  assert.deepEqual(lastTurnOf(config, user, 'telegram-42'), {
+    channel: 'telegram',
+    at: '2026-11-01T12:04:00.000Z',
+  });
+  assert.deepEqual(readChats(config, user)[0]?.lastTurn, {
+    channel: 'telegram',
+    at: '2026-11-01T12:04:00.000Z',
+  });
+
+  // Панель продолжила тот же разговор: шапка должна сказать уже про панель.
+  recordTurn(config, user, 'telegram-42', 'web', new Date('2026-11-01T12:10:00.000Z'));
+  assert.equal(lastTurnOf(config, user, 'telegram-42')?.channel, 'web');
+
+  // Разговора нет — подписи тоже: реестр не заводит записей задним числом.
+  assert.equal(recordTurn(config, user, 'telegram-нет', 'web'), null);
+  assert.equal(readChats(config, user).length, 1);
+});
+
+test('битый lastTurn не роняет реестр: поле просто не читается', () => {
+  const { config, user } = fixture();
+  fs.mkdirSync(userPaths(config, user).root, { recursive: true });
+  fs.writeFileSync(
+    path.join(userPaths(config, user).root, 'chats.json'),
+    JSON.stringify({
+      chats: [
+        {
+          id: 'telegram-42',
+          title: 'Разговор в Telegram',
+          createdAt: '2026-11-01T10:00:00.000Z',
+          channel: 'telegram',
+          conversationId: 'telegram-42',
+          workspace: 'talk',
+          lastTurn: { channel: 'телепатия', at: '2026-11-01T12:04:00.000Z' },
+        },
+      ],
+    }),
+  );
+
+  const [chat] = readChats(config, user);
+  assert.equal(chat?.lastTurn, undefined);
+  assert.equal(chat?.channel, 'telegram', 'остальная запись цела');
+});
+
+test('из панели пишут в веб и Telegram, а в API — только смотрят', () => {
+  const base = { title: 'x', createdAt: '2026-11-01T10:00:00.000Z', workspace: 'talk' } as const;
+  assert.equal(panelCanWrite({ ...base, channel: 'web' }), true);
+  assert.equal(panelCanWrite({ ...base, channel: 'telegram' }), true);
+  assert.equal(panelCanWrite({ ...base, channel: 'api' }), false);
 });
 
 test('sessionIdOf знает веб-чат, Telegram и старую session-запись', () => {

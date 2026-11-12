@@ -176,7 +176,7 @@ test('неизвестный разговор не выдумывает исто
   assert.equal(readHistory(config, user, 'session:нет-такой'), null);
 });
 
-test('Telegram-разговор в реестре, в списке и только для чтения', () => {
+test('Telegram-разговор в реестре и в списке: его можно продолжить из панели', () => {
   const { config, user } = fixture();
   const conversationId = 'telegram-4242';
   const { sessionId } = putSessionFile(
@@ -190,13 +190,14 @@ test('Telegram-разговор в реестре, в списке и тольк
   const [chat] = listChatPage(config, user).chats;
   assert.equal(chat?.id, conversationId);
   assert.equal(chat?.channel, 'telegram');
-  assert.equal(chat?.readOnly, true);
+  // Транспорт — труба, разговор общий: панель продолжает Telegram, а не смотрит.
+  assert.equal(chat?.readOnly, false);
   assert.match(chat?.title ?? '', /отчёт/);
   assert.match(chat?.preview ?? '', /Готово/);
   assert.equal(readChats(config, user)[0]?.title, chat?.title, 'заголовок сохранился в реестре');
 
   const history = readHistory(config, user, chat?.id ?? '');
-  assert.equal(history?.chat.readOnly, true);
+  assert.equal(history?.chat.readOnly, false);
   assert.equal(history?.chat.channel, 'telegram');
   assert.equal(history?.messages.length, 2);
   assert.equal(history?.messages[0]?.text, 'Собери отчёт для мамы');
@@ -265,11 +266,12 @@ test('список листается страницами, следующая �
   assert.deepEqual(search.chats.map((chat) => chat.id), [created[2]?.id]);
 });
 
-test('через API внешний разговор читается, но не пишется', async () => {
+test('разговор через API читается, но из панели не пишется', async () => {
   const { config, user } = fixture();
-  const conversationId = 'telegram-4242';
+  // API-клиент владеет историей сам: его разговор панель только смотрит.
+  const conversationId = 'api-4242';
   const { sessionId } = putSessionFile(config, user, conversationId, dialog('Покажи погоду', 'Солнечно'));
-  ensureChat(config, user, conversationId, 'telegram');
+  ensureChat(config, user, conversationId, 'api');
 
   const server = createServer(config, {} as never);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -295,7 +297,7 @@ test('через API внешний разговор читается, но не
       headers,
       body: JSON.stringify({ chatId: conversationId, text: 'продолжи' }),
     });
-    assert.equal(send.status, 403, 'в Telegram-разговор из панели не записать');
+    assert.equal(send.status, 403, 'в API-разговор из панели не записать');
     const abort = await fetch(`${base}/panel/api/chat/abort`, {
       method: 'POST',
       headers,

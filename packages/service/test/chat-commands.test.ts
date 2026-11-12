@@ -167,10 +167,11 @@ test('убранные /topic и /topics не уходят в pi реплико�
   });
 });
 
-test('список команд pi отдаётся только для веб-разговора', async () => {
+test('список команд pi отдаётся для веб-чата и Telegram, а у API-разговора пуст', async () => {
   await withServer(async (stand) => {
     const chat = createChat(stand.config, stand.user, 'talk');
     ensureChat(stand.config, stand.user, 'telegram-4242', 'telegram');
+    ensureChat(stand.config, stand.user, 'api-4242', 'api');
 
     const own = await fetch(`${stand.base}/panel/api/chat/commands?id=${encodeURIComponent(chat.id)}`, {
       headers: stand.headers,
@@ -180,18 +181,36 @@ test('список команд pi отдаётся только для веб-�
       commands: [{ name: 'skill:demo', description: 'демо', source: 'skill' }],
     });
 
-    const foreign = await fetch(`${stand.base}/panel/api/chat/commands?id=telegram-4242`, {
+    // Telegram-разговор панель ведёт так же, как свой: команды у него те же.
+    const telegram = await fetch(`${stand.base}/panel/api/chat/commands?id=telegram-4242`, {
       headers: stand.headers,
     });
+    assert.equal(telegram.status, 200);
+    assert.deepEqual((await telegram.json()) as unknown, {
+      commands: [{ name: 'skill:demo', description: 'демо', source: 'skill' }],
+    });
+
+    const foreign = await fetch(`${stand.base}/panel/api/chat/commands?id=api-4242`, { headers: stand.headers });
     assert.equal(foreign.status, 200);
     assert.deepEqual((await foreign.json()) as unknown, { commands: [] });
   });
 });
 
-test('в разговор Telegram команда из панели не пишется', async () => {
+test('команда из панели правит Telegram-разговор: это тот же диалог', async () => {
   await withServer(async (stand) => {
     ensureChat(stand.config, stand.user, 'telegram-4242', 'telegram');
     const result = await command(stand, { chatId: 'telegram-4242', text: '/stats' });
+    assert.equal(result.status, 200);
+    assert.equal(result.data.handled, true);
+    // Команда уходит в тот же разговор, который видит бот, а не в копию.
+    assert.deepEqual(stand.calls.find((call) => call.method === 'stats')?.args, [stand.user, 'telegram-4242']);
+  });
+});
+
+test('команда из панели не пишется в API-разговор: там историей владеет клиент', async () => {
+  await withServer(async (stand) => {
+    ensureChat(stand.config, stand.user, 'api-4242', 'api');
+    const result = await command(stand, { chatId: 'api-4242', text: '/stats' });
     assert.equal(result.status, 403);
   });
 });

@@ -26,6 +26,16 @@ test('стили сообщений едут общим файлом — их ж
   assert.match(html, /@keyframes pulse/);
 });
 
+test('шапка разговора подписана каналом последней реплики', () => {
+  // Одна сессия на панель и Telegram: по файлу истории не видно, кто говорил
+  // последним, поэтому канал запоминает сервис, а панель показывает его в шапке.
+  const html = chatPage(SESSION, { chatId: 'telegram-42', enabled: true });
+  assert.match(html, /id="chat-via"/);
+  assert.match(html, /\.chat-via \{/, 'стиль метки едет в страницу');
+  assert.match(html, /последняя реплика · /, 'клиент умеет подписывать канал');
+  assert.match(html, /Разговор общий с Telegram/, 'панель честно говорит, что ответ не уедет в Telegram');
+});
+
 test('чат — это лента с композером и диалогами, а не таблица настроек', () => {
   const html = chatPage(SESSION, { chatId: 'web-1', enabled: true });
 

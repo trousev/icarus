@@ -30,6 +30,17 @@ export type SessionEpoch = {
   startedAt: string;
 };
 
+/**
+ * Откуда пришла последняя реплика. Сессия pi у разговора одна на все каналы, и
+ * файл истории не помнит, чем её прислали: панель, Telegram и API пишут в один и
+ * тот же jsonl. Поэтому канал записывает тот, кто принял сообщение, — иначе в
+ * общей ленте не понять, кто это сказал.
+ */
+export type ChatTurn = {
+  channel: ChatChannel;
+  at: string;
+};
+
 export type ChatRecord = {
   id: string;
   title: string;
@@ -51,6 +62,8 @@ export type ChatRecord = {
    * для него мало: папка берётся из сессии pi, а не из рабочего каталога.
    */
   artifact?: string;
+  /** Откуда пришла последняя реплика: по ней панель подписывает шапку. */
+  lastTurn?: ChatTurn;
 };
 
 function chatsFile(config: IcarusConfig, user: UserConfig): string {
@@ -80,6 +93,18 @@ export function defaultTitle(channel: ChatChannel): string {
 /** Заголовок ещё не сложился из первой реплики — его можно заменить. */
 export function isGenericTitle(chat: ChatRecord): boolean {
   return !chat.title.trim() || chat.title === NEW_CHAT_TITLE || chat.title === defaultTitle(chat.channel);
+}
+
+/**
+ * Можно ли продолжать разговор из панели. Панель ведёт веб-чаты и продолжает
+ * Telegram: транспорт — труба, а разговор (сессия pi и файл истории) у нас один.
+ *
+ * API остаётся только для чтения: его клиент присылает историю в каждом запросе
+ * и считает её своей, поэтому ход из панели развёл бы две версии разговора
+ * (см. sessions/divergence.ts). Это не про канал, а про владельца истории.
+ */
+export function panelCanWrite(chat: Pick<ChatRecord, 'channel'>): boolean {
+  return chat.channel === 'web' || chat.channel === 'telegram';
 }
 
 function inferChannel(id: string): ChatChannel {
@@ -122,6 +147,12 @@ function normalize(value: unknown): ChatRecord | null {
   const legacySessionId = typeof item.sessionId === 'string' && item.sessionId.trim() ? item.sessionId : '';
   if (sessions.length === 0 && legacySessionId) sessions.push({ sessionId: legacySessionId, startedAt: createdAt });
 
+  const turn = item.lastTurn && typeof item.lastTurn === 'object' ? (item.lastTurn as Record<string, unknown>) : null;
+  const lastTurn: ChatTurn | null =
+    turn && isChannel(turn.channel) && typeof turn.at === 'string' && turn.at
+      ? { channel: turn.channel, at: turn.at }
+      : null;
+
   return {
     id: item.id,
     title: typeof item.title === 'string' && item.title.trim() ? item.title : defaultTitle(channel),
@@ -133,6 +164,7 @@ function normalize(value: unknown): ChatRecord | null {
     ...(sessions.length > 0 ? { sessions } : {}),
     // Пустая строка — это «обычный чат», а не артефакт с пустым именем.
     ...(typeof item.artifact === 'string' && item.artifact !== '' ? { artifact: item.artifact } : {}),
+    ...(lastTurn ? { lastTurn } : {}),
   };
 }
 
@@ -276,6 +308,40 @@ export function artifactForConversation(
   return readChats(config, user).find(
     (chat) => chat.conversationId === conversationId || chat.id === conversationId,
   )?.artifact;
+}
+
+/**
+ * Откуда пришла последняя реплика разговора. null — ход ещё не записан этим
+ * сервисом (старые сессии) или записи нет вовсе.
+ */
+export function lastTurnOf(config: IcarusConfig, user: UserConfig, conversationId: string): ChatTurn | null {
+  return findChatRecord(config, user, conversationId)?.lastTurn ?? null;
+}
+
+/**
+ * Записывает, из какого канала пришла реплика. Зовёт тот, кто принял сообщение:
+ * панель, бот и OpenAI-вход. Разговор к этому моменту уже существует — его
+ * заводит `registry.acquire`; если записи нет, молча ничего не делаем: реплика
+ * важнее подписи.
+ */
+export function recordTurn(
+  config: IcarusConfig,
+  user: UserConfig,
+  conversationId: string,
+  channel: ChatChannel,
+  at = new Date(),
+): ChatRecord | null {
+  try {
+    const chats = readChats(config, user);
+    const chat = chats.find((item) => item.conversationId === conversationId || item.id === conversationId);
+    if (!chat) return null;
+    chat.lastTurn = { channel, at: at.toISOString() };
+    writeChats(config, user, chats);
+    return chat;
+  } catch (error) {
+    log.warn('не записался канал последней реплики', { user: user.id, error: String(error) });
+    return null;
+  }
 }
 
 /** Новый веб-чат: единственный канал, который панель создаёт сама. */

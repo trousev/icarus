@@ -20,6 +20,8 @@ import { mcpReauthNotice } from '../mcp/reauth.ts';
 import { speechTranscriber, type Transcriber } from '../speech.ts';
 import type { SessionRegistry } from '../sessions/registry.ts';
 import type { PiSession } from '../sessions/pi-session.ts';
+import { lastTurnOf, recordTurn } from '../sessions/chats.ts';
+import type { ChatChannel } from '../sessions/identity.ts';
 import {
   clearText,
   compactText,
@@ -151,6 +153,18 @@ export const VOICE_NO_SPEECH =
 export const VOICE_EMPTY = 'В голосовом не разобрал ни слова — попробуй ещё раз или напиши словами.';
 
 export const BUSY = 'Ещё думаю над прошлым сообщением — секунду.';
+
+/**
+ * Отбивка в Telegram перед ответом, если прошлая реплика разговора пришла из
+ * другого канала. Разговор у нас один на все входы, поэтому в контексте pi уже
+ * лежат сказанное в панели (и её файлы). Молча подмешивать это в ответ нельзя:
+ * человек должен видеть, откуда Икар это знает, — иначе личная переписка из
+ * панели тихо становится окном в Telegram.
+ */
+export function crossChannelNote(channel: ChatChannel): string {
+  const from = channel === 'web' ? 'в панели' : channel === 'api' ? 'через API' : 'в другом канале';
+  return `🧵 Продолжаю разговор, который шёл ${from}: эти реплики уже в контексте. /clear — начать с чистого листа.\n\n`;
+}
 
 export function unknownUser(username: string): string {
   return (
@@ -680,6 +694,16 @@ export class TelegramBot {
       log.info('телеграм: жду, пока встанет прошлый ход', { user: user.id, conversation: conversationId });
       await session.interrupt();
     }
+
+    // Прошлая реплика была не отсюда — значит в контексте есть чужой канал:
+    // говорим об этом до ответа, а не после. Панель может быть личным окном,
+    // и Telegram не должен становиться его продолжением молча.
+    const previous = lastTurnOf(this.config, user, conversationId);
+    if (previous && previous.channel !== 'telegram') reply.push(crossChannelNote(previous.channel));
+
+    // Канал хода: файл сессии входы не различает, а шапка панели и отбивка
+    // в Telegram живут по этой отметке.
+    recordTurn(this.config, user, conversationId, 'telegram');
 
     let settle: () => void = () => {};
     const settled = new Promise<void>((resolve) => {
