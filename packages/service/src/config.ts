@@ -871,6 +871,12 @@ export function userPaths(config: IcarusConfig, user: UserConfig) {
     sessions: path.join(icarus, 'sessions'),
     /** Реестр разговоров лежит в корне человека, а контейнеру отдаётся внутрь .icarus. */
     chats: path.join(root, 'chats.json'),
+    /**
+     * Расписания задач лежат в корне человека рядом с чатами: расписание
+     * принадлежит человеку, а не разговору — задача переживает /clear и переезд
+     * прошлого запуска в архив.
+     */
+    scheduledTasks: path.join(root, 'scheduled-tasks.json'),
     /** Карта разговоров для агента — рядом с реестром, тоже только чтение. */
     sessionsMap: path.join(icarus, 'sessions.json'),
     piAgent: path.join(root, 'pi-agent'),

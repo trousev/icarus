@@ -88,6 +88,8 @@ import { handleMcpApi, handleMcpPublic } from './mcp.ts';
 import { mcpPage } from './mcp-ui.ts';
 import { countVisible } from '../mcp/registry.ts';
 import { handleChatApi } from './chat.ts';
+import { handleTasksApi } from './tasks.ts';
+import { tasksPage } from './tasks-ui.ts';
 import { handleArtifactsApi, handleArtifactsRaw, handleArtifactsVersionRaw } from './artifacts.ts';
 import { artifactsPage } from './artifacts-ui.ts';
 import { countArtifacts } from '../artifacts.ts';
@@ -117,6 +119,9 @@ export const SECTIONS: { id: string; adminOnly?: boolean }[] = [
   { id: 'memory' },
   { id: 'skills' },
   { id: 'mcp' },
+  // Задачи — не настройка, а действие: человек заводит расписание, по которому агент
+  // запускается сам. Стоят рядом с MCP: это тоже «что Икар умеет без человека».
+  { id: 'tasks' },
   // Ключи — настройка инсталляции, а не человека: раздел видят и открывают только
   // админы. Стоит он перед «Пользователем»: остальное — про содержимое, это — про
   // доступы, а последним идёт личная настройка.
@@ -133,6 +138,8 @@ function sectionLabel(id: string, ui: PanelStrings): string {
       return ui.sectionSkills;
     case 'mcp':
       return ui.sectionMcp;
+    case 'tasks':
+      return ui.sectionTasks;
     case 'keys':
       return ui.sectionKeys;
     case 'profile':
@@ -497,7 +504,7 @@ export async function handlePanel(
     // Старые ссылки открывали настройки поверх чата (?settings=memory). Теперь у
     // настроек своя страница с меню в левой панели — туда и ведём, не теряя раздел.
     const legacySettings = page.section === 'chat' ? url.searchParams.get('settings') : null;
-    if (legacySettings && /^(artifacts|memory|skills|mcp|keys|profile)$/.test(legacySettings)) {
+    if (legacySettings && /^(artifacts|memory|skills|mcp|tasks|keys|profile)$/.test(legacySettings)) {
       res.writeHead(302, { location: `/panel/${legacySettings}` });
       res.end();
       return true;
@@ -556,6 +563,12 @@ export async function handlePanel(
     return true;
   }
 
+  // Задачи — свой префикс, как у MCP: страница и её API живут под одним разделом.
+  if (url.pathname === '/panel/tasks/api' || url.pathname.startsWith('/panel/tasks/api/')) {
+    await handleApi(req, res, url, ctx, access);
+    return true;
+  }
+
   if (url.pathname.startsWith('/panel/api/') || routeApi(url.pathname)) {
     await handleApi(req, res, url, ctx, access);
     return true;
@@ -567,7 +580,7 @@ export async function handlePanel(
 /** Раздел из адреса: /panel/chat, /panel/artifacts, /panel/memory и остальные. */
 function routePage(pathname: string): PanelPage | null {
   if (pathname === '/panel/chat' || pathname === '/panel/chat/') return { section: 'chat' };
-  const match = /^\/panel\/(artifacts|memory|skills|mcp|keys|profile)\/?$/.exec(pathname);
+  const match = /^\/panel\/(artifacts|memory|skills|mcp|tasks|keys|profile)\/?$/.exec(pathname);
   return match ? { section: match[1] } : null;
 }
 
@@ -629,6 +642,9 @@ async function sectionPage(
   if (page.section === 'mcp') {
     return mcpPage(session);
   }
+  if (page.section === 'tasks') {
+    return tasksPage(session, config);
+  }
   if (page.section === 'keys') {
     return keysPage(session);
   }
@@ -681,6 +697,13 @@ async function handleApi(
   // среди записей памяти.
   if (url.pathname === '/panel/artifacts/api' || url.pathname.startsWith('/panel/artifacts/api/')) {
     await handleArtifactsApi(req, res, url, config, userId);
+    return;
+  }
+
+  // Задачи — отдельная ветка: у них своё хранилище расписаний, а не файлы памяти.
+  // Ветка стоит до общего разбора области, иначе «задачи» искались бы среди записей.
+  if (url.pathname === '/panel/tasks/api' || url.pathname.startsWith('/panel/tasks/api/')) {
+    await handleTasksApi(req, res, url, { config, userId });
     return;
   }
 

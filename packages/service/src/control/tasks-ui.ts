@@ -1,0 +1,104 @@
+// Страница раздела «Задачи». Каркас и стили — как у остальных разделов панели,
+// а клиентский скрипт лежит отдельным файлом: в TypeScript не приходится экранировать
+// бэктики и скобки, а браузер получает тот же JS и локально, и на проде.
+import fs from 'node:fs';
+import { taskTimeZone } from '../sessions/schedule.ts';
+import { escapeHtml, sessionStrings, sessionUiLanguage, settingsAside, shell, type PanelSession } from './ui.ts';
+import type { IcarusConfig } from '../config.ts';
+
+const CLIENT_CSS = fs.readFileSync(new URL('./tasks-client.css', import.meta.url), 'utf8');
+const CLIENT_JS = fs.readFileSync(new URL('./tasks-client.js', import.meta.url), 'utf8');
+
+/**
+ * Подписи дней недели для формы. Их даёт Intl, а не словарь: это названия дней,
+ * и в обоих языках они уже есть в стандартной библиотеке браузера.
+ */
+function weekdayLabels(lang: string): Array<[number, string]> {
+  const format = new Intl.DateTimeFormat(lang === 'en' ? 'en-GB' : 'ru-RU', {
+    weekday: 'short',
+    timeZone: 'UTC',
+  });
+  // 7 января 2024 — воскресенье: от него и отсчитываем дни, начиная с понедельника.
+  return [1, 2, 3, 4, 5, 6, 0].map((day) => [day, format.format(new Date(Date.UTC(2024, 0, 7 + day)))]);
+}
+
+export function tasksPage(session: PanelSession, config: IcarusConfig): string {
+  const ui = sessionStrings(session);
+  const timeZone = taskTimeZone(config);
+  const configJson = JSON.stringify({ user: session.user, section: 'tasks', timeZone, ui }).replaceAll('<', '\\u003c');
+  const days = weekdayLabels(sessionUiLanguage(session))
+    .map(
+      ([value, label]) =>
+        `<label><input type="checkbox" value="${value}"${value === 1 ? ' checked' : ''}> ${escapeHtml(label)}</label>`,
+    )
+    .join('\n        ');
+
+  return shell(
+    `<style>${CLIENT_CSS}</style>
+<div class="app">
+${settingsAside(session, 'tasks')}
+<div>
+  <div class="top">
+    <div class="crumbs">Icarus / <b>${escapeHtml(ui.sectionTasks)}</b></div>
+    <div class="status"><i></i>${escapeHtml(ui.agentActive)}</div>
+  </div>
+  <div class="content">
+    <p class="section-title">${escapeHtml(ui.tasksKicker)}</p>
+    <div class="head">
+      <div class="lead">
+        <h1>${escapeHtml(ui.sectionTasks)}</h1>
+        <p class="task-intro">${escapeHtml(ui.tasksIntro.replace('{tz}', timeZone))}</p>
+      </div>
+      <button class="btn primary" id="task-new">${escapeHtml(ui.tasksNew)}</button>
+    </div>
+    <div class="task-notice" id="task-notice" hidden></div>
+
+    <div class="task-form" id="task-form" hidden>
+      <h2>${escapeHtml(ui.tasksNew)}</h2>
+      <div class="field">
+        <label for="task-prompt">${escapeHtml(ui.tasksPromptLabel)}</label>
+        <textarea id="task-prompt" rows="3" placeholder="${escapeHtml(ui.tasksPromptPlaceholder)}"></textarea>
+      </div>
+      <div class="two">
+        <div class="field">
+          <label for="task-repeat">${escapeHtml(ui.tasksWhen)}</label>
+          <select id="task-repeat">
+            <option value="daily">${escapeHtml(ui.tasksEveryDay)}</option>
+            <option value="weekly">${escapeHtml(ui.tasksByWeekdays)}</option>
+            <option value="once">${escapeHtml(ui.tasksOnce)}</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="task-time">${escapeHtml(ui.tasksTime)}</label>
+          <input type="time" id="task-time" value="08:00">
+        </div>
+      </div>
+      <div class="field" id="task-date-field" hidden>
+        <label for="task-date">${escapeHtml(ui.tasksDate)}</label>
+        <input type="date" id="task-date">
+      </div>
+      <div class="field" id="task-days-field" hidden>
+        <label>${escapeHtml(ui.tasksWeekdays)}</label>
+        <div class="days" id="task-days">
+        ${days}
+        </div>
+      </div>
+      <div class="field">
+        <label for="task-workspace">${escapeHtml(ui.tasksWorkspace)}</label>
+        <select id="task-workspace"></select>
+      </div>
+      <div class="row">
+        <button class="primary" id="task-create" type="button">${escapeHtml(ui.tasksCreate)}</button>
+        <button id="task-cancel" type="button">${escapeHtml(ui.tasksCancel)}</button>
+      </div>
+    </div>
+
+    <div class="task-list" id="task-list"><p class="task-empty">${escapeHtml(ui.loading)}</p></div>
+  </div>
+</div>
+</div>
+<script>window.__TASKS_CFG__ = ${configJson};</script>
+<script>${CLIENT_JS}</script>`,
+    sessionUiLanguage(session),
+  );
+}

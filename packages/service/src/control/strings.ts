@@ -289,6 +289,55 @@ export type PanelStrings = {
   mcpRecipeAddNamed: string;
   keysWord: WordForms;
 
+  // ── Задачи: расписание, по которому агент запускается сам ───────────────────
+  /** «Задачи». */
+  sectionTasks: string;
+  tasksKicker: string;
+  /** «Каждый запуск — новый разговор… Считается по поясу {tz}.» */
+  tasksIntro: string;
+  tasksNew: string;
+  tasksEmpty: string;
+  tasksPromptLabel: string;
+  tasksPromptPlaceholder: string;
+  tasksWhen: string;
+  tasksTime: string;
+  tasksDate: string;
+  tasksWeekdays: string;
+  tasksWorkspace: string;
+  tasksEveryDay: string;
+  tasksByWeekdays: string;
+  tasksOnce: string;
+  tasksCreate: string;
+  tasksCancel: string;
+  tasksCreated: string;
+  tasksDeleted: string;
+  tasksEnabled: string;
+  tasksDisabled: string;
+  tasksDelete: string;
+  tasksDeleteArmed: string;
+  /** «следующий запуск: {when}». */
+  tasksNextRun: string;
+  /** «последний: {when}». */
+  tasksLastRun: string;
+  /** «прошлый разговор: {title}». */
+  tasksLastChat: string;
+  /** «запуск не удался: {error}». */
+  tasksError: string;
+  tasksNoMoreRuns: string;
+  tasksOn: string;
+  tasksOff: string;
+  tasksDone: string;
+  /** «один раз {when}». */
+  tasksRepeatOnce: string;
+  /** «каждый день в {time}». */
+  tasksRepeatDaily: string;
+  /** «по {days} в {time}». */
+  tasksRepeatWeekly: string;
+  /** «каждую неделю в {time}». */
+  tasksRepeatEveryWeek: string;
+  tasksToday: string;
+  tasksTomorrow: string;
+
   // ── скиллы: шаринг ─────────────────────────────────────────────────────────
   skillTagMine: string;
   skillTagShared: string;
@@ -602,6 +651,49 @@ const RU: PanelStrings = {
   mcpRecipeEdit: 'Изменить MCP',
   mcpRecipeAddNamed: 'Добавить: {name}',
   keysWord: { one: 'ключ', few: 'ключа', many: 'ключей' },
+
+  // ── Задачи: расписание, по которому агент запускается сам ───────────────────
+  sectionTasks: 'Задачи',
+  tasksKicker: 'РАСПИСАНИЕ АГЕНТА',
+  tasksIntro:
+    'Каждый запуск — новый разговор: агент получает промпт и работает в нём как обычно. ' +
+    'Держать панель открытой не нужно, расписание считается по поясу {tz}.',
+  tasksNew: 'Новая задача',
+  tasksEmpty:
+    'Пока пусто. Заведи задачу: напиши, что должен сделать агент, и выбери, когда запускать — ' +
+    'результат появится новым разговором.',
+  tasksPromptLabel: 'Что должен сделать агент',
+  tasksPromptPlaceholder: 'Например: собери сводку по проекту X и приложи список рисков',
+  tasksWhen: 'Когда',
+  tasksTime: 'Время',
+  tasksDate: 'Дата',
+  tasksWeekdays: 'Дни недели',
+  tasksWorkspace: 'Где работать',
+  tasksEveryDay: 'Каждый день',
+  tasksByWeekdays: 'По дням недели',
+  tasksOnce: 'Один раз',
+  tasksCreate: 'Создать',
+  tasksCancel: 'Отмена',
+  tasksCreated: 'Задача создана: агент запустится в свой час и откроет новый разговор.',
+  tasksDeleted: 'Задача удалена.',
+  tasksEnabled: 'Задача включена: следующий запуск уже назначен.',
+  tasksDisabled: 'Задача выключена и не сработает.',
+  tasksDelete: 'Удалить',
+  tasksDeleteArmed: 'Удалить?',
+  tasksNextRun: 'следующий запуск: {when}',
+  tasksLastRun: 'последний: {when}',
+  tasksLastChat: 'прошлый разговор: {title}',
+  tasksError: 'запуск не удался: {error}',
+  tasksNoMoreRuns: 'запусков больше нет',
+  tasksOn: 'включена',
+  tasksOff: 'выключена',
+  tasksDone: 'отработала',
+  tasksRepeatOnce: 'один раз {when}',
+  tasksRepeatDaily: 'каждый день в {time}',
+  tasksRepeatWeekly: 'по {days} в {time}',
+  tasksRepeatEveryWeek: 'каждую неделю в {time}',
+  tasksToday: 'сегодня',
+  tasksTomorrow: 'завтра',
 
   // ── скиллы: шаринг ─────────────────────────────────────────────────────────
   skillTagMine: 'только мой',
@@ -921,6 +1013,49 @@ const EN: PanelStrings = {
   mcpRecipeEdit: 'Edit MCP',
   mcpRecipeAddNamed: 'Add: {name}',
   keysWord: { one: 'key', few: 'keys', many: 'keys' },
+
+  // ── Задачи: расписание, по которому агент запускается сам ───────────────────
+  sectionTasks: 'Tasks',
+  tasksKicker: 'AGENT SCHEDULE',
+  tasksIntro:
+    'Every run is a new conversation: the agent gets the prompt and works in it as usual. ' +
+    'You do not need to keep the panel open; the schedule follows {tz}.',
+  tasksNew: 'New task',
+  tasksEmpty:
+    'Nothing here yet. Add a task: write what the agent should do and pick when to run it — ' +
+    'the result appears as a new conversation.',
+  tasksPromptLabel: 'What the agent should do',
+  tasksPromptPlaceholder: 'For example: gather a summary of project X and list the risks',
+  tasksWhen: 'When',
+  tasksTime: 'Time',
+  tasksDate: 'Date',
+  tasksWeekdays: 'Weekdays',
+  tasksWorkspace: 'Where to work',
+  tasksEveryDay: 'Every day',
+  tasksByWeekdays: 'On weekdays',
+  tasksOnce: 'Once',
+  tasksCreate: 'Create',
+  tasksCancel: 'Cancel',
+  tasksCreated: 'Task created: the agent will start in its hour and open a new conversation.',
+  tasksDeleted: 'Task deleted.',
+  tasksEnabled: 'Task enabled: the next run is scheduled.',
+  tasksDisabled: 'Task disabled and will not run.',
+  tasksDelete: 'Delete',
+  tasksDeleteArmed: 'Delete?',
+  tasksNextRun: 'next run: {when}',
+  tasksLastRun: 'last: {when}',
+  tasksLastChat: 'previous conversation: {title}',
+  tasksError: 'run failed: {error}',
+  tasksNoMoreRuns: 'no more runs',
+  tasksOn: 'enabled',
+  tasksOff: 'disabled',
+  tasksDone: 'done',
+  tasksRepeatOnce: 'once on {when}',
+  tasksRepeatDaily: 'every day at {time}',
+  tasksRepeatWeekly: 'on {days} at {time}',
+  tasksRepeatEveryWeek: 'every week at {time}',
+  tasksToday: 'today',
+  tasksTomorrow: 'tomorrow',
 
   // ── скиллы: шаринг ─────────────────────────────────────────────────────────
   skillTagMine: 'only mine',

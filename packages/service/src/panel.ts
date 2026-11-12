@@ -20,6 +20,8 @@ import { prepareUser } from './workspace.ts';
 import { ensureArtifactRepos } from './artifacts-git.ts';
 import { backfillChats } from './sessions/chats.ts';
 import { SessionRegistry } from './sessions/registry.ts';
+import { ScheduledTasks } from './sessions/scheduled.ts';
+import { taskLauncher } from './sessions/task-launch.ts';
 import { createServer } from './http/server.ts';
 
 /** Порт по умолчанию: 8081 занят настоящим сервисом, и путать их не надо. */
@@ -88,6 +90,10 @@ log.info('локальная панель: данные и git готовы', { 
 // не создаёт — нет стека, значит чат честно ответит ошибкой (ensureContainerRunning).
 // С `--with-model` дополнительно включается «напиши за меня» в редакторе скиллов.
 const registry = new SessionRegistry(config);
+// Расписания тикают и здесь: задача заводит новый разговор тем же путём, что и панель.
+// Контейнера рядом может не быть — тогда задача честно запишет, что запуск не удался.
+const scheduled = new ScheduledTasks(config, { launch: taskLauncher(config, registry) });
+scheduled.start();
 
 const server = createServer(config, registry, {
   // Без модели писать скилл за человека некому: кнопки в редакторе не будет вовсе.
@@ -99,6 +105,7 @@ server.listen(config.port, config.host, () => {
 
 function shutdown(signal: string): void {
   log.info('останавливаюсь', { signal });
+  scheduled.stop();
   registry.dispose();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 2000);
