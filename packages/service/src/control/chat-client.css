@@ -92,6 +92,30 @@
   display: block; width: 100%; text-align: left; border: 0; background: transparent;
   border-radius: 9px; padding: 9px 10px; color: var(--text); margin: 1px 0;
 }
+/* Строка списка — обёртка вокруг кнопки разговора и карандаша: вложить кнопку
+   в кнопку нельзя, а ручка переименования нужна в той же строке. */
+.chat-row { position: relative; }
+/* Карандаш стоит слева от «⋯»: справа место занято кнопкой папок. */
+.chat-rename {
+  position: absolute; top: 6px; right: 30px; width: 24px; height: 24px;
+  display: grid; place-items: center; border: 0; border-radius: 7px;
+  background: transparent; color: var(--dim); font-size: 13px; line-height: 1;
+  cursor: pointer; opacity: 0;
+  transition: opacity .12s ease, background .12s ease, color .12s ease;
+}
+.chat-row:hover .chat-rename, .chat-rename:focus-visible { opacity: 1; }
+.chat-rename:hover { background: var(--line); color: var(--text); }
+/* Ручка ложится поверх времени: на наведении время уступает ей место. */
+.chat-item-time { transition: opacity .12s ease; }
+.chat-row:hover .chat-item-time { opacity: 0; }
+/* Правка имени в строке списка: поле той же высоты, чтобы список не прыгал. */
+.chat-item.editing { padding: 9px 10px; }
+.chat-item-input {
+  flex: 1; min-width: 0; width: 100%; border: 1px solid var(--accent);
+  border-radius: 7px; background: var(--panel); color: var(--text);
+  font: inherit; font-size: 13px; font-weight: 500; padding: 3px 7px;
+  outline: none;
+}
 .chat-item:hover { background: var(--raise); }
 .chat-item.active { background: var(--accent-soft); }
 .chat-item-top { display: flex; gap: 10px; align-items: baseline; }
@@ -132,10 +156,6 @@
 }
 .chat-row:hover .chat-more, .chat-more:focus-visible { opacity: 1; }
 .chat-more:hover { background: var(--line); color: var(--text); }
-/* Наведение показывает «⋯» на месте времени: два действия в одной точке
-   читались бы как одно, а время в этот момент и так не главное. */
-.chat-row:hover .chat-item-time { opacity: 0; }
-.chat-item-time { transition: opacity .1s; }
 
 /* Кнопка «+ Папка» — действие над списком, поэтому мелкая и без акцентной заливки. */
 .new-folder {
@@ -664,7 +684,7 @@
   .chat-app.side-open .chat-side { transform: none; }
   /* Панель на узком экране — выдвижная и, как правило, на тач: «⋯» и действия
      папки видны всегда, иначе до них не добраться; время в строке убираем. */
-  .chat-more { opacity: 1; }
+  .chat-more, .chat-rename { opacity: 1; }
   .chat-row .chat-item-time { display: none; }
   .folder-actions { display: flex; }
   .menu-btn, .side-close { display: inline-block; }

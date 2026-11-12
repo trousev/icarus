@@ -116,19 +116,38 @@ export function textOfContent(content: unknown): string {
 }
 
 /**
- * Первая реплика человека из начала файла. Читаем только голову: для заголовка
- * хватает первого сообщения, а файл сессии бывает большим. Приписку о файлах
- * срезаем — в заголовке она выглядит как «Пользователь приложил файлы…».
+ * Начало разговора: первые реплики человека, первый ответ Икара и сколько
+ * реплик уже было. По ним модель придумывает заголовок: одно приветствие темы
+ * не даёт, а ответ на него показывает, о чём разговор на самом деле.
  */
-export function readFirstUserText(file: string, maxBytes = 64 * 1024): string {
+export type OpeningExchange = {
+  /** До трёх первых реплик человека — с запасом на «привет, помоги с …». */
+  users: string[];
+  /** Первый ответ Икара: он уточняет тему, которую человек назвал вскользь. */
+  assistant: string;
+  /** Все реплики человека в прочитанной голове файла: по ним видно, пора ли имя оставить. */
+  turns: number;
+};
+
+/** Приписку о файлах срезаем: в заголовке она выглядит как «Пользователь приложил файлы…». */
+function cleanOpeningText(text: string): string {
+  const cut = text.indexOf('\n\n[Пользователь приложил файлы');
+  return (cut === -1 ? text : text.slice(0, cut)).trim();
+}
+
+/**
+ * Разбор головы файла сессии: читаем только начало, а файл бывает большим.
+ * Сравнение с `readFirstUserText` — здесь нужен ещё и первый ответ.
+ */
+export function readOpeningExchange(file: string, maxBytes = 128 * 1024): OpeningExchange {
+  const opening: OpeningExchange = { users: [], assistant: '', turns: 0 };
   let fd: number | null = null;
   try {
     fd = fs.openSync(file, 'r');
     const buffer = Buffer.alloc(maxBytes);
     const read = fs.readSync(fd, buffer, 0, maxBytes, 0);
-    if (read <= 0) return '';
-    const lines = buffer.subarray(0, read).toString('utf8').split('\n');
-    for (const line of lines) {
+    if (read <= 0) return opening;
+    for (const line of buffer.subarray(0, read).toString('utf8').split('\n')) {
       if (!line.trim()) continue;
       let entry: { type?: string; message?: Record<string, unknown> };
       try {
@@ -136,18 +155,27 @@ export function readFirstUserText(file: string, maxBytes = 64 * 1024): string {
       } catch {
         continue;
       }
-      if (entry.type !== 'message' || entry.message?.role !== 'user') continue;
-      const text = textOfContent(entry.message.content);
-      const cut = text.indexOf('\n\n[Пользователь приложил файлы');
-      const clean = (cut === -1 ? text : text.slice(0, cut)).trim();
-      if (clean) return clean;
+      if (entry.type !== 'message') continue;
+      const text = cleanOpeningText(textOfContent(entry.message?.content));
+      if (entry.message?.role === 'user') {
+        opening.turns += 1;
+        if (!text) continue;
+        if (opening.users.length < 3) opening.users.push(text);
+      } else if (entry.message?.role === 'assistant' && opening.turns > 0 && !opening.assistant) {
+        opening.assistant = text;
+      }
     }
-    return '';
+    return opening;
   } catch {
-    return '';
+    return opening;
   } finally {
     if (fd !== null) fs.closeSync(fd);
   }
+}
+
+/** Первая реплика человека из начала файла. */
+export function readFirstUserText(file: string, maxBytes = 64 * 1024): string {
+  return readOpeningExchange(file, maxBytes).users[0] ?? '';
 }
 
 /** Когда создан разговор, по имени файла: `2026-09-23T18-54-52-308Z_…`. */

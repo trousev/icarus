@@ -1385,3 +1385,86 @@ test('архивный разговор открывается из архива
   assert.equal(архиве(app, 'archive-count').textContent, '0', 'в архиве пусто');
   assert.equal(архиве(app, 'chat-archived-tag').hidden, true, 'метка в шапке снята');
 });
+
+test('имя разговора из списка правится карандашом и Enter', async () => {
+  const app = await driveChat({
+    chatId: 'web-1',
+    routes: {
+      '/panel/api/chat/status': () => ({ busy: [] }),
+      '/panel/api/chat/history': () => ({
+        chat: { id: 'web-1', title: 'Разговор', workspace: 'talk' },
+        messages: [],
+        live: false,
+      }),
+      '/panel/api/chats': (_url, init) =>
+        init?.method === 'PATCH'
+          ? {
+              chat: {
+                id: 'web-1',
+                title: 'Налоги',
+                createdAt: '2026-11-01T10:00:00.000Z',
+                channel: 'web',
+                workspace: 'talk',
+                readOnly: false,
+              },
+            }
+          : { chats: [{ id: 'web-1', title: 'Разговор' }, { id: 'web-2', title: 'Долгий таск' }] },
+    },
+  });
+
+  // Карандаш живёт на строке списка: двойной клик по имени делает то же самое.
+  const pencil = app.document.querySelector('.chat-rename') as unknown as {
+    onclick: (event: { stopPropagation(): void }) => void;
+  };
+  assert.ok(pencil, 'у строки списка есть карандаш');
+  pencil.onclick({ stopPropagation() {} });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  const input = app.document.querySelector('.chat-item-input') as unknown as { value: string } | null;
+  assert.ok(input, 'вместо строки — поле ввода');
+  input.value = 'Налоги';
+  pressKey(app, input, 'Enter');
+  await new Promise((resolve) => setTimeout(resolve, 40));
+
+  assert.ok(
+    app.requests.some((request) => request.method === 'PATCH' && request.url.includes('/panel/api/chats')),
+    'новое имя ушло на сервер',
+  );
+  assert.equal(app.document.getElementById('chat-title')?.textContent, 'Налоги', 'шапка обновилась');
+  assert.match(app.sidebar(), /Налоги/, 'и строка списка тоже');
+  assert.doesNotMatch(app.sidebar(), /chat-item-input/, 'поле закрылось');
+});
+
+test('имя, придуманное моделью, приезжает сводкой и меняет шапку на лету', async () => {
+  const app = await driveChat({
+    chatId: 'web-1',
+    routes: {
+      '/panel/api/chat/status': () => ({ busy: [] }),
+      '/panel/api/chat/history': () => ({
+        chat: { id: 'web-1', title: 'Привет', workspace: 'talk' },
+        messages: [],
+        live: false,
+      }),
+      '/panel/api/chats': () => ({ chats: [{ id: 'web-1', title: 'Привет' }] }),
+    },
+  });
+
+  app.event({
+    userId: 'probe',
+    chatId: 'web-1',
+    type: 'title',
+    chat: {
+      id: 'web-1',
+      title: 'Настройка памяти Икара',
+      createdAt: '2026-11-01T10:00:00.000Z',
+      channel: 'web',
+      workspace: 'talk',
+      readOnly: false,
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+
+  assert.equal(app.document.getElementById('chat-title')?.textContent, 'Настройка памяти Икара');
+  assert.match(app.sidebar(), /Настройка памяти Икара/);
+  assert.equal(app.document.title, 'Icarus · Настройка памяти Икара', 'заголовок вкладки тоже');
+});

@@ -22,18 +22,22 @@ import { findWorkspace } from '../workspaces.ts';
 import { downloadHeader } from './files.ts';
 import { readJsonBody } from '../http/openai.ts';
 import { errorBody } from '../http/sse.ts';
-import { titleFromText } from '../http/title.ts';
+import { askModelTitle, titleFromText } from '../http/title.ts';
 import { buildPrompt } from '../prompt.ts';
 import { type ChatChannel } from '../sessions/identity.ts';
 import {
   NEW_CHAT_PREVIEW,
+  applyAutoTitle,
   createChatRecord,
   findChatRecord,
+  isAutoTitle,
   isGenericTitle,
   panelCanWrite,
   readChats,
   recordTurn,
+  renameChat,
   sessionEpochsOf,
+  sessionIdOf,
   sessionIdsOf,
   setChatArchived,
   setChatFolder,
@@ -42,7 +46,14 @@ import {
   type ChatTurn,
 } from '../sessions/chats.ts';
 import { findFolder } from '../sessions/folders.ts';
-import { sessionFileForId, sessionFilesFor, textOfContent as textOf, type FileSession } from '../sessions/files.ts';
+import {
+  readOpeningExchange,
+  sessionFileForId,
+  sessionFilesFor,
+  textOfContent as textOf,
+  type FileSession,
+  type OpeningExchange,
+} from '../sessions/files.ts';
 import type { SessionRegistry } from '../sessions/registry.ts';
 import {
   clearText,
@@ -372,8 +383,62 @@ function retitleChat(
   const generated = titleFromText(userText);
   if (!generated) return chat;
   const title = generated.length >= 47 ? `${generated.slice(0, 46).trimEnd()}…` : generated;
-  updateChatTitles(config, user, new Map([[chat.id, title]]));
-  return { ...chat, title };
+  // Имя наше, а не человека: модель ещё может уточнить его по первым репликам.
+  return applyAutoTitle(config, user, chat.id, title) ?? chat;
+}
+
+/** Сколько первых реплик участвует в живом заголовке: дальше имя должно устояться. */
+const AUTO_TITLE_TURNS = 3;
+
+/** Сколько ждём модель на заголовок в панели: ответ человеку уже ушёл, но и зря висеть незачем. */
+const AUTO_TITLE_TIMEOUT_MS = 8_000;
+
+/** Разговор для промпта заголовка: первые реплики человека и первый ответ Икара. */
+function titleConversation(opening: OpeningExchange): string {
+  const lines = opening.users.map((text) => `User: ${text}`);
+  if (opening.assistant) lines.push(`AI: ${opening.assistant}`);
+  return lines.join('\n');
+}
+
+/**
+ * Живой заголовок: модель читает начало разговора и называет его по смыслу.
+ * Ход к этому моменту уже отдан человеку, поэтому имя приезжает отдельным
+ * событием сводки, а не задерживает ответ. Уточняем только своё имя и только
+ * первые ходы: дальше разговор либо уже назван человеком, либо тема устоялась.
+ *
+ * `ask` — разовый вызов дешёвой модели. Сбой или таймаут оставляют эвристику:
+ * имя из первой реплики уже стоит, модель лишь пытается сделать его лучше.
+ */
+export async function refineChatTitle(
+  config: IcarusConfig,
+  user: UserConfig,
+  ask: (prompt: string) => Promise<string>,
+  chatId: string,
+): Promise<string | null> {
+  const chat = findChatRecord(config, user, chatId);
+  // Архивный разговор убран с глаз: имя ему модель не меняет (см. applyAutoTitle),
+  // значит и звать её незачем.
+  if (!chat || chat.archivedAt || !isAutoTitle(chat)) return null;
+
+  const file = sessionFileForId(userPaths(config, user).sessions, sessionIdOf(chat, user));
+  if (!file) return null;
+  const opening = readOpeningExchange(file);
+  if (opening.users.length === 0 || opening.turns > AUTO_TITLE_TURNS) return null;
+
+  const asked = await askModelTitle({
+    ask,
+    conversation: titleConversation(opening),
+    fallback: titleFromUserText(opening.users[0] ?? ''),
+  });
+  // Эвристику уже поставил finishChat: второй раз то же имя не пишем.
+  if (asked.source !== 'model') return null;
+
+  // Пока модель думала, человек мог назвать разговор сам — его имя сильнее.
+  const updated = applyAutoTitle(config, user, chatId, asked.title);
+  if (!updated || updated.title === chat.title) return null;
+  broadcast({ userId: user.id, chatId: updated.id, type: 'title', chat: updated });
+  log.info('заголовок разговора от модели', { user: user.id, chatId: updated.id, title: updated.title });
+  return updated.title;
 }
 
 /**
@@ -1074,6 +1139,16 @@ async function streamTurn(
     unsubscribe();
     unsubscribeSession();
     if (!res.writableEnded) res.end();
+    // Заголовок догоняет ответ: имя от модели приезжает отдельным событием
+    // сводки, поэтому человек не ждёт модель ради названия разговора.
+    void refineChatTitle(
+      config,
+      user,
+      (prompt) => registry.oneShot(user, prompt, { timeoutMs: AUTO_TITLE_TIMEOUT_MS }),
+      chatId,
+    ).catch((error: unknown) => {
+      log.warn('чат: живой заголовок не вышел', { user: user.id, chatId, error: String(error) });
+    });
     log.info('чат: ход завершён', {
       user: user.id,
       chatId,
@@ -1151,6 +1226,32 @@ export async function handleChatApi(
         return true;
       }
       json(res, 200, { chat: { id: chat.id, archived: Boolean(chat.archivedAt) } });
+      return true;
+    }
+
+    // Имя разговора из списка чатов: та же запись в chats.json, что и у `/rename`
+    // в веб-чате, поэтому имя видят и панель, и Telegram. После этого автоматика
+    // разговор не переименовывает: имя выбрал человек.
+    if (pathname === '/panel/api/chats' && req.method === 'PATCH') {
+      const body = await bodyOf(req);
+      const id = chatIdOf(body.id);
+      if (!id) {
+        json(res, 400, errorBody('не указан разговор'));
+        return true;
+      }
+      // Длина та же, что у /rename: у темы в Telegram предел 128 символов.
+      const title = typeof body.title === 'string' ? body.title.replace(/\s+/g, ' ').trim().slice(0, 128) : '';
+      if (!title) {
+        json(res, 400, errorBody('пустое имя разговора'));
+        return true;
+      }
+      const chat = renameChat(ctx.config, user, id, title);
+      if (!chat) {
+        json(res, 404, errorBody('разговор не найден'));
+        return true;
+      }
+      broadcast({ userId: user.id, chatId: chat.id, type: 'title', chat });
+      json(res, 200, { chat });
       return true;
     }
 
