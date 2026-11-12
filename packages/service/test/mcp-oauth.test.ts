@@ -12,6 +12,9 @@ import {
   completeAuthorization,
   credentialsFromCompleted,
   discoverOAuth,
+  mimicCallbackUrl,
+  parseAuthorizationResponse,
+  peekAuthorization,
   refreshAuthorization,
   resetPendingForTests,
   startAuthorization,
@@ -309,4 +312,150 @@ test('refresh сохраняет ротацию refresh_token и не теряе
 test('канонический ресурс не тащит хвостовой слэш и фрагмент', () => {
   assert.equal(canonicalResource('https://mcp.example.com/mcp/'), 'https://mcp.example.com/mcp');
   assert.equal(canonicalResource('https://mcp.example.com/#x'), 'https://mcp.example.com');
+});
+
+// ── мимикрия: вход через мёртвый loopback ──────────────────────────────────
+// Такие authorization servers (Any.do) примут только redirect_uri из своего
+// белого списка. Мы регистрируемся как локальный клиент, как Claude Code, а код
+// человек вставляет руками.
+
+test('мимикрия: регистрация и authorize идут на loopback, а не на панель', async () => {
+  resetPendingForTests();
+  let registerBody: Record<string, unknown> = {};
+  const { fetchImpl } = discoveryRoutes({
+    '/register': (_url, init) => {
+      registerBody = JSON.parse(String(init.body ?? '{}')) as Record<string, unknown>;
+      return json({ client_id: 'client-loop', token_endpoint_auth_method: 'none' }, 201);
+    },
+  });
+  const started = await startAuthorization({
+    server: server({ mimic: true }),
+    userId: 'probe',
+    publicUrl: 'https://icarus.example.com',
+    fetchImpl,
+    now: 1_000,
+  });
+
+  assert.equal(started.mimic, true);
+  assert.equal(started.redirectUri, mimicCallbackUrl());
+  assert.equal(started.redirectUri, 'http://localhost:47821/callback');
+  assert.deepEqual(registerBody.redirect_uris, ['http://localhost:47821/callback'], 'клиент регистрируется на loopback');
+  assert.equal(new URL(started.url).searchParams.get('redirect_uri'), 'http://localhost:47821/callback');
+});
+
+test('мимикрия: сохранённый redirect_uri не даёт переиспользовать чужого клиента', async () => {
+  resetPendingForTests();
+  const registrations: Array<Record<string, unknown>> = [];
+  const { fetchImpl } = discoveryRoutes({
+    '/register': (_url, init) => {
+      registrations.push(JSON.parse(String(init.body ?? '{}')) as Record<string, unknown>);
+      return json({ client_id: 'client-' + registrations.length, token_endpoint_auth_method: 'none' }, 201);
+    },
+    '/token': () => json({ access_token: 'access-1', refresh_token: 'refresh-1', expires_in: 3600 }),
+  });
+
+  const plain = await startAuthorization({
+    server: server(),
+    userId: 'probe',
+    publicUrl: 'https://icarus.example.com',
+    fetchImpl,
+  });
+  assert.equal(new URL(plain.url).searchParams.get('client_id'), 'client-1');
+  const completed = await completeAuthorization({ state: plain.state, code: 'code-1', fetchImpl });
+  const saved = credentialsFromCompleted(completed);
+  assert.equal(saved.redirectUri, 'https://icarus.example.com/panel/mcp/oauth/callback');
+
+  // Включили мимикрию: адрес возврата другой, значит клиенту нужна новая
+  // регистрация — старый client_id привязан к публичному callback.
+  const mimic = await startAuthorization({
+    server: server({ mimic: true }),
+    userId: 'probe',
+    publicUrl: 'https://icarus.example.com',
+    credentials: { oauth: saved },
+    fetchImpl,
+  });
+  assert.equal(registrations.length, 2, 'клиент перерегистрирован под loopback');
+  assert.equal(new URL(mimic.url).searchParams.get('client_id'), 'client-2');
+
+  // А повторный вход в том же режиме клиента уже переиспользует.
+  const repeated = await startAuthorization({
+    server: server({ mimic: true }),
+    userId: 'probe',
+    publicUrl: 'https://icarus.example.com',
+    credentials: { oauth: { ...saved, clientId: 'client-2', redirectUri: mimicCallbackUrl() } },
+    fetchImpl,
+  });
+  assert.equal(registrations.length, 2);
+  assert.equal(new URL(repeated.url).searchParams.get('client_id'), 'client-2');
+});
+
+test('мимикрия несовместима с CIMD: наш документ объявляет публичный callback', async () => {
+  resetPendingForTests();
+  const { fetchImpl } = discoveryRoutes({
+    '/.well-known/oauth-authorization-server': () =>
+      json({ ...AS_METADATA, registration_endpoint: undefined, client_id_metadata_document_supported: true }),
+  });
+  await assert.rejects(
+    () =>
+      startAuthorization({
+        server: server({ mimic: true }),
+        userId: 'probe',
+        publicUrl: 'https://icarus.example.com',
+        fetchImpl,
+      }),
+    /CIMD/,
+  );
+});
+
+test('вставленный адрес разбирается: полный URL, без схемы и один query', () => {
+  const full = parseAuthorizationResponse(
+    'http://localhost:47821/callback?code=abc&state=def&iss=https%3A%2F%2Fmcp.any.do%2F',
+  );
+  assert.equal(full.code, 'abc');
+  assert.equal(full.state, 'def');
+  assert.equal(full.redirect, 'http://localhost:47821/callback?code=abc&state=def&iss=https%3A%2F%2Fmcp.any.do%2F');
+
+  const noScheme = parseAuthorizationResponse('localhost:47821/callback?code=abc&state=def');
+  assert.equal(noScheme.code, 'abc');
+  assert.equal(noScheme.state, 'def');
+  assert.equal(noScheme.redirect, undefined, 'без схемы адрес не считаем URL');
+
+  const query = parseAuthorizationResponse('?code=abc&state=def');
+  assert.equal(query.code, 'abc');
+  assert.equal(query.state, 'def');
+
+  const bare = parseAuthorizationResponse('code=abc&state=def');
+  assert.equal(bare.code, 'abc');
+  assert.equal(bare.state, 'def');
+
+  const denied = parseAuthorizationResponse('http://localhost:47821/callback?error=access_denied&error_description=нет');
+  assert.equal(denied.error, 'access_denied');
+  assert.equal(denied.errorDescription, 'нет');
+
+  assert.throws(() => parseAuthorizationResponse('   '), /вставь адрес/);
+  assert.throws(() => parseAuthorizationResponse('http://localhost:47821/callback'), /code/);
+  assert.throws(() => parseAuthorizationResponse('что-то не то'), /code/);
+});
+
+test('peekAuthorization показывает, чей это вход, и исчезает после обмена', async () => {
+  resetPendingForTests();
+  const { fetchImpl } = discoveryRoutes({
+    '/register': () => json({ client_id: 'client-42', token_endpoint_auth_method: 'none' }, 201),
+    '/token': () => json({ access_token: 'access-1', refresh_token: 'refresh-1', expires_in: 3600 }),
+  });
+  const started = await startAuthorization({
+    server: server({ mimic: true }),
+    userId: 'probe',
+    publicUrl: 'https://icarus.example.com',
+    fetchImpl,
+    now: 1_000,
+  });
+  const info = peekAuthorization(started.state, 2_000);
+  assert.equal(info?.userId, 'probe');
+  assert.equal(info?.serverId, 'todoist');
+  assert.equal(info?.redirectUri, mimicCallbackUrl());
+
+  await completeAuthorization({ state: started.state, code: 'code-1', fetchImpl, now: 3_000 });
+  assert.equal(peekAuthorization(started.state, 4_000), null, 'одноразовый state больше не живёт');
+  assert.equal(peekAuthorization('чужой', 4_000), null);
 });

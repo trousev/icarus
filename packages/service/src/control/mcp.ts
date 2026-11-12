@@ -37,10 +37,13 @@ import {
 } from '../mcp/registry.ts';
 import {
   OAuthError,
+  PENDING_TTL_MS,
   callbackUrl,
   clientMetadataDocument,
   completeAuthorization,
   credentialsFromCompleted,
+  parseAuthorizationResponse,
+  peekAuthorization,
   refreshAuthorization,
   startAuthorization,
   tokenIsFresh,
@@ -163,6 +166,7 @@ function inputOf(body: Record<string, unknown>): McpServerInput {
     ...(optional(body.tokenEndpoint) === undefined ? {} : { tokenEndpoint: optional(body.tokenEndpoint) }),
     ...(optional(body.registrationEndpoint) === undefined ? {} : { registrationEndpoint: optional(body.registrationEndpoint) }),
     ...(optional(body.issuer) === undefined ? {} : { issuer: optional(body.issuer) }),
+    ...(body.mimic === true ? { mimic: true } : {}),
     shared: body.shared === true,
   };
 }
@@ -384,7 +388,62 @@ export async function handleMcpApi(
         ...(ctx.fetchImpl === undefined ? {} : { fetchImpl: ctx.fetchImpl }),
         ...(ctx.now === undefined ? {} : { now: ctx.now() }),
       });
-      json(res, 200, { url: started.url, state: started.state });
+      json(res, 200, {
+        url: started.url,
+        state: started.state,
+        redirectUri: started.redirectUri,
+        // Мимикрия: панель не уводит вкладку, а показывает адрес и ждёт вставки.
+        mimic: started.mimic,
+        expiresIn: Math.round(PENDING_TTL_MS / 1000),
+      });
+      return;
+    }
+
+    if (name === 'oauth/complete') {
+      // Ручное завершение: человек вставил адрес из строки браузера после того,
+      // как его вернуло на мёртвый loopback. Всё остальное — как в callback.
+      if (!id) throw new McpError('не указан id');
+      const server = serverForUser(config, userId, id);
+      if (!server) throw new McpError('такого MCP нет или он не расшарен', 404);
+      if (server.auth !== 'oauth') throw new McpError('этот MCP не использует OAuth');
+      const pasted = textOf(body.url).trim();
+      if (pasted === '') throw new McpError('вставь адрес из строки браузера');
+      const parsed = parseAuthorizationResponse(pasted);
+      if (parsed.error !== undefined) {
+        throw new OAuthError(
+          `authorization server отказал: ${parsed.errorDescription ?? parsed.error}`,
+          parsed.error,
+        );
+      }
+      if (parsed.state === undefined) throw new OAuthError('в адресе нет state — скопируй его целиком');
+      if (parsed.code === undefined) throw new OAuthError('в адресе нет code — скопируй его целиком');
+      const now = ctx.now === undefined ? Date.now() : ctx.now();
+      const info = peekAuthorization(parsed.state, now);
+      if (!info) throw new OAuthError('ссылка авторизации устарела или уже использована — начни заново');
+      // state живёт в памяти сервиса и связывает вход с человеком и сервером:
+      // чужой адрес не должен завершить вход, даже если он валиден.
+      if (info.userId !== userId) throw new McpError('этот вход начал другой человек', 403);
+      if (info.serverId !== server.id) throw new McpError('этот вход относится к другому MCP-серверу');
+      if (parsed.redirect !== undefined) {
+        const expected = new URL(info.redirectUri);
+        const actual = new URL(parsed.redirect);
+        if (actual.origin !== expected.origin || actual.pathname !== expected.pathname) {
+          throw new OAuthError(
+            `это адрес от другого входа: мы ждём ${expected.origin}${expected.pathname}. ` +
+              'Скопируй адрес из строки браузера после входа в этот сервер',
+          );
+        }
+      }
+      const completed = await completeAuthorization({
+        state: parsed.state,
+        code: parsed.code,
+        ...(ctx.fetchImpl === undefined ? {} : { fetchImpl: ctx.fetchImpl }),
+        now,
+      });
+      saveOAuthCredentials(config, completed.userId, completed.serverId, credentialsFromCompleted(completed));
+      apply(ctx, completed.userId);
+      log.info('MCP: доступ получен вставкой адреса', { user: completed.userId, server: completed.serverId });
+      json(res, 200, { server: viewFor(config, userId, server.id) });
       return;
     }
 

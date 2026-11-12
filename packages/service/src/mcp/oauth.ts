@@ -121,6 +121,33 @@ function prunePending(now: number): void {
   }
 }
 
+export type PendingAuthorizationInfo = {
+  userId: string;
+  serverId: string;
+  redirectUri: string;
+  createdAt: number;
+};
+
+/**
+ * Кто и для чего начал вход. Нужен ручному завершению: панель проверяет, что
+ * вставленный код относится к её человеку и её серверу, и только потом тратит
+ * одноразовый state на обмен.
+ */
+export function peekAuthorization(state: string, now = Date.now()): PendingAuthorizationInfo | null {
+  const item = pending.get(state);
+  if (!item) return null;
+  if (now - item.createdAt > PENDING_TTL_MS) {
+    pending.delete(state);
+    return null;
+  }
+  return {
+    userId: item.userId,
+    serverId: item.serverId,
+    redirectUri: item.redirectUri,
+    createdAt: item.createdAt,
+  };
+}
+
 function base64url(buffer: Buffer): string {
   return buffer.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
@@ -182,6 +209,72 @@ export function canonicalResource(serverUrl: string): string {
 
 export function callbackUrl(publicUrl: string): string {
   return new URL('/panel/mcp/oauth/callback', publicUrl).toString();
+}
+
+/**
+ * Порт «мёртвого» loopback-адреса для режима мимикрии (см. UserMcpServer.mimic).
+ * Слушать его никто не будет намеренно: браузер дойдёт до него, покажет ошибку
+ * соединения, а адрес с кодом останется в строке — человек скопирует его в панель.
+ * Число редкое, чтобы случайный dev-сервер на машине не перехватил код.
+ */
+const MIMIC_CALLBACK_PORT = 47821;
+
+/**
+ * Адрес, который принимают authorization servers с белым списком redirect_uri:
+ * локальный callback, как у Claude Code и Codex CLI. Им же прикрывается вход на
+ * серверы вроде Any.do, где наш публичный callback не прописан.
+ */
+export function mimicCallbackUrl(): string {
+  return `http://localhost:${MIMIC_CALLBACK_PORT}/callback`;
+}
+
+export type AuthorizationResponse = {
+  code?: string;
+  state?: string;
+  error?: string;
+  errorDescription?: string;
+  /** Адрес целиком, если человек вставил URL: по нему видно, куда его вернуло. */
+  redirect?: string;
+};
+
+/**
+ * Разбирает то, что человек вставил из строки браузера. Браузер не показывает
+ * схему, поэтому принимаем и полный адрес, и `localhost:port/callback?...`, и
+ * голую query-строку. Ошибку authorization server тоже разбираем: «access_denied»
+ * надо показать словами, а не «в адресе нет code».
+ */
+export function parseAuthorizationResponse(raw: string): AuthorizationResponse {
+  const text = raw.trim();
+  if (text === '') throw new OAuthError('вставь адрес из строки браузера');
+  let redirect: URL | null = null;
+  let params: URLSearchParams;
+  const query = text.indexOf('?');
+  try {
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) {
+      redirect = new URL(text);
+      params = redirect.searchParams;
+    } else if (query >= 0) {
+      params = new URLSearchParams(text.slice(query + 1));
+    } else {
+      params = new URLSearchParams(text.replace(/^[?#]/, ''));
+    }
+  } catch {
+    throw new OAuthError('не разобрал адрес: скопируй его из строки браузера целиком');
+  }
+  const code = optionalString(params.get('code'));
+  const state = optionalString(params.get('state'));
+  const error = optionalString(params.get('error'));
+  const errorDescription = optionalString(params.get('error_description'));
+  if (code === undefined && state === undefined && error === undefined) {
+    throw new OAuthError('в адресе нет ни code, ни state — скопируй адрес целиком, вместе с «?…»');
+  }
+  return {
+    ...(code === undefined ? {} : { code }),
+    ...(state === undefined ? {} : { state }),
+    ...(error === undefined ? {} : { error }),
+    ...(errorDescription === undefined ? {} : { errorDescription }),
+    ...(redirect === null ? {} : { redirect: redirect.toString() }),
+  };
 }
 
 export function clientMetadataUrl(publicUrl: string): string {
@@ -641,6 +734,10 @@ export type StartedAuthorization = {
   state: string;
   discovery: OAuthDiscovery;
   client: OAuthClient;
+  /** Адрес возврата, который уехал в authorize: панель показывает его человеку. */
+  redirectUri: string;
+  /** Вход идёт через мёртвый loopback-адрес и требует вставить адрес вручную. */
+  mimic: boolean;
 };
 
 /**
@@ -672,7 +769,8 @@ export async function startAuthorization(options: {
       fetchImpl,
     }));
 
-  const redirectUri = callbackUrl(options.publicUrl);
+  const mimic = options.server.mimic === true;
+  const redirectUri = mimic ? mimicCallbackUrl() : callbackUrl(options.publicUrl);
   const scopes =
     options.server.scopes?.trim() ||
     discovery.challengeScope ||
@@ -692,7 +790,13 @@ export async function startAuthorization(options: {
       ),
       source: 'preregistered',
     };
-  } else if (stored?.clientId && stored.tokenEndpoint !== undefined) {
+  } else if (
+    stored?.clientId &&
+    stored.tokenEndpoint !== undefined &&
+    // Регистрация привязана к redirect_uri: с другим адресом authorize отвергнет
+    // client_id, поэтому при смене режима клиента регистрируем заново.
+    (stored.redirectUri ?? callbackUrl(options.publicUrl)) === redirectUri
+  ) {
     const isCimd = stored.clientId === clientMetadataUrl(options.publicUrl);
     client = {
       clientId: stored.clientId,
@@ -712,6 +816,16 @@ export async function startAuthorization(options: {
     throw new OAuthError(
       'сервер не умеет регистрировать клиентов (нет registration_endpoint и CIMD). ' +
         'Зарегистрируй клиента вручную и укажи client_id в настройках MCP.',
+    );
+  }
+
+  if (mimic && client.source === 'cimd') {
+    // CIMD-документ у нас один и объявляет публичный callback: loopback с ним
+    // authorization server не примет, и человек получил бы непонятный отказ.
+    throw new OAuthError(
+      'мимикрия требует динамической регистрации клиента, а этот сервер умеет только CIMD: ' +
+        'документ объявляет публичный callback. Сними галочку или укажи client_id, ' +
+        `зарегистрированный на ${mimicCallbackUrl()}`,
     );
   }
 
@@ -745,7 +859,7 @@ export async function startAuthorization(options: {
     ...(scopes === undefined ? {} : { scopes }),
   });
 
-  return { url: url.toString(), state, discovery, client };
+  return { url: url.toString(), state, discovery, client, redirectUri, mimic };
 }
 
 export type CompletedAuthorization = {
@@ -854,13 +968,20 @@ export function credentialsFromCompleted(completed: CompletedAuthorization): Mcp
     issuer: completed.discovery.issuer,
     authorizationEndpoint: completed.discovery.authorizationEndpoint,
     tokenEndpoint: completed.discovery.tokenEndpoint,
-    ...(completed.discovery.registrationEndpoint === undefined
-      ? {}
-      : { registrationEndpoint: completed.discovery.registrationEndpoint }),
+    // Пустое значение здесь значит «стереть прежнее»: запись сливается с уже
+    // сохранённой, а сервер без registration_endpoint не должен унаследовать
+    // endpoint от прошлой регистрации.
+    registrationEndpoint: completed.discovery.registrationEndpoint,
     resource: completed.resource,
     clientId: completed.client.clientId,
-    ...(completed.client.clientSecret === undefined ? {} : { clientSecret: completed.client.clientSecret }),
+    // Секрет и ошибку задаём явно: новый client_id мог прийти без секрета, и
+    // старый не должен к нему прилипнуть.
+    clientSecret: completed.client.clientSecret,
     tokenEndpointAuthMethod: completed.client.tokenEndpointAuthMethod,
+    // С этим адресом клиент зарегистрирован: следующий authorize обязан повторить
+    // его же, иначе сервер отвергнет client_id.
+    redirectUri: completed.redirectUri,
+    error: undefined,
     // По этому ключу pi будет ходить в локальный прокси, а сервис — подставлять
     // свежий Bearer. В mcp.json сам токен не попадает.
     proxyKey: base64url(randomBytes(24)),
