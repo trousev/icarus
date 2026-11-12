@@ -12,6 +12,7 @@ import {
   findTelegramUser,
   loadConfig,
   loadEnvFile,
+  mcpLifecycle,
   publicHost,
 } from '../src/config.ts';
 
@@ -172,6 +173,17 @@ test('в примере конфига артефакты включены, ск
   assert.equal(artifacts.hidden, true, 'в панели MCP его нет и выключить нельзя');
   assert.equal(artifacts.lifecycle, 'lazy', 'инструкции не висят в каждом разговоре');
   assert.match(artifacts.description ?? '', /артефакт/i);
+});
+
+// Дефолтный стек не должен поднимать MCP-процессы на старте разговора: каждый
+// eager — это процесс на каждую сессию, и «не скейлится» начинается именно здесь.
+test('в примере конфига нет eager MCP: на старте разговора ничего не поднимается', () => {
+  const config = loadConfig(path.join(REPO_ROOT, 'config.example.yaml'), {
+    DEEPINFRA_API_KEY: 'sk-test',
+  } as NodeJS.ProcessEnv);
+  for (const [name, server] of Object.entries(config.mcp)) {
+    assert.equal(mcpLifecycle(server), 'lazy', `${name}: подключается по требованию`);
+  }
 });
 
 test('docker.dns: список адресов, опечатка — ошибка с путём до поля', () => {
