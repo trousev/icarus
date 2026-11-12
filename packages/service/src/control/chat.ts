@@ -35,10 +35,12 @@ import {
   recordTurn,
   sessionEpochsOf,
   sessionIdsOf,
+  setChatFolder,
   updateChatTitles,
   type ChatRecord,
   type ChatTurn,
 } from '../sessions/chats.ts';
+import { findFolder } from '../sessions/folders.ts';
 import { sessionFileForId, sessionFilesFor, textOfContent as textOf, type FileSession } from '../sessions/files.ts';
 import type { SessionRegistry } from '../sessions/registry.ts';
 import {
@@ -173,6 +175,8 @@ export type ChatSummary = {
   channel: ChatChannel;
   /** Рабочая папка разговора. */
   workspace: string;
+  /** Папка в левом меню; нет поля — разговор во «Входящих». */
+  folder?: string;
   /**
    * Писать отсюда нельзя. Веб-чат и Telegram панель ведёт (это один разговор),
    * разговоры через API — только смотрит.
@@ -495,6 +499,8 @@ function summaryOf(chat: ChatRecord, digest: SessionDigest | null): ChatSummary 
     updatedAt: digest?.updatedAt || chat.createdAt,
     channel: chat.channel,
     workspace: chat.workspace,
+    // Пустое поле не шлём: у разговора во «Входящих» папки просто нет.
+    ...(chat.folder ? { folder: chat.folder } : {}),
     readOnly: !panelCanWrite(chat),
     ...(chat.lastTurn ? { lastTurn: chat.lastTurn } : {}),
   };
@@ -570,6 +576,7 @@ export function summaryAfterTurn(chat: ChatRecord, userText: string, assistantTe
     createdAt: chat.createdAt,
     updatedAt: new Date().toISOString(),
     workspace: chat.workspace,
+    ...(chat.folder ? { folder: chat.folder } : {}),
     channel: chat.channel,
     readOnly: !panelCanWrite(chat),
     ...(chat.lastTurn ? { lastTurn: chat.lastTurn } : {}),
@@ -1201,6 +1208,29 @@ export async function handleChatApi(
       // Снимок для того, кто только открыл панель или переподключил сводку:
       // события за время разрыва потеряны, а состояние — вот оно.
       json(res, 200, { busy: ctx.registry?.busyConversations(user.id) ?? [] });
+      return true;
+    }
+
+    // Папки — это раскладка меню, а не работа агента: перенос доступен и тогда,
+    // когда панель поднята без pi. Поэтому маршрут стоит до проверки реестра.
+    if (pathname === '/panel/api/chat/folder' && req.method === 'POST') {
+      const body = await bodyOf(req);
+      const id = chatIdOf(body.id);
+      if (!id) {
+        json(res, 400, errorBody('не указан разговор'));
+        return true;
+      }
+      const folder = typeof body.folder === 'string' && body.folder ? body.folder : null;
+      if (folder && !findFolder(ctx.config, user, folder)) {
+        json(res, 404, errorBody(`папка «${folder}» не найдена`));
+        return true;
+      }
+      const chat = setChatFolder(ctx.config, user, id, folder);
+      if (!chat) {
+        json(res, 404, errorBody('разговор не найден'));
+        return true;
+      }
+      json(res, 200, { ok: true, id: chat.id, folder });
       return true;
     }
 

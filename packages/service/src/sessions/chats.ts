@@ -57,6 +57,12 @@ export type ChatRecord = {
   /** Рабочая папка разговора: разговор навсегда остаётся в своём workspace'е. */
   workspace: string;
   /**
+   * Папка в левом меню. К рабочему каталогу отношения не имеет: человек просто
+   * раскладывает разговоры по полкам, а chats без папки показывает «Входящие».
+   * Поля нет — значит, разговор лежит во «Входящих».
+   */
+  folder?: string;
+  /**
    * Артефакт, который правит этот разговор. Обычный чат работает в workspace,
    * а артефактный — строго в папке артефакта, поэтому одной только workspace
    * для него мало: папка берётся из сессии pi, а не из рабочего каталога.
@@ -162,6 +168,8 @@ function normalize(value: unknown): ChatRecord | null {
     workspace: typeof item.workspace === 'string' && item.workspace ? item.workspace : DEFAULT_WORKSPACE,
     ...(conversationId ? { conversationId } : {}),
     ...(sessions.length > 0 ? { sessions } : {}),
+    // Пустой папки не бывает: ссылка на удалённую папку равносильна «Входящим».
+    ...(typeof item.folder === 'string' && item.folder !== '' ? { folder: item.folder } : {}),
     // Пустая строка — это «обычный чат», а не артефакт с пустым именем.
     ...(typeof item.artifact === 'string' && item.artifact !== '' ? { artifact: item.artifact } : {}),
     ...(lastTurn ? { lastTurn } : {}),
@@ -282,6 +290,45 @@ export function reassignChats(config: IcarusConfig, user: UserConfig, from: stri
   for (const chat of chats) {
     if (chat.workspace !== from) continue;
     chat.workspace = to;
+    moved += 1;
+  }
+  if (moved > 0) writeChats(config, user, chats);
+  return moved;
+}
+
+/**
+ * Переносит разговор в папку меню (или во «Входящие», если folder === null).
+ * Файл сессии, workspace и заголовок не меняются: это только полка в списке.
+ */
+export function setChatFolder(
+  config: IcarusConfig,
+  user: UserConfig,
+  id: string,
+  folder: string | null,
+): ChatRecord | null {
+  const chats = readChats(config, user);
+  const chat = chats.find((item) => item.id === id || item.conversationId === id);
+  if (!chat) return null;
+  if (chat.folder === (folder ?? undefined)) return chat;
+  if (folder) chat.folder = folder;
+  else delete chat.folder;
+  writeChats(config, user, chats);
+  return chat;
+}
+
+/** Папку удалили: её разговоры возвращаются во «Входящие», а не теряются. */
+export function reassignChatFolder(
+  config: IcarusConfig,
+  user: UserConfig,
+  folder: string,
+  to: string | null = null,
+): number {
+  const chats = readChats(config, user);
+  let moved = 0;
+  for (const chat of chats) {
+    if (chat.folder !== folder) continue;
+    if (to) chat.folder = to;
+    else delete chat.folder;
     moved += 1;
   }
   if (moved > 0) writeChats(config, user, chats);

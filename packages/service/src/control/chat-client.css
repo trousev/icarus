@@ -89,7 +89,7 @@
   margin: 0 8px 6px; text-transform: uppercase;
 }
 .chat-item {
-  width: 100%; text-align: left; border: 0; background: transparent;
+  display: block; width: 100%; text-align: left; border: 0; background: transparent;
   border-radius: 9px; padding: 9px 10px; color: var(--text); margin: 1px 0;
 }
 .chat-item:hover { background: var(--raise); }
@@ -118,6 +118,88 @@
 .chat-item-preview {
   color: var(--dim); font-size: 12px; margin-top: 2px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* ── папки в меню ─────────────────────────────────────────────────────────── */
+/* Строка разговора — обёртка: кнопка «⋯» не может жить внутри кнопки чата,
+   иначе браузер сам решает, куда попадёт клик. */
+.chat-row { position: relative; }
+.chat-row.dragging { opacity: .45; }
+.chat-more {
+  position: absolute; top: 6px; right: 4px; border: 0; background: transparent;
+  color: var(--dim); padding: 2px 6px; border-radius: 6px; line-height: 1;
+  font-size: 14px; opacity: 0; transition: opacity .1s;
+}
+.chat-row:hover .chat-more, .chat-more:focus-visible { opacity: 1; }
+.chat-more:hover { background: var(--line); color: var(--text); }
+/* Наведение показывает «⋯» на месте времени: два действия в одной точке
+   читались бы как одно, а время в этот момент и так не главное. */
+.chat-row:hover .chat-item-time { opacity: 0; }
+.chat-item-time { transition: opacity .1s; }
+
+/* Кнопка «+ Папка» — действие над списком, поэтому мелкая и без акцентной заливки. */
+.new-folder {
+  width: 100%; border: 0; background: transparent; color: var(--dim);
+  font-size: 12px; text-align: left; padding: 6px 10px; border-radius: 7px;
+  margin: 2px 0 0;
+}
+.new-folder span { margin-right: 4px; }
+.new-folder:hover { background: var(--raise); color: var(--text); }
+
+.folder-head {
+  display: flex; align-items: center; gap: 6px; margin: 10px 2px 2px;
+  padding: 5px 6px; border-radius: 7px; cursor: pointer;
+  color: var(--dim); font-size: 11px; letter-spacing: .07em; text-transform: uppercase;
+}
+.folder-head:hover { background: var(--raise); color: var(--text); }
+/* «Входящие» — не папка, кликать по ним нечего. */
+.folder-head.inbox { cursor: default; }
+.folder-head:focus-visible { outline: 1px solid var(--accent); }
+/* Подсветка цели: пока тащат чат, видно, в какую папку он упадёт. */
+.folder-head.drop-target { background: var(--accent-soft); color: var(--text); outline: 1px dashed var(--accent); }
+.folder-caret { flex: 0 0 auto; font-size: 9px; width: 10px; transition: transform .12s; }
+.folder-head.collapsed .folder-caret { transform: rotate(-90deg); }
+.folder-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-count { flex: 0 0 auto; font-size: 10px; opacity: .7; }
+.folder-actions { display: none; gap: 2px; }
+.folder-head:hover .folder-actions, .folder-head:focus-within .folder-actions { display: flex; }
+.folder-act {
+  border: 0; background: transparent; color: var(--dim); font-size: 12px;
+  padding: 0 3px; border-radius: 4px; line-height: 1.4;
+}
+.folder-act:hover { background: var(--line); color: var(--text); }
+.folder-empty { margin: 2px 10px 6px; font-style: italic; }
+
+/* Поля имени папки: своё, а не системное, — строка списка не должна прыгать. */
+.folder-new { margin: 10px 2px 2px; }
+.folder-new input, .folder-rename {
+  width: 100%; box-sizing: border-box; background: var(--bg); color: var(--text);
+  border: 1px solid var(--accent); border-radius: 7px; font-size: 12px;
+  padding: 5px 7px; text-transform: none; letter-spacing: normal;
+}
+.folder-rename { flex: 1; min-width: 0; padding: 2px 5px; }
+
+/* Меню «Переместить в…»: то же, что перетаскивание, но доступно с клавиатуры. */
+.chat-menu {
+  position: fixed; z-index: 40; min-width: 190px; max-width: 249px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 6px; box-shadow: 0 14px 34px rgba(0, 0, 0, .38);
+}
+.chat-menu-title {
+  margin: 4px 8px 6px; color: var(--dim); font-size: 10px;
+  letter-spacing: .08em; text-transform: uppercase;
+}
+.chat-menu button {
+  display: block; width: 100%; text-align: left; border: 0; background: transparent;
+  color: var(--text); font-size: 13px; padding: 7px 9px; border-radius: 7px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chat-menu button:hover { background: var(--raise); }
+.chat-menu button.on::after { content: '✓'; float: right; color: var(--accent); }
+.chat-menu-empty { color: var(--dim); font-size: 12px; margin: 2px 9px 6px; }
+.chat-menu button.chat-menu-new {
+  margin-top: 4px; border-top: 1px solid var(--line); border-radius: 0;
+  color: var(--dim);
 }
 
 .side-settings { border-top: 1px solid var(--line); padding-top: 15px; margin-top: 12px; }
@@ -526,6 +608,11 @@
     box-shadow: 20px 0 50px rgba(0, 0, 0, .35);
   }
   .chat-app.side-open .chat-side { transform: none; }
+  /* Панель на узком экране — выдвижная и, как правило, на тач: «⋯» и действия
+     папки видны всегда, иначе до них не добраться; время в строке убираем. */
+  .chat-more { opacity: 1; }
+  .chat-row .chat-item-time { display: none; }
+  .folder-actions { display: flex; }
   .menu-btn, .side-close { display: inline-block; }
   .side-resizer { display: none; }
   .chat-search { width: min(230px, 40vw); }
