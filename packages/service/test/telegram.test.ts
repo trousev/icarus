@@ -37,7 +37,7 @@ import {
   type TelegramPhotoSize,
   type TelegramUpdate,
 } from '../src/telegram/api.ts';
-import { MESSAGE_LIMIT, PLACEHOLDER, splitPoint } from '../src/telegram/reply.ts';
+import { MESSAGE_LIMIT, splitPoint } from '../src/telegram/reply.ts';
 import { userPaths } from '../src/config.ts';
 import { ensureChat, findChatRecord, readChats, recordTurn, renameChat, workspaceForConversation } from '../src/sessions/chats.ts';
 import { sessionIdFor } from '../src/sessions/pi-session.ts';
@@ -1113,8 +1113,7 @@ test('пустой ответ не оставляет висящее много�
   await bot.handleUpdate(messageUpdate('посмотри, что там'));
 
   const text = chatText(state, 42);
-  assert.notEqual(text, PLACEHOLDER);
-  assert.equal(text, 'Готово.', 'молчаливый ход закрыт коротким словом, а не висящим многоточием');
+  assert.equal(text, 'Готово.', 'молчаливый ход закрыт коротким словом, а не пустым сообщением');
 });
 
 test('чем занят ход, видно действием Telegram, а не строкой в ответе', async () => {
