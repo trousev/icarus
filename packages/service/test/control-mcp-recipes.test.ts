@@ -105,10 +105,10 @@ test('каталог: id и имена уникальны, команда и т�
       assert.equal(recipe.secretKind, 'header', `${recipe.id}: ключи HTTP живут в заголовке`);
     }
 
-    if (recipe.secrets.length > 0) {
-      assert.equal(recipe.auth, 'headers', `${recipe.id}: есть ключи — значит, нужна авторизация`);
+    if (recipe.secrets.length > 0 && !recipe.secretsOptional) {
+      assert.equal(recipe.auth, 'headers', `${recipe.id}: обязательные ключи — значит, нужна авторизация`);
     } else {
-      assert.equal(recipe.auth, 'none', `${recipe.id}: ключей нет — и авторизация не нужна`);
+      assert.equal(recipe.auth, 'none', `${recipe.id}: без ключей (или они необязательные) авторизация не нужна`);
     }
     for (const secret of recipe.secrets) {
       assert.ok(secret.name.trim() !== '', `${recipe.id}: у ключа есть имя`);
@@ -286,7 +286,12 @@ test('рецепт OPDS: адрес каталога в env, запуск лен
   assert.equal(recipe.command, 'node');
   assert.deepEqual(recipe.args, ['/opt/icarus/tools/opds-mcp/server.mjs']);
   assert.ok(recipe.env?.OPDS_URL, 'адрес каталога — несекретная настройка в env');
-  assert.deepEqual(recipe.secrets, [], 'открытый каталог не требует ключей');
+  assert.deepEqual(
+    recipe.secrets.map((secret) => secret.name),
+    ['OPDS_USER', 'OPDS_PASSWORD', 'OPDS_TOKEN'],
+    'ключи закрытого каталога — секреты, а не переменные описания',
+  );
+  assert.equal(recipe.secretsOptional, true, 'открытый каталог работает и без ключей');
   assert.equal(recipe.auth, 'none');
 
   await withServer(async (base, config) => {
@@ -408,5 +413,68 @@ test('страница MCP рисует каталог рецептов, а не
     // Рецепты приезжают клиентом и в HTML не вшиваются: страница не должна
     // пухнуть от описаний, которые нужны только разделу MCP.
     assert.doesNotMatch(html, /proton-mail-bridge-mcp/);
+  });
+});
+
+// Ради этого всё и затевалось: два OPDS-каталога с разными настройками сразу.
+test('два сервера одного рецепта живут одновременно и не перетирают друг друга', async () => {
+  await withServer(async (base, config) => {
+    const recipe = recipeById('opds');
+    assert.ok(recipe);
+    const gutenberg = formBody(recipeEditor(recipe));
+    const home = formBody(recipeEditor(recipe));
+    (home.env as Record<string, string>).OPDS_URL = 'http://calibre.local:8080/opds/';
+    // Закрытый каталог: у него свои ключи, у открытого — своих нет.
+    home.credentialEnv = { OPDS_USER: 'icarus', OPDS_PASSWORD: 'demo-pass' };
+
+    const first = (await (await post(base, 'probe', 'add', gutenberg)).json()) as { server: { id: string } };
+    const second = (await (await post(base, 'probe', 'add', home)).json()) as { server: { id: string } };
+    assert.equal(first.server.id, 'opds-katalog');
+    assert.notEqual(second.server.id, first.server.id, 'второй сервер получил свой id');
+
+    const opdsOf = (id: string) =>
+      (piMcp(config, 'probe').mcpServers[id]?.env as Record<string, string> | undefined)?.OPDS_URL;
+    assert.equal(opdsOf(first.server.id), 'https://www.gutenberg.org/ebooks.opds/');
+    assert.equal(opdsOf(second.server.id), 'http://calibre.local:8080/opds/');
+    assert.equal(
+      (piMcp(config, 'probe').mcpServers[second.server.id]?.env as Record<string, string>).OPDS_USER,
+      'icarus',
+      'ключи закрытого каталога уехали только ему',
+    );
+    assert.equal(
+      (piMcp(config, 'probe').mcpServers[first.server.id]?.env as Record<string, string>).OPDS_USER,
+      undefined,
+      'открытому каталогу чужой логин не достался',
+    );
+    const credentials = JSON.parse(fs.readFileSync(storePaths(config).credentials, 'utf8')) as Record<
+      string,
+      Record<string, { env?: Record<string, string> }>
+    >;
+    assert.deepEqual(Object.keys(credentials.probe ?? {}), [second.server.id], 'секреты лежат под своим сервером');
+
+    // Панель показывает адрес, иначе два OPDS в списке выглядели бы одинаково.
+    const views = (await (await get(base, '/panel/mcp/servers')).json()) as {
+      servers: Array<{ id: string; target: string }>;
+    };
+    assert.match(views.servers.find((item) => item.id === first.server.id)?.target ?? '', /gutenberg\.org/);
+    assert.match(views.servers.find((item) => item.id === second.server.id)?.target ?? '', /calibre\.local/);
+
+    const agents = fs.readFileSync(userPaths(config, probe('probe')).agentsMd, 'utf8');
+    for (const id of [first.server.id, second.server.id]) {
+      assert.match(agents, new RegExp('`' + id + '`'), `${id}: сервер в AGENTS.md`);
+    }
+
+    // Правка одного — только его: у второго адрес остаётся прежним.
+    const repointed = formBody(recipeEditor(recipe));
+    (repointed.env as Record<string, string>).OPDS_URL = 'http://other.local:8080/opds/';
+    const updated = await post(base, 'probe', 'update', { id: second.server.id, ...repointed });
+    assert.equal(updated.status, 200);
+    assert.equal(opdsOf(first.server.id), 'https://www.gutenberg.org/ebooks.opds/');
+    assert.equal(opdsOf(second.server.id), 'http://other.local:8080/opds/');
+    assert.equal(
+      (piMcp(config, 'probe').mcpServers[second.server.id]?.env as Record<string, string>).OPDS_USER,
+      'icarus',
+      'правка адреса не стёрла личные ключи',
+    );
   });
 });

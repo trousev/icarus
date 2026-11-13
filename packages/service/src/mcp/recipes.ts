@@ -47,6 +47,12 @@ export type McpRecipe = {
   headers?: Record<string, string>;
   /** Ключи, которые попросит форма: только имена и подсказки. */
   secrets: McpRecipeSecret[];
+  /**
+   * Ключи необязательные: сервер работает и без них. Так устроен OPDS — открытый
+   * каталог читается сразу, а логин/пароль нужны только закрытому. Панель тогда
+   * не держит сервер в «ждёт доступа», но кнопку «Настроить доступ» показывает.
+   */
+  secretsOptional?: boolean;
   /** Где живёт ключ: в переменных окружения stdio или в заголовке HTTP. */
   secretKind: 'env' | 'header';
   /** Что должно быть снаружи до нажатия «Добавить». */
@@ -249,7 +255,14 @@ export const MCP_RECIPES: McpRecipe[] = [
     // Адрес — образец публичного каталога: его видно в форме и можно заменить на
     // свой (Calibre, домашняя библиотека). Сайт в коде сервера не зашит.
     env: { OPDS_URL: 'https://www.gutenberg.org/ebooks.opds/' },
-    secrets: [],
+    // Каталог может быть закрыт паролем: тогда нужны эти ключи. Они личные и
+    // необязательные — открытый каталог работает без них.
+    secrets: [
+      { name: 'OPDS_USER', hint: 'логин каталога (basic), если он закрыт паролем' },
+      { name: 'OPDS_PASSWORD', hint: 'пароль каталога (basic)' },
+      { name: 'OPDS_TOKEN', hint: 'Bearer-токен, если каталог пускает по токену' },
+    ],
+    secretsOptional: true,
     secretKind: 'env',
     requires: [
       'сеть из контейнера до OPDS-каталога',
@@ -257,7 +270,7 @@ export const MCP_RECIPES: McpRecipe[] = [
     ],
     steps: [
       'Проверь OPDS_URL: у Project Gutenberg это https://www.gutenberg.org/ebooks.opds/, у Calibre — http://<адрес>:8080/opds/. Адрес самой страницы сайта не подходит: нужен именно OPDS-фид.',
-      'Если каталог закрыт паролем, добавь в переменные окружения OPDS_USER и OPDS_PASSWORD (basic) или OPDS_TOKEN (Bearer).',
+      'Если каталог закрыт паролем, впиши OPDS_USER и OPDS_PASSWORD (basic) или OPDS_TOKEN (Bearer) в «Переменные окружения»: это секреты, они останутся только у тебя.',
       'Добавь сервер: открытый каталог готов сразу, ключей не нужно.',
     ],
     trouble: [
