@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// Тест «длинных» сессий Maple: состояние живёт в журнале и переживает
-// конец чата (перезапуск MCP-процесса) и принудительную остановку по простою.
-// Плюс проверка утечки процессов: ядро Maple не остаётся сиротой после остановки.
+// Test of Maple "long" sessions: state lives in the journal and survives
+// the end of a chat (restart of the MCP process) and a forced stop on idle.
+// Plus a process leak check: the Maple kernel does not stay orphaned after shutdown.
 //
-// Запуск: node tools/maple-mcp/test-sessions.mjs
+// Run: node tools/maple-mcp/test-sessions.mjs
 import { spawn, execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -26,15 +26,15 @@ function check(name, cond, detail = '') {
   }
 }
 
-// ─── процессы Maple: следим за утечкой ──────────────────────────────────
+// ─── Maple processes: watching for leaks ──────────────────────────────────
 //
-// Maple — это всегда два процесса: обёртка `cmaple` (её pid возвращает spawn) и ядро
-// `mserver`, которое обёртка порождает сама. Если погасить только обёртку, ядро
-// осиротеет, а в контейнере человека PID 1 — `sleep infinity`, который сирот не
-// подбирает: каждый брошенный `mserver` остаётся зомби (`[mserver] <defunct>`) навсегда.
-// Поэтому сервер запускает Maple в отдельной группе процессов и гасит группу целиком.
+// Maple is always two processes: the `cmaple` wrapper (its pid is returned by spawn) and the
+// `mserver` kernel, which the wrapper spawns itself. If only the wrapper is killed, the kernel
+// becomes orphaned, and in a person's container PID 1 is `sleep infinity`, which does not
+// reap orphans: every abandoned `mserver` stays a zombie (`[mserver] <defunct>`) forever.
+// That is why the server starts Maple in a separate process group and kills the whole group.
 
-/** Живые процессы Maple: pid → { ppid, pgid, sid, comm }. */
+/** Live Maple processes: pid → { ppid, pgid, sid, comm }. */
 function mapleProcs() {
   const out = execSync('ps -eo pid=,ppid=,pgid=,sid=,comm=', { encoding: 'utf8' });
   const map = new Map();
@@ -45,7 +45,7 @@ function mapleProcs() {
   return map;
 }
 
-/** Кто ещё жив в группе процессов `pgid`. */
+/** Who else is alive in process group `pgid`. */
 function procsInGroup(pgid) {
   const out = execSync('ps -eo pid=,pgid=', { encoding: 'utf8' });
   return out
@@ -56,7 +56,7 @@ function procsInGroup(pgid) {
     .map(([p]) => p);
 }
 
-/** Ждём, пока группа опустеет: возвращаем тех, кто остался (пусто — хорошо). */
+/** Wait until the group is empty: return those left (empty — good). */
 async function waitGroupGone(pgid, ms) {
   const deadline = Date.now() + ms;
   for (;;) {
@@ -67,7 +67,7 @@ async function waitGroupGone(pgid, ms) {
   }
 }
 
-/** Поднимает MCP-сервер и отдаёт клиента — как это делает pi в начале чата. */
+/** Starts the MCP server and returns a client — the way pi does at the start of a chat. */
 function makeClient(env = {}) {
   const child = spawn(process.execPath, [server], {
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -125,111 +125,111 @@ function makeClient(env = {}) {
 
 const init = (c) => c.call('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 's', version: '1' } });
 
-// ─── Чат 1: длинная работа ────────────────────────────────────────────────
-console.log('1) ЧАТ 1 — вводим данные, решаем дифур, считаем');
+// ─── Chat 1: long work ────────────────────────────────────────────────
+console.log('1) CHAT 1 — enter data, solve the ODE, compute');
 let chat1 = makeClient();
 await init(chat1);
 {
   const tools = await chat1.call('tools/list', {});
-  check('инструментов 14', tools.result.tools.length === 14, String(tools.result.tools.length));
+  check('14 tools', tools.result.tools.length === 14, String(tools.result.tools.length));
 
   const a = await chat1.tool('maple_evaluate_code', {
     code: 'm := 2: k := 3: ic := {y(0)=1, D(y)(0)=0}:',
     session: 'osc',
   });
-  check('данные заданы', !a.err, a.text);
+  check('data is set', !a.err, a.text);
 
   const b = await chat1.tool('maple_evaluate_code', {
     code: 'sol := dsolve({diff(y(x),x,x)+k^2*y(x)=0} union ic, y(x));',
     session: 'osc',
   });
-  check('дифур решён', !b.err && /cos|sin/.test(b.text), b.text);
+  check('ODE solved', !b.err && /cos|sin/.test(b.text), b.text);
 
   const c = await chat1.tool('maple_evaluate_code', { code: 'y_at_1 := eval(rhs(sol), x=1):', session: 'osc' });
-  check('промежуточный результат посчитан', !c.err, c.text);
+  check('intermediate result computed', !c.err, c.text);
 
   const l = await chat1.tool('maple_session_list', {});
-  check('сессия видна как живая', /osc\s+жива/.test(l.text), l.text);
+  check('session shows as alive', /osc\s+жива/.test(l.text), l.text);
 }
-console.log('   (имитируем конец чата: убиваем MCP-процесс)');
+console.log('   (simulate end of chat: kill the MCP process)');
 chat1.kill();
 await new Promise((r) => setTimeout(r, 300));
 
-// ─── Чат 2: продолжаем с того же места ───────────────────────────────────
-console.log('\n2) ЧАТ 2 — новый процесс MCP, продолжаем работу');
+// ─── Chat 2: continue from the same place ───────────────────────────────────
+console.log('\n2) CHAT 2 — new MCP process, continue the work');
 const chat2 = makeClient();
 await init(chat2);
 {
   const l = await chat2.tool('maple_session_list', {});
-  check('журнал прошлого чата виден', /osc/.test(l.text) && /журнал: \d+ шагов/.test(l.text), l.text);
+  check('previous chat journal is visible', /osc/.test(l.text) && /журнал: \d+ шагов/.test(l.text), l.text);
 
   const cont = await chat2.tool('maple_evaluate_code', {
     code: 'printf("m=%a k=%a y(1)=%a\\n", m, k, y_at_1);',
     session: 'osc',
   });
-  check('состояние восстановилось автоматически', !cont.err && /m=2 k=3/.test(cont.text), cont.text);
-  check('было сказано, что сессия восстановлена', /восстановлена из журнала/.test(cont.text), cont.text);
+  check('state was restored automatically', !cont.err && /m=2 k=3/.test(cont.text), cont.text);
+  check('it was said that the session was restored', /восстановлена из журнала/.test(cont.text), cont.text);
 
   const more = await chat2.tool('maple_evaluate_code', { code: 'y_at_2 := eval(rhs(sol), x=2):', session: 'osc' });
-  check('дописали в ту же сессию', !more.err, more.text);
+  check('appended to the same session', !more.err, more.text);
 
   const hist = await chat2.tool('maple_session_history', { session: 'osc' });
-  check('история показывает шаги', !hist.err && /dsolve/.test(hist.text), hist.text.slice(0, 200));
+  check('history shows the steps', !hist.err && /dsolve/.test(hist.text), hist.text.slice(0, 200));
 
   const resume = await chat2.tool('maple_session_resume', { session: 'osc' });
-  check('явный resume идемпотентен', !resume.err, resume.text);
+  check('explicit resume is idempotent', !resume.err, resume.text);
 }
 chat2.kill();
 await new Promise((r) => setTimeout(r, 300));
 
-// ─── Чат 3: третья жизнь той же сессии + забывание ────────────────────────
-console.log('\n3) ЧАТ 3 — ещё один процесс, состояние на месте');
+// ─── Chat 3: third life of the same session + forgetting ────────────────────────
+console.log('\n3) CHAT 3 — one more process, state is in place');
 const chat3 = makeClient();
 await init(chat3);
 {
   const v = await chat3.tool('maple_evaluate_code', { code: 'y_at_2;', session: 'osc' });
-  check('третье восстановление работает (y(2)=cos 6)', !v.err && /cos\(6\)/.test(v.text), v.text);
+  check('third restore works (y(2)=cos 6)', !v.err && /cos\(6\)/.test(v.text), v.text);
 
   const forgotten = await chat3.tool('maple_session_forget', { session: 'osc' });
-  check('forget стирает журнал', !forgotten.err && /удалён/.test(forgotten.text), forgotten.text);
+  check('forget erases the journal', !forgotten.err && /удалён/.test(forgotten.text), forgotten.text);
 
   const after = await chat3.tool('maple_session_list', {});
-  check('после forget сессии нет', !/osc/.test(after.text), after.text);
+  check('after forget the session is gone', !/osc/.test(after.text), after.text);
 }
 chat3.kill();
 await new Promise((r) => setTimeout(r, 300));
 
-// ─── Остановка по простою (5 минут в проде, 2 секунды в тесте) ────────────
-console.log('\n4) Простой: ядро гасится, состояние остаётся в журнале');
+// ─── Idle stop (5 minutes in prod, 2 seconds in the test) ────────────
+console.log('\n4) Idle: the kernel is shut down, state stays in the journal');
 const chat4 = makeClient({ MAPLE_IDLE_SECONDS: '2' });
 await init(chat4);
 {
   await chat4.tool('maple_evaluate_code', { code: 'zz := 777:', session: 'idle' });
   const before = await chat4.tool('maple_session_list', {});
-  check('сессия жива до простоя', /idle\s+жива/.test(before.text), before.text);
+  check('session is alive before idle', /idle\s+жива/.test(before.text), before.text);
 
   await new Promise((r) => setTimeout(r, 5000));
   const after = await chat4.tool('maple_session_list', {});
-  check('через простой ядро остановлено', /idle\s+остановлена/.test(after.text), after.text);
-  check('журнал при этом цел', /idle[\s\S]*журнал: \d+ шагов/.test(after.text), after.text);
+  check('after idle the kernel is stopped', /idle\s+остановлена/.test(after.text), after.text);
+  check('the journal is intact meanwhile', /idle[\s\S]*журнал: \d+ шагов/.test(after.text), after.text);
 
   const back = await chat4.tool('maple_evaluate_code', { code: 'zz;', session: 'idle' });
-  check('после простоя состояние вернулось', !back.err && /777/.test(back.text), back.text);
+  check('after idle the state came back', !back.err && /777/.test(back.text), back.text);
 }
 chat4.kill();
 
-console.log('\n5) Файлы журналов');
+console.log('\n5) Journal files');
 {
   const f = path.join(sessionDir, 'osc.jsonl');
   const exists = await readFile(f, 'utf8').then(() => true).catch(() => false);
-  check('журнал osc удалён после forget', !exists, f);
+  check('osc journal deleted after forget', !exists, f);
   const idle = await readFile(path.join(sessionDir, 'idle.jsonl'), 'utf8').then((t) => t.trim().split('\n').length).catch(() => 0);
-  check('журнал idle на диске', idle >= 1, `${idle} записей`);
+  check('idle journal on disk', idle >= 1, `${idle} записей`);
 }
 
-// ─── Утечка процессов: ядро Maple не остаётся сиротой ─────────────────────
-console.log('\n6) Утечка процессов: ядро не осиротеет после остановки');
-const baseline = new Set(mapleProcs().keys()); // чужой Maple на машине не наш
+// ─── Process leak: the Maple kernel does not stay orphaned ─────────────────────
+console.log('\n6) Process leak: the kernel does not stay orphaned after shutdown');
+const baseline = new Set(mapleProcs().keys()); // someone else's Maple on the machine is not ours
 const chat5 = makeClient({ MAPLE_TIMEOUT_SECONDS: '3' });
 await init(chat5);
 {
@@ -237,27 +237,27 @@ await init(chat5);
   const mine = [...mapleProcs()].filter(([pid]) => !baseline.has(pid));
   const wrapper = mine.find(([, p]) => p.comm === 'cmaple');
   check(
-    'ядро Maple работает в отдельной группе процессов',
+    'the Maple kernel runs in a separate process group',
     Boolean(wrapper) && wrapper[1].pgid === wrapper[0] && wrapper[1].sid === wrapper[0],
     `процессы: ${JSON.stringify(mine)}`,
   );
   const pgid = wrapper?.[1].pgid;
 
   const timedOut = await chat5.tool('maple_evaluate_code', { code: 'while true do end do:', session: 'leak' });
-  check('зависший счёт убит по таймауту', timedOut.err && /timeout/.test(timedOut.text), timedOut.text);
+  check('a hung computation is killed by the timeout', timedOut.err && /timeout/.test(timedOut.text), timedOut.text);
   const afterTimeout = await waitGroupGone(pgid, 6000);
-  check('после таймаута в группе не осталось ядра', afterTimeout.length === 0, `живы pid: ${afterTimeout.join(', ')}`);
+  check('after the timeout no kernel remains in the group', afterTimeout.length === 0, `живы pid: ${afterTimeout.join(', ')}`);
 
-  // Новое ядро — и штатное завершение MCP (SIGTERM: так мост гасит процесс в конце чата).
+  // A new kernel — and a normal MCP shutdown (SIGTERM: that is how the bridge kills the process at the end of a chat).
   const again = await chat5.tool('maple_evaluate_code', { code: 'leak2 := 2:', session: 'leak' });
-  check('сессия поднялась заново', !again.err, again.text);
+  check('the session came up again', !again.err, again.text);
   const next = [...mapleProcs()].filter(([pid]) => !baseline.has(pid));
   const pgid2 = next.find(([, p]) => p.comm === 'cmaple')?.[1].pgid;
   chat5.child.kill('SIGTERM');
   const afterBye = await waitGroupGone(pgid2, 6000);
-  check('штатное завершение MCP не оставляет живых ядер', afterBye.length === 0, `живы pid: ${afterBye.join(', ')}`);
+  check('a normal MCP shutdown leaves no live kernels', afterBye.length === 0, `живы pid: ${afterBye.join(', ')}`);
 }
 
-console.log(`\nи т о г о: ${pass} ok, ${failCount} fail`);
+console.log(`\nTOTAL: ${pass} ok, ${failCount} fail`);
 await rm(sessionDir, { recursive: true, force: true }).catch(() => {});
 process.exit(failCount ? 1 : 0);

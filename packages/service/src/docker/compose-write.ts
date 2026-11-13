@@ -1,9 +1,9 @@
-// CLI для ./script/server: собирает docker-compose.yml и отдаёт наружу сводку о стеке.
+// CLI for ./script/server: builds docker-compose.yml and exposes a stack summary.
 //
-// Запускается на хосте под обычным пользователем (не в контейнере): только так можно
-// узнать uid/gid, посмотреть на docker.sock и подготовить каталоги людей до того, как
-// docker их создаст root-овыми. Никаких решений о запуске здесь нет — их принимает
-// script/server, а этот файл честно пишет YAML и summary-файл.
+// Runs on the host as a regular user (not in a container): that's the only way to
+// learn uid/gid, look at docker.sock and prepare people's directories before docker
+// creates them as root. There are no launch decisions here — script/server makes them,
+// while this file honestly writes the YAML and the summary file.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -68,7 +68,7 @@ function parseArgs(argv: string[]): CliArgs {
   return args;
 }
 
-/** Как сервис попадёт в docker: локальный сокет монтируем, удалённый хост — через DOCKER_HOST. */
+/** How the service gets into docker: we mount the local socket, a remote host — via DOCKER_HOST. */
 function resolveDocker(config: ReturnType<typeof loadConfig>): {
   socketPath: string | null;
   dockerHost: string | null;
@@ -82,7 +82,7 @@ function resolveDocker(config: ReturnType<typeof loadConfig>): {
   return { socketPath: null, dockerHost: socket };
 }
 
-/** gid группы по имени — из того же /etc/group, где его берёт сам docker. */
+/** Group gid by name — from the same /etc/group that docker itself takes it from. */
 export function groupGid(name: string, groupFile = '/etc/group'): number | null {
   let text: string;
   try {
@@ -100,16 +100,15 @@ export function groupGid(name: string, groupFile = '/etc/group'): number | null 
 }
 
 /**
- * Дополнительные группы сервиса — из-за сокета docker он ходит в контейнеры людей.
+ * Extra groups for the service — because of the docker socket it reaches into people's containers.
  *
- * Одного gid сокета мало. У Docker Desktop и rootless-докера сокет принадлежит
- * пользователю из чужого user namespace: хост видит его как `nobody:nogroup` (65534),
- * а внутри контейнера он `root:docker` (125). Добавив 65534, мы не даём сервису ничего —
- * `docker inspect` из контейнера отвечает `permission denied`, и каждый ход падает на
- * «контейнер не найден», хотя на хосте всё работает. Поэтому к gid сокета добавляем gid
- * группы `docker`: он одинаковый с обеих сторон (проверено: `--group-add 125` доступ
- * даёт, `--group-add 65534` — нет). Лишняя безвредная группа в худшем случае просто
- * ничего не открывает.
+ * The socket gid alone is not enough. With Docker Desktop and rootless docker the socket
+ * belongs to a user from a foreign user namespace: the host sees it as `nobody:nogroup` (65534),
+ * while inside the container it's `root:docker` (125). Adding 65534 gives the service nothing —
+ * `docker inspect` from the container answers `permission denied`, and every turn fails with
+ * «container not found» even though everything works on the host. So to the socket gid we add the
+ * gid of the `docker` group: it's the same on both sides (verified: `--group-add 125` grants
+ * access, `--group-add 65534` doesn't). At worst an extra harmless group simply opens nothing.
  */
 export function socketGroups(socketGid: number, ownGid: number, groupFile = '/etc/group'): string[] {
   const groups: number[] = [];
@@ -124,20 +123,21 @@ export function socketGroups(socketGid: number, ownGid: number, groupFile = '/et
 
 function main(): void {
   const args = parseArgs(process.argv.slice(2));
-  // Ключи читаем до конфига: провайдерские подхватываются в auth.json (его пишет
-  // prepareUser ниже), остальные compose отдаёт контейнерам через env_file. Настройки
-  // панели (keys.json) сильнее .env, поэтому и здесь идём общим загрузчиком.
+  // We read keys before the config: provider ones are picked up in auth.json (written by
+  // prepareUser below), the rest compose hands to containers via env_file. Panel settings
+  // (keys.json) are stronger than .env, so here too we go through the common loader.
   const runtimeEnv = loadRuntimeEnv();
-  // Настройки панели сильнее .env, а деплой вливает в .env секреты GitHub. Перед
-  // сборкой приводим файл к тому, что уедет контейнерам: иначе новый контейнер
-  // получил бы старое значение, а сервис внутри — новое из keys.json.
+  // Panel settings are stronger than .env, and deploy pours GitHub secrets into .env.
+  // Before the build we bring the file in line with what will go to containers: otherwise
+  // a new container would get the old value while the service inside gets the new one from keys.json.
   syncEnvFile(runtimeEnv.store, ENV_FILE);
   const config = loadConfig(args.config, runtimeEnv.env);
   config.secretEnv = runtimeEnv.secrets;
   const docker = resolveDocker(config);
 
-  // Каталоги и файлы людей готовим на хосте и до docker: иначе docker создаст
-  // недостающие маунты root-овыми, и агент внутри контейнера не сможет писать в память.
+  // We prepare people's directories and files on the host and before docker: otherwise
+  // docker would create the missing mounts as root, and the agent inside the container
+  // wouldn't be able to write to memory.
   for (const user of config.users) prepareUser(config, user);
 
   let extraGroups: string[] = [];
@@ -154,16 +154,16 @@ function main(): void {
     dockerHost: docker.dockerHost,
     extraGroups,
     serviceImage: args.serviceImage,
-    // Отпечаток кода считаем здесь, на хосте, и кладём в окружение сервиса: иначе
-    // `docker compose up` не заметит, что код в bind-mount'е сменился, и оставит
-    // работать старый процесс (см. revision.ts).
+    // We compute the code fingerprint here, on the host, and put it into the service
+    // environment: otherwise `docker compose up` wouldn't notice the code in the
+    // bind-mount changed and would leave the old process running (see revision.ts).
     revision: sourceRevision(REPO_ROOT),
     ...(fs.existsSync(ENV_FILE) ? { envFile: ENV_FILE } : {}),
   };
 
   const yaml = renderCompose(config, options);
-  // Файл держим 600, как config.yaml и .env: секретов в нём нет (ключи едут env_file),
-  // но лишние глаза ему ни к чему, а читает его только тот, кто запускает compose.
+  // We keep the file at 600, like config.yaml and .env: there are no secrets in it (keys go
+  // via env_file), but extra eyes don't need it, and only whoever launches compose reads it.
   fs.writeFileSync(args.out, yaml, { mode: 0o600 });
   fs.chmodSync(args.out, 0o600);
 
@@ -184,8 +184,8 @@ function main(): void {
   process.stderr.write(`собрал ${args.out}: сервис, людей ${config.users.length}\n`);
 }
 
-// Тесты импортируют socketGroups из этого файла, поэтому CLI запускаем только тогда,
-// когда файл — точка входа: иначе импорт писал бы docker-compose.yml и требовал config.yaml.
+// Tests import socketGroups from this file, so we run the CLI only when the file is the
+// entry point: otherwise an import would write docker-compose.yml and require config.yaml.
 const entry = process.argv[1];
 if (entry && import.meta.url === pathToFileURL(entry).href) {
   try {

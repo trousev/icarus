@@ -1,26 +1,26 @@
-// Словарь строк панели: язык интерфейса — отдельная настройка от языка ответов.
+// Panel string dictionary: the interface language is a separate setting from the answer language.
 //
-// Зачем отдельный файл. До этого все подписи панели были русскими литералами,
-// разбросанными по серверной разметке (ui.ts, chat-ui.ts) и по клиентским скриптам.
-// Пока язык интерфейса не настраивался, это было незаметно; с двумя языками такой
-// литерал — это строка, которую забыли перевести, и найти её можно только глазами.
-// Здесь же видно, каких строк не хватает: тип PanelStrings обязывает EN и RU иметь
-// один и тот же набор ключей, а тест проверяет, что ни одна строка не пустая.
+// Why a separate file. Before this, all panel labels were Russian literals,
+// scattered across server markup (ui.ts, chat-ui.ts) and client scripts.
+// While the interface language was not configurable, this went unnoticed; with two languages such
+// a literal is a string that was forgotten in translation, and it can only be found by eye.
+// Here you can see which strings are missing: the PanelStrings type forces EN and RU to have
+// the same set of keys, and a test checks that no string is empty.
 //
-// Граница перевода описана в PR: переводится оболочка панели (навигация, кнопки,
-// пустые состояния, подписи настроек). НЕ переводятся память, скиллы, имена файлов,
-// код, цитаты и примеры реплик, которые уезжают агенту, — это содержимое и контекст,
-// а не интерфейс (см. memoryLanguageNote и specs/ru-language.md).
+// The translation boundary is described in the PR: the panel shell is translated (navigation, buttons,
+// empty states, settings labels). NOT translated are memory, skills, file names,
+// code, quotes and example messages that go to the agent — that is content and context,
+// not interface (see memoryLanguageNote and specs/ru-language.md).
 import type { UiLanguage } from '../profile.ts';
 
-/** Формы слова для счётчиков: в русском их три, в английском хватает двух. */
+/** Word forms for counters: Russian has three, English needs only two. */
 export type WordForms = { one: string; few: string; many: string };
 
 export type PanelStrings = {
-  /** Код языка: по нему клиент выбирает правило множественного числа. */
+  /** Language code: the client uses it to choose the plural rule. */
   lang: UiLanguage;
 
-  // ── оболочка: сайдбар, шапка, подписи полей ────────────────────────────────
+  // ── shell: sidebar, header, field labels ────────────────────────────────
   brandTagline: string;
   backToChat: string;
   backToPanel: string;
@@ -36,7 +36,7 @@ export type PanelStrings = {
   filesPanelWidth: string;
   previewHeight: string;
 
-  // ── разделы и их подписи ───────────────────────────────────────────────────
+  // ── sections and their labels ───────────────────────────────────────────────────
   sectionMemory: string;
   sectionSkills: string;
   sectionMcp: string;
@@ -54,10 +54,10 @@ export type PanelStrings = {
   aboutMemory: string;
   aboutProfile: string;
   aboutSkills: string;
-  /** Почему память остаётся русской, даже когда панель на другом языке. */
+  /** Why memory stays Russian even when the panel is in another language. */
   memoryLanguageNote: string;
 
-  // ── память и скиллы: списки, пустые состояния, кнопки ──────────────────────
+  // ── memory and skills: lists, empty states, buttons ──────────────────────
   headingFiles: string;
   headingSkills: string;
   loading: string;
@@ -97,11 +97,11 @@ export type PanelStrings = {
   bytesShort: string;
   kilobytesShort: string;
   megabytesShort: string;
-  /** «{n} {word}» — общий шаблон счётчика. */
+  /** «{n} {word}» — the common counter template. */
   countLabel: string;
-  /** «Поиск» — заголовок открытых результатов. */
+  /** «Поиск» — the title of open results. */
   searchTitle: string;
-  /** «{query} · найдено: {n}» — подпись результатов поиска. */
+  /** «{query} · найдено: {n}» — the search results label. */
   searchMeta: string;
   /** «Выбрано {n} из {total}». */
   selectedOf: string;
@@ -109,14 +109,14 @@ export type PanelStrings = {
   selectRows: string;
   /** «Удалить ({n})». */
   deleteCount: string;
-  /** «Убрать из памяти {what}?» — {what} собирается из entryOne/entryManyPrefix. */
+  /** «Убрать из памяти {what}?» — {what} is assembled from entryOne/entryManyPrefix. */
   removeMemoryPrompt: string;
   entryOne: string;
   entryManyPrefix: string;
   deleteSkillPrompt: string;
   revertCommitPrompt: string;
 
-  // ── скилл: редактор ────────────────────────────────────────────────────────
+  // ── skill: editor ────────────────────────────────────────────────────────
   skillIdeaLabel: string;
   skillIdeaPlaceholder: string;
   skillGeneratorHint: string;
@@ -138,7 +138,7 @@ export type PanelStrings = {
   savedCommit: string;
   savedNoCommit: string;
 
-  // ── настройки «Пользователь» ───────────────────────────────────────────────
+  // ── user settings ───────────────────────────────────────────────
   answerLanguageLabel: string;
   interfaceLanguageLabel: string;
   answerLanguageHint: string;
@@ -147,7 +147,7 @@ export type PanelStrings = {
   savedAnswer: string;
   saveFailedPrefix: string;
 
-  // ── чат: оболочка ──────────────────────────────────────────────────────────
+  // ── chat: shell ──────────────────────────────────────────────────────────
   newChat: string;
   draftPreview: string;
   chatListEmpty: string;
@@ -178,7 +178,7 @@ export type PanelStrings = {
   thisWeek: string;
   earlier: string;
 
-  // ── папки, архив и переименование разговора ────────────────────────────────
+  // ── folders, archive and renaming a conversation ────────────────────────────────
   folderNew: string;
   folderInbox: string;
   folderName: string;
@@ -193,7 +193,7 @@ export type PanelStrings = {
   chatMove: string;
   chatRenamePlaceholder: string;
 
-  // ── канал последней реплики ────────────────────────────────────────────────
+  // ── channel of the last message ────────────────────────────────────────────────
   viaPanel: string;
   /** «последняя реплика · {name}». */
   viaLast: string;
@@ -208,7 +208,7 @@ export type PanelStrings = {
   lockedNote: string;
   lockedOther: string;
 
-  // ── архив разговоров ───────────────────────────────────────────────────────
+  // ── conversation archive ───────────────────────────────────────────────────────
   archive: string;
   archiveTag: string;
   archiveAdd: string;
@@ -220,7 +220,7 @@ export type PanelStrings = {
   archiveRemovedNote: string;
   archiveRestoredNote: string;
 
-  // ── очередь реплик ─────────────────────────────────────────────────────────
+  // ── message queue ─────────────────────────────────────────────────────────
   /** «В очереди: {n}». */
   queueCount: string;
   queueHint: string;
@@ -228,7 +228,7 @@ export type PanelStrings = {
   nowSend: string;
   nowTitle: string;
 
-  // ── панель файлов workspace ────────────────────────────────────────────────
+  // ── workspace files panel ────────────────────────────────────────────────
   filesSearch: string;
   filesSearchAria: string;
   filesSearching: string;
@@ -259,7 +259,7 @@ export type PanelStrings = {
   filesFileWillDelete: string;
   filesRemove: string;
 
-  // ── MCP: страница и каталог рецептов ───────────────────────────────────────
+  // ── MCP: page and recipe catalog ───────────────────────────────────────
   mcpKicker: string;
   mcpIntro: string;
   mcpAdd: string;
@@ -289,7 +289,7 @@ export type PanelStrings = {
   mcpRecipeAddNamed: string;
   keysWord: WordForms;
 
-  // ── Задачи: расписание, по которому агент запускается сам ───────────────────
+  // ── Tasks: the schedule by which the agent starts itself ───────────────────
   /** «Задачи». */
   sectionTasks: string;
   tasksKicker: string;
@@ -341,7 +341,7 @@ export type PanelStrings = {
   tasksToday: string;
   tasksTomorrow: string;
 
-  // ── скиллы: шаринг ─────────────────────────────────────────────────────────
+  // ── skills: sharing ─────────────────────────────────────────────────────────
   skillTagMine: string;
   skillTagShared: string;
   /** «от {owner}». */
@@ -356,7 +356,7 @@ export type PanelStrings = {
   /** «Только чтение: скилл принадлежит {owner}». */
   skillReadOnly: string;
 
-  // ── выбор workspace в новом чате ──────────────────────────────────────────
+  // ── workspace selection in a new chat ──────────────────────────────────────────
   wsPickTitle: string;
   wsPickAbout: string;
   wsDefaultKind: string;
@@ -374,14 +374,14 @@ export type PanelStrings = {
   wsNewHint: string;
   wsCreate: string;
   wsCancel: string;
-  /** «НАЧАТЬ В «{name}»» — подпись над готовыми запросами. */
+  /** «НАЧАТЬ В «{name}»» — the label above the ready-made prompts. */
   wsStartIn: string;
-  /** «Написать в «{name}»» — подсказка в поле ввода черновика. */
+  /** «Написать в «{name}»» — the placeholder in the draft input field. */
   wsInputPlaceholder: string;
   wsNameRequired: string;
   wsPrompts: string[];
 
-  // ── общие отказы ───────────────────────────────────────────────────────────
+  // ── common refusals ───────────────────────────────────────────────────────────
   sessionExpired: string;
   errorPrefix: string;
 };
@@ -550,7 +550,7 @@ const RU: PanelStrings = {
   thisWeek: 'На этой неделе',
   earlier: 'Раньше',
 
-  // ── папки, архив и переименование разговора ────────────────────────────────
+  // ── folders, archive and renaming a conversation ────────────────────────────────
   folderNew: 'Папка',
   folderInbox: 'Входящие',
   folderName: 'Название папки',
@@ -565,7 +565,7 @@ const RU: PanelStrings = {
   chatMove: 'Переместить в папку',
   chatRenamePlaceholder: 'Новое имя разговора',
 
-  // ── канал последней реплики ────────────────────────────────────────────────
+  // ── channel of the last message ────────────────────────────────────────────────
   viaPanel: 'панель',
   viaLast: 'последняя реплика · {name}',
   viaTitle: 'Разговор общий: панель и Telegram пишут в одну сессию',
@@ -580,7 +580,7 @@ const RU: PanelStrings = {
     'Этот разговор начат в {label}. Здесь он только для чтения — продолжить можно там, где он начат.',
   lockedOther: 'другом входе',
 
-  // ── архив разговоров ───────────────────────────────────────────────────────
+  // ── conversation archive ───────────────────────────────────────────────────────
   archive: 'Архив',
   archiveTag: 'в архиве',
   archiveAdd: 'В архив',
@@ -592,14 +592,14 @@ const RU: PanelStrings = {
   archiveRemovedNote: 'Разговор вернулся в список.',
   archiveRestoredNote: 'Разговор вернулся из архива.',
 
-  // ── очередь реплик ─────────────────────────────────────────────────────────
+  // ── message queue ─────────────────────────────────────────────────────────
   queueCount: 'В очереди: {n}',
   queueHint: 'доедет после текущего хода',
   queueRemove: 'Убрать из очереди',
   nowSend: 'Прервать и отправить',
   nowTitle: 'Прервать текущий ход и отправить это сообщение сейчас',
 
-  // ── панель файлов workspace ────────────────────────────────────────────────
+  // ── workspace files panel ────────────────────────────────────────────────
   filesSearch: 'Поиск по файлам',
   filesSearchAria: 'Поиск по файлам workspace',
   filesSearching: 'Ищу…',
@@ -625,7 +625,7 @@ const RU: PanelStrings = {
   filesFileWillDelete: 'Файл «{path}» будет удалён. Вернуть его будет нельзя.',
   filesRemove: 'Убрать',
 
-  // ── MCP: страница и каталог рецептов ───────────────────────────────────────
+  // ── MCP: page and recipe catalog ───────────────────────────────────────
   mcpKicker: 'ВНЕШНИЕ ИНСТРУМЕНТЫ',
   mcpIntro:
     'Серверы, которые добавляют Икару инструменты: списки задач, календарь, домашние дела. ' +
@@ -655,7 +655,7 @@ const RU: PanelStrings = {
   mcpRecipeAddNamed: 'Добавить: {name}',
   keysWord: { one: 'ключ', few: 'ключа', many: 'ключей' },
 
-  // ── Задачи: расписание, по которому агент запускается сам ───────────────────
+  // ── Tasks: the schedule by which the agent starts itself ───────────────────
   sectionTasks: 'Задачи',
   tasksKicker: 'РАСПИСАНИЕ АГЕНТА',
   tasksIntro:
@@ -700,7 +700,7 @@ const RU: PanelStrings = {
   tasksToday: 'сегодня',
   tasksTomorrow: 'завтра',
 
-  // ── скиллы: шаринг ─────────────────────────────────────────────────────────
+  // ── skills: sharing ─────────────────────────────────────────────────────────
   skillTagMine: 'только мой',
   skillTagShared: 'поделился',
   skillTagFrom: 'от {owner}',
@@ -714,7 +714,7 @@ const RU: PanelStrings = {
     'Правки делает владелец, и они доезжают сюда сами.',
   skillReadOnly: 'Только чтение: скилл принадлежит {owner}',
 
-  // ── выбор workspace в новом чате ──────────────────────────────────────────
+  // ── workspace selection in a new chat ──────────────────────────────────────────
   wsPickTitle: 'Выберите workspace',
   wsPickAbout:
     'Workspace — это рабочая папка агента. У каждого своя папка и свой AGENTS.md, поэтому ' +
@@ -914,7 +914,7 @@ const EN: PanelStrings = {
   thisWeek: 'This week',
   earlier: 'Earlier',
 
-  // ── папки, архив и переименование разговора ────────────────────────────────
+  // ── folders, archive and renaming a conversation ────────────────────────────────
   folderNew: 'Folder',
   folderInbox: 'Inbox',
   folderName: 'Folder name',
@@ -929,7 +929,7 @@ const EN: PanelStrings = {
   chatMove: 'Move to folder',
   chatRenamePlaceholder: 'New conversation name',
 
-  // ── канал последней реплики ────────────────────────────────────────────────
+  // ── channel of the last message ────────────────────────────────────────────────
   viaPanel: 'panel',
   viaLast: 'last message · {name}',
   viaTitle: 'One conversation: the panel and Telegram write into the same session',
@@ -944,7 +944,7 @@ const EN: PanelStrings = {
     'This conversation was started in {label}. Here it is read-only — you can continue where it was started.',
   lockedOther: 'another entry point',
 
-  // ── архив разговоров ───────────────────────────────────────────────────────
+  // ── conversation archive ───────────────────────────────────────────────────────
   archive: 'Archive',
   archiveTag: 'archived',
   archiveAdd: 'Archive',
@@ -956,14 +956,14 @@ const EN: PanelStrings = {
   archiveRemovedNote: 'The conversation is back in the list.',
   archiveRestoredNote: 'The conversation is back from the archive.',
 
-  // ── очередь реплик ─────────────────────────────────────────────────────────
+  // ── message queue ─────────────────────────────────────────────────────────
   queueCount: 'Queued: {n}',
   queueHint: 'sent after the current turn',
   queueRemove: 'Remove from queue',
   nowSend: 'Interrupt and send',
   nowTitle: 'Interrupt the current turn and send this message now',
 
-  // ── панель файлов workspace ────────────────────────────────────────────────
+  // ── workspace files panel ────────────────────────────────────────────────
   filesSearch: 'Search files',
   filesSearchAria: 'Search workspace files',
   filesSearching: 'Searching…',
@@ -989,7 +989,7 @@ const EN: PanelStrings = {
   filesFileWillDelete: 'The file “{path}” will be deleted. It cannot be brought back.',
   filesRemove: 'Remove',
 
-  // ── MCP: страница и каталог рецептов ───────────────────────────────────────
+  // ── MCP: page and recipe catalog ───────────────────────────────────────
   mcpKicker: 'EXTERNAL TOOLS',
   mcpIntro:
     'Servers that give Icarus extra tools: task lists, calendars, household chores. ' +
@@ -1019,7 +1019,7 @@ const EN: PanelStrings = {
   mcpRecipeAddNamed: 'Add: {name}',
   keysWord: { one: 'key', few: 'keys', many: 'keys' },
 
-  // ── Задачи: расписание, по которому агент запускается сам ───────────────────
+  // ── Tasks: the schedule by which the agent starts itself ───────────────────
   sectionTasks: 'Tasks',
   tasksKicker: 'AGENT SCHEDULE',
   tasksIntro:
@@ -1064,7 +1064,7 @@ const EN: PanelStrings = {
   tasksToday: 'today',
   tasksTomorrow: 'tomorrow',
 
-  // ── скиллы: шаринг ─────────────────────────────────────────────────────────
+  // ── skills: sharing ─────────────────────────────────────────────────────────
   skillTagMine: 'only mine',
   skillTagShared: 'shared',
   skillTagFrom: 'from {owner}',
@@ -1078,7 +1078,7 @@ const EN: PanelStrings = {
     'The owner makes the edits, and they arrive here on their own.',
   skillReadOnly: 'Read only: the skill belongs to {owner}',
 
-  // ── выбор workspace в новом чате ──────────────────────────────────────────
+  // ── workspace selection in a new chat ──────────────────────────────────────────
   wsPickTitle: 'Choose a workspace',
   wsPickAbout:
     'A workspace is the agent’s working folder. Each has its own folder and its own AGENTS.md, ' +
@@ -1114,12 +1114,12 @@ const EN: PanelStrings = {
   errorPrefix: 'error: ',
 };
 
-/** Строки интерфейса на языке человека. Неизвестный язык — русский. */
+/** Interface strings in the person's language. An unknown language means Russian. */
 export function panelStrings(language: UiLanguage): PanelStrings {
   return language === 'en' ? EN : RU;
 }
 
-/** Язык интерфейса, для которого есть словарь. */
+/** Interface language for which a dictionary exists. */
 export function hasStrings(language: string): language is UiLanguage {
   return language === 'ru' || language === 'en';
 }

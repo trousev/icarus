@@ -1,27 +1,27 @@
 #!/usr/bin/env python3
-"""Снять флаг «исполняемый стек» (PT_GNU_STACK RWE) с библиотек Maple 18.
+"""Clear the "executable stack" flag (PT_GNU_STACK RWE) from Maple 18 libraries.
 
-Зачем. Maple 18 (2014) собрана старым тулчейном, и часть её внешних библиотек
-(`libatlas.so`, `libmsp.so`) помечена как требующая исполняемого стека. Начиная
-с glibc 2.41 (Ubuntu 25.04+/26.04) `dlopen` такие объекты отвергает:
+Why. Maple 18 (2014) was built with an old toolchain, and some of its external libraries
+(`libatlas.so`, `libmsp.so`) are marked as requiring an executable stack. Starting
+with glibc 2.41 (Ubuntu 25.04+/26.04) `dlopen` rejects such objects:
 
     Error, (in dsolve) external library libmodLA.so could not be found/used
     dlopen: libatlas.so: cannot enable executable stack as shared object
             requires: Invalid argument
 
-Из-за этого в Maple 18 молча ломается всё, что тянет `libmodLA`/ATLAS —
-`dsolve`, `pdsolve`, часть численных и линейно-алгебраических алгоритмов.
+Because of this, in Maple 18 everything that pulls in `libmodLA`/ATLAS silently breaks —
+`dsolve`, `pdsolve`, some numerical and linear-algebra algorithms.
 
-Что делает. Обнуляет бит PF_X в программном заголовке PT_GNU_STACK. Это не
-ослабление защиты самого Maple: библиотеки просто перестают *требовать*
-исполняемый стек, а он им и не нужен (артефакт сборки).
+What it does. Clears the PF_X bit in the PT_GNU_STACK program header. This is not
+a weakening of Maple's own protection: the libraries simply stop *requiring*
+an executable stack, and they do not need one anyway (a build artifact).
 
-Использование:
+Usage:
 
-    python3 fix-execstack.py                 # показать, что будет исправлено
-    python3 fix-execstack.py --apply         # исправить (с бэкапами *.bak-execstack)
+    python3 fix-execstack.py                 # show what would be fixed
+    python3 fix-execstack.py --apply         # fix (with *.bak-execstack backups)
     python3 fix-execstack.py --apply --root /opt/maple18
-    python3 fix-execstack.py --restore --root /opt/maple18   # вернуть бэкапы
+    python3 fix-execstack.py --restore --root /opt/maple18   # restore backups
 """
 from __future__ import annotations
 
@@ -37,10 +37,10 @@ BAK_SUFFIX = ".bak-execstack"
 
 
 def gnu_stack_offset(data: bytes) -> int | None:
-    """Смещение поля p_flags программного заголовка PT_GNU_STACK."""
+    """Offset of the p_flags field of the PT_GNU_STACK program header."""
     if data[:4] != b"\x7fELF":
         return None
-    if data[4] != 2:  # только 64-битные
+    if data[4] != 2:  # 64-bit only
         return None
     e_phoff = struct.unpack_from("<Q", data, 0x20)[0]
     e_phentsize = struct.unpack_from("<H", data, 0x36)[0]
@@ -101,7 +101,7 @@ def main() -> int:
     if args.restore:
         return 0 if restore(root) else 1
 
-    # Интересуют только библиотеки в bin.* — это они грузятся через dlopen.
+    # Only libraries in bin.* are of interest — those are the ones loaded via dlopen.
     candidates = [p for p in sorted(root.glob("bin.*/**/*.so*")) if p.is_file() and not p.name.endswith(BAK_SUFFIX)]
     broken = [p for p in candidates if needs_fix(p)]
     if not broken:

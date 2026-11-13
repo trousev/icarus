@@ -1,5 +1,5 @@
-// Обновление OAuth-токенов перед стартом сессии: pi читает mcp.json один раз,
-// поэтому просроченный токен должен обновиться до того, как он проснётся.
+// Refreshing OAuth tokens before session start: pi reads mcp.json once,
+// so an expired token must be refreshed before it wakes up.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -18,7 +18,7 @@ import { refreshUserMcpTokens } from '../src/mcp/refresh.ts';
 import type { FetchLike } from '../src/mcp/oauth.ts';
 import { makeConfig, probe } from './fixtures.ts';
 
-test('просроченный токен обновляется, а mcp.json уходит на прокси без Bearer', async () => {
+test('an expired token is refreshed, and mcp.json goes to the proxy without a Bearer', async () => {
   const config = makeConfig();
   const server = createServer(config, 'probe', {
     name: 'Задачи',
@@ -64,7 +64,7 @@ test('просроченный токен обновляется, а mcp.json у
   assert.equal(direct?.headers?.Authorization, 'Bearer new', 'прямой вид для панели/проверки — со свежим токеном');
 });
 
-test('выключенный сервер не обновляет токен: он всё равно не поедет в сессию', async () => {
+test('a disabled server does not refresh the token: it won\'t go into the session anyway', async () => {
   const config = makeConfig();
   const server = createServer(config, 'probe', {
     name: 'Выключенный',

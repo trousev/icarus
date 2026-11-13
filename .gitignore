@@ -2,14 +2,14 @@ node_modules/
 .venv/
 __pycache__/
 *.pyc
-# ключи: провайдеры и инструменты (.env в корне, образец — .env.example)
+# keys: providers and tools (.env in the root, sample — .env.example)
 .env
 .env.*
 !.env.example
-# настройки панели «Ключи»: сильнее .env и переживают деплой
+# panel "Keys" settings: win over .env and survive a deploy
 keys.json
 keys.json.bak
-# черновик с ключами: чтобы выписанные руками ключи не уехали в git случайно
+# a draft with keys: so that keys written by hand do not accidentally go into git
 KEYS
 .pytest_cache/
 dist/
@@ -17,15 +17,15 @@ build/
 *.log
 .DS_Store
 
-# рабочие копии dsh (изолированные worktree для задач)
+# dsh working copies (isolated worktrees for tasks)
 .dsh-worktrees/
 
-# рантайм-данные Icarus (контейнеры, тома памяти, сессии)
+# Icarus runtime data (containers, memory volumes, sessions)
 runtime/
 data/
 
-# локальный конфиг сервиса (ключи — в .env, см. выше)
+# local service config (keys — in .env, see above)
 config.yaml
 
-# стек, который ./script/server собирает из config.yaml
+# the stack that ./script/server builds from config.yaml
 /docker-compose.yml

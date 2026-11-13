@@ -1,13 +1,13 @@
-// Общие типы поискового роутера: один результат, один провайдер, один отказ.
+// Shared types of the search router: one result, one provider, one failure.
 //
-// Роутер не знает про конкретные API: каждый провайдер — это функция «запрос →
-// результаты» и список имён переменных, где лежит его ключ. Всё остальное (баны,
-// рейтинг, текущий провайдер) живёт в state.ts и router.ts.
+// The router doesn't know about specific APIs: each provider is a function "request →
+// results" and a list of variable names holding its key. Everything else (bans,
+// rating, current provider) lives in state.ts and router.ts.
 export type SearchResult = { title: string; url: string; snippet?: string };
 
 /**
- * Все провайдеры, которых знает роутер. Поисковый рейтинг задаётся отдельно
- * (router.ts): cloudflare умеет только извлекать страницы и в поиске не участвует.
+ * All providers the router knows. The search rating is defined separately
+ * (router.ts): cloudflare can only fetch pages and doesn't take part in search.
  */
 export const PROVIDER_IDS = [
   'serpapi',
@@ -24,7 +24,7 @@ export const PROVIDER_IDS = [
 
 export type ProviderId = (typeof PROVIDER_IDS)[number];
 
-/** Поисковые провайдеры: все, кроме cloudflare — он умеет только страницы. */
+/** Search providers: all except cloudflare — it can only fetch pages. */
 export type SearchProviderId = Exclude<ProviderId, 'cloudflare'>;
 
 export function isProviderId(value: string): value is ProviderId {
@@ -32,19 +32,19 @@ export function isProviderId(value: string): value is ProviderId {
 }
 
 /**
- * Почему провайдер отвалился. От этого зависит длина карантина:
- *  - credits — кончились кредиты/квота, сутки;
- *  - rate — превышен темп, пять минут;
- *  - page — страница не отдалась (404, robots, пейволл): это свойство URL, а не
- *    здоровье ключа, поэтому провайдера за такое не баним;
- *  - http/network/timeout — обычный сбой, пять минут.
+ * Why the provider dropped out. The quarantine length depends on this:
+ *  - credits — credits/quota ran out, one day;
+ *  - rate — rate exceeded, five minutes;
+ *  - page — the page wasn't served (404, robots, paywall): this is a property of the URL, not
+ *    the health of the key, so we don't ban the provider for it;
+ *  - http/network/timeout — a normal failure, five minutes.
  */
 export type FailureKind = 'credits' | 'rate' | 'page' | 'http' | 'network' | 'timeout';
 
 export class SearchFailure extends Error {
   readonly kind: FailureKind;
   readonly status: number | null;
-  /** Тело ответа или текст ошибки: панель показывает его человеку целиком. */
+  /** Response body or error text: the panel shows it to the person in full. */
   readonly body: string;
 
   constructor(kind: FailureKind, message: string, details: { status?: number; body?: string } = {}) {
@@ -57,18 +57,18 @@ export class SearchFailure extends Error {
 }
 
 /**
- * Что считать «кончились кредиты».
+ * What counts as "credits ran out".
  *
- * 402 и 432 (нестандартный код Tavily) — всегда деньги. 403 и 429 с упоминанием
- * кредитов, баланса или плана — тоже: провайдеры шлют их, кто во что горазд.
- * Голый 429 без таких слов — это темп, а не деньги, и банить на сутки нельзя.
+ * 402 and 432 (Tavily's non-standard code) — always money. 403 and 429 mentioning
+ * credits, balance or plan — too: providers send them however they fancy.
+ * A bare 429 without such words is rate, not money, and we can't ban for a day.
  */
 const CREDIT_HINTS = /\bcredits?\b|\bquota\b|insufficient|out of credits|no credits|run out|out of searches|exhausted|billing|payment required|plan limit|usage limit|\bbalance\b/i;
 
 export function classifyFailure(status: number, body: string): FailureKind {
-  // 402/432 — деньги по стандарту и у Tavily; 433 — её же «pay-as-you-go limit».
+  // 402/432 — money by the standard and at Tavily; 433 — its "pay-as-you-go limit".
   if (status === 402 || status === 432 || status === 433) return 'credits';
-  // Кто-то шлёт «кончились поиски» под 401/403 — это не мёртвый ключ, а деньги.
+  // Some send "searches ran out" under 401/403 — that's not a dead key, but money.
   if ((status === 401 || status === 403 || status === 429) && CREDIT_HINTS.test(body)) return 'credits';
   if (status === 429) return 'rate';
   return 'http';
@@ -82,31 +82,31 @@ export type ProviderContext = {
 
 export type SearchProvider = {
   id: ProviderId;
-  /** Как провайдер называется в панели. */
+  /** What the provider is called in the panel. */
   label: string;
-  /** Переменные окружения, в которых ищется ключ (первая непустая побеждает). */
+  /** Environment variables searched for the key (the first non-empty one wins). */
   keyNames: string[];
-  /** Ключ не нужен: провайдер доступен всегда (бесплатный MCP You.com). */
+  /** No key needed: the provider is always available (free You.com MCP). */
   keyless?: boolean;
   /**
-   * Кто делает то же самое без ключа. Панель по этому полю говорит «ключа нет,
-   * и он не нужен», а не «нет ключа» — для You.com это ровно так.
+   * Who does the same thing without a key. Using this field the panel says "there's no key,
+   * and none is needed" rather than "no key" — for You.com that's exactly the case.
    */
   keylessTwin?: ProviderId;
   /**
-   * Когда вернётся квота после «кончились кредиты». Для суточных лимитов —
-   * следующая полночь: ровные сутки держали бы провайдера дольше, чем нужно.
+   * When the quota returns after "credits ran out". For daily limits — the
+   * next midnight: a full 24 hours would keep the provider out longer than needed.
    */
   creditsResetAt?: (now: number) => number;
   search(query: string, limit: number, ctx: ProviderContext): Promise<SearchResult[]>;
 };
 
-/** Страница, вытащенная провайдером: текст уже обрезан по maxChars. */
+/** Page pulled by the provider: the text is already truncated to maxChars. */
 export type FetchResult = { url: string; title?: string; text: string };
 
 export type FetchContext = ProviderContext & {
   maxChars: number;
-  /** Доступ к любому секрету: у Cloudflare нужны и аккаунт, и токен. */
+  /** Access to any secret: Cloudflare needs both account and token. */
   secret: (name: string) => string;
 };
 
@@ -114,7 +114,7 @@ export type FetchProvider = {
   id: ProviderId;
   label: string;
   keyNames: string[];
-  /** Секреты, без которых провайдер не готов (проверяются все). */
+  /** Secrets without which the provider isn't ready (all are checked). */
   requires?: string[];
   fetch(url: string, ctx: FetchContext): Promise<FetchResult>;
 };

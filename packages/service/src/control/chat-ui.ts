@@ -1,28 +1,28 @@
-// Страница чата в панели. Каркас статичный, данные приезжают из /panel/api/chat*,
-// а стили и клиентский скрипт лежат рядом отдельными файлами: так в TypeScript не
-// приходится экранировать бэктики и скобки, а браузер получает один и тот же JS
-// и в локальной панели, и в сервисе на проде.
+// The chat page in the panel. The shell is static, data arrives from /panel/api/chat*,
+// while styles and the client script live alongside in separate files: this way TypeScript
+// doesn't have to escape backticks and braces, and the browser gets the same JS
+// both in the local panel and in the service in production.
 import fs from 'node:fs';
 import { DEFAULT_WORKSPACE } from '../config.ts';
 import { WEB_COMMANDS } from '../sessions/commands.ts';
 import { escapeHtml, sessionStrings, sessionUiLanguage, shell, type PanelSession } from './ui.ts';
 
 const CLIENT_CSS = fs.readFileSync(new URL('./chat-client.css', import.meta.url), 'utf8');
-// Сообщения (пузыри, трассировка, .md) — общий файл с боковым чатом артефактов:
-// один и тот же ответ должен выглядеть одинаково в обоих местах.
+// Messages (bubbles, trace, .md) — a shared file with the artifact side chat:
+// the same answer must look identical in both places.
 const MESSAGES_CSS = fs.readFileSync(new URL('./chat-messages.css', import.meta.url), 'utf8');
-// Разметку держим отдельным файлом: её разбирает тест, а клиенту она нужна раньше
-// самого чата — функции разметки подключаются как обычные глобальные.
+// We keep the markdown in a separate file: a test parses it, and the client needs it before
+// the chat itself — the markdown functions are included as ordinary globals.
 const CLIENT_MD = fs.readFileSync(new URL('./chat-markdown.js', import.meta.url), 'utf8');
-// Подсветку кода тоже подключаем раньше клиента: предпросмотр файлов зовёт
-// `highlightCode` как обычную глобальную функцию.
+// We also include syntax highlighting before the client: the file preview calls
+// `highlightCode` as an ordinary global function.
 const CLIENT_HIGHLIGHT = fs.readFileSync(new URL('./files-highlight.js', import.meta.url), 'utf8');
 const CLIENT_JS = fs.readFileSync(new URL('./chat-client.js', import.meta.url), 'utf8');
 
 export type ChatPageOptions = {
-  /** Какой разговор открыть сразу; без него клиент выберет самый свежий. */
+  /** Which conversation to open immediately; without it the client picks the freshest one. */
   chatId?: string;
-  /** Есть ли куда отправить реплику: в панели без pi чат только для чтения. */
+  /** Whether there is somewhere to send a message: in a panel without pi the chat is read-only. */
   enabled: boolean;
 };
 
@@ -35,14 +35,14 @@ export function chatPage(session: PanelSession, options: ChatPageOptions): strin
     storage: session.storage ?? 'git · local',
     enabled: options.enabled,
     defaultWorkspace: DEFAULT_WORKSPACE,
-    // Команды, которые чат разбирает сам: палитра показывает их сразу, не дожидаясь
-    // ответа pi. Команды pi (скиллы, шаблоны, расширения) приезжают отдельно.
+    // Commands the chat parses itself: the palette shows them immediately, without waiting
+    // for pi's answer. pi commands (skills, templates, extensions) arrive separately.
     commands: WEB_COMMANDS,
-    // Строки клиента — из того же словаря, что и серверная разметка: иначе поле
-    // ввода переключится, а «Ничего не найдено» в списке чатов останется русским.
+    // Client strings come from the same dictionary as the server markup: otherwise the input
+    // field would switch but "Nothing found" in the chat list would stay Russian.
     ui,
   };
-  // JSON уезжает в <script>: экранируем «<», иначе значение с </script> закроет тег.
+  // JSON goes into <script>: we escape "<", otherwise a value with </script> would close the tag.
   const json = JSON.stringify(config).replaceAll('<', '\\u003c');
 
   return shell(`<style>${MESSAGES_CSS}</style>
@@ -57,12 +57,12 @@ export function chatPage(session: PanelSession, options: ChatPageOptions): strin
 
     <button class="new-chat" id="new-chat"><span>+</span> ${escapeHtml(ui.newChat)}</button>
 
-    <!-- Папки — надстройка над списком, а не ещё один чат: кнопка маленькая и
-         стоит рядом с главной. Свёрнутость и состав папок помнит сервер. -->
+    <!-- Folders are an add-on to the list, not another chat: the button is small and
+         sits next to the main one. The server remembers collapsed state and folder contents. -->
     <button class="new-folder" id="new-folder" type="button"><span>+</span> ${escapeHtml(ui.folderNew)}</button>
 
-    <!-- Черновик занимает место кнопки: разговор создаётся только с первым
-         сообщением, а до тех пор это просто строка списка «Новый чат». -->
+    <!-- The draft takes the place of the button: a conversation is created only with the first
+         message, and until then it is just a list row "New chat". -->
     <div class="draft-wrap" id="draft-wrap" hidden>
       <button class="chat-item active" id="draft-item" type="button">
         <div class="chat-item-top"><span class="chat-item-title">${escapeHtml(ui.newChat)}</span>
@@ -73,8 +73,8 @@ export function chatPage(session: PanelSession, options: ChatPageOptions): strin
 
     <div class="chat-list" id="chat-list"><p class="side-empty">${escapeHtml(ui.chatListEmpty)}</p></div>
 
-    <!-- Архив — секция того же списка, а не отдельная страница: разговор уходит
-         из ежедневного списка, но остаётся под рукой вместе с историей и файлами. -->
+    <!-- The archive is a section of the same list, not a separate page: a conversation leaves
+         the daily list but stays at hand along with its history and files. -->
     <div class="archive-zone" id="archive-zone">
       <button class="archive-toggle" id="archive-toggle" type="button"
               aria-expanded="false" aria-controls="archive-list">
@@ -86,9 +86,9 @@ export function chatPage(session: PanelSession, options: ChatPageOptions): strin
       <div class="archive-list" id="archive-list" hidden></div>
     </div>
 
-    <!-- Настройки — одна дверь. Сами разделы живут на своей странице, и там же
-         в этой панели появляется их меню: два списка настроек человеку не нужны.
-         Артефакты — не настройка, поэтому стоят рядом с «Настройками», а не внутри. -->
+    <!-- Settings are one door. The sections themselves live on their own page, and their menu
+         appears in this panel: a person does not need two settings lists.
+         Artifacts are not a setting, so they sit next to "Settings", not inside. -->
     <div class="side-settings">
       <a class="side-link" href="/panel/artifacts"><span>${escapeHtml(ui.artifacts)}</span></a>
       <a class="side-link" href="/panel/memory"><span>${escapeHtml(ui.settings)}</span></a>
@@ -108,13 +108,13 @@ export function chatPage(session: PanelSession, options: ChatPageOptions): strin
     <header class="chat-top">
       <button class="icon-btn menu-btn" id="toggle-side" aria-label="${escapeHtml(ui.menu)}">☰</button>
       <div class="chat-crumbs">Icarus / <b id="chat-title">${escapeHtml(ui.newChat)}</b><span class="chat-archived-tag" id="chat-archived-tag" hidden>${escapeHtml(ui.archiveTag)}</span></div>
-      <!-- Откуда пришла последняя реплика: сессия у разговора одна на все входы,
-           и по файлу истории этого не видно — канал запоминает сервис. -->
+      <!-- Where the last message came from: a conversation has one session for all inputs,
+           and the history file does not show it — the service remembers the channel. -->
       <span class="chat-via" id="chat-via" hidden></span>
       <label class="chat-search"><span>⌕</span><input id="chat-search" placeholder="${escapeHtml(ui.searchTitles)}" autocomplete="off"></label>
       <div class="top-status"><i></i><span id="chat-status">${escapeHtml(ui.agentActive)}</span></div>
-      <!-- Архив открытого разговора: убрать с глаз, не теряя историю. Кнопка
-           меняет смысл, когда разговор уже в архиве, — «вернуть» ищут там же. -->
+      <!-- Archiving the open conversation: out of sight without losing the history. The button
+           changes meaning when the conversation is already archived — "restore" is looked for there too. -->
       <button class="archive-btn" id="toggle-archive" type="button" aria-pressed="false" disabled>
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="5" rx="1.5"/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9"/><path d="M10 13h4"/></svg>
         <span id="archive-button-label">${escapeHtml(ui.archiveAdd)}</span>
@@ -140,47 +140,47 @@ export function chatPage(session: PanelSession, options: ChatPageOptions): strin
 
     <div class="composer">
       <div class="pending" id="chat-pending" hidden></div>
-      <!-- Очередь реплик, написанных во время хода: живёт на сервере, поэтому
-           переживает F5. Каждую можно снять, пока она не отправилась. -->
+      <!-- Queue of messages written during a turn: it lives on the server, so it
+           survives F5. Each one can be removed before it is sent. -->
       <div class="queue" id="chat-queue" hidden>
         <div class="queue-head"><b id="queue-count">${escapeHtml(ui.queueCount.replace('{n}', '0'))}</b><span class="queue-hint">${escapeHtml(ui.queueHint)}</span></div>
         <div class="queue-list" id="queue-list"></div>
       </div>
       <div class="composer-locked" id="chat-locked" hidden></div>
       <div class="composer-box" id="composer-box">
-        <!-- Палитра команд: всплывает над полем, как только человек набрал «/».
-             Список команд чата известен сразу, команды pi подгружаются следом. -->
+        <!-- Command palette: pops up above the field as soon as the person types "/".
+             The chat command list is known immediately, pi commands load after. -->
         <div class="cmd-palette" id="cmd-palette" role="listbox" aria-label="${escapeHtml(ui.chatCommands)}" hidden></div>
         <button class="icon-btn attach" id="chat-attach" aria-label="${escapeHtml(ui.attachFile)}" title="${escapeHtml(ui.attachFile)}"${options.enabled ? '' : ' disabled'}><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
         <input id="chat-files" type="file" multiple hidden>
         <textarea id="chat-input" rows="1" placeholder="${escapeHtml(ui.inputPlaceholder)}"${options.enabled ? '' : ' disabled'}></textarea>
         <div class="composer-actions">
-          <!-- Две разные операции: «сейчас» отменяет чужую работу, «отправить»
-               при идущем ходе ставит реплику в очередь. -->
+          <!-- Two different operations: "now" cancels someone else's work, "send"
+               during an ongoing turn queues the message. -->
           <button class="now" id="chat-now" title="${escapeHtml(ui.nowTitle)}" hidden>${escapeHtml(ui.nowSend)}</button>
           <button class="stop" id="chat-stop" aria-label="${escapeHtml(ui.stop)}" title="${escapeHtml(ui.stopAnswer)}" hidden>■</button>
           <button class="send" id="chat-send" aria-label="${escapeHtml(ui.send)}"${options.enabled ? '' : ' disabled'}>↑</button>
         </div>
       </div>
       <div class="composer-foot">
-        <!-- Под полем ввода — только отказы и подтверждения. Прогресс хода
-             (шаги, команды, субагенты) живёт в трассировке ответа: дублировать
-             его мелким текстом снизу незачем. -->
+        <!-- Under the input field are only refusals and confirmations. Turn progress
+             (steps, commands, subagents) lives in the response trace: there is no
+             need to duplicate it in small text below. -->
         <span id="chat-note">${options.enabled ? '' : escapeHtml(ui.chatDisabledNote)}</span>
         <span>${escapeHtml(ui.composerHint)}</span>
       </div>
     </div>
   </main>
 
-  <!-- Правая панель: файлы рабочей папки открытого разговора. Клиент рисует
-       дерево и предпросмотр; здесь только каркас, иначе страница пухнет вдвое. -->
+  <!-- Right panel: files of the open conversation's working folder. The client draws
+       the tree and preview; here is only the frame, otherwise the page doubles in size. -->
   <aside class="files-panel" id="files-panel" aria-label="${escapeHtml(ui.workspaceFiles)}">
-    <!-- На узком экране панель выдвигается поверх шапки чата и закрывает кнопку
-         «Файлы»: свой крестик остаётся единственным способом её свернуть. -->
+    <!-- On a narrow screen the panel slides over the chat header and covers the "Files"
+         button: its own close cross remains the only way to collapse it. -->
     <button class="icon-btn files-close" id="files-close" aria-label="${escapeHtml(ui.hideFiles)}" title="${escapeHtml(ui.hideFiles)}">×</button>
-    <!-- Поиск по всему workspace, а не по открытой папке: чаще всего файл ищут
-         по куску текста, не зная, в какой он папке. Результаты встают на место
-         дерева, поэтому панель не раздваивается. -->
+    <!-- Search across the whole workspace, not the open folder: most often a file is searched
+         by a piece of text without knowing which folder it is in. Results take the place
+         of the tree, so the panel does not split in two. -->
     <label class="files-search"><span>⌕</span><input id="files-search" placeholder="${escapeHtml(ui.filesSearch)}" autocomplete="off" aria-label="${escapeHtml(ui.filesSearchAria)}"></label>
     <div class="files-tree" id="files-tree"><p class="files-note">${escapeHtml(ui.readingFolder)}</p></div>
     <div class="files-split" id="files-split" role="separator" aria-orientation="horizontal"

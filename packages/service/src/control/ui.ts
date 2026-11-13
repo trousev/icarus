@@ -1,68 +1,68 @@
-// Страница панели управления: один HTML, никакой сборки и зависимостей.
+// The control panel page: one HTML, no build and no dependencies.
 //
-// Входа с паролем здесь нет и не должно быть: панель стоит за SSO-прокси, и все её
-// запросы — обычные same-origin запросы браузера, к которым прокси сам прикладывает
-// имя вошедшего. Поэтому в ссылке нет ни ключа, ни токена: если человека не назвал
-// прокси, страница честно объясняет, чего не хватает (см. PanelDenial).
+// There is no password login here and there shouldn't be: the panel sits behind an SSO proxy, and all its
+// requests are ordinary same-origin browser requests, to which the proxy itself attaches
+// the name of the logged-in person. That's why the link has neither a key nor a token: if a person wasn't named
+// by the proxy, the page honestly explains what's missing (see PanelDenial).
 //
-// Раскладка — сайдбар с разделами, строка с крошками и поиском, и контент раздела.
-// Сервер отдаёт каркас и заголовок раздела, а списки, записи и история приезжают из
-// /panel/api/* уже в браузер: у человека с десятком файлов памяти страница обязана
-// открываться мгновенно, а не ждать, пока сервис обойдёт всю память и git.
+// The layout is a sidebar with sections, a row with breadcrumbs and search, and the section content.
+// The server serves the frame and the section title, while lists, entries and history arrive from
+// /panel/api/* already in the browser: for a person with a dozen memory files the page must
+// open instantly, not wait while the service walks all the memory and git.
 //
-// Состояние живёт в адресе (?scope=…&file=…&tab=…), поэтому ссылку на конкретную
-// запись или историю файла можно переслать, а «назад» в браузере работает как надо.
+// State lives in the address (?scope=…&file=…&tab=…), so a link to a specific
+// entry or file history can be forwarded, and the browser's "back" works as it should.
 import { panelStrings, type PanelStrings } from './strings.ts';
 import { DEFAULT_UI_LANGUAGE, isUiLanguage, type UiLanguage } from '../profile.ts';
 
 export type PanelSection = { id: string; label: string };
 
-/** Язык интерфейса из сессии. Неизвестное или отсутствующее значение — русский. */
+/** The interface language from the session. An unknown or missing value means Russian. */
 export function sessionUiLanguage(session: PanelSession): UiLanguage {
   return isUiLanguage(session.uiLanguage) ? session.uiLanguage : DEFAULT_UI_LANGUAGE;
 }
 
 export const sessionStrings = (session: PanelSession): PanelStrings => panelStrings(sessionUiLanguage(session));
 
-/** Отказ доступа: что случилось и что с этим делать. */
+/** Access denial: what happened and what to do about it. */
 export type PanelDenial = { status: 401 | 403; message: string; hint: string };
 
 export type PanelSession = {
   user: string;
   sections: PanelSection[];
   scopes: Record<string, 'memory' | 'skills' | 'profile'>;
-  /** Заголовки областей: у каждой своё имя, и придумывать их в браузере незачем. */
+  /** Scope labels: each has its own name, and there's no point inventing them in the browser. */
   scopeLabels?: Record<string, string>;
-  /** Модель и хранилище — то, чем человек проверяет, что смотрит в ту панель. */
+  /** Model and storage — what a person uses to check they're looking at the right panel. */
   model?: string;
   storage?: string;
-  /** Есть ли кому написать скилл: в локальной панели контейнера с моделью нет. */
+  /** Whether there's anyone to write a skill for: the local panel has no model container. */
   draftSkills?: boolean;
-  /** Админ ли: раздел «Ключи» в сайдбаре есть только у него. */
+  /** Whether an admin: the "Keys" section in the sidebar exists only for them. */
   admin?: boolean;
-  /** Язык ответов этого человека: «ru» или «en». Раздел «Пользователь» им и занят. */
+  /** This person's answer language: "ru" or "en". The "User" section is what deals with it. */
   language?: string;
-  /** Язык интерфейса панели: отдельная настройка, «ru» или «en». */
+  /** The panel interface language: a separate setting, "ru" or "en". */
   uiLanguage?: string;
 };
 
 export type PanelView = PanelSession | PanelDenial;
 
-/** Что открыто в разделе: область, файл и вкладка внутри файла. */
+/** What's open in the section: the scope, the file and the tab inside the file. */
 export type PanelPage = {
   section: string;
   scope?: string;
   file?: string;
-  /** Владелец открытого скилла: у расшаренного он чужой и править его нельзя. */
+  /** The owner of the open skill: for a shared one it's someone else's and can't be edited. */
   owner?: string;
-  /** Пустой редактор нового скилла: файла ещё нет, а страница уже есть. */
+  /** An empty editor of a new skill: the file doesn't exist yet, but the page does. */
   fresh?: boolean;
   tab?: 'notes' | 'history';
 };
 
 /**
- * Подпись области. Сервер присылает её уже на языке человека; здесь остаётся
- * запасной вариант для старых вызовов и тестов без `scopeLabels`.
+ * The scope label. The server sends it already in the person's language; here only a
+ * fallback remains for old calls and tests without `scopeLabels`.
  */
 const scopeLabel = (session: PanelSession, scope: string): string => {
   const ui = sessionStrings(session);
@@ -80,8 +80,8 @@ export function panelHtml(view: PanelView, page: PanelPage = { section: 'memory'
 }
 
 /**
- * Оболочка страницы: шапка документа и стили одни на всех. `lang` — язык
- * интерфейса: от него зависит переносы, озвучка и то, как браузер ищет по странице.
+ * The page shell: document head and styles are the same for everyone. `lang` is the interface
+ * language: hyphenation, speech and how the browser searches the page depend on it.
  */
 export function shell(body: string, lang: string = DEFAULT_UI_LANGUAGE): string {
   return `<!doctype html>
@@ -90,8 +90,8 @@ export function shell(body: string, lang: string = DEFAULT_UI_LANGUAGE): string 
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${PANEL_TITLE}</title>
-<!-- Иконка нарисована тут же: панель не тянет ни одного внешнего файла, и без
-     неё браузер на каждом открытии просит /favicon.ico и получает 404. -->
+<!-- The icon is drawn right here: the panel pulls no external files, and without
+     it the browser asks for /favicon.ico on every open and gets a 404. -->
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%237aa2f7'/%3E%3Ctext x='16' y='23' font-size='20' font-family='sans-serif' font-weight='bold' fill='%230f1116' text-anchor='middle'%3EI%3C/text%3E%3C/svg%3E">
 <style>
   :root { color-scheme: dark; --bg:#0f1116; --side:#13161d; --panel:#1b1f28; --raise:#20242e;
@@ -102,7 +102,7 @@ export function shell(body: string, lang: string = DEFAULT_UI_LANGUAGE): string 
   button { font:inherit; cursor:pointer; }
   .app { display:grid; grid-template-columns:250px 1fr; min-height:100vh; }
 
-  /* Сайдбар: слева разделы панели и подпись, чем эта панель работает. */
+  /* Sidebar: on the left the panel sections and a note on what this panel runs on. */
   aside { background:var(--side); border-right:1px solid var(--line); padding:18px 14px;
           display:flex; flex-direction:column; gap:22px; }
   .brand { display:flex; gap:10px; align-items:center; }
@@ -119,7 +119,7 @@ export function shell(body: string, lang: string = DEFAULT_UI_LANGUAGE): string 
   .nav .soon { opacity:.55; }
   .nav em { font-style:normal; margin-left:auto; font-size:12px; }
   .nav .pin { margin-left:auto; color:var(--dim); font-size:10px; }
-  /* Назад в чат — отдельной кнопкой: это выход из настроек, а не ещё один раздел. */
+  /* Back to chat — as a separate button: it's an exit from settings, not another section. */
   .nav-box { display:flex; flex-direction:column; }
   .nav-back { display:flex; align-items:center; gap:8px; padding:8px 10px; border:1px solid var(--line);
               border-radius:8px; background:var(--panel); color:var(--text); text-decoration:none; font-size:13px; }
@@ -128,7 +128,7 @@ export function shell(body: string, lang: string = DEFAULT_UI_LANGUAGE): string 
   .foot { margin-top:auto; display:flex; flex-direction:column; gap:8px; color:var(--dim); font-size:12px; }
   .foot div { display:flex; justify-content:space-between; gap:10px; }
 
-  /* Верхняя строка: где мы, поиск по разделам и состояние агента. */
+  /* Top row: where we are, search across sections, and the agent state. */
   .top { display:flex; gap:14px; align-items:center; padding:14px 24px; border-bottom:1px solid var(--line); }
   .crumbs { color:var(--dim); font-size:13px; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .crumbs b { color:var(--text); font-weight:500; }
@@ -143,7 +143,7 @@ export function shell(body: string, lang: string = DEFAULT_UI_LANGUAGE): string 
   h1 { font-size:30px; margin:0 0 8px; letter-spacing:-.3px; }
   .about { color:var(--dim); max-width:620px; margin:0 0 18px; }
 
-  /* Области: личная, семейная, математика. Число у области — сколько в ней файлов. */
+  /* Scopes: personal, family, math. The number by a scope is how many files it has. */
   .areas { display:flex; gap:4px; background:var(--panel); border:1px solid var(--line);
            border-radius:11px; padding:4px; flex:0 0 auto; }
   .area { display:flex; gap:8px; align-items:center; padding:7px 14px; border-radius:8px;
@@ -155,10 +155,10 @@ export function shell(body: string, lang: string = DEFAULT_UI_LANGUAGE): string 
   .head .lead { min-width:0; }
 
   .cols { display:grid; grid-template-columns:330px minmax(0,1fr); gap:16px; align-items:start; }
-  /* У настроек нет колонки файлов: карточка одна и на всю ширину. */
+  /* Settings have no file column: a single card spanning the full width. */
   .cols.single { grid-template-columns:minmax(0,1fr); }
-  /* Выбор языка: строка-переключатель, а не выпадающий список — вариантов два,
-     и оба должны быть видны сразу. */
+  /* Language choice: a switch row, not a dropdown — there are two options,
+     and both must be visible at once. */
   .choice { display:flex; flex-direction:column; gap:8px; }
   .choice label { display:flex; gap:11px; align-items:center; padding:12px 14px; border:1px solid var(--line);
                   border-radius:9px; cursor:pointer; background:var(--bg); }
@@ -172,27 +172,27 @@ export function shell(body: string, lang: string = DEFAULT_UI_LANGUAGE): string 
                padding:11px 16px; border-bottom:1px solid var(--line); color:var(--dim);
                font-size:10px; letter-spacing:.14em; }
   .lead-box { padding:17px 18px 18px; }
-  /* Две настройки языка — два блока: черта между ними не даёт прочитать их как одну. */
+  /* Two language settings — two blocks: the line between them prevents reading them as one. */
   .lead-box + .lead-box { border-top:1px solid var(--line); }
   .lead-box h3 { font-size:17px; margin:0 0 7px; }
 
-  /* Правая колонка: открытый файл целиком — с шапкой, вкладками и записями. */
+  /* Right column: the open file in full — with head, tabs and entries. */
   .file-head { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; padding:16px 18px 12px; }
-  /* Пока файл не открыт, шапка с пустым именем только занимает место. */
+  /* While no file is open, a head with an empty name only takes up space. */
   .file-head[hidden] { display:none; }
-  /* Вкладки и «Скачать» — одним углом: вкладки переключают, кнопка забирает файл. */
+  /* Tabs and "Download" — in one corner: tabs switch, the button grabs the file. */
   .head-actions { display:flex; gap:8px; align-items:center; flex:0 0 auto; }
   .head-actions [hidden] { display:none; }
   .file-head strong { font-family:ui-monospace, monospace; font-size:15px; }
   .meta { color:var(--dim); font-size:12px; margin-top:4px; }
   .tabs { display:flex; gap:4px; background:var(--raise); border-radius:9px; padding:3px; }
-  /* display:flex сильнее атрибута hidden, поэтому прячем вкладки явным правилом. */
+  /* display:flex is stronger than the hidden attribute, so we hide the tabs with an explicit rule. */
   .tabs[hidden] { display:none; }
   .tab { padding:6px 14px; border-radius:7px; color:var(--dim); text-decoration:none; font-size:13px; }
   .tab.active { background:var(--accent); color:#0f1116; }
   .file-body { padding:0 18px 18px; }
 
-  /* Панель действий появляется только когда есть выделение: пустых кнопок не держим. */
+  /* The action bar appears only when there's a selection: we don't keep empty buttons. */
   .bar { display:flex; gap:12px; align-items:center; padding:11px 12px; margin-bottom:10px;
          border:1px solid var(--line); border-radius:9px; color:var(--dim); }
   .bar.on { background:var(--accent-soft); border-color:var(--accent); color:var(--text); }
@@ -200,10 +200,10 @@ export function shell(body: string, lang: string = DEFAULT_UI_LANGUAGE): string 
   .bar button, .btn { background:var(--raise); color:var(--text); border:1px solid var(--line);
                       border-radius:8px; padding:7px 14px; }
   .bar button:hover, .btn:hover { border-color:var(--accent); }
-  /* Пока модель пишет, кнопку не жмём второй раз: это минута и чужой токен. */
+  /* While the model is writing, we don't press the button a second time: it's a minute and someone else's token. */
   button:disabled { opacity:.55; cursor:default; }
   button:disabled:hover { border-color:var(--line); }
-  /* Отказ проверки в редакторе скилла: видно там же, где кнопка «Сохранить». */
+  /* A validation failure in the skill editor: visible right where the "Save" button is. */
   #skill-status.bad { color:var(--danger); }
   button.primary { background:var(--accent); border-color:var(--accent); color:#0f1116; font-weight:500; }
   button.danger { color:var(--danger); }
@@ -211,21 +211,21 @@ export function shell(body: string, lang: string = DEFAULT_UI_LANGUAGE): string 
   button.solid { background:var(--danger); border-color:var(--danger); color:#0f1116; }
 
   .rows { display:flex; flex-direction:column; }
-  /* Строку выравниваем по базовой линии: галочка, номер и текст — на одной строке,
-     иначе номер с галочкой всплывают над текстом. Номер и дата — тем же кеглем и
-     интерлиньяжем, что и текст: тогда базовая линия у них общая. */
+  /* We align the row by the baseline: checkbox, number and text on one line,
+     otherwise the number and checkbox float above the text. The number and date use the same font size and
+     line height as the text: then they share a baseline. */
   .row { display:flex; gap:14px; align-items:baseline; padding:11px 8px; border-radius:8px; }
   .row:hover { background:var(--raise); }
   .row.sel { background:var(--accent-soft); }
-  /* У чекбокса базовой линии нет: он не в потоке текста, поэтому подтягиваем его
-     к строке вручную — иначе он висит выше текста и номера. */
+  /* A checkbox has no baseline: it's not in the text flow, so we pull it
+     to the row manually — otherwise it hangs above the text and number. */
   .row input { margin:0; position:relative; top:3px; width:15px; height:15px;
                accent-color:var(--accent); flex:0 0 auto; cursor:pointer; }
   .num { color:var(--dim); font:12px/1.6 ui-monospace, monospace; width:26px; flex:0 0 auto;
          user-select:none; -webkit-user-select:none; }
   .row-text { flex:1; min-width:0; word-break:break-word; }
   .date { color:var(--dim); font-size:12px; white-space:nowrap; }
-  /* Заголовок раздела — не запись: галочки у него нет, и трогать его нечем. */
+  /* A section heading is not an entry: it has no checkbox, and there's no way to touch it. */
   .row.heading { background:var(--raise); cursor:default; }
   .row.heading .row-text { font-weight:500; }
   .row.plain { cursor:default; }
@@ -233,7 +233,7 @@ export function shell(body: string, lang: string = DEFAULT_UI_LANGUAGE): string 
   .plus { color:#4ade80; font:12px/1.6 ui-monospace, monospace; }
   .minus { color:var(--danger); font:12px/1.6 ui-monospace, monospace; }
 
-  /* История: коммит и строки по этому файлу — клик открывает дифф. */
+  /* History: a commit and the lines for this file — a click opens the diff. */
   .hist { display:flex; flex-direction:column; }
   .commit { display:flex; gap:14px; align-items:flex-start; padding:13px 8px; border-radius:8px; cursor:pointer; }
   .commit:hover { background:var(--raise); }
@@ -254,15 +254,15 @@ export function shell(body: string, lang: string = DEFAULT_UI_LANGUAGE): string 
   .file .grow { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
                 font-family:ui-monospace, monospace; font-size:13px; }
   .file small { color:var(--dim); margin-left:12px; }
-  /* Скилл в списке — имя и одной строкой описание: по описанию модель и решает,
-     когда скилл открывать, поэтому в списке оно важнее размера файла. */
+  /* A skill in the list is a name and a one-line description: the model uses the description to decide
+     when to open the skill, so in the list it matters more than the file size. */
   .file.skill .grow { white-space:normal; }
   .file.skill b { display:block; font-weight:500; }
   .file.skill .grow small { display:block; margin:2px 0 0; font-family:ui-sans-serif, system-ui, sans-serif;
                             font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .file .flag { color:var(--danger); margin-left:12px; cursor:help; }
-  /* Статус и владелец скилла в списке: включён/выключен и «поделился/расшарен» —
-     те же две вещи, что у MCP, поэтому и выглядят знакомо. */
+  /* The status and owner of a skill in the list: enabled/disabled and "shared/received" —
+     the same two things as with MCP, so they look familiar. */
   .file.skill.off .grow { opacity:.55; }
   .file .tags { display:flex; flex-direction:column; align-items:flex-end; gap:4px; flex:0 0 auto; }
   .tag { display:inline-block; padding:1px 7px; border-radius:5px; font-size:10px; letter-spacing:.02em;
@@ -270,7 +270,7 @@ export function shell(body: string, lang: string = DEFAULT_UI_LANGUAGE): string 
   .tag.on { background:#16301f; color:#9ece6a; }
   .tag.off { background:#33222a; color:var(--danger); }
   .tag.shared { background:var(--accent-soft); color:var(--accent); }
-  /* Переключатель — тот же, что в формах: маленький, чтобы не спорить с описанием. */
+  /* The switch is the same as in forms: small, so it doesn't argue with the description. */
   .switch { position:relative; display:inline-flex; width:34px; height:19px; flex:0 0 auto; }
   .switch input { position:absolute; opacity:0; width:100%; height:100%; margin:0; cursor:pointer; z-index:1; }
   .switch span { position:absolute; inset:0; border-radius:999px; background:var(--raise);
@@ -282,7 +282,7 @@ export function shell(body: string, lang: string = DEFAULT_UI_LANGUAGE): string 
   .switch input:disabled { cursor:default; }
   .switch input:disabled + span { opacity:.5; }
 
-  /* Редактор скилла: поля вместо построчных записей — тут пишут файл целиком. */
+  /* The skill editor: fields instead of line-by-line entries — here you write the whole file. */
   .field { display:flex; flex-direction:column; gap:7px; padding:0 0 14px; }
   .field label { color:var(--dim); font-size:10px; letter-spacing:.14em; }
   .field input[type=text], .field textarea { background:var(--bg); border:1px solid var(--line);
@@ -291,18 +291,18 @@ export function shell(body: string, lang: string = DEFAULT_UI_LANGUAGE): string 
   .field textarea { resize:vertical; font:13px/1.7 ui-monospace, monospace; }
   .field textarea:focus, .field input[type=text]:focus { outline:none; border-color:var(--accent); }
   .field textarea#skill-body { min-height:320px; }
-  /* «Напиши за меня»: отдельным блоком, потому что это другой способ начать скилл —
-     не «заполни поля», а «расскажи идею, поля заполнятся сами». */
+  /* "Write for me": as a separate block, because it's a different way to start a skill —
+     not "fill in the fields", but "tell the idea, the fields will fill in themselves". */
   .generator { border:1px solid var(--line); border-radius:11px; padding:14px 14px 4px;
                margin:0 0 16px; background:var(--bg); }
   .generator .field textarea { background:var(--panel); min-height:auto; font:inherit; }
   .generator .row { display:flex; gap:10px; align-items:center; padding:0 0 12px; }
   .generator .row .grow { flex:1; color:var(--dim); font-size:12px; }
   .hint { color:var(--dim); font-size:12px; margin:0; padding:0 0 14px; }
-  /* Подпись к блоку настроек — тот же начерк, что у заголовков карточек. */
+  /* The caption for a settings block — the same style as the card headings. */
   .field-label { color:var(--dim); font-size:10px; letter-spacing:.14em; margin:0 0 10px; }
   .check { display:flex; gap:9px; align-items:center; color:var(--dim); font-size:13px; padding:0 0 16px; }
-  /* display:flex сильнее атрибута hidden, поэтому прячем строку шаринга явно. */
+  /* display:flex is stronger than the hidden attribute, so we hide the sharing row explicitly. */
   .check[hidden] { display:none; }
   .check input { accent-color:var(--accent); margin:0; }
   .hint code, .check code { font-family:ui-monospace, monospace; color:var(--text); }
@@ -329,8 +329,8 @@ ${body}
 }
 
 /**
- * Отказ: прокси не назвал человека (401) или назвал того, кого нет в конфиге (403).
- * Это не форма входа — панель не умеет логинить, — а объяснение, где искать причину.
+ * Denial: the proxy didn't name the person (401), or named someone who isn't in the config (403).
+ * This is not a login form — the panel can't log anyone in — but an explanation of where to look for the cause.
  */
 function denialPage(denial: PanelDenial): string {
   return shell(`<div class="banner">
@@ -341,8 +341,8 @@ function denialPage(denial: PanelDenial): string {
 }
 
 /**
- * Сайдбар настроек: дорога назад в чат, отчерк и сами разделы. Один и тот же на
- * всех страницах настроек — иначе их меню разъезжается от раздела к разделу.
+ * The settings sidebar: the way back to chat, a divider and the sections themselves. The same on
+ * every settings page — otherwise their menu drifts from section to section.
  */
 export function settingsAside(
   session: PanelSession,
@@ -352,8 +352,8 @@ export function settingsAside(
   const ui = sessionStrings(session);
   const nav = session.sections
     .map((item) => {
-      // Память помнит открытую область: возвращаясь из другого раздела, человек
-      // должен попасть в ту же личную или семейную память, а не в первую.
+      // Memory remembers the open scope: coming back from another section, the person
+      // should land in the same personal or family memory, not the first one.
       const href = `/panel/${item.id}${item.id === 'memory' && options.scope ? `?scope=${options.scope}` : ''}`;
       return (
         `<a class="${item.id === active ? 'active' : ''}" href="${href}">` +
@@ -389,26 +389,26 @@ function sessionPage(session: PanelSession, page: PanelPage): string {
   const scopes = Object.keys(session.scopes);
   const scope = page.scope && session.scopes[page.scope] ? page.scope : scopes[0];
   const skills = page.section === 'skills';
-  // «Пользователь» — не список файлов, а форма. Ему не нужны ни колонка файлов,
-  // ни поиск, поэтому он рисуется собственной правой колонкой целиком.
+  // "User" is not a file list but a form. It needs neither a file column
+  // nor search, so it draws its own right column entirely.
   const profile = page.section === 'profile';
-  // Режим — свойство раздела. Он решает, какие маршруты зовёт страница и каким
-  // рендером рисуется правая колонка: память правится построчно, скиллы — файлом.
+  // The mode is a property of the section. It decides which routes the page calls and how
+  // the right column is rendered: memory is edited line by line, skills as a file.
   const mode = skills ? 'skills' : profile ? 'profile' : 'memory';
   const sectionLabel = session.sections.find((item) => item.id === page.section)?.label ?? ui.sectionMemory;
   const title = skills ? ui.sectionSkills : profile ? ui.sectionProfile : scopeLabel(session, scope);
   const about = skills ? ui.aboutSkills : profile ? ui.aboutProfile : ui.aboutMemory;
-  // Память остаётся на языке контекста. Английский интерфейс не должен создавать
-  // впечатление, что её сейчас переведут: подписываем решение прямо в разделе.
+  // Memory stays in the language of the context. The English interface must not create
+  // the impression that it's about to be translated: we state the decision right in the section.
   const memoryNote =
     !skills && !profile && ui.lang !== 'ru' ? `<p class="hint">${escapeHtml(ui.memoryLanguageNote)}</p>` : '';
-  // Крошки не повторяют заголовок, когда раздел назван так же: «Скиллы / Скиллы»
-  // не сообщает ничего.
+  // Breadcrumbs don't repeat the heading when the section is named the same: "Skills / Skills"
+  // says nothing.
   const breadcrumbs = [`Icarus`, sectionLabel, ...(skills || profile ? [] : [title])];
 
-  // Область в ссылке несёт только память: у скиллов своей области нет, и
-  // `?scope=personal` в их адресе — это ровно та путаница, когда раздел показывал
-  // личную память под своим заголовком.
+  // The scope in the link belongs to memory only: skills have no scope of their own, and
+  // `?scope=personal` in their address is exactly that confusion where the section showed
+  // personal memory under its own heading.
   const areas = skills || profile
     ? ''
     : `<nav class="areas">${scopes
@@ -424,19 +424,19 @@ function sessionPage(session: PanelSession, page: PanelPage): string {
     section: page.section,
     scope,
     file: page.file ?? null,
-    // У своего скилла владелец — сам человек, у расшаренного — автор. Панель по
-    // этому полю решает, показывать редактор или только чтение.
+    // For one's own skill the owner is the person, for a shared one it's the author. By
+    // this field the panel decides whether to show the editor or read-only.
     owner: page.owner ?? session.user,
     fresh: Boolean(page.fresh),
     tab: page.tab === 'history' ? 'history' : 'notes',
     mode,
     scopes,
-    // Есть ли кому написать скилл. Локальная панель поднимается без контейнера с
-    // моделью — там кнопки нет вовсе, а не «есть, но всегда отказывает».
+    // Whether there's anyone to write a skill. The local panel comes up without a
+    // model container — there's no button at all, not "present but always fails".
     draftSkills: Boolean(session.draftSkills),
     labels: Object.fromEntries(scopes.map((name) => [name, scopeLabel(session, name)])),
-    // Строки клиентского скрипта: тот же словарь, что у серверной разметки, чтобы
-    // «Читаю…» в шаблоне и «Ничего не нашлось» после поиска не разъезжались.
+    // Client script strings: the same dictionary as the server markup, so that
+    // "Loading…" in the template and "Nothing found" after a search don't drift apart.
     ui,
   };
 
@@ -492,10 +492,10 @@ ${settingsAside(session, page.section, { scope })}
 <script>
 const cfg = ${JSON.stringify(config)};
 
-// Запросы уходят как есть, без заголовков авторизации: панель стоит за SSO-прокси,
-// и он узнаёт человека по своей сессионной куке. Приехал не JSON — значит, вместо
-// ответа API браузер получил страницу входа: сессия истекла, и об этом надо сказать
-// человеку, а не показывать «Unexpected token <».
+// Requests go as they are, without auth headers: the panel sits behind an SSO proxy,
+// and it identifies the person by its own session cookie. Not JSON came back — so instead of
+// an API response the browser got a login page: the session expired, and that must be told
+// to the person rather than showing "Unexpected token <".
 const api = async (path, options = {}) => {
   const response = await fetch(path, {
     ...options,
@@ -516,8 +516,8 @@ const humanSize = (bytes) => bytes < 1024 ? bytes + cfg.ui.bytesShort : (bytes /
 const day = (iso) => { const [y, m, d] = String(iso).split('-'); return y && m && d ? d + '.' + m + '.' + y : String(iso); };
 const stamp = (iso) => String(iso).slice(0, 16).replace('T', ' ');
 const isImage = (path) => /\\.(gif|jpe?g|bmp)$/i.test(path);
-// Число со словом: русскому нужны три формы («1 скилл», «2 скилла», «11 скиллов»),
-// английскому хватает двух. Формы приходят из словаря панели, правило — здесь.
+// A number with a word: Russian needs three forms ("1 skill", "2 skills", "11 skills"),
+// English gets by with two. The forms come from the panel dictionary, the rule is here.
 const plural = (n, words) => {
   if (cfg.ui.lang !== 'ru') return n === 1 ? words.one : words.many;
   const tens = n % 100, ones = n % 10;
@@ -526,29 +526,29 @@ const plural = (n, words) => {
   if (ones >= 2 && ones <= 4) return words.few;
   return words.many;
 };
-// Подстановка в шаблон словаря: «{n} {word}» и подобные. Без регулярок: строки
-// приходят из JSON, и экранировать тут нечего.
+// Substitution into a dictionary template: "{n} {word}" and the like. Without regexes: the strings
+// come from JSON, and there's nothing to escape here.
 const fill = (template, values) =>
   Object.entries(values).reduce((text, [key, value]) => text.split('{' + key + '}').join(String(value)), template);
 const countLabel = (n, words) => fill(cfg.ui.countLabel, { n, word: plural(n, words) });
-// Адрес запроса: раздел задаёт корень, область уточняет память. У скиллов и
-// математики области нет, и scope в их запросах только сбивал бы с толку.
+// Request address: the section sets the root, the scope refines memory. Skills and
+// math have no scope, and scope in their requests would only be confusing.
 const endpoint = (name, extra = {}) => {
   const query = cfg.mode === 'memory' ? { scope: cfg.scope, ...extra } : { ...extra };
   const suffix = new URLSearchParams(query).toString();
   return '/panel/' + cfg.section + '/' + name + (suffix ? '?' + suffix : '');
 };
 
-// Адрес — это и есть состояние: файл, вкладку и пустой редактор видно в ссылке,
-// «назад» работает.
+// The address is the state: the file, the tab and the empty editor are visible in the link,
+// and "back" works.
 function go(patch) {
   const next = { scope: cfg.scope, file: cfg.file, owner: cfg.owner, tab: cfg.tab, fresh: cfg.fresh, ...patch };
   const query = new URLSearchParams();
-  // Область в адресе есть только у памяти: у скиллов и математики её нет вовсе.
+  // Only memory has a scope in the address: skills and math have none at all.
   if (cfg.mode === 'memory') query.set('scope', next.scope);
   if (next.file) query.set('file', next.file);
-  // Владельца пишем только у чужого скилла: у своего это лишний параметр, который
-  // ещё и сломает старые ссылки на «мой скилл».
+  // We write the owner only for someone else's skill: for one's own it's a redundant parameter
+  // that would also break old links to "my skill".
   if (next.file && next.owner && next.owner !== cfg.user) query.set('owner', next.owner);
   if (next.fresh) query.set('new', '1');
   if (next.file && next.tab === 'history') query.set('tab', 'history');
@@ -556,8 +556,8 @@ function go(patch) {
   location.href = '/panel/' + cfg.section + (suffix ? '?' + suffix : '');
 }
 
-// Свой диалог вместо window.confirm: браузер глушит нативные модалки, если
-// вкладка не активна, и нативный confirm молча возвращает false — кнопки «не работают».
+// Our own dialog instead of window.confirm: the browser mutes native modals if
+// the tab isn't active, and the native confirm silently returns false — the buttons "don't work".
 function askConfirm(message, confirmLabel = cfg.ui.confirm) {
   return new Promise((resolve) => {
     const backdrop = document.createElement('div');
@@ -595,9 +595,9 @@ function askConfirm(message, confirmLabel = cfg.ui.confirm) {
   });
 }
 
-// Общий обработчик: любая ошибка API должна быть видна, а не глохнуть.
-// Событие передаём в действие: обработчики вкладок сами зовут preventDefault,
-// и без аргумента они падали на «event is undefined» вместо перехода.
+// Shared handler: any API error must be visible, not swallowed.
+// We pass the event into the action: tab handlers call preventDefault themselves,
+// and without the argument they crashed on "event is undefined" instead of navigating.
 const guard = (action) => async (event) => {
   if (event && event.preventDefault) event.preventDefault();
   try { await action(event); } catch (error) { fail(error); }
@@ -606,7 +606,7 @@ function fail(error) {
   el('content').innerHTML = '<p class="empty">' + esc(cfg.ui.errorPrefix) + esc(error && error.message ? error.message : error) + '</p>';
 }
 
-// Счётчики у областей и разделов: сколько в каждой файлов. Обновляются после правок.
+// Counters for scopes and sections: how many files each has. Updated after edits.
 async function loadCounts() {
   const state = await api('/panel/api/state');
   const counts = state.counts || {};
@@ -625,8 +625,8 @@ async function loadFiles() {
     box.innerHTML = '<p class="empty">' + esc(cfg.ui.emptyMemory) + '</p>';
     return;
   }
-  // Файлы группируем по полкам: в памяти это осмысленные разделы (люди, дела,
-  // журнал), и плоский список из трёх десятков файлов читать было бы нельзя.
+  // We group files by shelf: in memory these are meaningful sections (people, matters,
+  // journal), and a flat list of three dozen files would be unreadable.
   const groups = new Map();
   for (const file of data.files) {
     const cut = file.path.lastIndexOf('/');
@@ -648,11 +648,11 @@ async function loadFiles() {
   box.querySelectorAll('.file').forEach((node) => node.onclick = guard(() => openFile(node.dataset.path)));
 }
 
-// ── скиллы ───────────────────────────────────────────────────────────────────
-// Скилл — это не файл в списке, а единица работы: имя, описание и инструкция.
-// Поэтому список показывает скиллы (с описанием — по нему модель и решает, когда
-// скилл открывать), а правая колонка — редактор файла целиком.
-/** Бейджи скилла: чей он, включён ли и не сломан ли. */
+// ── skills ───────────────────────────────────────────────────────────────────
+// A skill is not a file in the list but a unit of work: a name, a description and an instruction.
+// That's why the list shows skills (with the description — the model uses it to decide when
+// to open the skill), and the right column is an editor for the whole file.
+/** Skill badges: whose it is, whether it's enabled and whether it's broken. */
 function skillTags(skill) {
   const tags = [];
   if (skill.ownerIsMe) tags.push('<span class="tag' + (skill.shared ? ' shared' : '') + '">' +
@@ -676,7 +676,7 @@ async function loadSkills() {
   box.innerHTML = '<div class="files">' + skills.map((skill) => {
     const owner = skill.owner || cfg.user;
     const active = skill.id === cfg.file && owner === cfg.owner;
-    // Корневой SKILL.md — сам каталог скиллов: выключать его переездом нельзя.
+    // The root SKILL.md is the skills directory itself: it can't be disabled by moving.
     const switchable = skill.id !== 'SKILL.md';
     return '<div class="file skill' + (skill.enabled ? '' : ' off') + (active ? ' active' : '') +
       '" data-id="' + esc(skill.id) + '" data-owner="' + esc(owner) + '">' +
@@ -703,7 +703,7 @@ function openSkill(id, owner) {
   go({ file: id, owner: owner || cfg.user, fresh: false, tab: 'notes' });
 }
 
-/** Переключатель в списке: включить/выключить скилл себе, не открывая редактор. */
+/** The switch in the list: enable/disable a skill for yourself without opening the editor. */
 async function toggleSkill(input) {
   const row = input.closest('.file');
   const owner = row.dataset.owner || cfg.user;
@@ -713,10 +713,10 @@ async function toggleSkill(input) {
   try {
     await api(endpoint('toggle'), { method: 'POST', body: JSON.stringify(payload) });
     await Promise.all([loadCounts(), loadSkills()]);
-    // Открыт этот же скилл — редактор должен показать новый статус.
+    // This same skill is open — the editor must show the new status.
     if (row.dataset.id === cfg.file && owner === cfg.owner && !cfg.fresh) await renderSkill();
   } catch (error) {
-    // Не получилось — возвращаем галочку, чтобы она не врала о состоянии.
+    // It didn't work — we put the checkbox back so it doesn't lie about the state.
     input.checked = !input.checked;
     throw error;
   } finally {
@@ -724,10 +724,10 @@ async function toggleSkill(input) {
   }
 }
 
-/** Разметка редактора: статичная, значения подставляет fillSkill. */
+/** The editor markup: static, fillSkill substitutes the values. */
 function skillForm() {
-  // Блок «напиши за меня» — только у нового скилла и только когда есть кому писать.
-  // У открытого скилла он бы значил «перепиши моё», а это уже другая кнопка.
+  // The "write for me" block — only for a new skill and only when there's someone to write.
+  // For an open skill it would mean "rewrite mine", which is a different button.
   const generator = cfg.draftSkills && !cfg.file
     ? '<div class="generator"><div class="field"><label for="skill-idea">' + esc(cfg.ui.skillIdeaLabel) + '</label>' +
       '<textarea id="skill-idea" rows="2" placeholder="' + esc(cfg.ui.skillIdeaPlaceholder) + '"></textarea></div>' +
@@ -750,7 +750,7 @@ function skillForm() {
     '<div class="field"><label for="skill-body">' + esc(cfg.ui.skillBodyLabel) + '</label>' +
     '<textarea id="skill-body" spellcheck="false" placeholder="# Как это делать&#10;&#10;1. …"></textarea></div>' +
     '<label class="check"><input type="checkbox" id="skill-hidden"> ' + cfg.ui.skillHidden + '</label>' +
-    // Шаринг — только у своего скилла. У чужого этой строки нет: владелец решает сам.
+    // Sharing — only for one's own skill. Someone else's has no such row: the owner decides.
     '<label class="check" id="skill-share-row"><input type="checkbox" id="skill-share"> ' +
     esc(cfg.ui.skillShareLabel) + '</label>';
 }
@@ -763,7 +763,7 @@ function fillSkill(data) {
   el('skill-share').checked = Boolean(data && data.shared);
 }
 
-/** Поделиться или спрятать открытый скилл: то же, что бейдж в списке, но по-человечески. */
+/** Share or hide the open skill: the same as the badge in the list, but in human terms. */
 async function toggleShare(checkbox) {
   checkbox.disabled = true;
   try {
@@ -786,10 +786,10 @@ function skillStatus(text, bad) {
 }
 
 /**
- * «Напиши за меня»: один запрос — и поля заполнены черновиком.
+ * "Write for me": one request — and the fields are filled with a draft.
  *
- * На диске до этого не появляется ничего: черновик живёт в форме, а файл и коммит
- * делает «Сохранить». Так человек видит, что именно уедет Икару, и может поправить.
+ * Nothing appears on disk until then: the draft lives in the form, and the file and commit
+ * are made by "Save". That way the person sees exactly what will go to Icarus and can fix it.
  */
 async function writeForMe() {
   const idea = el('skill-idea').value.trim();
@@ -807,7 +807,7 @@ async function writeForMe() {
     el('skill-description').value = draft.description || '';
     el('skill-body').value = draft.body || '';
     skillStatus(draft.note ? cfg.ui.skillWritten + draft.note : cfg.ui.skillWrittenCheck);
-    // Имя не вышло — ведём человека туда, где от него что-то нужно.
+    // The name didn't come out — we take the person to where something is needed from them.
     (draft.name ? el('skill-body') : el('skill-name')).focus();
   } catch (error) {
     skillStatus(cfg.ui.skillWriteFailed + (error && error.message ? error.message : error), true);
@@ -816,7 +816,7 @@ async function writeForMe() {
   }
 }
 
-/** Сохранение: файл, коммит и пометка «ресурсы обновились» — одним запросом. */
+/** Saving: the file, the commit and the "resources updated" mark — in one request. */
 async function saveSkill(id) {
   const payload = {
     name: el('skill-name').value.trim(),
@@ -831,14 +831,14 @@ async function saveSkill(id) {
   try {
     result = await api(endpoint('save'), { method: 'POST', body: JSON.stringify(payload) });
   } catch (error) {
-    // Отказ проверки показываем строкой состояния, а не вместо редактора: иначе
-    // вместе с «нет описания» пропал бы и текст, который человек только что написал.
+    // We show a validation failure as a status line, not instead of the editor: otherwise
+    // along with "no description" the text the person just wrote would disappear too.
     skillStatus(cfg.ui.saveFailedPrefix + (error && error.message ? error.message : error), true);
     return;
   }
 
-  // Дальше живём по адресу сохранённого скилла: имя могло смениться, и вместе с
-  // ним переехал каталог — перезагрузка вернула бы человека к старой ссылке.
+  // From here we live at the address of the saved skill: the name could have changed, and
+  // the directory moved with it — a reload would return the person to the old link.
   cfg.file = result.id;
   cfg.fresh = false;
   history.replaceState(null, '', '/panel/skills?file=' + encodeURIComponent(result.id));
@@ -855,8 +855,8 @@ async function deleteSkill(data) {
 }
 
 /**
- * Правая колонка в разделе скиллов: пустой редактор нового скилла, редактор
- * открытого или история — та же, что у памяти.
+ * The right column in the skills section: the empty editor of a new skill, the editor
+ * of the open one, or the history — the same as for memory.
  */
 async function renderSkill() {
   if (!cfg.file) {
@@ -865,42 +865,42 @@ async function renderSkill() {
       el('content').innerHTML = '<p class="empty">' + esc(cfg.ui.emptyPickSkill) + '</p>';
       return;
     }
-    // Пустой редактор: скачивать пока нечего, вкладок истории ещё нет.
+    // Empty editor: there's nothing to download yet, and there are no history tabs yet.
     showFileHead(cfg.ui.newSkill, cfg.ui.notSaved, false, false);
     el('content').innerHTML = skillForm();
     fillSkill(null);
-    // Новый скилл ещё никому не принадлежит, кроме автора: шаринг появится после
-    // сохранения, когда у скилла будет файл.
+    // A new skill belongs to no one but the author yet: sharing will appear after
+    // saving, when the skill has a file.
     if (el('skill-share-row')) el('skill-share-row').hidden = true;
     el('skill-save').onclick = guard(() => saveSkill(null));
     if (el('skill-write')) el('skill-write').onclick = guard(writeForMe);
-    // Начинать тут логично с идеи: поля ниже заполнятся сами.
+    // It makes sense to start with the idea here: the fields below will fill in themselves.
     (el('skill-idea') || el('skill-name')).focus();
     return;
   }
 
-  // Свой скилл открывается без владельца в адресе: это старый контракт, и он
-  // должен продолжать работать. Чужой — с owner: иначе два одинаковых id
-  // не различить.
+  // One's own skill opens without an owner in the address: this is an old contract, and it
+  // must keep working. Someone else's — with owner: otherwise two identical ids
+  // can't be told apart.
   const skillUrl = cfg.owner && cfg.owner !== cfg.user
     ? endpoint('skill', { id: cfg.file, owner: cfg.owner })
     : endpoint('skill', { id: cfg.file });
   const data = await api(skillUrl);
-  // Дата изменения — день, а не метка времени: в шапке рядом с путём и числом
-  // файлов часы только шумят.
+  // The modification date is a day, not a timestamp: in the head, next to the path and the number
+  // of files, the hours are just noise.
   const byWhom = data.ownerIsMe ? '' : ' · ' + fill(cfg.ui.skillTagFrom, { owner: data.owner });
   const state = data.enabled ? cfg.ui.skillEnabled : cfg.ui.skillDisabled;
   const meta = data.id + byWhom + ' · ' + state + ' · ' + countLabel(data.files, cfg.ui.filesWord) +
     ' · ' + cfg.ui.changedOn + ' ' + day(String(data.modified).slice(0, 10)) + (data.problem ? ' · ⚠ ' + data.problem : '');
-  // Чужой скилл — только для чтения: редактор показывает содержимое, но поля
-  // выключены. Включить/выключить его себе можно: это личный переключатель, а не
-  // правка чужого файла. Историю чужого репозитория не показываем: она про файлы,
-  // которых у получателя нет.
+  // Someone else's skill is read-only: the editor shows the content, but the fields
+  // are disabled. You can still enable/disable it for yourself: that's a personal switch, not
+  // an edit of someone else's file. We don't show the history of someone else's repository: it's about files
+  // the recipient doesn't have.
   const editable = data.canEdit !== false;
-  // У чужого скилла нет ни истории, ни скачивания: и то и другое ходит в личный
-  // репозиторий, а файл лежит в общем снимке, который только читается. У своего
-  // выключенного скачивание тоже не предлагаем: файл лежит в .disabled/, а
-  // маршрут файла ищет его в корне.
+  // Someone else's skill has neither history nor download: both go to the personal
+  // repository, while the file lies in a shared snapshot that is read-only. For one's own
+  // disabled skill we also don't offer download: the file lies in .disabled/, and
+  // the file route looks for it in the root.
   showFileHead(data.name, meta, editable, editable && data.enabled);
   if (cfg.tab === 'history' && editable) {
     await renderHistory();
@@ -911,7 +911,7 @@ async function renderSkill() {
     : '<p class="hint">' + esc(fill(cfg.ui.skillOwnerBanner, { owner: data.owner })) + '</p>';
   el('content').innerHTML = banner + skillForm();
   fillSkill(data);
-  // Корневой SKILL.md — не отдельный скилл, а весь каталог: делиться им нельзя.
+  // The root SKILL.md is not a separate skill but the whole directory: it can't be shared.
   if (el('skill-share-row')) el('skill-share-row').hidden = !editable || data.id === 'SKILL.md';
   if (!editable) {
     ['skill-name', 'skill-description', 'skill-body', 'skill-hidden'].forEach((id) => { el(id).disabled = true; });
@@ -930,10 +930,10 @@ async function openFile(path) {
   go({ file: path, tab: 'notes' });
 }
 
-// Скачивание — запрос за байтами и <a download>, а не переход по адресу: переход
-// увёл бы со страницы, а неудачное скачивание оставило бы человека с пустой
-// вкладкой вместо панели. Сервер при этом всё равно отдаёт имя в заголовке —
-// страница его не разбирает, а берёт последний кусок пути, который и так знает.
+// Download is a request for bytes plus <a download>, not a navigation by address: navigating
+// would take the person off the page, and a failed download would leave them with a blank
+// tab instead of the panel. The server returns the name in a header anyway —
+// the page doesn't parse it but takes the last path segment, which it already knows.
 el('download').onclick = guard(async () => {
   if (!cfg.file) return;
   const response = await fetch(endpoint('file', { path: cfg.file, download: '1' }));
@@ -944,13 +944,13 @@ el('download').onclick = guard(async () => {
   document.body.append(link);
   link.click();
   link.remove();
-  // Освобождаем blob сразу после клика: держать копию файла в памяти незачем.
+  // We release the blob right after the click: there's no point keeping a copy of the file in memory.
   setTimeout(() => URL.revokeObjectURL(link.href), 10000);
 });
 
-// ── записи памяти ────────────────────────────────────────────────────────────
-// Строка файла — это запись с галочкой, заголовок раздела или просто текст.
-// Выделение живёт в браузере и никуда не уезжает, пока не нажали «удалить».
+// ── memory entries ────────────────────────────────────────────────────────────
+// A file line is an entry with a checkbox, a section heading, or just text.
+// The selection lives in the browser and goes nowhere until "delete" is pressed.
 let selection = new Set();
 
 function renderEntries(data) {
@@ -1020,9 +1020,9 @@ async function removeSelected(data) {
   location.reload();
 }
 
-// ── история файла ────────────────────────────────────────────────────────────
-// В памяти история — по открытому файлу, у скиллов — по всему каталогу: скилл это
-// каталог, и коммит «скилл «pirate-mode»» читается лучше, чем история его SKILL.md.
+// ── file history ────────────────────────────────────────────────────────────
+// For memory the history is per open file, for skills it's for the whole directory: a skill is
+// a directory, and the commit "skill «pirate-mode»" reads better than the history of its SKILL.md.
 async function renderHistory() {
   const data = await api(cfg.mode === 'skills' ? endpoint('history') : endpoint('file-history', { path: cfg.file }));
   el('content').innerHTML = data.commits.length
@@ -1036,7 +1036,7 @@ async function renderHistory() {
   el('content').querySelectorAll('.commit').forEach((node) => node.onclick = guard(() => showCommit(node.dataset.hash, node)));
 }
 
-/** Дифф открывается под коммитом: до этого в колонке видно саму историю. */
+/** The diff opens under the commit: before that the column shows the history itself. */
 async function showCommit(hash, node) {
   el('content').querySelectorAll('.commit').forEach((other) => other.classList.toggle('active', other === node));
   const data = await api(endpoint('show', { commit: hash }));
@@ -1058,33 +1058,33 @@ async function showCommit(hash, node) {
     location.reload();
   });
 }
-// ── что показать в правой колонке ────────────────────────────────────────────
+// ── what to show in the right column ────────────────────────────────────────────
 
 /**
- * Шапка открытого файла: имя, подпись и вкладки. Пока файла нет, её нет тоже —
- * пустая шапка с прочерком только сбивает с толку.
+ * The head of the open file: the name, the caption and the tabs. While there's no file, there's none either —
+ * an empty head with a dash only confuses.
  *
- * Скачивание включается отдельно: у нового скилла имя есть, а файла ещё нет, и
- * кнопка «Скачать» на пустом редакторе обещала бы несуществующее.
+ * Download is enabled separately: a new skill has a name but no file yet, and
+ * a "Download" button on an empty editor would promise something that doesn't exist.
  */
 function showFileHead(path, meta, tabs, download = Boolean(path)) {
   el('file-head').hidden = !path;
   el('file-name').textContent = path || '';
   el('file-meta').textContent = meta || '';
   el('tabs').hidden = !tabs;
-  // Скачать можно любой файл раздела — и память, и SKILL.md: это чтение, а не
-  // правка, и упирается оно в те же проверки пути, что и остальные запросы.
+  // Any file of the section can be downloaded — both memory and SKILL.md: this is a read, not
+  // an edit, and it runs into the same path checks as the other requests.
   el('download').hidden = !download;
 }
 
 async function renderContent() {
-  // У скиллов своя правая колонка: там редактор, а не записи с галочками.
+  // Skills have their own right column: there it's the editor, not entries with checkboxes.
   if (cfg.mode === 'skills') {
     await renderSkill();
     return;
   }
-  // «Пользователь» — форма настроек: у неё нет ни файла, ни записей, поэтому она
-  // рисуется целиком здесь и больше никуда не ходит.
+  // "User" is a settings form: it has neither a file nor entries, so it
+  // is drawn entirely here and doesn't go anywhere else.
   if (cfg.mode === 'profile') {
     await renderProfile();
     return;
@@ -1096,8 +1096,8 @@ async function renderContent() {
     return;
   }
 
-  // Картинку тянем байтами и показываем как <img>: base64 в JSON раздул бы ответ
-  // втрое, а картинки бывают на сотни килобайт.
+  // We pull the image as bytes and show it as <img>: base64 in JSON would bloat the response
+  // threefold, and images can be hundreds of kilobytes.
   if (isImage(path)) {
     showFileHead(path, cfg.ui.imageMeta, false);
     const response = await fetch(endpoint('file', { path, raw: '1' }));
@@ -1114,14 +1114,14 @@ async function renderContent() {
   else renderEntries(data);
 }
 
-// ── настройки: пользователь ──────────────────────────────────────────────────
-// Две независимые настройки языка: ответы и интерфейс. Сохраняем сразу по клику —
-// отдельная кнопка «Сохранить» у переключателя из двух вариантов только заставляет
-// гадать, применилось ли. Статус пишем туда же, где человек смотрит.
+// ── settings: user ──────────────────────────────────────────────────
+// Two independent language settings: answers and interface. We save immediately on click —
+// a separate "Save" button for a two-option switch only makes one
+// guess whether it applied. We write the status where the person is looking.
 async function renderProfile() {
   const data = await api('/panel/profile/api');
-  // Поля uiLanguage может не быть (старый сервер, заглушка в тесте): панель должна
-  // открыться, а не остаться пустой из-за отсутствующего ключа.
+  // The uiLanguage field may be missing (old server, stub in a test): the panel must
+  // open, not stay empty because of a missing key.
   const languages = data.languages || ['ru', 'en'];
   const labels = data.labels || {};
   const uiLanguages = data.uiLanguages || languages;
@@ -1167,19 +1167,19 @@ async function renderProfile() {
 
   bind('language', 'profile-status', (value) => {
     cfg.language = value;
-    // Следующая реплика поднимает pi заново: AGENTS.md читается при старте.
+    // The next turn starts pi anew: AGENTS.md is read at startup.
     el('profile-status').textContent = cfg.ui.savedAnswer;
   });
-  // Язык интерфейса меняет всю страницу, включая разметку, которую рисует сервер.
-  // Перезагрузка — самый честный способ переключить её разом, без второго словаря
-  // на клиенте.
+  // The interface language changes the whole page, including the markup the server renders.
+  // A reload is the most honest way to switch it all at once, without a second dictionary
+  // on the client.
   bind('uiLanguage', 'ui-status', () => location.reload());
 }
 
-// ── поиск ────────────────────────────────────────────────────────────────────
-// Строка поиска ищет в открытом разделе: в памяти — по записям, в скиллах — по их
-// файлам, в математике — по журналам. Обещать «по памяти и скиллам» сразу значило
-// бы врать: чужие корни раздел не читает.
+// ── search ────────────────────────────────────────────────────────────────────
+// The search box searches the open section: in memory — by entries, in skills — by their
+// files, in math — by journals. Promising "across memory and skills" at once would
+// be a lie: the section doesn't read other people's roots.
 async function doSearch() {
   const query = el('q').value.trim();
   if (query.length < 2) return;
@@ -1197,7 +1197,7 @@ async function doSearch() {
   el('content').querySelectorAll('.hit').forEach((node) => node.onclick = guard(() => go({ file: node.dataset.path, tab: 'notes' })));
 }
 
-/** Поиск по скиллам: находка открывает сам скилл, а не строку в файле. */
+/** Skill search: a hit opens the skill itself, not a line in a file. */
 async function searchSkills(query) {
   const data = await api(endpoint('search', { q: query }));
   showFileHead(cfg.ui.searchTitle, fill(cfg.ui.searchMeta, { query, n: data.hits.length }), false, false);
@@ -1213,12 +1213,12 @@ el('tabs').querySelectorAll('.tab').forEach((tab) => tab.onclick = guard((event)
   event.preventDefault();
   go({ tab: tab.dataset.tab });
 }));
-// Строки поиска нет у настроек: раздел — форма, а не список файлов. Без проверки
-// el('q') возвращает null, и присваивание onkeydown валит весь скрипт — до того,
-// как страница нарисует хоть что-нибудь. Та же ловушка была со скиллами.
+// Settings have no search box: the section is a form, not a file list. Without the check,
+// el('q') returns null, and assigning onkeydown crashes the whole script — before
+// the page draws anything at all. The same trap existed with skills.
 if (el('q')) el('q').onkeydown = (event) => { if (event.key === 'Enter') guard(doSearch)(); };
-// «Новый скилл» — это адрес, а не скрытое состояние: ссылку на пустой редактор
-// можно переслать, а «назад» возвращает к списку.
+// "New skill" is an address, not hidden state: a link to the empty editor
+// can be forwarded, and "back" returns to the list.
 if (el('new-skill')) el('new-skill').onclick = guard(() => go({ file: null, fresh: true, tab: 'notes' }));
 
 (async () => {
@@ -1228,7 +1228,7 @@ if (el('new-skill')) el('new-skill').onclick = guard(() => go({ file: null, fres
 </script>`, sessionUiLanguage(session));
 }
 
-/** Экранирование для недоверенных значений: имя человека из заголовка и тексты отказа. */
+/** Escaping for untrusted values: the person's name from a header and denial texts. */
 export function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (char) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char] ?? char,

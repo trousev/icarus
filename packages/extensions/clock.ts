@@ -1,24 +1,24 @@
-// Часы Икара: метка «Сейчас» перед репликой человека и тул `now` для точного времени.
+// Icarus's clock: a "Now" marker before the person's message and the `now` tool for exact time.
 //
-// Почему не в системном промпте: промпт должен оставаться байт-в-байт тем же, пока
-// не изменилась память — иначе кэш промпта ломается на каждой смене даты. Поэтому
-// время приезжает не в промпт, а в последнюю реплику человека, и только на время
-// запроса к модели (хук context правит копию сообщений, в сессию это не пишется).
+// Why not in the system prompt: the prompt must stay byte-for-byte the same until
+// memory changes — otherwise the prompt cache breaks on every date change. That's why
+// time arrives not in the prompt but in the last human message, and only for the
+// duration of the model request (the context hook edits a copy of the messages; this is not written to the session).
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { exactMoment, momentLine, resolveZone, unknownZone } from "./lib/time-core.ts";
 
-/** Имя тула: его же знает эскалация (см. SEARCH_TOOLS в escalation.ts). */
+/** Tool name: escalation knows it too (see SEARCH_TOOLS in escalation.ts). */
 export const NOW_TOOL = "now";
 
 export type ContentBlock = { type?: string; text?: string };
 export type ChatMessage = { role?: string; content?: string | ContentBlock[] };
 
 /**
- * Дописывает метку времени к последней реплике человека.
+ * Appends a timestamp to the last human message.
  *
- * Возвращает новый массив (исходные сообщения не трогаем: pi ждёт, что хук
- * правит копию) или null, если реплики человека в списке нет.
+ * Returns a new array (we don't touch the original messages: pi expects the hook
+ * to edit a copy) or null if there's no human message in the list.
  */
 export function appendMoment<T extends ChatMessage>(messages: T[], line: string): T[] | null {
   const lastUser = messages.map((message) => message?.role).lastIndexOf('user');
@@ -54,8 +54,8 @@ function log(message: string): void {
 }
 
 export default function (pi: ExtensionAPI) {
-  // Метка считается раз на ход, а не на каждый запрос к модели: внутри хода время
-  // не скачет, и один и тот же текст не переписывается на каждом шаге тулов.
+  // The marker is computed once per turn, not on every model request: within a turn
+  // time doesn't jump, and the same text isn't rewritten on every tool step.
   let moment: string | null = null;
   let warned = false;
 

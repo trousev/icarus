@@ -1,16 +1,15 @@
-// Права на папки для инструментов агента: общий слой, не только для артефактов.
+// Folder permissions for the agent's tools: a common layer, not just for artifacts.
 //
-// У папки может лежать `.folder-acl.json`:
+// A folder may have `.folder-acl.json`:
 //
 //   { "owner": "probe", "acl": { "me": "read", "family": "write" } }
 //
-// Уровни: none ⊂ read ⊂ write ⊂ admin. `none` — папки не существует для этого
-// субъекта: ни чтения, ни записи. Для артефактов это ровно та же матрица, что
-// показывает панель; для будущих общих каталогов достаточно положить такой файл.
+// Levels: none ⊂ read ⊂ write ⊂ admin. `none` — the folder doesn't exist for this
+// subject: neither read nor write. For artifacts this is exactly the same matrix
+// the panel shows; for future shared directories it's enough to drop in such a file.
 //
-// Правило: путь внутри одного из защищённых корней ищет ближайшую папку с ACL.
-// Нет ACL — доступа нет: новый артефакт создаётся через artifact_new, а не
-// случайным `write`.
+// Rule: a path inside one of the protected roots looks for the nearest folder with an ACL.
+// No ACL — no access: a new artifact is created via artifact_new, not a random `write`.
 import fs from "node:fs";
 import path from "node:path";
 
@@ -37,7 +36,7 @@ export function isAccessLevel(value: unknown): value is AccessLevel {
   return value === "none" || value === "read" || value === "write" || value === "admin";
 }
 
-/** Корни, где включён страж. По умолчанию — глобальная библиотека артефактов. */
+/** The roots where the guard is enabled. By default — the global artifact library. */
 export function aclRoots(env: NodeJS.ProcessEnv = process.env): string[] {
   const raw = (env.ICARUS_ACL_ROOTS ?? env.ICARUS_ARTIFACTS_DIR ?? "/artifacts").trim();
   return raw
@@ -47,7 +46,7 @@ export function aclRoots(env: NodeJS.ProcessEnv = process.env): string[] {
     .map((item) => path.resolve(item));
 }
 
-/** Ближайший защищённый корень, которому принадлежит путь. */
+/** The nearest protected root the path belongs to. */
 export function rootOf(target: string, roots: string[]): string | null {
   const resolved = path.resolve(target);
   let best: string | null = null;
@@ -82,7 +81,7 @@ export function readFolderAcl(dir: string): FolderAclFile | null {
   }
 }
 
-/** Реальный путь с раскрытием симлинков; новых файлов — от ближайшего родителя. */
+/** Real path with symlinks resolved; for new files — from the nearest parent. */
 export function canonicalTarget(target: string): string {
   let current = path.resolve(target);
   const tail: string[] = [];
@@ -114,10 +113,10 @@ export type FolderVerdict =
     };
 
 /**
- * Проверить путь: можно ли в нём делать операцию нужного уровня.
+ * Check a path: whether an operation of the required level can be done in it.
  *
- * `required=read` — чтение, `write` — изменение файлов. `admin` здесь не нужен:
- * удаление и права меняет сервис, а не файловый тул.
+ * `required=read` — reading, `write` — changing files. `admin` isn't needed here:
+ * deletion and permissions are changed by the service, not by a file tool.
  */
 export function folderVerdict(
   target: string,
@@ -128,9 +127,9 @@ export function folderVerdict(
   const lexicalRoot = rootOf(target, roots);
   const resolved = canonicalTarget(target);
   const canonicalRoot = rootOf(resolved, roots);
-  // Симлинк из workspace в /artifacts тоже должен проверяться: иначе права
-  // обходятся ссылкой. Если путь лексически вне корня, но ведёт внутрь —
-  // защищаем по реальному пути; если лексически внутри, а ведёт наружу — нет.
+  // A symlink from the workspace into /artifacts must also be checked: otherwise permissions
+  // are bypassed with a link. If the path is lexically outside the root but leads inside —
+  // we protect by the real path; if lexically inside but leading outside — we don't.
   if (!lexicalRoot && !canonicalRoot) return { protected: false };
   if (!canonicalRoot) {
     return {
@@ -147,8 +146,8 @@ export function folderVerdict(
   const root = canonicalRoot;
   if (resolved === root) return { protected: true, rootOnly: true, root };
 
-  // Ищем ближайший существующий путь: новый файл ещё не существует, но его
-  // папка с ACL — уже да.
+  // We look for the nearest existing path: the new file doesn't exist yet, but its
+  // folder with an ACL already does.
   let current = resolved;
   for (;;) {
     try {

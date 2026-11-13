@@ -1,79 +1,79 @@
-// Пользовательские MCP: кто их завёл, с кем поделился и кому они включены.
+// User MCPs: who created them, who they were shared with, and who has them enabled.
 //
-// config.yaml остаётся местом общих серверов (echo, Maple, Home Assistant): их
-// заводит тот, кто ведёт стек. Всё, что человек добавил сам в панели, живёт здесь,
-// в dataDir — рядом с памятью, но отдельными файлами:
+// config.yaml remains the place for shared servers (echo, Maple, Home Assistant): they are
+// created by whoever runs the stack. Everything a person added themselves in the panel lives here,
+// in dataDir — next to memory, but in separate files:
 //
-//   <dataDir>/mcp/registry.json    — описания серверов и переключатели людей;
-//   <dataDir>/mcp/credentials.json — ключи и OAuth-токены, только 0600.
+//   <dataDir>/mcp/registry.json    — server descriptions and per-person toggles;
+//   <dataDir>/mcp/credentials.json — keys and OAuth tokens, 0600 only.
 //
-// Разделение намеренное: описания можно показать, скопировать и забрать в бэкап,
-// а ключи не должны уезжать вместе с ними. Токен — такой же секрет, как ключ
-// модели, и лежит с теми же правами, что auth.json в контейнере.
+// The split is intentional: descriptions can be shown, copied and taken into a backup,
+// while keys must not travel along with them. A token is as much a secret as a model
+// key, and it is stored with the same permissions as auth.json in the container.
 //
-// Главное правило видимости: сервер видит владелец и все, с кем он поделился.
-// Поделились — сервер приезжает другому человеку ВЫКЛЮЧЕННЫМ: включить его тот
-// должен сам. Пока сервер выключен, его нет ни в mcp.json, ни в AGENTS.md, то есть
-// он не занимает ни контекст, ни промпт. Ключи при этом не копируются: каждый
-// настраивает доступ сам, иначе «поделиться сервером» незаметно означало бы
-// «поделиться своим аккаунтом».
+// The main visibility rule: a server is seen by its owner and everyone it was shared with.
+// Once shared, the server arrives to another person DISABLED: they must enable it
+// themselves. While a server is disabled, it is neither in mcp.json nor in AGENTS.md, i.e.
+// it takes up neither context nor prompt. Keys are not copied, though: each
+// person configures access themselves, otherwise "share a server" would imperceptibly mean
+// "share your account".
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import type { IcarusConfig, McpServerConfig } from '../config.ts';
 
-/** Версия формата: без неё будущая миграция не отличит старый файл от нового. */
+/** Format version: without it a future migration couldn't tell an old file from a new one. */
 export const MCP_STORE_VERSION = 1;
 
 export type McpTransport = NonNullable<McpServerConfig['transport']>;
 export type McpAuthType = 'none' | 'headers' | 'oauth';
 
 /**
- * OAuth-состояние одного человека на одном сервере. Здесь и токены, и то, что
- * нужно, чтобы их обновить: issuer, endpoints, client_id и способ аутентификации
- * клиента. Всё это — секреты или почти секреты, поэтому файл отдельный.
+ * OAuth state of one person on one server. Here are both the tokens and what
+ * is needed to refresh them: issuer, endpoints, client_id and the client
+ * authentication method. All of this is secrets or near-secrets, hence the separate file.
  */
 export type McpOAuthCredentials = {
   accessToken?: string;
   refreshToken?: string;
   tokenType?: string;
   scope?: string;
-  /** Когда истекает access token, мс epoch. Нет — считаем, что не истекает. */
+  /** When the access token expires, ms since epoch. Absent — assume it doesn't expire. */
   expiresAt?: number;
   issuer?: string;
   authorizationEndpoint?: string;
   tokenEndpoint?: string;
   registrationEndpoint?: string;
-  /** Канонический адрес ресурса: тот же, что уезжает в resource (RFC 8707). */
+  /** Canonical resource address: the same one that goes into resource (RFC 8707). */
   resource?: string;
   clientId?: string;
   clientSecret?: string;
   tokenEndpointAuthMethod?: 'none' | 'client_secret_post' | 'client_secret_basic';
   /**
-   * С каким адресом возврата регистрировали клиента. В режиме мимикрии это
-   * мёртвый loopback, иначе публичный callback панели. Хранится, чтобы повторный
-   * вход не подсунул серверу другой redirect_uri: он обязан совпадать.
+   * The redirect address the client was registered with. In mimic mode it is
+   * a dead loopback, otherwise the panel's public callback. Stored so that a repeat
+   * login doesn't slip a different redirect_uri to the server: it must match.
    */
   redirectUri?: string;
   /**
-   * Ключ локального прокси сервиса. По нему pi ходит в /mcp-proxy/<ключ>, а
-   * сервис подставляет свежий Bearer на каждом запросе. В mcp.json токена нет.
+   * Local proxy key of the service. pi uses it to go to /mcp-proxy/<key>, and
+   * the service substitutes a fresh Bearer on every request. The token is not in mcp.json.
    */
   proxyKey?: string;
   authorizedAt?: string;
-  /** Последняя ошибка обновления/авторизации — человеку в панели, не модели. */
+  /** The last refresh/authorization error — for the person in the panel, not for the model. */
   error?: string;
 };
 
 export type McpCredentials = {
-  /** Заголовки доступа этого человека. Не показываются другим и не шарятся. */
+  /** Access headers of this person. Not shown to others and not shared. */
   headers?: Record<string, string>;
-  /** Переменные окружения stdio-сервера этого человека. */
+  /** Environment variables of this person's stdio server. */
   env?: Record<string, string>;
   oauth?: McpOAuthCredentials;
 };
 
-/** Описание пользовательского сервера. Секретов здесь нет. */
+/** Description of a user server. There are no secrets here. */
 export type UserMcpServer = {
   id: string;
   name: string;
@@ -83,32 +83,32 @@ export type UserMcpServer = {
   command?: string;
   args?: string[];
   /**
-   * Постоянные заголовки описания (например, X-Client: icarus). Ключ доступа
-   * сюда не кладём — он в credentials, иначе он уехал бы всем, с кем поделились.
+   * Persistent description headers (e.g. X-Client: icarus). We don't put an access
+   * key here — it's in credentials, otherwise it would travel to everyone it was shared with.
    */
   headers?: Record<string, string>;
-  /** Постоянные переменные окружения stdio-сервера, тоже без секретов. */
+  /** Persistent environment variables of the stdio server, also without secrets. */
   env?: Record<string, string>;
   /**
-   * Имена ключей, которые серверу понадобятся (рецепт их знает заранее).
-   * Только имена: значения живут в credentials и человеку показываются пустыми.
+   * Names of the keys the server will need (the recipe knows them in advance).
+   * Names only: the values live in credentials and are shown to the person as empty.
    */
   credentialEnv?: string[];
   credentialHeaders?: string[];
   auth: McpAuthType;
-  /** Запрошенные scopes: строка через пробел, как в OAuth. */
+  /** Requested scopes: a space-separated string, as in OAuth. */
   scopes?: string;
-  /** Заранее зарегистрированный client_id (публичный, не секрет). */
+  /** A pre-registered client_id (public, not a secret). */
   clientId?: string;
-  /** Ручные endpoint'ы: нужны там, где сервер не рассказывает про RFC 9728/8414. */
+  /** Manual endpoints: needed where the server doesn't advertise RFC 9728/8414. */
   authorizationEndpoint?: string;
   tokenEndpoint?: string;
   registrationEndpoint?: string;
   issuer?: string;
   /**
-   * Сервер пускает только «свои» адреса возврата (так делает Any.do: у него
-   * белый список redirect_uri). Тогда вход идёт на мёртвый loopback — тот же,
-   * что у Claude Code, — а адрес из строки браузера человек вставляет в панель.
+   * The server only accepts "its own" redirect addresses (Any.do does this: it has
+   * a whitelist of redirect_uri). Then login goes to a dead loopback — the same
+   * as with Claude Code — and the person pastes the address from the browser bar into the panel.
    */
   mimic?: boolean;
   owner: string;
@@ -120,13 +120,13 @@ export type UserMcpServer = {
 export type McpStore = {
   version: number;
   servers: Record<string, UserMcpServer>;
-  /** userId -> serverId -> включён ли сервер у этого человека. */
+  /** userId -> serverId -> whether the server is enabled for this person. */
   prefs: Record<string, Record<string, boolean>>;
-  /** userId -> serverId -> ключи и токены. */
+  /** userId -> serverId -> keys and tokens. */
   credentials: Record<string, Record<string, McpCredentials>>;
 };
 
-/** Что человек прислал в панели. Секреты — только в credentials. */
+/** What the person submitted in the panel. Secrets — only in credentials. */
 export type McpServerInput = {
   name: string;
   description?: string;
@@ -136,7 +136,7 @@ export type McpServerInput = {
   args?: string[];
   headers?: Record<string, string>;
   env?: Record<string, string>;
-  /** Чего сервер ждёт от человека: имена ключей из рецепта, без значений. */
+  /** What the server expects from the person: key names from the recipe, without values. */
   credentialEnv?: string[];
   credentialHeaders?: string[];
   auth?: McpAuthType;
@@ -151,28 +151,28 @@ export type McpServerInput = {
   credentials?: McpCredentials;
 };
 
-/** Сервер глазами панели: ни секретов, ни внутренних путей. */
+/** A server as seen by the panel: no secrets, no internal paths. */
 export type McpView = {
   id: string;
   name: string;
   description: string;
   transport: McpTransport;
-  /** Адрес или команда без секретов в query. */
+  /** Address or command without secrets in the query. */
   target: string;
   auth: McpAuthType;
-  /** Сервер из config.yaml: его нельзя удалить и переписать из панели. */
+  /** A server from config.yaml: it cannot be deleted or rewritten from the panel. */
   global: boolean;
   owner: string | null;
   ownerIsMe: boolean;
   shared: boolean;
   enabled: boolean;
-  /** Готов ли сервер к работе: есть ключ/OAuth-токен (или он не нужен). */
+  /** Whether the server is ready to work: there is a key/OAuth token (or none is needed). */
   ready: boolean;
   authState: 'none' | 'ready' | 'needed' | 'expired' | 'error';
   authMessage?: string;
-  /** Вход идёт через мёртвый loopback: карточка просит вставить адрес вручную. */
+  /** Login goes through a dead loopback: the card asks to paste the address manually. */
   mimic?: boolean;
-  /** Имена уже сохранённых секретов: значения в панель не уезжают. */
+  /** Names of already saved secrets: values do not travel to the panel. */
   credentialHeaders?: string[];
   credentialEnv?: string[];
   canEdit: boolean;
@@ -201,7 +201,7 @@ const ENV_LIMIT = 40;
 const ENV_VALUE_LIMIT = 8192;
 const ARGS_LIMIT = 60;
 
-/** Транслитерация для id: русское имя должно дать предсказуемый латинский слаг. */
+/** Transliteration for id: a Russian name must yield a predictable Latin slug. */
 const TRANSLIT: Record<string, string> = {
   а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh', з: 'z', и: 'i', й: 'y',
   к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f',
@@ -256,8 +256,8 @@ function readJson(file: string): unknown {
 }
 
 /**
- * Читает оба файла. Секретов в сообщениях об ошибках нет — только путь и причина:
- * иначе сломанный registry.json сам стал бы утечкой.
+ * Reads both files. There are no secrets in error messages — only the path and the cause:
+ * otherwise a broken registry.json would itself become a leak.
  */
 export function readStore(config: IcarusConfig): McpStore {
   const paths = storePaths(config);
@@ -297,7 +297,7 @@ function writeAtomic(file: string, text: string): void {
   try {
     fs.chmodSync(dir, 0o700);
   } catch {
-    // Не на всех ФС права меняются; файл всё равно пишем закрытым.
+    // Permissions don't change on every filesystem; we still write the file closed.
   }
   const temporary = path.join(dir, `.${path.basename(file)}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`);
   fs.writeFileSync(temporary, text, { mode: 0o600 });
@@ -355,7 +355,7 @@ function stringMap(value: unknown, where: string, limit: number, valueLimit: num
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
-/** Список имён ключей: рецепт говорит, что спросить, но не подставляет значения. */
+/** List of key names: the recipe says what to ask for, but doesn't substitute values. */
 function nameList(value: unknown, where: string, limit: number): string[] | undefined {
   if (value === undefined || value === null) return undefined;
   if (!Array.isArray(value)) throw new McpError(`${where}: ожидался массив имён`);
@@ -405,7 +405,7 @@ function normalizeAuth(value: unknown): McpAuthType {
   throw new McpError('auth: ожидалось none, headers или oauth');
 }
 
-/** Проверяет и чистит то, что человек прислал в форму. */
+/** Validates and cleans what the person submitted in the form. */
 export function normalizeInput(raw: McpServerInput): McpServerInput {
   const name = text(raw.name, 'name');
   if (name === '') throw new McpError('имя не может быть пустым');
@@ -447,8 +447,8 @@ export function normalizeInput(raw: McpServerInput): McpServerInput {
   if (!raw.url) throw new McpError('для HTTP-сервера нужен адрес');
   const url = httpUrl(text(raw.url, 'url'), 'адрес');
   const headers = stringMap(raw.headers, 'headers', HEADER_LIMIT, HEADER_VALUE_LIMIT);
-  // Ожидания ключей имеют смысл только у «ключа / заголовков»: у OAuth вход
-  // делается через браузер, и список env там был бы ложной подсказкой.
+  // Key expectations make sense only for "key / headers": with OAuth the login
+  // is done via the browser, and a list of env there would be a false hint.
   const credentialHeaders = auth === 'headers' ? nameList(raw.credentialHeaders, 'credentialHeaders', HEADER_LIMIT) : undefined;
   const scopes = limited(optionalText(raw.scopes, 'scopes'), DESCRIPTION_LIMIT, 'scopes');
   const clientId = limited(optionalText(raw.clientId, 'clientId'), URL_LIMIT, 'clientId');
@@ -484,7 +484,7 @@ export function normalizeInput(raw: McpServerInput): McpServerInput {
     ...(tokenEndpoint === undefined ? {} : { tokenEndpoint }),
     ...(registrationEndpoint === undefined ? {} : { registrationEndpoint }),
     ...(issuer === undefined ? {} : { issuer }),
-    // Мимикрия бывает только у OAuth: она меняет redirect_uri, а без входа он не нужен.
+    // Mimicry exists only with OAuth: it changes redirect_uri, and without login it isn't needed.
     ...(auth === 'oauth' && raw.mimic === true ? { mimic: true } : {}),
     shared,
   };
@@ -520,21 +520,21 @@ function isGlobal(config: IcarusConfig, id: string): boolean {
 }
 
 /**
- * Служебный сервер: он объявлен в config.yaml с пометкой hidden. В панели его нет,
- * выключить себе его нельзя — это встроенное умение, а не чужой инструмент.
- * В mcp.json человека он при этом уезжает всегда.
+ * Service server: it is declared in config.yaml with the hidden flag. It is not in the panel,
+ * and you cannot disable it for yourself — it is a built-in capability, not someone else's tool.
+ * At the same time it always goes into the person's mcp.json.
  */
 export function isHidden(config: IcarusConfig, id: string): boolean {
   return config.mcp?.[id]?.hidden === true;
 }
 
 /**
- * Общий сервер из config.yaml в том же виде, что и личный: панель, проверка
- * доступа и mcp.json должны видеть одно и то же.
+ * A shared server from config.yaml in the same shape as a personal one: the panel, the access
+ * check and mcp.json must all see the same thing.
  *
- * Секретов в config.yaml нет — только имена: у stdio это переменные окружения,
- * у HTTP — заголовки. Значения приходят из credentials.json этого человека,
- * поэтому у одного и того же общего сервера ключ у каждого свой.
+ * There are no secrets in config.yaml — only names: for stdio these are environment variables,
+ * for HTTP — headers. The values come from this person's credentials.json,
+ * so the same shared server has its own key for each person.
  */
 export function globalServerOf(config: IcarusConfig, id: string): UserMcpServer | null {
   const server = config.mcp?.[id];
@@ -554,8 +554,8 @@ export function globalServerOf(config: IcarusConfig, id: string): UserMcpServer 
     ...(server.env === undefined ? {} : { env: server.env }),
     ...(own && transport !== 'stdio' ? { credentialHeaders: names } : {}),
     ...(own && transport === 'stdio' ? { credentialEnv: names } : {}),
-    // Без объявленных секретов сервер живёт как раньше: заголовки из config.yaml
-    // общие на всех, и настраивать человеку нечего.
+    // Without declared secrets the server lives as before: the headers from config.yaml
+    // are shared by everyone, and there is nothing for a person to configure.
     auth: own || server.headers ? 'headers' : 'none',
     owner: '',
     shared: true,
@@ -584,9 +584,9 @@ function authStateOf(
 ): { ready: boolean; state: McpView['authState']; message?: string } {
   if (server.auth === 'none') return { ready: true, state: 'none' };
   if (server.auth === 'headers') {
-    // У stdio готовность определяют только личные переменные окружения. Постоянный
-    // env — часть описания, он уезжает всем, с кем сервер поделились: считать его
-    // «ключ настроен» значило бы обещать модели инструменты без доступа.
+    // For stdio, readiness is determined only by personal environment variables. The persistent
+    // env is part of the description, it travels to everyone the server was shared with: counting it as
+    // "key configured" would mean promising the model tools without access.
     const has = server.transport === 'stdio'
       ? Object.keys(credentials?.env ?? {}).length > 0
       : hasHeaders(server, credentials);
@@ -600,9 +600,9 @@ function authStateOf(
   }
   const oauth = credentials?.oauth;
   if (oauthFresh(oauth, now)) return { ready: true, state: 'ready' };
-  // Прокси умеет обновить токен сам, а если refresh мёртв — вернуть ссылку на
-  // повторный вход. Поэтому сервер с ключом прокси остаётся в mcp.json даже
-  // с просроченным токеном: иначе человек увидел бы проблему только в панели.
+  // The proxy can refresh the token itself, and if the refresh is dead — return a link to
+  // re-login. That's why a server with a proxy key stays in mcp.json even
+  // with an expired token: otherwise the person would see the problem only in the panel.
   if (oauth?.proxyKey && (oauth.accessToken || oauth.refreshToken)) {
     return oauth.error
       ? { ready: true, state: 'error', message: oauth.error }
@@ -615,7 +615,7 @@ function authStateOf(
   return { ready: false, state: 'needed', message: 'нужно войти через браузер' };
 }
 
-/** Адрес для показа: query-секреты маскируются, чтобы список не был утечкой. */
+/** Address to display: query secrets are masked so the list isn't a leak. */
 export function maskUrl(raw: string): string {
   try {
     const url = new URL(raw);
@@ -630,8 +630,8 @@ export function maskUrl(raw: string): string {
 
 export function maskTarget(server: UserMcpServer): string {
   if (server.transport === 'stdio') {
-    // Постоянные env — часть описания и они не секреты. Без них два сервера
-    // одного рецепта (два OPDS-каталога) выглядели бы в панели одинаково.
+    // Persistent env is part of the description and it is not secret. Without it two servers
+    // of the same recipe (two OPDS catalogs) would look identical in the panel.
     const env = Object.entries(server.env ?? {}).map(([name, value]) => `${name}=${value}`);
     return [server.command ?? '', ...(server.args ?? []), ...env].filter(Boolean).join(' ');
   }
@@ -639,8 +639,8 @@ export function maskTarget(server: UserMcpServer): string {
 }
 
 /**
- * Имена секретов для панели: сохранённые важнее ожидаемых (рецепт знает, что
- * спросить, а человек — что уже ввёл). Значения сюда не уезжают никогда.
+ * Secret names for the panel: saved ones matter more than expected ones (the recipe knows what
+ * to ask for, and the person knows what they already entered). Values never travel here.
  */
 function credentialNames(credentials: McpCredentials | undefined, server: UserMcpServer): Partial<McpView> {
   const headers = Object.keys(credentials?.headers ?? {});
@@ -682,8 +682,8 @@ export function viewOf(
       authState: auth.state,
       ...(auth.message === undefined ? {} : { authMessage: auth.message }),
       ...credentialNames(credentials, server),
-      // Команду и адрес задаёт config.yaml, поэтому «Изменить» у общего сервера
-      // нет. Своё у него — ключи (если объявлены секреты) и включённость.
+      // The command and address are set by config.yaml, so a shared server has no
+      // "Edit". What is its own — the keys (if secrets are declared) and the enabled state.
       canEdit: false,
       canShare: false,
       canDelete: false,
@@ -748,22 +748,22 @@ export function countVisible(config: IcarusConfig, userId: string): number {
 }
 
 /**
- * Собирает mcp.json человека: общие серверы из config.yaml (если он их не выключил)
- * плюс его собственные и расшаренные, но только включённые и готовые к работе.
+ * Builds a person's mcp.json: shared servers from config.yaml (if they haven't disabled them)
+ * plus their own and shared ones, but only enabled and ready to work.
  *
- * Выключенный сервер сюда не попадает вообще: ни его имени, ни инструментов. Именно
- * поэтому «выключен» честно значит «не замусоривает контекст», а не «подключён, но
- * спрятан в UI».
+ * A disabled server doesn't get in here at all: neither its name nor its tools. That is exactly
+ * why "disabled" honestly means "doesn't clutter the context", not "connected but
+ * hidden in the UI".
  */
 export type EffectiveServersOptions = {
-  /** База прокси; null — не проксировать (тесты и прямая проверка токена). */
+  /** Proxy base; null — do not proxy (tests and direct token checking). */
   proxyBase?: string | null;
 };
 
 /**
- * Куда pi ходит за OAuth-MCP. По умолчанию — сервис по имени контейнера:
- * пользовательские контейнеры и icarus живут в одной сети compose. Для запуска
- * без compose (или с другим именем) адрес перекрывается ICARUS_MCP_PROXY_BASE.
+ * Where pi goes for OAuth MCP. By default — the service by container name:
+ * user containers and icarus live on the same compose network. For running
+ * without compose (or with a different name), the address is overridden by ICARUS_MCP_PROXY_BASE.
  */
 export function mcpProxyBase(config: IcarusConfig): string {
   const override = process.env.ICARUS_MCP_PROXY_BASE?.trim();
@@ -772,8 +772,8 @@ export function mcpProxyBase(config: IcarusConfig): string {
 }
 
 /**
- * Дополняет описание общего сервера личными секретами этого человека. Постоянные
- * заголовки и env остаются: секреты их не заменяют, а ложатся рядом.
+ * Supplements a shared server's description with this person's personal secrets. The persistent
+ * headers and env remain: the secrets don't replace them, they lie alongside.
  */
 function withUserCredentials(server: McpServerConfig, credentials: McpCredentials | undefined): McpServerConfig {
   if (!credentials) return server;
@@ -797,16 +797,16 @@ export function effectiveServers(
   const servers: Record<string, McpServerConfig> = {};
   const skipped: string[] = [];
   for (const [id, server] of Object.entries(config.mcp ?? {})) {
-    // Служебный сервер выключить нельзя: prefs к нему не применяются вовсе.
+    // A service server cannot be disabled: prefs don't apply to it at all.
     if (server.hidden !== true && !enabledFor(store, userId, id, true)) {
       skipped.push(id);
       continue;
     }
     const credentials = store.credentials[userId]?.[id];
     const global = globalServerOf(config, id);
-    // Секреты объявлены, а человек их ещё не ввёл — сервер ждёт доступа и не
-    // попадает ни в mcp.json, ни в AGENTS.md: иначе модель звала бы инструменты,
-    // на которые сервер ответит 401.
+    // Secrets are declared but the person hasn't entered them yet — the server is waiting for access and
+    // gets into neither mcp.json nor AGENTS.md: otherwise the model would call tools
+    // the server would answer 401 to.
     if (server.hidden !== true && global && !authStateOf(global, credentials, now).ready) {
       skipped.push(id);
       continue;
@@ -832,11 +832,11 @@ export function effectiveServers(
 }
 
 /**
- * Превращает описание панели в то, что читает pi-mcp-extension.
+ * Turns a panel description into what pi-mcp-extension reads.
  *
- * OAuth-сервер с proxyKey уезжает в mcp.json ссылкой на наш /mcp-proxy: токен
- * там не лежит и не протухает вместе с живым разговором. Без proxyBase (панель,
- * проверка, тесты) остаётся прямой адрес с Authorization — так проще отладить.
+ * An OAuth server with proxyKey goes into mcp.json as a reference to our /mcp-proxy: the token
+ * isn't there and doesn't expire along with a live conversation. Without proxyBase (panel,
+ * check, tests), a direct address with Authorization remains — easier to debug that way.
  */
 export function toPiConfig(
   server: UserMcpServer,
@@ -849,7 +849,7 @@ export function toPiConfig(
   const viaProxy =
     server.transport !== 'stdio' && server.auth === 'oauth' && server.url !== undefined && proxyKey !== undefined && proxyBase !== undefined;
   if (viaProxy) {
-    // Секрет не должен уехать в прокси как обычный заголовок: его подставит сервис.
+    // The secret must not travel to the proxy as an ordinary header: the service will substitute it.
     for (const key of Object.keys(headers)) {
       if (key.toLowerCase() === 'authorization') delete headers[key];
     }
@@ -867,8 +867,8 @@ export function toPiConfig(
     ...(server.args === undefined ? {} : { args: server.args }),
     ...(Object.keys(headers).length === 0 ? {} : { headers }),
     ...(Object.keys(env).length === 0 ? {} : { env }),
-    // Пользовательские серверы всегда ленивые: включить сервер — не значит
-    // вставить все его инструменты в каждый разговор.
+    // User servers are always lazy: enabling a server doesn't mean
+    // inserting all its tools into every conversation.
     lifecycle: 'lazy',
     ...(description === '' ? {} : { description }),
   };
@@ -905,14 +905,14 @@ export function createServer(config: IcarusConfig, owner: string, raw: McpServer
     updatedAt: now,
   };
   store.servers[id] = server;
-  // id мог принадлежать удалённому общему серверу из config.yaml: у людей
-  // остались бы старые выключатели и ключи. Новый сервер начинается с чистого
-  // листа — владельцу включён, остальным выключен.
+  // The id could have belonged to a deleted shared server from config.yaml: people
+  // would have been left with old toggles and keys. A new server starts with a clean
+  // slate — enabled for the owner, disabled for the rest.
   for (const prefs of Object.values(store.prefs)) delete prefs[id];
   for (const own of Object.values(store.credentials)) delete own[id];
   store.prefs[owner] = { ...(store.prefs[owner] ?? {}), [id]: true };
-  // Секреты не проходят через normalizeInput: это не описание сервера, а личная
-  // часть, и она сохраняется отдельно от него.
+  // Secrets don't go through normalizeInput: this is not a server description but a personal
+  // part, and it is saved separately from it.
   const credentials = sanitizeCredentials(raw.credentials);
   if (credentials) {
     store.credentials[owner] = { ...(store.credentials[owner] ?? {}), [id]: credentials };
@@ -978,14 +978,14 @@ export function updateServer(
     tokenEndpoint: input.tokenEndpoint,
     registrationEndpoint: input.registrationEndpoint,
     issuer: input.issuer,
-    // false значит «снять галочку», а не «оставить как было»: иначе выключить
-    // мимикрию было бы нечем.
+    // false means "uncheck", not "leave as it was": otherwise there would be
+    // no way to turn mimicry off.
     mimic: input.mimic === true ? true : undefined,
     shared: input.shared === true,
     updatedAt: new Date().toISOString(),
   };
-  // Поля, которых нет, нельзя оставлять старыми: иначе смена URL на stdio
-  // сохранила бы прежний адрес и сервер стал бы двуликим.
+  // Fields that are absent must not be left stale: otherwise switching the URL to stdio
+  // would keep the old address and the server would become two-faced.
   for (const key of [
     'url',
     'command',
@@ -1003,21 +1003,21 @@ export function updateServer(
     if (next[key] === undefined) delete next[key];
   }
 
-  // Ожидания ключей приходят только из рецепта при добавлении. Правка формы
-  // их не шлёт и не должна затирать: иначе «сохранил описание» потеряет подсказку.
+  // Key expectations come only from the recipe when adding. The edit form
+  // doesn't send them and must not overwrite them: otherwise "saved the description" would lose the hint.
   if (input.credentialEnv !== undefined) next.credentialEnv = input.credentialEnv;
   if (input.credentialHeaders !== undefined) next.credentialHeaders = input.credentialHeaders;
 
   const wasShared = existing.shared;
   if (!sameEndpoint(existing, next)) {
-    // Сменился адрес или способ входа — старые ключи и токены относятся к другому
-    // серверу. Их не переносим: пусть человек настроит доступ заново, чем получит
-    // «работает через раз» с чужим токеном.
+    // The address or login method changed — the old keys and tokens belong to a different
+    // server. We don't carry them over: let the person configure access anew rather than get
+    // "works half the time" with someone else's token.
     store.credentials = {};
   }
   if (!wasShared && next.shared) {
-    // Поделились впервые: у остальных не должно остаться ни включённости, ни
-    // ключей от прошлой жизни сервера. Приезжает выключенным — включат сами.
+    // Shared for the first time: others must be left with neither enablement nor
+    // keys from the server's past life. It arrives disabled — they'll enable it themselves.
     for (const [other, prefs] of Object.entries(store.prefs)) {
       if (other === userId) continue;
       delete prefs[id];
@@ -1071,8 +1071,8 @@ export function getCredentials(config: IcarusConfig, userId: string, id: string)
 }
 
 /**
- * Достраивает proxyKey старым OAuth-записям. Без него mcp.json пошёл бы с
- * вклеенным Bearer, который через пять минут протух бы прямо в живом треде.
+ * Backfills proxyKey for old OAuth records. Without it mcp.json would go with a
+ * pasted-in Bearer that would expire in five minutes right inside a live thread.
  */
 export function ensureOAuthProxyKeys(config: IcarusConfig, userId: string): string[] {
   const store = readStore(config);
@@ -1089,7 +1089,7 @@ export function ensureOAuthProxyKeys(config: IcarusConfig, userId: string): stri
   return changed;
 }
 
-/** Находит, чей это ключ, — единственное, что знает прокси о запросе. */
+/** Finds whose key this is — the only thing the proxy knows about the request. */
 export function findOAuthByProxyKey(
   config: IcarusConfig,
   key: string,
@@ -1108,14 +1108,14 @@ export function findOAuthByProxyKey(
   return null;
 }
 
-/** Полная запись для редактора: описание плюс имена секретов, но не их значения. */
+/** Full record for the editor: description plus secret names, but not their values. */
 export function editorOf(
   config: IcarusConfig,
   userId: string,
   id: string,
 ): { server: UserMcpServer; credentialHeaders: string[]; credentialEnv: string[]; oauth: McpOAuthCredentials | null; global: boolean } | null {
   if (isGlobal(config, id)) {
-    // Служебный сервер в панели не редактируется и не показывается — как и в списке.
+    // A service server is neither edited nor shown in the panel — as in the list.
     if (isHidden(config, id)) return null;
     return { server: {
       id,
@@ -1135,8 +1135,8 @@ export function editorOf(
   if (server.owner !== userId && !server.shared) return null;
   if (server.owner !== userId) return null;
   const credentials = store.credentials[userId]?.[id];
-  // Форма должна показать имена и тогда, когда значений ещё нет: рецепт их знает
-  // заранее (OPDS спрашивает логин каталога, даже если тот открыт).
+  // The form must show the names even when there are no values yet: the recipe knows them
+  // in advance (OPDS asks for the catalog login even if it is open).
   const savedHeaders = Object.keys(credentials?.headers ?? {});
   const savedEnv = Object.keys(credentials?.env ?? {});
   return {
@@ -1158,8 +1158,8 @@ export function editorOf(
 
 function mergeCredentials(existing: McpCredentials | undefined, patch: McpCredentials): McpCredentials {
   const next: McpCredentials = { ...(existing ?? {}) };
-  // Пустая строка значит «не трогать»: форма показывает только имена секретов,
-  // а значения в неё не уезжают. Полная очистка — отдельным запросом (clear).
+  // An empty string means "don't touch": the form shows only secret names,
+  // and values don't travel into it. Full clearing — by a separate request (clear).
   if (patch.headers !== undefined) {
     next.headers = { ...(next.headers ?? {}), ...patch.headers };
   }
@@ -1179,8 +1179,8 @@ export function saveCredentials(
   const store = readStore(config);
   if (!isVisible(config, store, userId, id)) throw new McpError('такого MCP нет или он не расшарен', 404);
   if (isGlobal(config, id)) {
-    // Общий сервер живёт в config.yaml, но личный ключ ему нужен так же, как
-    // пользовательскому: команду и адрес панель не трогает, секреты — да.
+    // A shared server lives in config.yaml, but it needs a personal key just like a
+    // user one: the panel doesn't touch the command and address, but it does touch the secrets.
     const global = globalServerOf(config, id);
     const declared = [...(global?.credentialHeaders ?? []), ...(global?.credentialEnv ?? [])];
     if (declared.length === 0) {
@@ -1238,7 +1238,7 @@ export function clearOAuthCredentials(config: IcarusConfig, userId: string, id: 
   writeStore(config, store);
 }
 
-/** OAuth-токен жив или его пора обновлять: решение принимает не панель, а время. */
+/** The OAuth token is alive or it's time to refresh: the decision is made by time, not by the panel. */
 export function oauthNeedsRefresh(oauth: McpOAuthCredentials | undefined, now = Date.now()): boolean {
   if (!oauth?.refreshToken) return false;
   return !oauthFresh(oauth, now);

@@ -1,5 +1,5 @@
-// Команды в веб-чате: тот же разбор, что у Telegram, но за своим маршрутом.
-// Докера и модели тут нет: реестр — заглушка, а HTTP и записи разговоров настоящие.
+// Web chat commands: same parsing as Telegram, but behind its own route.
+// No docker or model here: the registry is a stub, while HTTP and conversation records are real.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
@@ -80,7 +80,7 @@ async function command(
   return { status: response.status, data: (await response.json()) as Record<string, unknown> };
 }
 
-test('/compact, /stats и /skills отвечают текстом, а не ходом модели', async () => {
+test('/compact, /stats and /skills reply with text, not a model turn', async () => {
   await withServer(async (stand) => {
     const chat = createChat(stand.config, stand.user, 'talk');
 
@@ -104,7 +104,7 @@ test('/compact, /stats и /skills отвечают текстом, а не хо�
   });
 });
 
-test('/clear оставляет старую ленту и просит нарисовать разделитель', async () => {
+test('/clear keeps the old feed and asks to draw a divider', async () => {
   await withServer(async (stand) => {
     const chat = createChat(stand.config, stand.user, 'talk');
     const cleared = await command(stand, { chatId: chat.id, text: '/clear' });
@@ -116,7 +116,7 @@ test('/clear оставляет старую ленту и просит нари
   });
 });
 
-test('/help отвечает и без разговора — до первой реплики', async () => {
+test('/help replies even without a conversation — before the first message', async () => {
   await withServer(async (stand) => {
     const help = await command(stand, { text: '/help' });
     assert.equal(help.status, 200);
@@ -126,7 +126,7 @@ test('/help отвечает и без разговора — до первой 
   });
 });
 
-test('команды pi не отбираем: они уезжают в разговор обычной репликой', async () => {
+test('we do not intercept pi commands: they go into the conversation as a regular message', async () => {
   await withServer(async (stand) => {
     const chat = createChat(stand.config, stand.user, 'talk');
 
@@ -135,14 +135,14 @@ test('команды pi не отбираем: они уезжают в разг
       assert.equal(result.data.handled, false, `${text} — реплика для pi, а не команда чата`);
     }
 
-    // Незнакомая команда без аргументов — опечатка, а не повод звать модель.
+    // An unknown command without arguments is a typo, not a reason to call the model.
     const unknown = await command(stand, { chatId: chat.id, text: '/foo' });
     assert.equal(unknown.data.handled, true);
     assert.match(String(unknown.data.text), /Такой команды не знаю/);
   });
 });
 
-test('/rename меняет имя текущего разговора и отдаёт его клиенту', async () => {
+test('/rename changes the current conversation name and returns it to the client', async () => {
   await withServer(async (stand) => {
     const chat = createChat(stand.config, stand.user, 'talk');
     const renamed = await command(stand, { chatId: chat.id, text: '/rename Налоги' });
@@ -158,7 +158,7 @@ test('/rename меняет имя текущего разговора и отд�
   });
 });
 
-test('убранные /topic и /topics не уходят в pi репликой', async () => {
+test('removed /topic and /topics do not go to pi as a message', async () => {
   await withServer(async (stand) => {
     const chat = createChat(stand.config, stand.user, 'talk');
     const topic = await command(stand, { chatId: chat.id, text: '/topic работа' });
@@ -167,7 +167,7 @@ test('убранные /topic и /topics не уходят в pi реплико�
   });
 });
 
-test('список команд pi отдаётся для веб-чата и Telegram, а у API-разговора пуст', async () => {
+test('the pi command list is served for web chat and Telegram, but is empty for an API conversation', async () => {
   await withServer(async (stand) => {
     const chat = createChat(stand.config, stand.user, 'talk');
     ensureChat(stand.config, stand.user, 'telegram-4242', 'telegram');
@@ -181,7 +181,7 @@ test('список команд pi отдаётся для веб-чата и Te
       commands: [{ name: 'skill:demo', description: 'демо', source: 'skill' }],
     });
 
-    // Telegram-разговор панель ведёт так же, как свой: команды у него те же.
+    // The panel manages a Telegram conversation the same as its own: it has the same commands.
     const telegram = await fetch(`${stand.base}/panel/api/chat/commands?id=telegram-4242`, {
       headers: stand.headers,
     });
@@ -196,18 +196,18 @@ test('список команд pi отдаётся для веб-чата и Te
   });
 });
 
-test('команда из панели правит Telegram-разговор: это тот же диалог', async () => {
+test('a command from the panel edits a Telegram conversation: it is the same dialog', async () => {
   await withServer(async (stand) => {
     ensureChat(stand.config, stand.user, 'telegram-4242', 'telegram');
     const result = await command(stand, { chatId: 'telegram-4242', text: '/stats' });
     assert.equal(result.status, 200);
     assert.equal(result.data.handled, true);
-    // Команда уходит в тот же разговор, который видит бот, а не в копию.
+    // The command goes into the same conversation the bot sees, not into a copy.
     assert.deepEqual(stand.calls.find((call) => call.method === 'stats')?.args, [stand.user, 'telegram-4242']);
   });
 });
 
-test('команда из панели не пишется в API-разговор: там историей владеет клиент', async () => {
+test('a command from the panel is not written to an API conversation: there the client owns the history', async () => {
   await withServer(async (stand) => {
     ensureChat(stand.config, stand.user, 'api-4242', 'api');
     const result = await command(stand, { chatId: 'api-4242', text: '/stats' });

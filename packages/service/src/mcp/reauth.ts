@@ -1,11 +1,11 @@
-// Когда MCP просит повторный вход, человек должен получить ссылку, а не
-// «invalid_token» в трассировке. Здесь — одна на всех логика: по имени
-// инструмента, ошибке и (если есть) reauth_url из ответа прокси собрать
-// человеческое уведомление со ссылкой на карточку MCP в панели.
+// When MCP asks for a re-login, the person must get a link, not
+// «invalid_token» in a trace. Here — one shared logic: from the tool
+// name, the error and (if present) the reauth_url from the proxy response, assemble
+// a human-readable notice with a link to the MCP card in the panel.
 import type { IcarusConfig } from '../config.ts';
 import { listVisible, readStore } from './registry.ts';
 
-/** Ссылка на карточку сервера в панели: подсветит и прокрутит к ней. */
+/** Link to the server card in the panel: it will highlight and scroll to it. */
 export function mcpReauthUrl(config: IcarusConfig, serverId: string): string {
   const base = config.url.replace(/\/+$/, '');
   return `${base}/panel/mcp?server=${encodeURIComponent(serverId)}`;
@@ -19,7 +19,7 @@ export function serverIdFromReauthUrl(url: string): string | null {
   }
 }
 
-/** Ссылку из тела ошибки принимаем только свою: чужой домен — фишинг. */
+/** We accept only our own link from the error body: someone else's domain is phishing. */
 function trustedReauthUrl(config: IcarusConfig, url: string): string | null {
   try {
     const own = new URL(config.url);
@@ -30,7 +30,7 @@ function trustedReauthUrl(config: IcarusConfig, url: string): string | null {
   }
 }
 
-/** Текст из результата тула: строка, content-блоки или JSON-строка с ними. */
+/** Text from the tool result: a string, content blocks, or a JSON string with them. */
 function textOf(value: unknown): string {
   if (typeof value === 'string') return value;
   if (!Array.isArray(value)) return '';
@@ -50,7 +50,7 @@ export function toolResultText(result: unknown): string {
         const nested = toolResultText(parsed);
         if (nested && nested !== text) return nested;
       } catch {
-        // это просто текст, не JSON
+        // this is just text, not JSON
       }
     }
     return result;
@@ -68,7 +68,7 @@ export function toolResultText(result: unknown): string {
   return '';
 }
 
-/** Похоже ли это на «токен протух / нужен вход», а не на сетевую ошибку. */
+/** Whether this looks like "token expired / login needed" rather than a network error. */
 export function isMcpAuthFailure(toolName: string, isError: boolean, text: string): boolean {
   if (!isError || !toolName.startsWith('mcp_')) return false;
   if (/reauth_url/i.test(text)) return true;
@@ -77,7 +77,7 @@ export function isMcpAuthFailure(toolName: string, isError: boolean, text: strin
   );
 }
 
-/** Адрес реавторизации из тела ошибки прокси, если он там есть. */
+/** Reauthorization address from the proxy error body, if it is there. */
 export function reauthUrlFromText(text: string): string | null {
   const direct = /"reauth_url"\s*:\s*"([^"]+)"/.exec(text)?.[1];
   const escaped = /\\"reauth_url\\"\s*:\s*\\"([^"\\]+)\\"/.exec(text)?.[1];
@@ -85,7 +85,7 @@ export function reauthUrlFromText(text: string): string | null {
   return (direct ?? escaped ?? bare)?.replace(/\\\//g, '/') ?? null;
 }
 
-/** id видимых серверов: по ним разбираем `mcp_<сервер>_<инструмент>`. */
+/** ids of visible servers: we parse `mcp_<server>_<tool>` by them. */
 function visibleServerIds(config: IcarusConfig, userId: string): string[] {
   try {
     return listVisible(config, readStore(config), userId).servers.map((server) => server.id);
@@ -103,7 +103,7 @@ function serverName(config: IcarusConfig, userId: string, id: string): string {
   }
 }
 
-/** pi заменяет в именах тулов всё, кроме букв, цифр и подчёркивания. */
+/** pi replaces everything in tool names except letters, digits and underscores. */
 function sanitized(id: string): string {
   return id.replace(/[^A-Za-z0-9_]/g, '_').toLowerCase();
 }
@@ -118,16 +118,16 @@ export function serverIdFromTool(toolName: string, ids: string[]): string | null
 }
 
 export type McpReauthNotice = {
-  /** id сервера: по нему строятся ссылки и дедуп. */
+  /** server id: links and deduplication are built from it. */
   server: string;
-  /** Человеческое имя сервера. */
+  /** Human-readable server name. */
   name: string;
   url: string;
 };
 
 /**
- * Разбирает результат тула и, если это отказ авторизации, говорит, куда вести
- * человека. Возвращает null для обычных ошибок (таймаут, 500, сеть).
+ * Parses the tool result and, if this is an authorization refusal, says where to lead
+ * the person. Returns null for ordinary errors (timeout, 500, network).
  */
 export function mcpReauthNotice(input: {
   config: IcarusConfig;

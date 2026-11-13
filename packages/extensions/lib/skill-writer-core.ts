@@ -1,21 +1,21 @@
-// skill_writer: создание скилла файлами, а не «куда-нибудь».
+// skill_writer: creating a skill as files, not "somewhere".
 //
-// Скилл — это каталог с SKILL.md и, если нужно, файлами бандла. Модель умеет
-// писать файлы обычным write, но у скилла есть правила раскладки (имя = каталог,
-// описание обязательно, бандл лежит рядом) и два разных адреса: личный каталог
-// Икара и проектный `.pi/skills` текущей папки. Здесь это собрано в одном месте,
-// чтобы «создать скилл» не означало «положить SKILL.md куда попало».
+// A skill is a directory with SKILL.md and, if needed, bundle files. The model can
+// write files with ordinary write, but a skill has layout rules (name = directory,
+// description mandatory, the bundle sits next to it) and two different locations: Icarus's
+// personal directory and the project `.pi/skills` of the current folder. This is gathered in one place here,
+// so that "create a skill" doesn't mean "put SKILL.md anywhere".
 //
-// Ядро нарочно чистое: ни pi, ни окружения. Тесты зовут writeSkill напрямую, а
-// расширение только выбирает корень и отдаёт результат модели.
+// The core is deliberately pure: no pi, no environment. Tests call writeSkill directly, and
+// the extension only chooses the root and gives the result to the model.
 import fs from 'node:fs';
 import path from 'node:path';
 
-/** Ограничения Agent Skills: те же числа, что у pi и у панели. */
+/** Agent Skills limits: the same numbers as in pi and the panel. */
 export const SKILL_NAME_LIMIT = 64;
 export const SKILL_DESCRIPTION_LIMIT = 1024;
 
-/** Сколько файлов бандла и сколько весит один — чтобы скилл не стал свалкой. */
+/** How many bundle files and how much one weighs — so a skill doesn't become a dump. */
 export const SKILL_FILES_LIMIT = 64;
 export const SKILL_FILE_SIZE_LIMIT = 512 * 1024;
 
@@ -27,17 +27,17 @@ export type SkillWriterInput = {
   name: string;
   description: string;
   body: string;
-  /** Полка внутри каталога скиллов: `sea` даст `sea/<name>/SKILL.md`. */
+  /** Shelf inside the skills directory: `sea` will give `sea/<name>/SKILL.md`. */
   folder?: string;
-  /** Файлы бандла: `scripts/run.sh`, `references/notes.md`. */
+  /** Bundle files: `scripts/run.sh`, `references/notes.md`. */
   files?: SkillFileInput[];
-  /** Переписать существующий скилл, а не отказать. */
+  /** Overwrite an existing skill instead of refusing. */
   overwrite?: boolean;
 };
 
 export type SkillWriterResult = { ok: true; id: string; file: string } | { ok: false; error: string };
 
-/** Имя скилла по правилам Agent Skills. Возвращает текст ошибки или null. */
+/** Skill name per Agent Skills rules. Returns an error text or null. */
 export function validateSkillName(name: string): string | null {
   const value = name.trim();
   if (!value) return 'имя не может быть пустым';
@@ -56,8 +56,8 @@ export function validateSkillDescription(description: string): string | null {
 }
 
 /**
- * Полка: относительный путь без пустых сегментов, `..` и служебных каталогов.
- * `null` — полка не годится, `''` — её нет.
+ * Shelf: a relative path without empty segments, `..`, and service directories.
+ * `null` — the shelf is invalid, `''` — there's none.
  */
 export function normalizeFolder(folder: string | undefined): string | null {
   const value = (folder ?? '').trim().replaceAll('\\', '/');
@@ -66,13 +66,13 @@ export function normalizeFolder(folder: string | undefined): string | null {
   const parts = value.split('/').filter(Boolean);
   if (parts.length === 0) return '';
   for (const part of parts) {
-    // Служебные каталоги панели (`.disabled`, `.git`) и зависимости — не полки.
+    // The panel's service directories (`.disabled`, `.git`) and dependencies aren't shelves.
     if (part.startsWith('.') || part === 'node_modules') return null;
   }
   return parts.join('/');
 }
 
-/** Путь файла бандла: только относительный и только внутри каталога скилла. */
+/** Bundle file path: only relative and only inside the skill directory. */
 export function safeBundlePath(relative: string): string | null {
   const value = relative.trim().replaceAll('\\', '/');
   if (!value || value.startsWith('/') || /^[a-zA-Z]:/.test(value)) return null;
@@ -88,9 +88,9 @@ export function safeBundlePath(relative: string): string | null {
 }
 
 /**
- * Frontmatter без YAML-библиотеки: имя и описание — обычные строки, а JSON-
- * строка в двойных кавычках — валидный YAML. Переводы строк в описании
- * схлопываем: многострочный скаляр сломал бы разбор у pi.
+ * Frontmatter without a YAML library: the name and description are ordinary strings, and a JSON
+ * string in double quotes is valid YAML. We collapse newlines in the description:
+ * a multiline scalar would break pi's parsing.
  */
 function frontmatter(name: string, description: string): string {
   const oneLine = (value: string): string => JSON.stringify(value.replace(/\s+/g, ' ').trim());
@@ -104,12 +104,12 @@ function ensureInside(root: string, target: string): boolean {
 }
 
 /**
- * Записывает скилл. Возвращает id от корня каталога (`sea/pirate-mode/SKILL.md`)
- * и абсолютный путь — модели полезно знать, куда именно легло.
+ * Writes a skill. Returns the id from the directory root (`sea/pirate-mode/SKILL.md`)
+ * and the absolute path — it's useful for the model to know exactly where it landed.
  *
- * Существующий скилл без `overwrite` не трогаем: модель может повторно позвать
- * инструмент и не должна затирать чужую работу. С `overwrite` переписываем только
- * SKILL.md и перечисленные файлы; остальной бандл остаётся как был.
+ * We don't touch an existing skill without `overwrite`: the model may call the
+ * tool again and must not wipe out someone else's work. With `overwrite` we rewrite only
+ * SKILL.md and the listed files; the rest of the bundle stays as it was.
  */
 export function writeSkill(root: string, input: SkillWriterInput): SkillWriterResult {
   const name = String(input.name ?? '').trim();
@@ -134,13 +134,13 @@ export function writeSkill(root: string, input: SkillWriterInput): SkillWriterRe
   if (fs.existsSync(skillDir) && !fs.statSync(skillDir).isDirectory()) {
     return { ok: false, error: `место «${name}» занято файлом, а не каталогом скилла` };
   }
-  // Плоский скилл с тем же именем — тоже занятое имя: в панели было бы две
-  // записи, а pi оставил бы только одну.
+  // A flat skill with the same name is also a taken name: the panel would have two
+  // entries, and pi would keep only one.
   if (folder === '' && fs.existsSync(path.join(root, `${name}.md`))) {
     return { ok: false, error: `скилл «${name}» уже есть плоским файлом — правь его в панели` };
   }
-  // Выключенный скилл с тем же именем — тоже занятое имя: создать рядом
-  // включённого значило бы получить в панели две записи с одним id.
+  // A disabled skill with the same name is also a taken name: creating one next to
+  // an enabled one would mean two entries with one id in the panel.
   if (
     !fs.existsSync(skillDir) &&
     (fs.existsSync(path.join(root, '.disabled', folder, name)) ||
@@ -175,14 +175,14 @@ export function writeSkill(root: string, input: SkillWriterInput): SkillWriterRe
   return { ok: true, id: path.relative(root, file).split(path.sep).join('/'), file };
 }
 
-/** Личный каталог скиллов Икара: тот же, который читает панель и pi. */
+/** Icarus's personal skills directory: the same one the panel and pi read. */
 export function personalSkillsRoot(env: NodeJS.ProcessEnv = process.env): string {
   const explicit = env.ICARUS_SKILLS_DIR?.trim();
   if (explicit) return explicit;
   return path.join(env.HOME?.trim() || '/home/node', '.pi', 'agent', 'skills');
 }
 
-/** Проектный каталог скиллов: `.pi/skills` в текущей рабочей папке. */
+/** Project skills directory: `.pi/skills` in the current working folder. */
 export function workspaceSkillsRoot(cwd: string): string {
   return path.join(cwd, '.pi', 'skills');
 }

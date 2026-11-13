@@ -1,8 +1,8 @@
-/* Сообщения чата: лента, пузыри, трассировка и типографика ответа.
-   Один файл на два места — основной чат и боковой чат правки артефакта.
-   Дизайн ответа общий: разметка модели живёт в .md без пузыря, а
-   «думает» и трассировка — в карточках-пузырях. */
-/* ── сообщения ───────────────────────────────────────────────────────────── */
+/* Chat messages: feed, bubbles, trace and answer typography.
+   One file for two places — the main chat and the side chat for artifact editing.
+   The answer design is shared: the model's markup lives in .md without a bubble, while
+   the "thinking" and trace live in bubble cards. */
+/* ── messages ────────────────────────────────────────────────────────────── */
 .turn { display: flex; gap: 10px; margin-bottom: 20px; }
 .turn.user { justify-content: flex-end; }
 .turn.user .bubble {
@@ -26,7 +26,7 @@
 .who b { color: var(--text); font-weight: 500; }
 .who time { margin-left: 8px; }
 
-/* Трассировка: несколько шагов инструментов одной карточкой. */
+/* Trace: several tool steps in one card. */
 .trace { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; margin: 2px 0 10px; overflow: hidden; }
 .trace summary { cursor: pointer; color: var(--dim); font-size: 11px; letter-spacing: .08em; padding: 9px 12px; list-style: none; user-select: none; }
 .trace summary::-webkit-details-marker { display: none; }
@@ -39,11 +39,11 @@
 .trace-dot { width: 6px; height: 6px; border-radius: 50%; background: #4ade80; flex: 0 0 auto; }
 .trace-step.running .trace-dot { background: var(--accent); animation: pulse 1.2s infinite; }
 .trace-step.error .trace-dot { background: var(--danger); }
-/* Извлечение страницы — не поиск: бирюзовая подпись, чтобы шаги не путались. */
+/* Page fetch — not search: turquoise label so steps don't get mixed up. */
 .trace-step.tool-web_fetch .trace-label { color: #5eead4; }
 @keyframes pulse { 50% { opacity: .25; } }
 
-/* Субагенты под шагом: строка на ребёнка, как в трассировке, но с заданием. */
+/* Subagents under a step: one line per child, as in the trace, but with the task. */
 .trace-step.has-subs { flex-wrap: wrap; }
 .sub-list { flex: 1 0 100%; margin: 3px 0 5px 96px; display: flex; flex-direction: column; gap: 3px; }
 .sub-step { font-size: 11.5px; color: var(--dim); }
@@ -57,7 +57,7 @@
 .sub-agent { flex: 0 0 auto; color: var(--text); font: 10px/1.5 ui-monospace, monospace; letter-spacing: .04em; }
 .sub-task { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sub-note { flex: 0 0 auto; max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .85; }
-/* Действия ребёнка: свёрнутый список под его строкой. */
+/* Child actions: collapsed list under its line. */
 .sub-actions { margin: 1px 0 3px 18px; }
 .sub-actions summary {
   cursor: pointer; color: var(--dim); font-size: 10.5px; list-style: none;
@@ -77,7 +77,7 @@
 }
 
 .md { font-size: 14px; line-height: 1.65; word-break: break-word; }
-/* Ошибка авторизации MCP: не часть ответа модели, а действие человека. */
+/* MCP sign-in error: not part of the model's answer, but a human action. */
 .reauth-card { margin: 10px 0 0; padding: 10px 12px; border: 1px solid #4a3d2b; border-radius: 10px;
                background: #241f14; color: var(--text); font-size: 13px; }
 .reauth-card a { color: var(--accent); text-decoration: none; }
@@ -93,12 +93,12 @@
 .md code { background: var(--raise); border-radius: 4px; padding: 1px 5px; font: 12px/1.5 ui-monospace, monospace; }
 .md pre { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 11px 13px; overflow: auto; margin: 10px 0; }
 .md pre code { background: none; padding: 0; font-size: 12px; }
-/* Ссылка должна выглядеть ссылкой: цвет и подчёркивание, без «просто текста». */
+/* A link must look like a link: color and underline, not "just text". */
 .md a, .turn.user .bubble a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
 .md a:hover, .turn.user .bubble a:hover { color: var(--text); }
 .md img.md-image { display: block; max-width: 100%; height: auto; border-radius: 10px; border: 1px solid var(--line); margin: 10px 0; }
 .md hr { border: 0; border-top: 1px solid var(--line); margin: 14px 0; }
-/* Широкая таблица прокручивается сама: иначе она растянула бы ленту чата. */
+/* A wide table scrolls on its own: otherwise it would stretch the chat feed. */
 .md .md-table { margin: 10px 0; overflow-x: auto; }
 .md .md-table table { border-collapse: collapse; width: max-content; min-width: 100%; font-size: 13px; }
 .md .md-table th, .md .md-table td {
@@ -115,9 +115,9 @@
 .typing::after { content: '…'; animation: pulse 1.2s infinite; }
 .turn.assistant.error .md { color: var(--danger); }
 
-/* Ответ команды: не ответ модели, а служебная плашка с именем команды. В историю
-   он не пишется. Живёт здесь, потому что команды работают и в основном чате,
-   и в боковой панели артефакта. */
+/* Command response: not the model's answer, but a service card with the command name. It is
+   not written to history. It lives here because commands work both in the main chat
+   and in the artifact side panel. */
 .turn.command { display: block; }
 .command-card {
   max-width: 900px; margin: 0 auto; padding: 10px 14px;

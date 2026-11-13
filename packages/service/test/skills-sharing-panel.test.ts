@@ -1,8 +1,8 @@
-// Шаринг скиллов через панель: владелец делится, получатель видит выключенным,
-// включает себе и не может править чужое.
+// Skill sharing through the panel: the owner shares, the recipient sees it disabled,
+// enables it for themselves and cannot edit someone else's.
 //
-// Это HTTP-тест, а не тест хранилища: проверяем права на маршрутах — именно там
-// решается, попадёт ли чужой скилл в редактор или в удаление.
+// This is an HTTP test, not a storage test: we check permissions on the routes — that's
+// where it is decided whether a foreign skill reaches the editor or deletion.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
@@ -16,7 +16,7 @@ function asUser(userId: string): Record<string, string> {
 
 async function withServer(handler: (base: string, config: IcarusConfig) => Promise<void>): Promise<void> {
   const config = makeConfig({ users: [probe('anna'), probe('boris')] });
-  // Панели нужен только bump: «напиши за меня» в этом тесте не участвует.
+  // The panel only needs bump: "write for me" doesn't take part in this test.
   const registry = { bumpResources: () => 0 };
   const server = createServer(config, registry as never);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -53,7 +53,7 @@ type Skill = {
 
 const DRAFT = { name: 'pirate-mode', description: 'говорить как пират', body: '# Йо-хо-хо' };
 
-test('владелец делится, получатель видит скилл выключенным и включает себе', async () => {
+test('the owner shares, the recipient sees the skill disabled and enables it for themselves', async () => {
   await withServer(async (base) => {
     assert.equal((await post(base, 'save', 'anna', DRAFT)).status, 200);
 
@@ -81,8 +81,8 @@ test('владелец делится, получатель видит скил�
     const after = (await (await call(base, 'files', 'boris')).json()) as { skills: Skill[] };
     assert.equal(after.skills[0].enabled, true);
 
-    // Правка автора доезжает до снимка тем же сохранением: получатель читает уже
-    // новое тело, не дожидаясь пересборки своего окружения.
+    // The author's edit reaches the snapshot with the same save: the recipient reads the
+    // new body already, without waiting for their environment to be rebuilt.
     const updated = await post(base, 'save', 'anna', { ...DRAFT, id: 'pirate-mode/SKILL.md', body: '# Новое тело' });
     assert.equal(updated.status, 200);
 
@@ -92,15 +92,15 @@ test('владелец делится, получатель видит скил�
     assert.match(body.body, /Новое тело/);
     assert.equal(body.canEdit, false);
 
-    // На странице есть и переключатель статуса, и галочка шаринга: это не только
-    // API, человек должен видеть доступ в самом разделе.
+    // The page has both a status toggle and a sharing checkbox: it's not only the
+    // API, the person must see access in the section itself.
     const page = await (await fetch(base + '/panel/skills', { headers: asUser('anna') })).text();
     assert.match(page, /id="skill-share"/);
     assert.match(page, /data-toggle/);
   });
 });
 
-test('чужой скилл нельзя ни сохранить, ни удалить', async () => {
+test('a foreign skill can neither be saved nor deleted', async () => {
   await withServer(async (base) => {
     await post(base, 'save', 'anna', DRAFT);
     await post(base, 'share', 'anna', { id: 'pirate-mode/SKILL.md', shared: true });
@@ -116,7 +116,7 @@ test('чужой скилл нельзя ни сохранить, ни удал�
   });
 });
 
-test('свой скилл выключается через панель и остаётся открытым', async () => {
+test('your own skill is disabled through the panel and remains open', async () => {
   await withServer(async (base) => {
     await post(base, 'save', 'anna', DRAFT);
 

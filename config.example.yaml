@@ -1,47 +1,47 @@
-# Конфигурация Icarus.
+# Icarus configuration.
 #
-# Рабочий файл — config.yaml рядом с этим; он в git не попадает, а ./script/update
-# копирует его отсюда при первом запуске.
+# The working file is config.yaml next to this one; it does not go into git, and ./script/update
+# copies it from here on first start.
 #
-# Здесь всё общее для всех людей: модели, MCP. Ключи — в .env рядом (образец
-# .env.example), у человека — только id (см. users внизу), из него выводятся имя
-# контейнера, каталоги в dataDir и id сессии pi.
+# Everything here is common to all people: models, MCP. Keys — in .env next to it (sample
+# .env.example), a person has only an id (see users below), from which the container name,
+# directories in dataDir and the pi session id are derived.
 
 host: 0.0.0.0
-# 8081 — тот же порт, что и на проде (там 8080 занят jitsi-jvb): одинаковый порт
-# избавляет от «локально одно, в бою другое».
+# 8081 — the same port as in prod (there 8080 is taken by jitsi-jvb): the same port
+# saves you from "one thing locally, another in production".
 port: 8081
 
-# Токен, под которым OpenAI-совместимый эндпоинт (/v1) пускает клиента. Сейчас
-# основной вход — Telegram, а эндпоинт оставлен для будущих клиентов и отладки.
+# Token under which the OpenAI-compatible endpoint (/v1) lets a client in. Currently
+# the main entry is Telegram, and the endpoint is kept for future clients and debugging.
 apiKey: icarus-local-token
-# Внешний адрес панели управления: его Икар называет человеку в чате, и по нему же
-# человек открывает панель из закладки. Не задан — берётся http://localhost:<port>.
+# External address of the control panel: Icarus gives it to a person in chat, and by it
+# the person opens the panel from a bookmark. If unset — http://localhost:<port> is taken.
 # url: https://chat.trousev.pro/
 
-# Где живут память, сессии и каталоги людей
+# Where memory, sessions and user directories live
 dataDir: ~/icarus-data
-# Язык ответов по умолчанию: ru или en. Человек может перекрыть его себе в панели
-# («Пользователь» → язык): тогда выбор лежит в его profile.json рядом с памятью.
-# Здесь — умолчание для тех, кто ещё не выбирал.
+# Default answer language: ru or en. A person can override it for themselves in the panel
+# ("User" → language): then the choice lives in their profile.json next to the memory.
+# Here — the default for those who have not chosen yet.
 userLanguage: ru
 
-# Через сколько минут тишины разговор считается законченным: Икар подводит итог
-# (внутри pi это /compact — модель пересказывает разговор, пересказ остаётся в
-# файле сессии) и гасит сессию pi. Пока человек говорит, сжатия нет: занятые
-# сессии уборка пропускает, а переполненное окно pi сжимает сам. Следующая реплика
-# поднимает pi заново, уже по сжатой истории; контейнер при этом остаётся поднятым.
+# After how many minutes of silence a conversation is considered finished: Icarus sums it up
+# (inside pi this is /compact — the model retells the conversation, the retelling stays in the
+# session file) and shuts down the pi session. While a person talks, there is no compaction: busy
+# sessions are skipped by the cleanup, and an overflowing pi window compacts itself. The next message
+# raises pi again, already from the compacted history; the container stays up.
 sessionIdleMinutes: 60
 
-# Панель управления. Пароля у неё нет: человека называет SSO-прокси, за которым она
-# стоит, — nginx с Authelia подставляет заголовок Remote-User из ответа /api/verify
-# и перетирает всё, что клиент прислал сам. Отсюда правило эксплуатации: порт icarus
-# не должен смотреть наружу мимо прокси — кто дотянется до него напрямую, тот назовётся
-# любым именем. Заголовок другого прокси (Traefik, Caddy, oauth2-proxy) задаётся здесь.
+# Control panel. It has no password: the person is named by the SSO proxy behind which it
+# stands — nginx with Authelia substitutes the Remote-User header from the /api/verify response
+# and overwrites everything the client sent itself. Hence the operating rule: the icarus port
+# must not look outward past the proxy — whoever reaches it directly will name themselves
+# any name. The header of another proxy (Traefik, Caddy, oauth2-proxy) is set here.
 panel:
   userHeader: Remote-User
-  # Локальный запуск без SSO: панель открывается от имени этого человека, и только
-  # когда заголовка нет вовсе. На проде так делать нельзя — сервис об этом ругается.
+  # Local run without SSO: the panel opens on behalf of this person, and only
+  # when there is no header at all. This must not be done in prod — the service complains about it.
   # devUser: probe
 
 docker:
@@ -49,26 +49,26 @@ docker:
   prefix: icarus-user
   # network: icarus-net
   # socket: unix:///var/run/docker.sock
-  # DNS-серверы контейнеров. Обычно не нужны: Docker отдаёт контейнерам резолвер хоста.
-  # Пригодятся там, где резолвер хоста не пускает docker-подсети: unbound с access-control
-  # только на 10.0.0.0/8 отвечает контейнерам REFUSED, и тогда Docker ждёт таймаут ~4 с,
-  # прежде чем уйти на следующий сервер из resolv.conf — каждый запрос pi к модели
-  # становится на эти секунды длиннее. Правильнее починить резолвер хоста, но если
-  # нельзя — вот явный список:
+  # DNS servers of the containers. Usually not needed: Docker gives the containers the host resolver.
+  # They come in handy where the host resolver does not allow docker subnets: unbound with access-control
+  # only on 10.0.0.0/8 answers containers with REFUSED, and then Docker waits ~4 s for the timeout
+  # before going to the next server from resolv.conf — every pi request to the model
+  # becomes that many seconds longer. The right thing is to fix the host resolver, but if
+  # you cannot — here is an explicit list:
   # dns: [1.1.1.1, 8.8.8.8]
 
-# Модели: tier раздаёт эскалация — fast для болтовни и поиска, strong для работы руками,
-# vision для картинок. thinking — уровень размышлений, он уезжает модели как есть
-# (эскалация не даёт pi поднять его до ближайшего доступного). У DeepSeek-V4.1-Flash
-# размышления задаются уровнем reasoning_effort, off выключает их совсем.
-# fast и vision держим на low: без thinking модель теряет отдельный канал и начинает
-# писать вызовы инструментов разметкой прямо в ответ. Цена — ~2 с до первого видимого
-# токена; strong и так думает, ему low бессмыслен.
+# Models: tier is distributed by escalation — fast for chatter and search, strong for work with hands,
+# vision for images. thinking — the level of reasoning, it goes to the model as is
+# (escalation does not let pi raise it to the nearest available one). For DeepSeek-V4.1-Flash
+# reasoning is set by the reasoning_effort level, off disables it entirely.
+# We keep fast and vision on low: without thinking the model loses a separate channel and starts
+# writing tool calls as markup right in the answer. The cost — ~2 s to the first visible
+# token; strong thinks anyway, low is pointless for it.
 #
-# Провайдера deepinfra pi сам не знает: его описание (базовый адрес, протокол, ключ)
-# живёт в packages/service/src/providers.ts и уезжает в models.json контейнера. Здесь
-# важны только имя провайдера и id модели. V4.1-Flash мультимодальная, поэтому одна и
-# та же модель годится и для работы руками, и для картинок.
+# pi itself does not know the deepinfra provider: its description (base address, protocol, key)
+# lives in packages/service/src/providers.ts and goes into the container's models.json. Here
+# only the provider name and the model id matter. V4.1-Flash is multimodal, so the same
+# model works both for working with hands and for images.
 models:
   - provider: deepinfra
     id: deepseek-ai/DeepSeek-V4.1-Flash
@@ -83,39 +83,39 @@ models:
     thinking: low
     tier: vision
 
-# Ключи провайдеров лежат в .env в корне (образец .env.example): провайдер из models,
-# для которого там нашёлся ключ, сам уезжает в auth.json внутри контейнера. Здесь — только
-# переопределение: свой ключ вместо .env или провайдер, которого нет в списке известных
-# (PROVIDER_ENV в packages/service/src/config.ts).
+# Provider keys live in .env in the root (sample .env.example): a provider from models
+# for which a key was found there goes into auth.json inside the container by itself. Here — only
+# an override: your own key instead of .env or a provider that is not in the list of known ones
+# (PROVIDER_ENV in packages/service/src/config.ts).
 # auth:
 #   deepinfra: env:DEEPINFRA_API_KEY
 
-# Окружение контейнера — им настраиваются наши расширения
+# Container environment — our extensions are configured by it
 env:
   ICARUS_EXTRACT_AFTER_MS: '20000'
   ICARUS_EXTRACT_MODEL: deepinfra/deepseek-ai/DeepSeek-V4.1-Flash
-  # Часовой пояс человека. По нему Икар считает дату, часть суток и датирует память:
-  # без него контейнер живёт в UTC, и вечерние записи уезжают во вчера. Обычно это
-  # тот же пояс, что у тебя на хосте (у Дублина — Europe/Dublin).
+  # A person's time zone. Icarus counts the date, the part of the day and dates memory by it:
+  # without it the container lives in UTC, and evening entries slip to yesterday. Usually it is
+  # the same zone as on your host (for Dublin — Europe/Dublin).
   TZ: Europe/Dublin
-  # Субагенты: одновременных детей (потолок 8), задач за вызов и пределы времени.
-  # По умолчанию 4 параллельно — столько же, сколько запускает ведущий агент у Anthropic;
-  # больше восьми не даём: это уже провайдер и CPU контейнера, а не вкус.
+  # Subagents: simultaneous children (ceiling 8), tasks per call and time limits.
+  # By default 4 in parallel — the same number the lead agent runs at Anthropic;
+  # we do not give more than eight: at that point it is the provider and the container CPU, not taste.
   ICARUS_SUBAGENT_CONCURRENCY: '4'
   ICARUS_SUBAGENT_MAX_TASKS: '40'
   ICARUS_SUBAGENT_TASK_TIMEOUT_MS: '300000'
   ICARUS_SUBAGENT_BUDGET_MS: '900000'
 
-# Кастомных маунтов с хоста больше нет: контейнер видит только рабочие папки
-# (`/workspaces/<имя>`), служебный `.icarus` и установку Maple. Нужен чужой
-# репозиторий — сделай `git clone` в один из workspace'ов.
+# There are no more custom mounts from the host: the container sees only working folders
+# (`/workspaces/<name>`), the service `.icarus` and the Maple installation. Need someone else's
+# repository — do `git clone` into one of the workspaces.
 
-# MCP-серверы: то, чем Икар обрастает без правки кода.
+# MCP servers: what Icarus grows with without editing code.
 #
-# Здесь — ОБЩИЕ серверы стека: их видят все люди, и заводит их тот, кто ведёт
-# config.yaml. Личные и расшаренные серверы добавляются в панели, раздел «MCP»:
-# они лежат в dataDir/mcp и переключаются каждому человеку отдельно. Общий сервер
-# из этого блока человек тоже может выключить себе — конфиг от этого не меняется.
+# Here — COMMON stack servers: all people see them, and they are set up by whoever maintains
+# config.yaml. Personal and shared servers are added in the panel, "MCP" section:
+# they live in dataDir/mcp and are toggled per person. A person can also disable a common server
+# from this block for themselves — the config does not change because of that.
 #
 # Секреты у каждого MCP свои. Общий сервер объявляет только ИМЕНА: secrets: [Authorization]
 # (для stdio — имена переменных окружения). Значение вводит человек в панели
@@ -134,31 +134,31 @@ mcp:
   echo:
     command: node
     args: ['/opt/icarus/mcp/echo-server.mjs']
-    # Даже демо-сервер не поднимаем на старте: eager — только осознанный выбор.
+    # We do not raise even the demo server at start: eager is only a deliberate choice.
     lifecycle: lazy
-  # Артефакты: общая библиотека /artifacts для всей семьи — страницы, документы,
-  # картинки. Сервер заводит папку и права через artifact_new, объясняет структуру
-  # (index.html | index.md | index.png + обязательный index.ai.md) и выдаёт ссылку.
-  # Права папки (.folder-acl.json): me/family × none/read/write/admin, по умолчанию
-  # me=admin, family=none — артефакт личный, семья не видит его до явного открытия;
-  # права проверяют панель, MCP и generic folder-guard.
-  # История версий: у папки свой скрытый git, коммиты после каждого write/edit;
-  # в панели — «История» и «Вернуть». Служебные файлы не версионируются.
+  # Artifacts: the shared /artifacts library for the whole family — pages, documents,
+  # images. The server creates the folder and rights via artifact_new, explains the structure
+  # (index.html | index.md | index.png + the required index.ai.md) and issues a link.
+  # Folder rights (.folder-acl.json): me/family × none/read/write/admin, by default
+  # me=admin, family=none — the artifact is personal, the family does not see it until explicitly opened;
+  # the rights are checked by the panel, MCP and the generic folder-guard.
+  # Version history: the folder has its own hidden git, commits after every write/edit;
+  # in the panel — "History" and "Revert". Service files are not versioned.
   #
-  # hidden: true убирает сервер из раздела MCP и запрещает его выключать — это
-  # встроенное умение. lifecycle: lazy держит инструкции и инструменты вне промпта,
-  # пока человек не заговорит об артефактах: тогда модель видит короткий триггер
-  # в AGENTS.md, подключает сервер и получает полные инструкции. Так «спрятанные»
-  # правила не занимают контекст в каждом разговоре.
+  # hidden: true removes the server from the MCP section and forbids disabling it — this is
+  # a built-in ability. lifecycle: lazy keeps the instructions and tools out of the prompt
+  # until a person talks about artifacts: then the model sees a short trigger
+  # in AGENTS.md, connects the server and gets the full instructions. That way "hidden"
+  # rules do not take up context in every conversation.
   artifacts:
     command: node
     args: ['/opt/icarus/tools/artifacts-mcp/server.mjs']
     lifecycle: lazy
     hidden: true
     description: "Артефакты: общая библиотека /artifacts — страницы, документы и картинки с правами для семьи"
-# Maple: обычный встроенный MCP. Установка и код сервера монтируются из репозитория,
-# MAPLE_DIR задаётся в .env — сервис монтирует его в контейнер тем же путём, что и
-# на хосте: launcher ищет свои библиотеки по записанному внутри пути.
+# Maple: a regular built-in MCP. The installation and server code are mounted from the repository,
+# MAPLE_DIR is set in .env — the service mounts it into the container at the same path as
+# on the host: the launcher looks for its libraries by the recorded internal path.
 #
 # Своего хранилища у сервера нет: журналы сессий и графики он держит в рабочей папке
 # разговора, в скрытом `.maple/`. Своего раздела в панели тоже нет — hidden: true
@@ -172,7 +172,7 @@ mcp:
 #      MAPLE_TIMEOUT_SECONDS: "25"
 #    lifecycle: eager
 #    hidden: true
-#    description: "Математика и аналитика: символьно, численно и графиками"
+#    description: "Mathematics and analytics: symbolic, numeric, and with plots"
 
 # Home Assistant: MCP-сервер живёт в самом HA (адрес вида <хост>/api/mcp) и без
 # ключа отвечает 401 — авторизация у него не своя, а обычная для HA: долгоживущий
@@ -192,69 +192,69 @@ mcp:
 #    url: http://10.0.0.16/api/mcp
 #    secrets: [Authorization]
 #    lifecycle: lazy
-#    description: "Умный дом: свет, климат, сцены, датчики и состояния устройств"
+#    description: "Smart home: lights, climate, scenes, sensors, and device states"
 
-# Люди: id и, если надо, флаг админа. От id зависят имя контейнера, каталоги в
-# dataDir и id сессии pi. В Telegram человек сопоставляется с id через
-# telegram.mapping ниже; HTTP-клиент присылает тот же id заголовком x-icarus-user-id.
-# Id существующего человека менять нельзя без переноса его каталога в dataDir/users.
+# People: id and, if needed, the admin flag. The container name, directories in
+# dataDir and the pi session id depend on the id. In Telegram a person is matched to an id via
+# telegram.mapping below; an HTTP client sends the same id in the x-icarus-user-id header.
+# The id of an existing person cannot be changed without moving their directory in dataDir/users.
 #
-# admin: true открывает раздел «Ключи» — право править секреты всей инсталляции.
-# Флаг можно опустить: у конфига, написанного до его появления, админом считается
-# один trousev (так прошла миграция), остальные — обычные люди. Явное
-# `admin: false` забирает флаг даже у него.
+# admin: true opens the "Keys" section — the right to edit the secrets of the whole installation.
+# The flag can be omitted: for a config written before it appeared, only
+# one trousev is considered admin (that is how the migration went), the rest are ordinary people. An explicit
+# `admin: false` takes the flag away even from him.
 
 users:
   - id: probe
     admin: true
   - id: probe2
 
-# Скиллы pi живут в ~/.pi/agent/skills человека (каталог монтируется сервисом).
-# Пишутся они в панели, раздел «Скиллы»: каталог — git-репозиторий, и сохранённый
-# скилл доезжает до Икара следующим ходом.
+# pi skills live in a person's ~/.pi/agent/skills (the directory is mounted by the service).
+# They are written in the panel, "Skills" section: the directory is a git repository, and a saved
+# skill reaches Icarus on the next turn.
 
-# Telegram — основной вход к Икару: бот отвечает в личке и в группах, память
-# и контейнер у человека те же, что у HTTP-клиента, а разговоры свои (свой разговор
-# на чат, поэтому болтовня в Telegram не путается с чатом через /v1). Понимает текст,
-# фото и голосовые: картинка уезжает модели нативно и ложится в incoming/ человека,
-# голосовое сначала расшифровывается (см. speech ниже), а видео и стикеры бот честно
-# просит прислать словами.
+# Telegram — the main entry to Icarus: the bot answers in DMs and in groups, the memory
+# and container of a person are the same as those of an HTTP client, but the conversations are their own (one conversation
+# per chat, so chatter in Telegram does not get mixed up with chat via /v1). It understands text,
+# photos and voice: an image goes to the model natively and lands in the person's incoming/,
+# a voice message is first transcribed (see speech below), and the bot honestly asks for video and stickers
+# to be sent in words.
 #
-# mapping — кто есть кто: telegram username → id человека из users. На проде это
-# логины, под которыми люди ходили в чат раньше: от id зависят их каталоги памяти.
-# Username пишется без «@», и в yaml его придётся взять в кавычки:
-# с @ начинаются зарезервированные конструкции, и `@trousev: trousev` не разберётся.
-# Тот же маппинг принимается отдельным ключом telegram_mapping — ровно как он
-# читается глазами:
+# mapping — who is who: telegram username → person id from users. In prod these are
+# the logins under which people used to go to chat: their memory directories depend on the id.
+# The username is written without "@", and in yaml you will have to quote it:
+# reserved constructs start with @, and `@trousev: trousev` will not be parsed.
+# The same mapping is accepted by a separate key telegram_mapping — exactly as it
+# reads by eye:
 #
 #   telegram_mapping:
 #     '@trousev': trousev
 #
-# Токен бота в конфиге не нужен: он подхватывается из .env (TELEGRAM_BOT_TOKEN,
-# образец .env.example). Нет токена или пусто в mapping — бот не поднимается, а
-# сервис работает как раньше. Команды бота: /compact, /stop, /stats, /clear,
-# /skills и /help — что каждая делает, написано в README, раздел «Telegram».
+# The bot token is not needed in the config: it is picked up from .env (TELEGRAM_BOT_TOKEN,
+# sample .env.example). No token or empty mapping — the bot does not come up, and
+# the service works as before. Bot commands: /compact, /stop, /stats, /clear,
+# /skills and /help — what each does is written in the README, "Telegram" section.
 #
-# Топики (мультичат: свой разговор на топик) включаются не здесь и не в чате, а в
-# Mini App @BotFather: My bots → бот → Bot Settings → Threads Settings → Threaded
-# Mode. В текстовом меню /mybots этого пункта нет; прямая ссылка на Mini App —
-# https://t.me/BotFather?startapp. Режим выключен — /topic не зовёт Telegram, а
-# объясняет, где галочка, а разговор остаётся один на чат. Команды топиков:
-# /topic [имя] — завести разговор, /topics — какие бот помнит, /rename — переименовать.
+# Topics (multi-chat: its own conversation per topic) are enabled not here and not in chat, but in
+# the @BotFather Mini App: My bots → bot → Bot Settings → Threads Settings → Threaded
+# Mode. There is no such item in the /mybots text menu; a direct link to the Mini App —
+# https://t.me/BotFather?startapp. Mode off — /topic does not call Telegram, it
+# explains where the checkbox is, and the conversation stays one per chat. Topic commands:
+# /topic [name] — start a conversation, /topics — which ones the bot remembers, /rename — rename.
 #
 # telegram:
 #   mapping:
 #     '@trousev': probe
 #     '@vita': probe2
 
-# Голосовые из Telegram: модель звука не слышит, поэтому голосовое сначала
-# расшифровывается отдельным запросом к провайдеру — метод /audio/transcriptions
-# (у DeepInfra это Whisper). Ключ берётся из auth по имени провайдера, то есть тот
-# же, что у моделей: по умолчанию достаточно DEEPINFRA_API_KEY в .env. Звук уезжает
-# провайдеру, а не модели; нет ключа — бот отвечает, что голосовых не разбирает.
+# Voice messages from Telegram: the model does not hear sound, so a voice message is first
+# transcribed by a separate request to the provider — the /audio/transcriptions method
+# (at DeepInfra this is Whisper). The key is taken from auth by provider name, that is the same
+# as for models: by default DEEPINFRA_API_KEY in .env is enough. The sound goes
+# to the provider, not to the model; no key — the bot answers that it does not handle voice messages.
 #
-# language — подсказка распознавателю, необязательна: на русской диктовке помогает.
-# Выключить распознавание совсем — `speech: none`.
+# language — a hint to the recognizer, optional: it helps with Russian dictation.
+# Disable recognition entirely — `speech: none`.
 #
 # speech:
 #   provider: deepinfra

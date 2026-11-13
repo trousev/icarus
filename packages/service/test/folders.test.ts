@@ -1,7 +1,7 @@
-// Папки в левом меню: реестр, принадлежность разговоров и API панели.
+// Folders in the left menu: the registry, chat membership and the panel API.
 //
-// Папка — это полка для разговоров, а не рабочая директория: проверяем, что она
-// ничего не двигает на диске, не теряет чаты при удалении и помнит свёрнутость.
+// A folder is a shelf for conversations, not a working directory: we check that it
+// moves nothing on disk, does not lose chats when deleted, and remembers collapsed state.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
@@ -24,11 +24,11 @@ function fixture() {
   return { config, user };
 }
 
-test('папка создаётся, переименовывается и запоминает свёрнутость', () => {
+test('a folder is created, renamed and remembers collapsed state', () => {
   const { config, user } = fixture();
   const folder = createFolder(config, user, '  Работа   и  деньги ', new Date('2026-11-01T10:00:00.000Z'));
 
-  // Лишние пробелы схлопываются: иначе в меню две одинаковые на вид строки.
+  // Extra spaces are collapsed: otherwise the menu shows two visually identical lines.
   assert.equal(folder.name, 'Работа и деньги');
   assert.equal(folder.collapsed, false);
   assert.deepEqual(readFolders(config, user), [folder]);
@@ -40,7 +40,7 @@ test('папка создаётся, переименовывается и за�
   assert.equal(stored?.collapsed, true, 'свёрнутость хранится на сервере, а не в браузере');
 });
 
-test('одинаковые имена и пустое название папки не принимаются', () => {
+test('duplicate names and an empty folder name are not accepted', () => {
   const { config, user } = fixture();
   createFolder(config, user, 'Работа');
 
@@ -54,7 +54,7 @@ test('одинаковые имена и пустое название папк�
   assert.throws(() => setFolderCollapsed(config, user, 'f-нет', true), /не найдена/);
 });
 
-test('разговор переезжает в папку и обратно, не меняя workspace', () => {
+test('a conversation moves into a folder and back without changing workspace', () => {
   const { config, user } = fixture();
   const folder = createFolder(config, user, 'Работа');
   const chat = createChatRecord(config, user, 'talk', new Date('2026-11-01T10:00:00.000Z'));
@@ -68,11 +68,11 @@ test('разговор переезжает в папку и обратно, н�
 
   setChatFolder(config, user, chat.id, null);
   assert.equal(readChats(config, user)[0]?.folder, undefined);
-  // Во «Входящих» поля просто нет — клиенту не нужно различать null и пустую строку.
+  // In "Inbox" the field simply is not there — the client need not distinguish null from an empty string.
   assert.equal('folder' in (readChats(config, user)[0] as object), false);
 });
 
-test('удаление папки не удаляет разговоры: они возвращаются во «Входящие»', () => {
+test('deleting a folder does not delete conversations: they return to "Inbox"', () => {
   const { config, user } = fixture();
   const folder = createFolder(config, user, 'Работа');
   const first = createChatRecord(config, user, 'talk', new Date('2026-11-01T10:00:00.000Z'));
@@ -82,7 +82,7 @@ test('удаление папки не удаляет разговоры: они
   const deleted = deleteFolder(config, user, folder.id);
   assert.equal(deleted.movedChats, 1);
   assert.deepEqual(readFolders(config, user), []);
-  // Оба разговора на месте: удалили полку, а не разговоры.
+  // Both conversations are in place: we deleted the shelf, not the conversations.
   assert.deepEqual(
     readChats(config, user).map((chat) => chat.id),
     [second.id, first.id],
@@ -90,7 +90,7 @@ test('удаление папки не удаляет разговоры: они
   assert.equal(readChats(config, user).every((chat) => chat.folder === undefined), true);
 });
 
-/** Панель поднимаем настоящую: так проверяется и доступ по заголовку прокси. */
+/** We bring up a real panel: this also exercises access via the proxy header. */
 async function withServer(
   config: ReturnType<typeof makeConfig>,
   run: (base: string, headers: Record<string, string>) => Promise<void>,
@@ -105,7 +105,7 @@ async function withServer(
   }
 }
 
-test('API папок: создать, перенести чат, свернуть, переименовать и удалить', async () => {
+test('folders API: create, move a chat, collapse, rename and delete', async () => {
   const { config, user } = fixture();
   const first = createChatRecord(config, user, 'talk', new Date('2026-11-01T10:00:00.000Z'));
   const second = createChatRecord(config, user, 'talk', new Date('2026-11-01T11:00:00.000Z'));
@@ -130,7 +130,7 @@ test('API папок: создать, перенести чат, свернут�
     });
     assert.equal(duplicate.status, 409, 'имя папки сравниваем без учёта регистра');
 
-    // Перенос работает и без pi: папка — раскладка меню, а не ход агента.
+    // Moving works without pi too: a folder is menu layout, not an agent action.
     const moved = await fetch(`${base}/panel/api/chat/folder`, {
       method: 'POST',
       headers,
@@ -177,7 +177,7 @@ test('API папок: создать, перенести чат, свернут�
   });
 });
 
-test('папки закрыты для чужого человека и отвечают понятной ошибкой', async () => {
+test('folders are closed to an alien person and answer with a clear error', async () => {
   const { config } = fixture();
   await withServer(config, async (base, headers) => {
     const anonymous = await fetch(`${base}/panel/api/folders`);

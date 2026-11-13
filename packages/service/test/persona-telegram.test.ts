@@ -1,5 +1,5 @@
-// Персона в Telegram: агент должен знать, что markdown-ссылка на файл станет
-// настоящим вложением, — иначе он будет отдавать человеку мёртвый путь текстом.
+// Persona in Telegram: the agent must know that a markdown link to a file becomes
+// a real attachment, — otherwise it will give the person a dead path as text.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-persona-tg-'));
-// Переменные читаются на загрузке модуля, поэтому выставляем их до import().
+// Variables are read at module load, so we set them before import().
 process.env.ICARUS_HOME = ROOT;
 process.env.ICARUS_MEMORY_DIR = path.join(ROOT, 'memory');
 process.env.ICARUS_CHANNEL = 'telegram';
@@ -32,7 +32,7 @@ async function prompt(): Promise<string> {
   return (await captured({ systemPromptOptions: { contextFiles: [] } })).systemPrompt;
 }
 
-test('в Telegram агент знает, что ссылка на файл станет вложением', async () => {
+test('in Telegram the agent knows that a link to a file becomes an attachment', async () => {
   const text = await prompt();
   assert.match(text, /# Telegram/);
   assert.match(text, /markdown-ссылку/);

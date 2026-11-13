@@ -1,10 +1,11 @@
-// Подсветка кода в предпросмотре файлов панели.
+// Code highlighting in the panel's file preview.
 //
-// Библиотеку сюда не тянем: панель живёт без сборки и внешних скриптов, а весь
-// разбор — один проход по строке. Подсветка не доверяет файлу: всё, что не
-// распознано как токен, экранируется, поэтому HTML из файла в страницу не
-// попадёт. Файл — обычный script: chat-ui.ts вставляет его в страницу раньше
-// chat-client.js, и `highlightCode` видна клиенту как глобальная функция.
+// We don't pull in a library here: the panel lives without a build step and external
+// scripts, and the whole parsing is a single pass over the line. The highlighting does
+// not trust the file: anything not recognized as a token is escaped, so HTML from the
+// file won't get into the page. The file is a plain script: chat-ui.ts inserts it into
+// the page before chat-client.js, and `highlightCode` is visible to the client as a
+// global function.
 /* exported highlightCode */
 
 const CODE_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
@@ -28,13 +29,13 @@ const TS_KEYWORDS =
   'never number object override private protected public readonly satisfies string symbol type ' +
   'unknown';
 
-/** Язык предпросмотра: что считать комментарием, строкой и ключевым словом. */
+/** Preview language: what counts as a comment, a string, and a keyword. */
 function codeLanguage(config) {
   return {
     line: config.line ?? [],
     block: Boolean(config.block),
     template: Boolean(config.template),
-    // Ключи (свойства CSS, поля YAML/TOML) узнаются по двоеточию, а не списком.
+    // Keys (CSS properties, YAML/TOML fields) are recognized by a colon, not by a list.
     keys: Boolean(config.keys),
     keywords: new Set(String(config.keywords ?? '').split(/\s+/).filter(Boolean)),
   };
@@ -75,11 +76,11 @@ const CODE_LANGUAGES = {
   YAML: codeLanguage({ line: ['#'], keys: true, keywords: 'true false null yes no on off' }),
   TOML: codeLanguage({ line: ['#'], keys: true, keywords: 'true false' }),
   INI: codeLanguage({ line: ['#', ';'], keys: true, keywords: 'true false' }),
-  // У CSS комментарии только блочные: `#fff` — цвет, а не начало комментария.
+  // CSS only has block comments: `#fff` is a color, not the start of a comment.
   CSS: codeLanguage({ block: true, keys: true }),
 };
 
-/** Строка заканчивается на кавычке, а не на конце файла: `\` экранирует символ. */
+/** The string ends at the quote, not at the end of the file: `\` escapes the character. */
 function codeStringEnd(source, start, quote, multiline) {
   let index = start + 1;
   while (index < source.length) {
@@ -95,8 +96,9 @@ function codeStringEnd(source, start, quote, multiline) {
   return index;
 }
 
-/** Первый токен строки перед `:` или `=` — ключ: свойство CSS, поле YAML/TOML.
- *  В CSS свойство начинается после `{` или `;`, в YAML — с начала строки. */
+/** The first token on the line before `:` or `=` is a key: a CSS property, a
+ *  YAML/TOML field. In CSS a property starts after `{` or `;`, in YAML — at the start
+ *  of the line. */
 function codeLooksLikeKey(source, start, end) {
   const lineStart = source.lastIndexOf('\n', start - 1) + 1;
   const before = source.slice(lineStart, start);
@@ -107,8 +109,8 @@ function codeLooksLikeKey(source, start, end) {
 }
 
 /**
- * HTML с подсветкой или `null`, если язык незнаком: тогда панель показывает
- * текст как есть — лучше без цвета, чем с угадыванием.
+ * HTML with highlighting, or `null` if the language is unknown: then the panel shows
+ * the text as is — better without color than with guesswork.
  */
 function highlightCode(text, type) {
   const language = CODE_LANGUAGES[String(type ?? '').toUpperCase()];
@@ -153,7 +155,7 @@ function highlightCode(text, type) {
       index = end;
       continue;
     }
-    // Число только с начала слова: в `a1` это часть идентификатора, а не токен.
+    // A number only at the start of a word: in `a1` it's part of the identifier, not a token.
     if (DIGIT.test(char) && (index === 0 || !WORD_PART.test(source[index - 1]))) {
       let end = index + 1;
       while (end < source.length && NUMBER_PART.test(source[end])) end += 1;

@@ -1,11 +1,11 @@
-// Сколько поисков и страниц отдал каждый ключ и сколько раз отказал.
+// How many searches and pages each key served and how many times it failed.
 //
-// Историю не ведём: счётчики лежат по дням, при каждой записи восьмой день
-// выбрасывается — панель показывает сумму за семь. Этого хватает, чтобы понять,
-// кто тратит квоту, а кто только делает вид, что работает.
+// We don't keep history: counters are stored per day, and on every write the eighth day
+// is discarded — the panel shows the sum over seven. That's enough to understand
+// who spends the quota and who only pretends to work.
 //
-// Пишем на каждую попытку роутера, а не на запрос человека: fallback Linkup →
-// Tavily — это две попытки, и обе стоят своих денег.
+// We write on every router attempt, not on a person's request: the Linkup →
+// Tavily fallback is two attempts, and both cost their money.
 import fs from 'node:fs';
 import path from 'node:path';
 import type { IcarusConfig } from '../config.ts';
@@ -13,21 +13,21 @@ import { log } from '../log.ts';
 import { stateFile } from './state.ts';
 import { isProviderId, type ProviderId } from './types.ts';
 
-/** Сколько дней помним. Восьмой день стирается при следующей записи. */
+/** How many days we remember. The eighth day is erased on the next write. */
 export const USAGE_DAYS = 7;
 const DAY_MS = 24 * 60 * 60_000;
 
 export type UsageCapability = 'search' | 'fetch';
 
-/** Успехи и отказы одного ключа. */
+/** Successes and failures of one key. */
 export type UsageCount = { ok: number; fail: number };
 
-/** День: счётчики по возможностям, внутри — по провайдерам. */
+/** A day: counters per capability, inside — per provider. */
 export type UsageDay = Record<UsageCapability, Record<string, UsageCount>>;
 
 export type UsageState = { version: 1; days: Record<string, UsageDay> };
 
-/** Суммы за окно: то, что видит панель. */
+/** Window totals: what the panel sees. */
 export type UsageReport = {
   days: number;
   since: string;
@@ -36,12 +36,12 @@ export type UsageReport = {
   fetch: Partial<Record<ProviderId, UsageCount>>;
 };
 
-/** Файл рядом с состоянием роутера: в тестах подменяется вместе с ним. */
+/** File next to the router state: in tests it's swapped together with it. */
 export function usageFile(config: IcarusConfig): string {
   return path.join(path.dirname(stateFile(config)), 'search-usage.json');
 }
 
-/** День считаем по UTC: в контейнере это и есть календарь сервиса. */
+/** We count the day in UTC: in the container that's the service calendar. */
 export function dayKey(now: number): string {
   return new Date(now).toISOString().slice(0, 10);
 }
@@ -64,8 +64,8 @@ function readCounts(value: unknown): UsageCount {
 }
 
 /**
- * Прочитать файл. Битый или чужой — начинаем с чистого листа: статистика не
- * повод ломать поиск.
+ * Read the file. Broken or foreign — we start from a clean slate: statistics are not
+ * a reason to break search.
  */
 export function readUsage(file: string): UsageState {
   let parsed: unknown;
@@ -94,7 +94,7 @@ export function readUsage(file: string): UsageState {
   return { version: 1, days };
 }
 
-/** Запись через временный файл: недописанный JSON не должен стать статистикой. */
+/** Write via a temporary file: an unfinished JSON must not become statistics. */
 function writeUsage(file: string, state: UsageState): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
@@ -102,7 +102,7 @@ function writeUsage(file: string, state: UsageState): void {
   fs.renameSync(tmp, file);
 }
 
-/** Оставить только сегодня и шесть предыдущих дней. */
+/** Keep only today and the six previous days. */
 function prune(state: UsageState, today: string): void {
   const floor = sinceKey(Date.parse(`${today}T00:00:00.000Z`));
   for (const day of Object.keys(state.days)) {
@@ -110,7 +110,7 @@ function prune(state: UsageState, today: string): void {
   }
 }
 
-// Замок внутри процесса: два одновременных запроса не должны потерять счётчик.
+// In-process lock: two concurrent requests must not lose a counter.
 const locks = new Map<string, Promise<unknown>>();
 
 function withLock<T>(file: string, task: () => T): Promise<T> {
@@ -127,10 +127,10 @@ function withLock<T>(file: string, task: () => T): Promise<T> {
 }
 
 /**
- * Записать попытку: успех или отказ конкретного ключа в конкретной возможности.
+ * Record an attempt: success or failure of a specific key in a specific capability.
  *
- * Ошибки записи глотаем с предупреждением в лог: статистика — не причина
- * отказывать человеку в странице.
+ * We swallow write errors with a warning to the log: statistics are not a reason
+ * to deny a person a page.
  */
 export async function recordUsage(
   config: IcarusConfig,
@@ -157,7 +157,7 @@ export async function recordUsage(
   }
 }
 
-/** Суммы за последние семь дней: по одной карте на каждую возможность. */
+/** Totals for the last seven days: one map per capability. */
 export function usageReport(config: IcarusConfig, now: number = Date.now()): UsageReport {
   const state = readUsage(usageFile(config));
   const through = dayKey(now);

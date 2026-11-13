@@ -1,14 +1,14 @@
-// История версий артефакта: маленький git-репозиторий в каждой папке.
+// Artifact version history: a small git repository in each folder.
 //
-// Человек про git не знает и не должен: панель показывает «История версий» и
-// кнопку «Вернуть». Коммиты делает императивный слой — расширение pi после
-// каждого write/edit и этот модуль при инициализации/откате. ИИ к истории
-// отношения не имеет: он просто пишет файлы, а система фиксирует снимки.
+// The human doesn't know about git and shouldn't: the panel shows "Version history" and
+// a "Restore" button. Commits are made by the imperative layer — the pi extension after
+// each write/edit and this module on init/restore. The AI has nothing to do with the
+// history: it just writes files, and the system records snapshots.
 //
-// Служебные файлы артефакта в историю не попадают: `.folder-acl.json` — это
-// права, `.artifact.json` — публичная ссылка. Иначе откат содержимого менял бы
-// доступ к артефакту. Исключения лежат в `.git/info/exclude`, а не в видимом
-// `.gitignore`: пользователь не должен видеть даже намёка на git.
+// Artifact service files don't make it into history: `.folder-acl.json` holds
+// permissions, `.artifact.json` holds the public link. Otherwise restoring content would
+// change access to the artifact. The exclusions live in `.git/info/exclude`, not in the
+// visible `.gitignore`: the user shouldn't see even a hint of git.
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -38,7 +38,7 @@ export type ArtifactCommit = {
   subject: string;
 };
 
-/** Версия артефакта для предпросмотра: всё, что нужно панели, без правки файлов. */
+/** Artifact version for preview: everything the panel needs, without modifying files. */
 export type ArtifactVersion = {
   artifact: {
     name: string;
@@ -78,7 +78,7 @@ function git(dir: string, args: string[]): Promise<GitResult> {
   });
 }
 
-/** Бинарное чтение: `git show` для картинок и других файлов версии. */
+/** Binary read: `git show` for images and other version files. */
 function gitBuffer(dir: string, args: string[]): Promise<{ code: number; stdout: Buffer; stderr: string }> {
   return new Promise((resolve) => {
     execFile(
@@ -107,7 +107,7 @@ function gitDirOk(dir: string): boolean {
   }
 }
 
-/** Служебные файлы не версионируются: их нельзя откатывать вместе с контентом. */
+/** Service files are not versioned: they can't be restored along with the content. */
 function ensureExclude(dir: string): void {
   const info = path.join(dir, '.git', 'info');
   fs.mkdirSync(info, { recursive: true });
@@ -116,7 +116,7 @@ function ensureExclude(dir: string): void {
   try {
     current = fs.readFileSync(file, 'utf8');
   } catch {
-    // файла ещё нет — начнём с пустого
+    // the file doesn't exist yet — start from empty
   }
   const lines = new Set(current.split('\n').map((line) => line.trim()));
   const missing = IGNORED.filter((name) => !lines.has(name));
@@ -130,11 +130,11 @@ function commitMessage(message: string): string {
   return (clean || 'artifact: update').slice(0, 200);
 }
 
-/** Завести репозиторий, если его ещё нет. Идемпотентно. */
+/** Create the repository if it doesn't exist yet. Idempotent. */
 export async function ensureArtifactRepo(dir: string): Promise<void> {
   fs.mkdirSync(dir, { recursive: true });
   if (!gitDirOk(dir)) {
-    // Битый или чужой `.git` не трогаем: лучше ошибка, чем молча перезаписать.
+    // We don't touch a broken or foreign `.git`: an error is better than silently overwriting.
     if (fs.existsSync(path.join(dir, '.git'))) {
       throw new Error(`в ${dir} уже есть .git, но это не каталог`);
     }
@@ -142,15 +142,15 @@ export async function ensureArtifactRepo(dir: string): Promise<void> {
     if (init.code !== 0) throw new Error(init.stderr.trim() || 'git init не удался');
     await git(dir, ['config', 'user.name', 'Icarus']);
     await git(dir, ['config', 'user.email', 'icarus@localhost']);
-    // Глобальный commit.gpgsign иначе потребует ключ, которого в контейнере нет.
+    // The global commit.gpgsign would otherwise require a key that isn't in the container.
     await git(dir, ['config', 'commit.gpgsign', 'false']);
   }
   ensureExclude(dir);
 }
 
 /**
- * Зафиксировать изменения. false — коммитить нечего. Ошибки git не глотаем:
- * вызывающий решает, показать их человеку или записать в лог.
+ * Record the changes. false — nothing to commit. We don't swallow git errors:
+ * the caller decides whether to show them to the human or write them to the log.
  */
 export async function commitArtifact(dir: string, message: string): Promise<boolean> {
   await ensureArtifactRepo(dir);
@@ -166,7 +166,7 @@ export async function commitArtifact(dir: string, message: string): Promise<bool
   return true;
 }
 
-/** Версии от новых к старым. Пустой репозиторий — пустая история. */
+/** Versions from new to old. An empty repository means an empty history. */
 export async function artifactHistory(dir: string, limit = 40): Promise<ArtifactCommit[]> {
   if (!gitDirOk(dir)) return [];
   const result = await git(dir, [
@@ -187,11 +187,11 @@ export async function artifactHistory(dir: string, limit = 40): Promise<Artifact
 }
 
 /**
- * Вернуть содержимое к версии `commit`.
+ * Restore the content to version `commit`.
  *
- * Не переписываем историю: `read-tree` ставит в индекс и рабочую папку ровно то
- * дерево, а затем обычный коммит «restore» фиксирует возврат. Так старые версии
- * остаются доступными, а человек видит понятное «вернул к такой-то».
+ * We don't rewrite history: `read-tree` puts exactly that tree into the index and the
+ * working folder, and then a regular "restore" commit records the rollback. This way old
+ * versions stay available, and the human sees a clear "restored to such-and-such".
  */
 export async function restoreArtifact(
   dir: string,
@@ -203,7 +203,7 @@ export async function restoreArtifact(
   const exists = await git(dir, ['cat-file', '-e', `${commit}^{commit}`]);
   if (exists.code !== 0) throw new Error('такой версии нет');
 
-  // Незакоммиченное перед откатом тоже сохраняем: это честнее, чем потерять.
+  // We also save the uncommitted work before the rollback: that's fairer than losing it.
   await commitArtifact(dir, 'artifact: before restore');
 
   const reset = await git(dir, ['read-tree', '-u', '--reset', commit]);
@@ -213,7 +213,7 @@ export async function restoreArtifact(
   return { ok: true, changed, subject: `artifact: restore ${commit.slice(0, 8)}` };
 }
 
-/** Коммит-метаданные для предпросмотра: hash, короткий hash, дата и subject. */
+/** Commit metadata for preview: hash, short hash, date and subject. */
 async function commitInfo(dir: string, commit: string): Promise<ArtifactCommit | null> {
   const result = await git(dir, [
     'show',
@@ -247,8 +247,8 @@ function encodedPath(relative: string): string {
 }
 
 /**
- * Собрать версию для предпросмотра. Ничего не меняет: читает дерево коммита через
- * `git show`. Именно это позволяет «тыкнуть и посмотреть», не нажимая «Вернуть».
+ * Assemble a version for preview. Changes nothing: reads the commit tree via
+ * `git show`. That's exactly what allows "click and look" without pressing "Restore".
  */
 export async function artifactVersion(
   config: IcarusConfig,
@@ -294,7 +294,7 @@ export async function artifactVersion(
   };
 }
 
-/** Файл конкретной версии: ассеты HTML и картинки предпросмотра. */
+/** File of a specific version: HTML assets and preview images. */
 export async function artifactVersionFile(
   dir: string,
   commit: string,
@@ -313,8 +313,8 @@ export async function artifactVersionFile(
 }
 
 /**
- * Поднять историю у всех существующих артефактов. Старые папки получили
- * initial-коммит при миграции; новые заводятся при первом write через pi.
+ * Bring up history for all existing artifacts. Old folders got an
+ * initial commit during migration; new ones are created on the first write via pi.
  */
 export async function ensureArtifactRepos(config: IcarusConfig): Promise<number> {
   const root = ensureArtifactsRoot(config);

@@ -1,6 +1,6 @@
-// Команды человека поверх реестра сессий: /stop, /stats, /skills, /clear и /rename.
-// Докера и модели тут нет: сессии — заглушки (см. RegistryDeps), а разговор
-// для /clear — запись в chats.json и файл в каталоге сессий человека.
+// Human commands on top of the session registry: /stop, /stats, /skills, /clear and /rename.
+// No docker or model here: sessions are stubs (see RegistryDeps), while the conversation
+// for /clear is a record in chats.json and a file in the person's sessions directory.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -11,7 +11,7 @@ import { findChatRecord, ensureChat } from '../src/sessions/chats.ts';
 import { userPaths, type IcarusConfig } from '../src/config.ts';
 import { makeConfig, probe } from './fixtures.ts';
 
-/** Сессия-заглушка: реестру от неё нужны занятость, прерывание и ответы на вопросы. */
+/** A stub session: the registry needs busy state, interruption and answers to questions from it. */
 function fakeSession(overrides: Partial<Record<string, unknown>> = {}) {
   const session = {
     key: 'probe:conv',
@@ -27,7 +27,7 @@ function fakeSession(overrides: Partial<Record<string, unknown>> = {}) {
     disposed: 0,
     aborted: 0,
     cleared: 0,
-    /** Подтверждает ли pi прерывание: сбойный abort — тоже жизнь. */
+    /** Whether pi confirms the interruption: a failed abort is also life. */
     abortConfirmed: true,
     stats: { userMessages: 3, tokens: { total: 100 } } as Record<string, unknown> | null,
     commands: [{ name: 'skill:brave-search', description: 'поиск', source: 'skill' }],
@@ -71,7 +71,7 @@ function makeRegistry(session: ReturnType<typeof fakeSession>, config: IcarusCon
   };
 }
 
-/** Файл разговора так, как его кладёт pi: `<когда создан>_<id>.jsonl`. */
+/** The conversation file the way pi lays it down: `<created at>_<id>.jsonl`. */
 function putSessionFile(config: IcarusConfig, conversationId: string): string {
   const dir = userPaths(config, probe()).sessions;
   fs.mkdirSync(dir, { recursive: true });
@@ -80,7 +80,7 @@ function putSessionFile(config: IcarusConfig, conversationId: string): string {
   return file;
 }
 
-test('/stop прерывает занятую сессию', async () => {
+test('/stop interrupts a busy session', async () => {
   const session = fakeSession({ busy: true });
   const { registry } = makeRegistry(session);
   try {
@@ -92,7 +92,7 @@ test('/stop прерывает занятую сессию', async () => {
   }
 });
 
-test('/stop по молчащей или закрытой сессии — внятный ответ, а не вызов pi', async () => {
+test('/stop on a silent or closed session is a clear answer, not a call to pi', async () => {
   const session = fakeSession();
   const { registry } = makeRegistry(session);
   try {
@@ -106,7 +106,7 @@ test('/stop по молчащей или закрытой сессии — вн�
   }
 });
 
-test('/stop говорит, если pi не подтвердил прерывание', async () => {
+test('/stop says so if pi did not confirm the interruption', async () => {
   const session = fakeSession({ busy: true, abortConfirmed: false });
   const { registry } = makeRegistry(session);
   try {
@@ -118,7 +118,7 @@ test('/stop говорит, если pi не подтвердил прерыва
   }
 });
 
-test('/stats поднимает затихшую сессию: файл разговора на месте, цифры те же', async () => {
+test('/stats brings up a dormant session: the conversation file is in place, the numbers are the same', async () => {
   const session = fakeSession();
   const { registry } = makeRegistry(session);
   try {
@@ -130,7 +130,7 @@ test('/stats поднимает затихшую сессию: файл разг
   }
 });
 
-test('/stats рассказывает про сбой, а не молчит', async () => {
+test('/stats reports a failure instead of staying silent', async () => {
   const session = fakeSession({ stats: null });
   const { registry } = makeRegistry(session);
   try {
@@ -141,7 +141,7 @@ test('/stats рассказывает про сбой, а не молчит', as
   }
 });
 
-test('/skills отдаёт то, что собрал pi', async () => {
+test('/skills returns what pi collected', async () => {
   const session = fakeSession();
   const { registry } = makeRegistry(session);
   try {
@@ -152,7 +152,7 @@ test('/skills отдаёт то, что собрал pi', async () => {
   }
 });
 
-test('/clear просит pi начать новую сессию, а не трогает файлы сам', async () => {
+test('/clear asks pi to start a new session instead of touching files itself', async () => {
   const config = makeConfig();
   const session = fakeSession();
   const { registry } = makeRegistry(session, config);
@@ -172,7 +172,7 @@ test('/clear просит pi начать новую сессию, а не тр�
   }
 });
 
-test('/clear затихшего разговора переводит его на новую сессию pi', async () => {
+test('/clear of a dormant conversation moves it to a new pi session', async () => {
   const config = makeConfig();
   const { registry } = makeRegistry(fakeSession(), config);
   const file = putSessionFile(config, 'conv');
@@ -190,7 +190,7 @@ test('/clear затихшего разговора переводит его н�
   }
 });
 
-test('/clear без начатого разговора не выдумывает новую сессию', async () => {
+test('/clear without a started conversation does not invent a new session', async () => {
   const { registry } = makeRegistry(fakeSession());
   try {
     assert.deepEqual(await registry.clear(probe(), 'conv'), { status: 'empty' });
@@ -199,7 +199,7 @@ test('/clear без начатого разговора не выдумывае�
   }
 });
 
-test('/clear во время хода не рвёт разговор: сначала /stop', async () => {
+test('/clear during a turn does not tear down the conversation: /stop first', async () => {
   const config = makeConfig();
   const session = fakeSession({ busy: true });
   const { registry } = makeRegistry(session, config);
@@ -216,7 +216,7 @@ test('/clear во время хода не рвёт разговор: снача
   }
 });
 
-test('/clear не трогает чужие разговоры в том же каталоге', async () => {
+test('/clear does not touch other conversations in the same directory', async () => {
   const config = makeConfig();
   const { registry } = makeRegistry(fakeSession(), config);
   const mine = putSessionFile(config, 'conv');
@@ -235,7 +235,7 @@ test('/clear не трогает чужие разговоры в том же к
   }
 });
 
-test('/rename меняет имя разговора в реестре и не теряет новую сессию', async () => {
+test('/rename changes the conversation name in the registry and does not lose the new session', async () => {
   const config = makeConfig();
   const { registry } = makeRegistry(fakeSession(), config);
   ensureChat(config, probe(), 'conv', 'telegram');
@@ -253,7 +253,7 @@ test('/rename меняет имя разговора в реестре и не �
   }
 });
 
-test('/rename заводит запись разговора, если её ещё не было', async () => {
+test('/rename creates a conversation record if there was none', async () => {
   const config = makeConfig();
   const { registry } = makeRegistry(fakeSession(), config);
   try {
@@ -269,7 +269,7 @@ test('/rename заводит запись разговора, если её ещ
   }
 });
 
-test('/rename без имени не выдумывает название', async () => {
+test('/rename without a name does not invent a title', async () => {
   const config = makeConfig();
   const { registry } = makeRegistry(fakeSession(), config);
   try {

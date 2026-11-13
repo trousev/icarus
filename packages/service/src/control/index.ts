@@ -1,25 +1,25 @@
-// Панель управления Icarus: чат и настройки — тонкий JSON-слой над сессиями pi,
-// файлами и git.
+// Icarus control panel: chat and settings — a thin JSON layer over pi sessions,
+// files and git.
 //
-// Человека называет SSO-прокси (см. identity.ts), поэтому параметра user в запросах нет
-// и подменить его нельзя: чужую память через свою сессию не открыть.
+// The person is named by the SSO proxy (see identity.ts), so there is no user parameter in requests
+// and it cannot be substituted: someone else's memory cannot be opened through your own session.
 //
-// Главный экран — /panel/chat: диалоги, лента и композер. Чат ходит в те же сессии
-// pi, что Telegram, только conversationId начинается с web-. Настройки
-// (/panel/memory, /panel/skills, /panel/mcp) открываются панелью поверх чата.
+// The main screen is /panel/chat: dialogs, feed and composer. Chat goes to the same pi
+// sessions as Telegram, only conversationId starts with web-. Settings
+// (/panel/memory, /panel/skills, /panel/mcp) are opened by the panel over the chat.
 //
-// Внутри памяти две области: личная и семейная. Файлов встроенных умений здесь нет:
-// их инструменты — обычный MCP, а всё созданное живёт в рабочей папке разговора.
+// Inside memory there are two scopes: personal and shared. There are no built-in skill files here:
+// their tools are ordinary MCP, and everything created lives in the working folder of the conversation.
 //
-// Скиллы — третий вид раздела: их пишет человек, и правка тут не построчная, а целым
-// файлом (`SKILL.md`). Панель — автор скиллов, pi — их читатель: каталог скиллов
-// человека монтируется в контейнер как `~/.pi/agent/skills`, откуда pi берёт их при
-// старте сессии. Поэтому после сохранения панель поднимает поколение ресурсов: живой
-// разговор доигрывает на старом наборе, а следующий ход поднимает pi заново.
+// Skills are the third kind of section: a person writes them, and editing here is not line-by-line but a whole
+// file (`SKILL.md`). The panel is the author of skills, pi is their reader: the person's
+// skills directory is mounted into the container as `~/.pi/agent/skills`, from where pi takes them at
+// session start. Therefore after saving the panel bumps the resource generation: a live
+// conversation finishes on the old set, and the next turn starts pi again.
 //
-// Старые адреса (/panel/api/*) остаются рабочими: браузер держит открытую страницу
-// панели живой, и после обновления сервиса она не должна осыпаться на полуслове.
-// Новые маршруты короче и называют раздел явно — их и рисует сама панель.
+// Old addresses (/panel/api/*) remain working: the browser keeps an open panel
+// page alive, and after a service update it must not crumble mid-word.
+// The new routes are shorter and name the section explicitly — the panel itself draws them.
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import fs from 'node:fs';
 import { handleWorkspacesApi } from './workspaces.ts';
@@ -99,44 +99,44 @@ import { log as logger } from '../log.ts';
 
 export type PanelContext = {
   config: IcarusConfig;
-  /** Живые сессии pi: из них панель отправляет сообщения и читает историю. */
+  /** Live pi sessions: from them the panel sends messages and reads history. */
   registry?: SessionRegistry;
   /**
-   * Отметить, что медленные ресурсы человека (скиллы) поменялись: живая сессия pi
-   * держит их в памяти с самого старта, поэтому следующий ход поднимает её заново.
-   * Не передан — панель просто пишет файлы (так её гоняют тесты хранилища).
+   * Mark that the person's slow resources (skills) have changed: a live pi session
+   * keeps them in memory from the very start, so the next turn starts it again.
+   * Not passed — the panel just writes files (that is how the storage tests run it).
    */
   bump?: (userId: string) => void;
   /**
-   * Спросить модель: панель зовёт её, чтобы написать скилл по описанию человека.
-   * Не передан — кнопки «напиши за меня» нет вовсе (так живёт локальная панель:
-   * контейнера с моделью рядом с ней нет).
+   * Ask the model: the panel calls it to write a skill from the person's description.
+   * Not passed — there is no "write it for me" button at all (that is how the local panel lives:
+   * there is no container with a model next to it).
    */
   draft?: (userId: string, idea: string) => Promise<string>;
   /**
-   * Вынести Telegram-разговор из Telegram: архивация в панели и в боте — одно
-   * действие, и топик Telegram удаляется вместе с сообщениями (см. archiveChat).
-   * Не передан — панель без бота: архив остаётся только отметкой в реестре.
+   * Move a Telegram conversation out of Telegram: archiving in the panel and in the bot is one
+   * action, and the Telegram topic is deleted together with the messages (see archiveChat).
+   * Not passed — the panel is without the bot: the archive remains only as a mark in the registry.
    */
   archiveTelegram?: (user: UserConfig, chat: ChatRecord) => Promise<void>;
 };
 
-/** Разделы панели: порядок здесь — порядок в сайдбаре. Подписи — из словаря. */
+/** Panel sections: the order here is the order in the sidebar. Labels — from the dictionary. */
 export const SECTIONS: { id: string; adminOnly?: boolean }[] = [
   { id: 'memory' },
   { id: 'skills' },
   { id: 'mcp' },
-  // Задачи — не настройка, а действие: человек заводит расписание, по которому агент
-  // запускается сам. Стоят рядом с MCP: это тоже «что Икар умеет без человека».
+  // Tasks are not a setting but an action: a person sets up a schedule by which the agent
+  // starts itself. They stand next to MCP: this is also "what Icarus can do without a person".
   { id: 'tasks' },
-  // Ключи — настройка инсталляции, а не человека: раздел видят и открывают только
-  // админы. Стоит он перед «Пользователем»: остальное — про содержимое, это — про
-  // доступы, а последним идёт личная настройка.
+  // Keys are installation settings, not a person's: only admins see and open
+  // the section. It stands before "Profile": the rest is about content, this is about
+  // access, and last comes the personal setting.
   { id: 'keys', adminOnly: true },
   { id: 'profile' },
 ];
 
-/** Подпись раздела на языке интерфейса. */
+/** Section label in the interface language. */
 function sectionLabel(id: string, ui: PanelStrings): string {
   switch (id) {
     case 'memory':
@@ -156,13 +156,13 @@ function sectionLabel(id: string, ui: PanelStrings): string {
   }
 }
 
-/** Подписи областей: их рисует панель, и держать их в браузере незачем. */
+/** Scope labels: the panel draws them, and there is no reason to keep them in the browser. */
 function scopeLabels(ui: PanelStrings): Record<string, string> {
   return { personal: ui.scopePersonal, shared: ui.scopeShared, skills: ui.sectionSkills };
 }
 
 type Scope = 'personal' | 'shared' | 'skills' | 'profile';
-/** Режим раздела: memory правится построчно, skills — целым файлом. */
+/** Section mode: memory is edited line by line, skills — as a whole file. */
 export type ScopeMode = 'memory' | 'skills' | 'profile';
 
 function json(res: ServerResponse, status: number, payload: unknown): void {
@@ -171,10 +171,10 @@ function json(res: ServerResponse, status: number, payload: unknown): void {
 }
 
 /**
- * Отказ хранилища общих скиллов.
+ * Shared skill store failure.
  *
- * Ошибку формата (битый registry.json) человеку надо показать текстом, а не
- * уронить весь раздел: он тогда поймёт, что чинить, и не решит, что скиллы пропали.
+ * A format error (broken registry.json) must be shown to the person as text, not
+ * bring down the whole section: then he will understand what to fix and will not decide that the skills are gone.
  */
 function skillError(res: ServerResponse, error: unknown): void {
   if (error instanceof SkillStoreError) {
@@ -190,16 +190,16 @@ function skillError(res: ServerResponse, error: unknown): void {
 }
 
 /**
- * Раздел «Пользователь»: две независимые настройки — язык ответов и язык интерфейса.
+ * The "Profile" section: two independent settings — response language and interface language.
  *
- * GET отдаёт обе и списки доступных; POST меняет ту, которую прислали, не трогая
- * вторую. Файл профиля лежит рядом с памятью человека, поэтому настройки переживают
- * и перезапуск сервиса, и пересоздание контейнера.
+ * GET returns both and the lists of available ones; POST changes the one that was sent, without touching
+ * the second. The profile file lies next to the person's memory, so the settings survive
+ * both a service restart and container recreation.
  *
- * Смена языка ответов живую сессию не рвёт, но помечает ресурсы: pi читает AGENTS.md
- * при старте, поэтому следующая реплика поднимает её заново — тем же механизмом, что
- * и скиллы. Смена языка интерфейса pi не касается вовсе: её видит только панель, и
- * перезапускать из-за неё разговор значило бы терять контекст ни за что.
+ * Changing the response language does not tear the live session but marks the resources: pi reads AGENTS.md
+ * at start, so the next reply starts it again — by the same mechanism as
+ * skills. Changing the interface language does not concern pi at all: only the panel sees it, and
+ * restarting the conversation because of it would mean losing context for nothing.
  */
 async function handleProfileApi(
   req: IncomingMessage,
@@ -222,7 +222,7 @@ async function handleProfileApi(
       labels: LANGUAGE_LABELS,
       uiLanguage: uiLanguageOf(config, user),
       uiLanguages: UI_LANGUAGES,
-      // Подписи одни и те же: «Русский» и «English» человек читает на любом языке.
+      // The labels are the same: "Русский" and "English" a person reads in any language.
       uiLabels: LANGUAGE_LABELS,
     });
     return;
@@ -263,8 +263,8 @@ async function handleProfileApi(
     return;
   }
 
-  // Меняем только присланное поле: иначе переключение интерфейса молча сбрасывало
-  // бы язык ответов (и наоборот) — ровно то смешение, от которого уходим.
+  // We change only the field that was sent: otherwise switching the interface would silently reset
+  // the response language (and vice versa) — exactly the mixing we are moving away from.
   const previousLanguage = languageOf(config, user);
   const current = readProfile(config, user) ?? { language: previousLanguage, uiLanguage: DEFAULT_UI_LANGUAGE };
   const next = {
@@ -273,23 +273,23 @@ async function handleProfileApi(
   };
   writeProfile(config, user, next);
 
-  // Язык ответов живёт в AGENTS.md, а его pi читает при старте процесса — значит,
-  // живую сессию без этой пометки смена языка не догонит, и человек услышит прежний
-  // язык. Помечаем только когда он правда поменялся, и никогда — из-за интерфейса.
+  // The response language lives in AGENTS.md, and pi reads it at process start — that means
+  // without this mark the language change will not catch up with the live session, and the person will hear the previous
+  // language. We mark only when it really changed, and never — because of the interface.
   if (next.language !== previousLanguage) bumpResources(ctx, userId);
 
   json(res, 200, { user: userId, language: next.language, uiLanguage: next.uiLanguage });
 }
 
 /**
- * Ресурсы человека поменялись — pi об этом ещё не знает.
+ * The person's resources have changed — pi does not know about it yet.
  *
- * Ресурсы pi читает один раз при старте процесса: каталог скиллов и карту окружения
- * (AGENTS.md, а в ней — язык ответов). Поэтому правка файла сама по себе до живого
- * разговора не доедет. Пометка «ресурсы обновились» говорит реестру сессий поднять
- * следующую сессию заново: идущий ход доигрывает на прежнем наборе, а следующий
- * ответ — уже с новым скиллом или на новом языке (см. SessionRegistry.bumpResources).
- * Ошибка тут не должна отменять сохранение: файл уже записан и закоммичен.
+ * pi reads resources once at process start: the skills directory and the environment map
+ * (AGENTS.md, and in it — the response language). Therefore editing a file by itself will not reach the live
+ * conversation. The mark "resources updated" tells the session registry to start
+ * the next session again: the running turn finishes on the previous set, and the next
+ * answer — already with the new skill or in the new language (see SessionRegistry.bumpResources).
+ * An error here must not cancel the save: the file is already written and committed.
  */
 function bumpResources(ctx: PanelContext, userId: string): void {
   try {
@@ -300,12 +300,12 @@ function bumpResources(ctx: PanelContext, userId: string): void {
 }
 
 /**
- * Заголовок для скачивания: имя файла как есть, а не «file».
+ * Header for download: the file name as is, not "file".
  *
- * Имена в памяти русские, а в ASCII-варианте заголовка кириллицы быть не может —
- * поэтому имя едет дважды: подчищенное для старых браузеров и percent-encoded
- * (RFC 5987) для всех остальных. Без второго браузер сохранил бы «здоровье.md»
- * как «______.md».
+ * Names in memory are Russian, and in the ASCII variant of the header there can be no Cyrillic —
+ * therefore the name travels twice: cleaned for old browsers and percent-encoded
+ * (RFC 5987) for all the rest. Without the second, the browser would save "здоровье.md"
+ * as "______.md".
  */
 export function disposition(relative: string): string {
   const name = relative.split('/').pop() ?? 'file';
@@ -314,9 +314,9 @@ export function disposition(relative: string): string {
 }
 
 /**
- * Отдать текст файлом: браузер сохранит его под тем же именем, а не покажет
- * страницей. Проверки пути — те же, что у обычного чтения: их делает тот, кто
- * уже прочитал содержимое.
+ * Serve text as a file: the browser will save it under the same name instead of showing
+ * it as a page. The path checks are the same as for ordinary reading: they are done by the one who
+ * has already read the content.
  */
 function sendAttachment(res: ServerResponse, relative: string, content: string): void {
   const body = Buffer.from(content, 'utf8');
@@ -329,7 +329,7 @@ function sendAttachment(res: ServerResponse, relative: string, content: string):
 }
 
 /**
- * Область памяти из запроса: всё незнакомое — личная, как и раньше.
+ * Memory scope from the request: everything unfamiliar is personal, as before.
  */
 function parseScope(raw: unknown): 'personal' | 'shared' {
   return raw === 'shared' ? raw : 'personal';
@@ -337,19 +337,19 @@ function parseScope(raw: unknown): 'personal' | 'shared' {
 
 function modeFor(scope: Scope): ScopeMode {
   if (scope === 'skills') return 'skills';
-  // Профиль — не файлы, а форма настроек: у него свой рендер и свои маршруты,
-  // и в общий разбор «файлов памяти» он не заходит.
+  // Profile is not files but a settings form: it has its own render and its own routes,
+  // and it does not enter the common "memory files" parsing.
   if (scope === 'profile') return 'profile';
   return 'memory';
 }
 
 /**
- * Какую область читает запрос.
+ * Which scope the request reads.
  *
- * У новых маршрутов раздел стоит в адресе (`/panel/skills/files`) и решает всё:
- * область из query там только путала бы. У старых (`/panel/api/*`) раздела в
- * адресе нет — они и раньше называли область параметром, и открытая в браузере
- * вкладка панели должна продолжать работать после обновления сервиса.
+ * In the new routes the section is in the address (`/panel/skills/files`) and decides everything:
+ * the scope from the query would only confuse there. In the old ones (`/panel/api/*`) there is no section in
+ * the address — they already named the scope with a parameter, and an open panel
+ * tab in the browser must keep working after a service update.
  */
 function scopeFor(section: string | undefined, raw: unknown): Scope {
   if (section === 'skills') return 'skills';
@@ -358,47 +358,47 @@ function scopeFor(section: string | undefined, raw: unknown): Scope {
   return raw === 'shared' ? raw : 'personal';
 }
 
-/** Корень раздела и набор расширений, которые в нём вообще допустимы. */
+/** The section root and the set of extensions that are allowed in it at all. */
 function resolveScope(config: IcarusConfig, userId: string, scope: Scope) {
   const user = findUser(config, userId);
   if (!user) return null;
   const paths = userPaths(config, user);
   if (scope === 'shared') return { root: paths.sharedMemory, allowed: memoryExtensions };
   if (scope === 'skills') return { root: paths.skills, allowed: skillExtensions };
-  // Профиль — один файл, и живёт он на уровень выше памяти. Корнем отдаём каталог
-  // человека: списком файлов его никто не ходит, а «есть ли файл» — вопрос к нему же.
+  // Profile is a single file, and it lives one level above memory. As the root we give the person's
+  // directory: nobody walks it as a file list, and "is there a file" is a question to it too.
   if (scope === 'profile') return { root: paths.icarus, allowed: NO_FILES };
   return { root: paths.memory, allowed: memoryExtensions };
 }
 
 /**
- * Разделы, у которых файлов нет вовсе: список файлов у них запрашивать нечего.
- * Пустой набор вместо `[]` — потому что ниже его сравнивают как множество.
+ * Sections that have no files at all: there is nothing to ask them for a file list.
+ * An empty set instead of `[]` — because below it is compared as a set.
  */
 const NO_FILES: ReadonlySet<string> = new Set();
 
-/** Какие области есть у человека и что в них можно делать. */
+/** Which scopes a person has and what can be done in them. */
 function scopesFor(): Record<string, ScopeMode> {
-  // Областей ровно две, и обе — память. Скиллы и математика сюда не входят: это
-  // разделы со своим корнем, и в списке областей они появлялись бы вторым входом
-  // туда же — ровно та путаница, из-за которой математику отсюда убрали.
+  // There are exactly two scopes, and both are memory. Skills and math do not belong here: they are
+  // sections with their own root, and in the scope list they would appear as a second entrance
+  // to the same place — exactly the confusion because of which math was removed from here.
   return { personal: 'memory', shared: 'memory' };
 }
 
-/** Репозитории и каталоги, без которых раздел не открыть: панель их и заводит. */
+/** Repositories and directories without which the section cannot be opened: the panel creates them. */
 async function prepare(config: IcarusConfig, userId: string): Promise<void> {
   const user = findUser(config, userId);
   if (!user) return;
   const paths = userPaths(config, user);
   await ensureRepo(paths.memory);
   await ensureRepo(paths.sharedMemory);
-  // Скиллы — свой репозиторий внутри каталога, который pi читает как `~/.pi/agent/skills`.
-  // Отдельный от pi-agent: в самом pi-agent лежат auth.json и mcp.json с ключами, и
-  // заводить репозиторий над ними значило бы коммитить ключи.
+  // Skills have their own repository inside the directory that pi reads as `~/.pi/agent/skills`.
+  // Separate from pi-agent: in pi-agent itself lie auth.json and mcp.json with keys, and
+  // creating a repository over them would mean committing keys.
   await ensureRepo(paths.skills);
 }
 
-/** Сколько файлов в каждой области: панель показывает это числом у раздела. */
+/** How many files in each scope: the panel shows this as a number next to the section. */
 function countsFor(config: IcarusConfig, userId: string): Record<string, number> {
   const user = findUser(config, userId);
   if (!user) return {};
@@ -406,9 +406,9 @@ function countsFor(config: IcarusConfig, userId: string): Record<string, number>
   const counts: Record<string, number> = {
     personal: countFiles(paths.memory, memoryExtensions),
     shared: countFiles(paths.sharedMemory, memoryExtensions),
-    // У скиллов считаем не файлы, а сами скиллы: бандл из десятка файлов —
-    // это один скилл, и число рядом с разделом должно значить именно это.
-    // В счёт входят и расшаренные: панель показывает их в том же списке.
+    // For skills we count not files but the skills themselves: a bundle of a dozen files is
+    // one skill, and the number next to the section must mean exactly that.
+    // Shared ones are also included in the count: the panel shows them in the same list.
     skills: listSkills(paths.skills).length,
   };
   try {
@@ -419,11 +419,11 @@ function countsFor(config: IcarusConfig, userId: string): Record<string, number>
   try {
     counts.mcp = countVisible(config, userId);
   } catch (error) {
-    // Сломанное хранилище MCP не должно ронять счётчики всей панели.
+    // A broken MCP store must not bring down the counters of the whole panel.
     logger.warn('MCP: счётчик не собрался', { user: userId, error: String(error) });
   }
   try {
-    // Артефакты считаем по всем workspace'ам: раздел один, а лежат они в разных.
+    // We count artifacts across all workspaces: the section is one, but they lie in different ones.
     counts.artifacts = countArtifacts(config, userId);
   } catch (error) {
     logger.warn('артефакты: счётчик не собрался', { user: userId, error: String(error) });
@@ -439,16 +439,16 @@ export async function handlePanel(
 ): Promise<boolean> {
   const { config } = ctx;
 
-  // Публичные маршруты MCP: их зовёт authorization server и браузер после
-  // редиректа, а не панель с заголовком SSO. В callback человека связывает state.
+  // Public MCP routes: they are called by the authorization server and the browser after a
+  // redirect, not by the panel with the SSO header. In the callback the person is bound by state.
   if (url.pathname.startsWith('/panel/mcp/oauth/')) {
     if (await handleMcpPublic(req, res, url, ctx)) return true;
   }
 
   const access = identifyPanelUser(req, config);
 
-  // Файл артефакта: путь, а не query, чтобы относительные ссылки внутри HTML
-  // (стили, картинки) разрешались сами. SSO тут обязателен: это панель.
+  // Artifact file: a path, not a query, so that relative links inside the HTML
+  // (styles, images) resolve by themselves. SSO is mandatory here: this is the panel.
   if (url.pathname.startsWith('/panel/artifacts/raw/')) {
     if (!access.ok) {
       json(
@@ -465,7 +465,7 @@ export async function handlePanel(
     return true;
   }
 
-  // Файл конкретной версии — для предпросмотра истории. Тот же SSO, что у панели.
+  // The file of a specific version — for previewing history. The same SSO as the panel.
   if (url.pathname.startsWith('/panel/artifacts/version/')) {
     if (!access.ok) {
       json(
@@ -482,8 +482,8 @@ export async function handlePanel(
     return true;
   }
 
-  // Корень панели — чат: это теперь главный экран, а память и скиллы живут
-  // настройками. Старые ссылки на файл памяти по-прежнему ведут в память.
+  // The panel root is chat: this is now the main screen, and memory and skills live
+  // as settings. Old links to a memory file still lead to memory.
   if (url.pathname === '/panel' || url.pathname === '/panel/') {
     if (!access.ok) {
       res.writeHead(access.denial.status, { 'content-type': 'text/html; charset=utf-8' });
@@ -508,8 +508,8 @@ export async function handlePanel(
 
   const page = routePage(url.pathname);
   if (page) {
-    // Старые ссылки открывали настройки поверх чата (?settings=memory). Теперь у
-    // настроек своя страница с меню в левой панели — туда и ведём, не теряя раздел.
+    // Old links opened settings over the chat (?settings=memory). Now the
+    // settings have their own page with a menu in the left panel — we lead there without losing the section.
     const legacySettings = page.section === 'chat' ? url.searchParams.get('settings') : null;
     if (legacySettings && /^(artifacts|memory|skills|mcp|tasks|keys|profile)$/.test(legacySettings)) {
       res.writeHead(302, { location: `/panel/${legacySettings}` });
@@ -522,8 +522,8 @@ export async function handlePanel(
       html = panelHtml(access.denial);
       status = access.denial.status;
     } else if (page.section === 'keys' && !isAdmin(findUser(config, access.identity.userId))) {
-      // Раздел не прячем в 404: человек пришёл по ссылке из закладки и должен
-      // понять, что дело в правах, а не в сломанной панели.
+      // We do not hide the section behind a 404: the person came by a link from a bookmark and must
+      // understand that it is about permissions, not a broken panel.
       html = panelHtml({
         status: 403,
         message: 'Ключи правит только админ',
@@ -546,7 +546,7 @@ export async function handlePanel(
     return true;
   }
 
-  // Артефакты — свой префикс, как у MCP и ключей: страница и API живут вместе.
+  // Artifacts have their own prefix, like MCP and keys: the page and API live together.
   if (url.pathname === '/panel/artifacts/api' || url.pathname.startsWith('/panel/artifacts/api/')) {
     await handleApi(req, res, url, ctx, access);
     return true;
@@ -557,20 +557,20 @@ export async function handlePanel(
     return true;
   }
 
-  // Ключи — свой префикс, как у MCP: страница и API живут под одним разделом.
+  // Keys have their own prefix, like MCP: the page and API live under one section.
   if (url.pathname === '/panel/keys/api' || url.pathname.startsWith('/panel/keys/api/')) {
     await handleApi(req, res, url, ctx, access);
     return true;
   }
 
-  // Профиль — та же история, что у MCP: страница и её API живут под одним разделом,
-  // поэтому API уходит по своему префиксу, а не делит адрес со страницей.
+  // Profile is the same story as MCP: the page and its API live under one section,
+  // so the API goes by its own prefix instead of sharing an address with the page.
   if (url.pathname === '/panel/profile/api' || url.pathname.startsWith('/panel/profile/api/')) {
     await handleApi(req, res, url, ctx, access);
     return true;
   }
 
-  // Задачи — свой префикс, как у MCP: страница и её API живут под одним разделом.
+  // Tasks have their own prefix, like MCP: the page and its API live under one section.
   if (url.pathname === '/panel/tasks/api' || url.pathname.startsWith('/panel/tasks/api/')) {
     await handleApi(req, res, url, ctx, access);
     return true;
@@ -584,22 +584,22 @@ export async function handlePanel(
   return false;
 }
 
-/** Раздел из адреса: /panel/chat, /panel/artifacts, /panel/memory и остальные. */
+/** Section from the address: /panel/chat, /panel/artifacts, /panel/memory and the rest. */
 function routePage(pathname: string): PanelPage | null {
   if (pathname === '/panel/chat' || pathname === '/panel/chat/') return { section: 'chat' };
   const match = /^\/panel\/(artifacts|memory|skills|mcp|tasks|keys|profile)\/?$/.exec(pathname);
   return match ? { section: match[1] } : null;
 }
 
-/** Маршрут API из адреса: /panel/<раздел>/<имя>. */
+/** API route from the address: /panel/<section>/<name>. */
 function routeApi(pathname: string): { section: string; name: string } | null {
   const match = /^\/panel\/(memory|skills)\/([\w-]+)$/.exec(pathname);
   return match ? { section: match[1], name: match[2] } : null;
 }
 
 /**
- * Разделы панели у этого человека: ключи — только у админа. Остальных разделов
- * не прячем: это его собственные память, скиллы и настройки.
+ * Panel sections for this person: keys — only for an admin. We do not hide the other sections:
+ * they are his own memory, skills and settings.
  */
 function sectionsFor(
   config: IcarusConfig,
@@ -622,8 +622,8 @@ async function sectionPage(
 ): Promise<string> {
   await prepare(config, userId);
   const user = findUser(config, userId);
-  // Язык интерфейса — до сборки сессии: из него берутся подписи разделов, областей
-  // и всех строк страницы. Без человека (панель без конфига) остаётся русский.
+  // The interface language is set before building the session: from it come the labels of sections, scopes
+  // and all page strings. Without a person (panel without config) Russian remains.
   const uiLanguage: UiLanguage = user ? uiLanguageOf(config, user) : DEFAULT_UI_LANGUAGE;
   const ui = panelStrings(uiLanguage);
   const session: PanelSession = {
@@ -636,8 +636,8 @@ async function sectionPage(
     draftSkills,
     admin: isAdmin(user),
     uiLanguage,
-    // Язык ответов: панель показывает его в разделе «Пользователь» и подсвечивает
-    // выбранный. Он же уезжает в AGENTS.md человека (см. workspace.ts).
+    // Response language: the panel shows it in the "Profile" section and highlights
+    // the selected one. It also goes into the person's AGENTS.md (see workspace.ts).
     ...(user ? { language: languageOf(config, user) } : {}),
   };
   if (page.section === 'chat') {
@@ -663,15 +663,15 @@ async function sectionPage(
   }
   return panelHtml(session, {
     ...page,
-    // Область — только у памяти: у скиллов и математики её нет, и тащить туда личную
-    // значит показывать раздел в виде, которого не бывает.
+    // Scope — only for memory: skills and math have none, and dragging the personal one there
+    // would mean showing the section in a form that does not exist.
     scope: scopeFor(page.section, url.searchParams.get('scope')),
     file: url.searchParams.get('file') ?? undefined,
-    // Владелец открытого скилла: у своего он совпадает с человеком, у расшаренного
-    // приезжает в адресе. Без него два скилла с одинаковым id не различить.
+    // Owner of the open skill: for your own it matches the person, for a shared one
+    // it comes in the address. Without it two skills with the same id cannot be told apart.
     owner: url.searchParams.get('owner') ?? undefined,
-    // Пустой редактор нового скилла — тоже состояние, и живёт оно в адресе: ссылку
-    // «заведи скилл» можно переслать, а «назад» возвращает к списку.
+    // An empty editor of a new skill is also state, and it lives in the address: the link
+    // "create a skill" can be forwarded, and "back" returns to the list.
     fresh: url.searchParams.get('new') === '1',
     tab: url.searchParams.get('tab') === 'history' ? 'history' : 'notes',
   });
@@ -699,38 +699,38 @@ async function handleApi(
 
   const userId = access.identity.userId;
 
-  // Артефакты — свой раздел: список, чтение, ссылки и удаление. Его маршруты не
-  // должны попадать в общий разбор памяти, иначе «файл артефакта» искали бы
-  // среди записей памяти.
+  // Artifacts are their own section: list, read, links and delete. Its routes must not
+  // fall into the common memory parsing, otherwise "artifact file" would be searched
+  // among memory records.
   if (url.pathname === '/panel/artifacts/api' || url.pathname.startsWith('/panel/artifacts/api/')) {
     await handleArtifactsApi(req, res, url, config, userId);
     return;
   }
 
-  // Задачи — отдельная ветка: у них своё хранилище расписаний, а не файлы памяти.
-  // Ветка стоит до общего разбора области, иначе «задачи» искались бы среди записей.
+  // Tasks are a separate branch: they have their own schedule storage, not memory files.
+  // The branch stands before the common scope parsing, otherwise "tasks" would be searched among records.
   if (url.pathname === '/panel/tasks/api' || url.pathname.startsWith('/panel/tasks/api/')) {
     await handleTasksApi(req, res, url, { config, userId });
     return;
   }
 
-  // Ключи — только админ: проверка живёт в обработчике, рядом с записью файлов,
-  // чтобы её не обошёл ни один новый маршрут раздела.
+  // Keys — admin only: the check lives in the handler, next to the file writing,
+  // so that no new route of the section can bypass it.
   if (url.pathname === '/panel/keys/api' || url.pathname.startsWith('/panel/keys/api/')) {
     await handleKeysApi(req, res, url, { config, userId, bump: ctx.bump });
     return;
   }
 
-  // MCP — отдельный раздел со своими маршрутами; в общий разбор областей он не
-  // заходит, иначе «файлы» памяти попытались бы открыть MCP-сервер.
+  // MCP is a separate section with its own routes; it does not enter the common scope
+  // parsing, otherwise memory "files" would try to open an MCP server.
   if (url.pathname.startsWith('/panel/mcp/')) {
     await handleMcpApi(req, res, url, ctx, userId);
     return;
   }
 
-  // Чат — отдельная ветка: у него свои сущности (диалоги и сессии pi), и общий
-  // разбор памяти тут только мешал бы. Тело POST он читает сам, поэтому уходим
-  // до общего readJsonBody ниже.
+  // Chat is a separate branch: it has its own entities (dialogs and pi sessions), and the common
+  // memory parsing would only get in the way here. It reads the POST body itself, so we leave
+  // before the common readJsonBody below.
   if (url.pathname === '/panel/api/chats' || url.pathname.startsWith('/panel/api/chat/')) {
     await handleChatApi(req, res, url, {
       config,
@@ -741,29 +741,29 @@ async function handleApi(
     return;
   }
 
-  // Workspace'ы — папки, а не контейнеры: отдельная ветка, тот же человек из прокси.
+  // Workspaces are folders, not containers: a separate branch, the same person from the proxy.
   if (url.pathname === '/panel/api/workspaces' || url.pathname.startsWith('/panel/api/workspaces/')) {
     await handleWorkspacesApi(req, res, url, { config, userId });
     return;
   }
 
-  // Папки в меню слева — полки для разговоров, а не рабочие каталоги: своя ветка,
-  // чтобы они не попадали в разбор областей памяти.
+  // Folders in the left menu are shelves for conversations, not working directories: their own branch,
+  // so that they do not fall into the memory scope parsing.
   if (url.pathname === '/panel/api/folders' || url.pathname.startsWith('/panel/api/folders/')) {
     await handleFoldersApi(req, res, url, { config, userId });
     return;
   }
 
-  // Файлы рабочей папки для правой панели чата: дерево и предпросмотр. Отдельная
-  // ветка до общего разбора области — иначе «файлы» искались бы в памяти.
+  // Working folder files for the chat's right panel: tree and preview. A separate
+  // branch before the common scope parsing — otherwise "files" would be searched in memory.
   if (url.pathname === '/panel/api/workspace-files' || url.pathname.startsWith('/panel/api/workspace-files/')) {
     await handleWorkspaceFilesApi(req, res, url, { config, userId });
     return;
   }
 
-  // «Пользователь» — настройка, а не файлы: маршрут живёт до общего разбора области,
-  // иначе запрос на сохранение языка попал бы в «память» и искал бы в ней файл
-  // `profile`. Имя настройки стоит сразу за `api`, а не после имени раздела.
+  // "Profile" is a setting, not files: the route lives before the common scope parsing,
+  // otherwise a request to save the language would fall into "memory" and look there for a file
+  // `profile`. The setting name stands right after `api`, not after the section name.
   if (url.pathname === '/panel/profile/api' || url.pathname.startsWith('/panel/profile/api/')) {
     await prepare(config, userId);
     await handleProfileApi(req, res, ctx, userId);
@@ -800,20 +800,20 @@ async function handleApi(
     return;
   }
 
-  // У GET область приходит в query, у POST — в теле. Человека в запросе нет:
-  // его уже назвал прокси, и подменить его нельзя.
+  // For GET the scope comes in the query, for POST — in the body. There is no person in the request:
+  // the proxy has already named him, and he cannot be substituted.
   let body: Record<string, unknown> = {};
   if (req.method === 'POST') {
     try {
       body = (await readJsonBody(req)) as Record<string, unknown>;
     } catch (error) {
-      // Битое тело — это отказ в запросе, а не падение панели: чинить его нечем.
+      // A broken body is a refusal in the request, not a panel crash: there is nothing to fix it with.
       json(res, 400, errorBody(`не разобрал тело запроса: ${String(error)}`, 'invalid_request_error'));
       return;
     }
   }
-  // Раздел в адресе старше области: /panel/skills/… — это скиллы, каким бы
-  // ни был scope в запросе, а /panel/memory/… — только память.
+  // The section in the address is older than the scope: /panel/skills/… is skills, whatever the
+  // scope in the request, and /panel/memory/… is only memory.
   const scope = scopeFor(route?.section, url.searchParams.get('scope') ?? body.scope);
   const mode = modeFor(scope);
   const resolved = resolveScope(config, userId, scope);
@@ -824,14 +824,14 @@ async function handleApi(
   const { root, allowed } = resolved;
 
   if (req.method === 'GET' && name === 'files') {
-    // Память и скиллы — под git: их правки в панели откатываются коммитами.
+    // Memory and skills are under git: their edits in the panel are reverted by commits.
     await ensureRepo(root);
-    // У скиллов «файлы» — это сами скиллы: каталог с SKILL.md внутри и его бандл.
-    // Панель показывает их списком, а не россыпью файлов, из которых они собраны.
+    // For skills "files" are the skills themselves: a directory with SKILL.md inside and its bundle.
+    // The panel shows them as a list, not a scattering of the files they are made of.
     if (mode === 'skills') {
       try {
-        // Свои и расшаренные — в одном списке: человеку не важно, откуда скилл,
-        // ему важно, включён ли он и можно ли его править.
+        // Own and shared — in one list: a person does not care where the skill is from,
+        // he cares whether it is enabled and whether he can edit it.
         json(res, 200, { user: userId, scope, mode, root, skills: listVisibleSkills(config, userId) });
       } catch (error) {
         skillError(res, error);
@@ -842,10 +842,10 @@ async function handleApi(
     return;
   }
 
-  // ── скиллы ──────────────────────────────────────────────────────────────────
-  // Раздел целиком свой: панель тут не «смотрит файлы», а пишет скиллы, поэтому и
-  // маршруты у него свои. Всё, что ниже этой ветки, до скиллов не доходит — иначе
-  // «забудь строку» и «удали файл» полезли бы в SKILL.md.
+  // ── skills ──────────────────────────────────────────────────────────────────
+  // The section is entirely its own: the panel here does not "look at files" but writes skills, so
+  // its routes are its own too. Everything below this branch does not reach skills — otherwise
+  // "forget a line" and "delete a file" would crawl into SKILL.md.
   if (mode === 'skills') {
     if (req.method === 'GET' && name === 'skill') {
       const owner = url.searchParams.get('owner') ?? userId;
@@ -862,8 +862,8 @@ async function handleApi(
       return;
     }
 
-    // «Напиши за меня»: человек описывает идею — модель собирает черновик скилла.
-    // Черновик только заполняет редактор: файл и коммит появляются после «Сохранить».
+    // "Write it for me": the person describes an idea — the model assembles a skill draft.
+    // The draft only fills the editor: the file and commit appear after "Save".
     if (req.method === 'POST' && name === 'draft') {
       if (!ctx.draft) {
         json(res, 501, errorBody('в этой панели писать некому: рядом нет контейнера с моделью'));
@@ -888,12 +888,12 @@ async function handleApi(
         return;
       }
 
-      // Занятые имена знает только диск: модель про них ничего не знает и вполне
-      // может предложить имя существующего скилла.
+      // Only the disk knows the taken names: the model knows nothing about them and quite
+      // possibly may suggest the name of an existing skill.
       let taken: Set<string>;
       try {
-        // Имена расшаренных скиллов тоже заняты: pi не должен получить два скилла
-        // с одним именем — он молча оставит только первый.
+        // The names of shared skills are taken too: pi must not receive two skills
+        // with one name — it will silently keep only the first.
         taken = new Set(listVisibleSkills(config, userId).map((skill) => skill.name));
       } catch {
         taken = new Set(listSkills(root).map((skill) => skillLabel(skill.id)));
@@ -909,8 +909,8 @@ async function handleApi(
       return;
     }
 
-    // Файл скилла целиком: панель открывает скилл редактором, а скачивание — это
-    // тот же SKILL.md, отданный файлом (и файлы бандла заодно).
+    // The whole skill file: the panel opens the skill in an editor, and download is
+    // the same SKILL.md served as a file (and the bundle files along with it).
     if (req.method === 'GET' && name === 'file') {
       const relative = url.searchParams.get('path') ?? '';
       const content = readMemoryFile(root, relative, skillExtensions);
@@ -927,8 +927,8 @@ async function handleApi(
     }
 
     if (req.method === 'POST' && name === 'save') {
-      // Чужой скилл только читается и включается. Править его у себя — значит
-      // незаметно разойтись с автором, поэтому панель отказывает, а не копирует.
+      // Someone else's skill is only read and enabled. Editing it on your side would mean
+      // quietly diverging from the author, so the panel refuses instead of copying.
       const owner = typeof body.owner === 'string' && body.owner ? body.owner : userId;
       if (owner !== userId) {
         json(res, 403, errorBody('чужой скилл правит только его владелец', 'permission_error'));
@@ -953,8 +953,8 @@ async function handleApi(
         json(res, 400, errorBody(result.message, 'invalid_request_error'));
         return;
       }
-      // Скилл был расшарен — снимок у остальных обязан догнать правку. Сначала
-      // переезд (имя могло смениться), потом снимок нового файла.
+      // The skill was shared — the snapshot at the others must catch up with the edit. First
+      // the move (the name could have changed), then the snapshot of the new file.
       try {
         if (wasShared) {
           if (previousId !== result.id) renameShare(config, userId, previousId, result.id);
@@ -964,12 +964,12 @@ async function handleApi(
         skillError(res, error);
         return;
       }
-      // Коммит — часть сохранения: у скиллов та же история и тот же откат, что у памяти.
+      // The commit is part of the save: skills have the same history and the same revert as memory.
       const committed = await commitAll(root, `skills: скилл «${skillLabel(result.id)}»`);
       bumpResources(ctx, userId);
       logger.info('панель: скилл сохранён', { user: userId, id: result.id, committed });
-      // Хеш коммита едет в панель: человек видит, что скилл не просто записан, а
-      // лёг в историю, откуда его можно вернуть.
+      // The commit hash goes to the panel: the person sees that the skill is not just written but
+      // has landed in history, from where it can be returned.
       const [head] = await log(root, 1);
       json(res, 200, { ...result, committed, commit: head?.hash ?? '' });
       return;
@@ -983,17 +983,17 @@ async function handleApi(
       }
       const id = String(body.id ?? '');
       const label = skillLabel(id);
-      // Файлы бандла человек мог положить руками и не закоммитить: удалять их
-      // безвозвратно нельзя, поэтому сначала фиксируем то, чего ещё нет в истории,
-      // — тогда откат удаления вернёт скилл целиком, а не один SKILL.md.
+      // The bundle files could have been placed by hand and not committed: they must not be
+      // deleted irrevocably, so first we record what is not in history yet,
+      // — then reverting the deletion will return the whole skill, not just one SKILL.md.
       const skillPath = skillScope(id);
-      // Выключенный скилл лежит в `.disabled/`, и незакоммиченный бандл там тоже
-      // надо зафиксировать: иначе откат удаления вернёт один SKILL.md.
+      // A disabled skill lies in `.disabled/`, and an uncommitted bundle there must also be
+      // recorded: otherwise reverting the deletion will return one SKILL.md.
       if ((await hasChanges(root, skillPath)) || (await hasChanges(root, `${SKILLS_DISABLED_DIR}/${skillPath}`))) {
         await commitAll(root, `skills: ${label} перед удалением`);
       }
       try {
-        // Снимаем шаринг до удаления: снимок у остальных не должен пережить скилл.
+        // We remove sharing before deletion: the snapshot at the others must not outlive the skill.
         setSkillShared(config, userId, id, false);
       } catch (error) {
         skillError(res, error);
@@ -1007,8 +1007,8 @@ async function handleApi(
       return;
     }
 
-    // Включение/выключение. Свой скилл переезжает между корнем и `.disabled/`,
-    // чужой — просто флаг у меня: сам файл лежит в общем снимке и только читается.
+    // Enable/disable. Your own skill moves between the root and `.disabled/`,
+    // someone else's — just a flag on my side: the file itself lies in the shared snapshot and is only read.
     if (req.method === 'POST' && name === 'toggle') {
       const id = String(body.id ?? '');
       const owner = typeof body.owner === 'string' && body.owner ? body.owner : userId;
@@ -1026,8 +1026,8 @@ async function handleApi(
             json(res, 400, errorBody(result.message, 'invalid_request_error'));
             return;
           }
-          // У владельца скилл может быть расшарен: снимок должен знать, что файл
-          // переехал в `.disabled/`, иначе у остальных он останется старым.
+          // At the owner the skill may be shared: the snapshot must know that the file
+          // has moved to `.disabled/`, otherwise at the others it will remain old.
           if (shared) setSkillShared(config, userId, result.id, true);
           await commitAll(root, `skills: ${body.enabled ? 'включить' : 'выключить'} «${skillLabel(id)}»`);
         }
@@ -1041,7 +1041,7 @@ async function handleApi(
       return;
     }
 
-    // Поделиться или спрятать. Только владелец: чужой скилл — не его имущество.
+    // Share or hide. Owner only: someone else's skill is not his property.
     if (req.method === 'POST' && name === 'share') {
       const id = String(body.id ?? '');
       if (typeof body.shared !== 'boolean') {
@@ -1060,15 +1060,15 @@ async function handleApi(
       try {
         detail = readVisibleSkill(config, userId, userId, id);
       } catch {
-        // Шаринг уже случился; ответ без детали — не повод отдавать ошибку.
+        // The sharing has already happened; a response without the detail is no reason to return an error.
       }
       json(res, 200, detail ?? { ok: true });
       return;
     }
 
     if (req.method === 'GET' && name === 'history') {
-      // Без пути: у скиллов история общая по каталогу, но с теми же цифрами по
-      // строкам коммита, что у файла памяти, — их рисует одна и та же вёрстка.
+      // Without a path: for skills the history is common across the directory, but with the same numbers per
+      // commit line as a memory file — they are drawn by the same layout.
       json(res, 200, { commits: await fileHistory(root, '') });
       return;
     }
@@ -1081,9 +1081,9 @@ async function handleApi(
     if (req.method === 'POST' && name === 'revert') {
       const result = await revert(root, String(body.commit ?? ''));
       if (result.ok) {
-        // Откат мог вернуть удалённый скилл или убрать существующий: снимки у
-        // остальных обязаны это догнать, иначе они получат инструкцию, которой
-        // у автора уже нет.
+        // The revert could have returned a deleted skill or removed an existing one: the snapshots at the
+        // others must catch up with this, otherwise they will get an instruction that
+        // the author no longer has.
         try {
           syncSharedSkills(config);
         } catch (error) {
@@ -1106,9 +1106,9 @@ async function handleApi(
     return;
   }
 
-  // Записи файла: строки с номерами и датами из истории — то, из чего панель рисует
-  // список с галочками. Файл целиком остаётся отдельным маршрутом: его читает
-  // подсветка картинок и старые вкладки панели.
+  // File entries: lines with numbers and dates from history — what the panel uses to draw
+  // the list with checkboxes. The whole file remains a separate route: it is read by
+  // image highlighting and old panel tabs.
   if (req.method === 'GET' && name === 'entries') {
     const relative = url.searchParams.get('path') ?? '';
     const content = readMemoryFile(root, relative, allowed);
@@ -1123,8 +1123,8 @@ async function handleApi(
   if (req.method === 'GET' && (name === 'file' || name === 'file-raw')) {
     const relative = url.searchParams.get('path') ?? '';
     const asFile = url.searchParams.get('download') === '1';
-    // Картинку отдаём байтами всегда, как её ни просят: строкой в JSON график не
-    // уедет, да и читать .gif как utf8 — значит испортить его на глазах у человека.
+    // We always serve an image as bytes, however it is asked for: a chart will not go
+    // as a string in JSON, and reading .gif as utf8 means corrupting it in front of the person.
     const raw = name === 'file-raw' || url.searchParams.get('raw') === '1' || isImageFile(relative);
     if (raw && isImageFile(relative)) {
       const image = readImageFile(root, relative, allowed);
@@ -1145,8 +1145,8 @@ async function handleApi(
       json(res, 404, errorBody('файл не найден или недоступен'));
       return;
     }
-    // download=1 — отдать файл как файл: браузер сохранит его под тем же именем,
-    // а не покажет текстом. Проверки пути тут те же, что и у обычного чтения.
+    // download=1 — serve the file as a file: the browser will save it under the same name
+    // instead of showing it as text. The path checks here are the same as for ordinary reading.
     if (asFile) {
       sendAttachment(res, relative, content);
       return;
@@ -1193,8 +1193,8 @@ async function handleApi(
     return;
   }
 
-  // Пачка записей, отмеченных галочками: удаляем одним коммитом, чтобы в истории
-  // это было одним осмысленным действием, а не десятком «забыть строку».
+  // A batch of entries marked with checkboxes: we delete them in one commit so that in history
+  // it is one meaningful action, not a dozen "forget a line".
   if (mode === 'memory' && req.method === 'POST' && name === 'forget-many') {
     const relative = String(body.path ?? '');
     const lines = Array.isArray(body.lines) ? body.lines.map(Number) : [];
@@ -1212,8 +1212,8 @@ async function handleApi(
     return;
   }
 
-  // Удаление файла целиком — тоже коммит: пропажу видно в истории, и её можно
-  // вернуть обратным коммитом, как и любую другую правку памяти.
+  // Deleting a whole file is also a commit: the loss is visible in history, and it can be
+  // returned by a reverse commit, like any other memory edit.
   if (mode === 'memory' && req.method === 'POST' && name === 'delete') {
     const relative = String(body.path ?? '');
     const result = removeFile(root, relative, allowed);
@@ -1229,9 +1229,9 @@ async function handleApi(
 }
 
 /**
- * Проверяет, что удалять собираются ровно записи: заголовок раздела — не запись,
- * и «убрать» его значит снести раздел вместе со всем, что под ним написано.
- * Заодно ловим случай, когда файл успел измениться: тогда номера уже не те.
+ * Checks that exactly entries are about to be deleted: a section heading is not an entry,
+ * and "removing" it means tearing down the section together with everything written under it.
+ * At the same time we catch the case when the file has already changed: then the numbers are no longer the right ones.
  */
 function guardEntries(
   root: string,
@@ -1241,7 +1241,7 @@ function guardEntries(
 ): string | null {
   const content = readMemoryFile(root, relative, allowed);
   if (content === null) return 'файл не найден или недоступен';
-  // Даты тут не нужны: разбор идёт по строкам файла, а история приедет в панель.
+  // Dates are not needed here: the parsing goes by the file lines, and the history will come to the panel.
   const entries = new Map(parseEntries(content).entries.map((entry) => [entry.line, entry.kind]));
   for (const line of lines) {
     const kind = entries.get(line);

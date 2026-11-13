@@ -1,4 +1,4 @@
-// Общие утилиты стенда: вызовы модели, терпимый JSON, средние.
+// Shared rig utilities: model calls, tolerant JSON, averages.
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
@@ -6,7 +6,7 @@ export const ROOT = join(import.meta.dirname, "..");
 export const API_URL = "https://api.deepinfra.com/v1/openai/chat/completions";
 
 export const MODELS = {
-  // на ком гоняем реплики Икара
+  // who we run Icarus's replies on
   icarus: process.env.FW_MODEL ?? "deepseek-ai/DeepSeek-V4.1-Flash",
   user: "deepseek-ai/DeepSeek-V4.1-Flash",
   judge: "deepseek-ai/DeepSeek-V4-Pro-0813",
@@ -27,8 +27,8 @@ export function apiKey() {
 export async function chat({ model, system, messages, maxTokens = 500, temperature = 1, retries = 3, responseFormat, extra }) {
   let lastError;
   for (let attempt = 1; attempt <= retries; attempt++) {
-    // на повторах даём модели больше места: пустой ответ обычно значит,
-    // что весь бюджет ушёл в размышления и на текст ничего не осталось
+    // on retries we give the model more room: an empty reply usually means
+    // that the whole budget went into reasoning and nothing was left for text
     const budget = maxTokens * (attempt >= 2 ? 4 : 1);
     const body = {
       model,
@@ -60,8 +60,8 @@ export async function chat({ model, system, messages, maxTokens = 500, temperatu
   throw lastError;
 }
 
-// Модель иногда тратит весь бюджет на скрытые размышления и оставляет текст пустым.
-// Второй заход без размышлений: просим выдать только финальную реплику.
+// The model sometimes spends the whole budget on hidden reasoning and leaves the text empty.
+// Second pass without reasoning: we ask for just the final reply.
 export async function chatFinal({ model, system, messages, maxTokens = 300, temperature = 1 }) {
   return chat({
     model,
@@ -87,7 +87,7 @@ export function parseJson(text) {
     try {
       return JSON.parse(slice.replace(/,\s*([\]}])/g, "$1"));
     } catch {
-      /* пробуем короче */
+      /* try a shorter slice */
     }
   }
   return null;
@@ -104,7 +104,7 @@ export function loadText(path, fallback = "") {
   return existsSync(path) ? readFileSync(path, "utf8") : fallback;
 }
 
-// параллельный map с ограничением одновременности
+// parallel map with a concurrency limit
 export async function mapLimit(items, limit, worker) {
   const results = new Array(items.length);
   let cursor = 0;

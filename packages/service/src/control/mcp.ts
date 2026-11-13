@@ -1,12 +1,12 @@
-// Панель MCP: добавить сервер, поделиться им, включить себе и настроить доступ.
+// MCP panel: add a server, share it, enable it for yourself and configure access.
 //
-// Человека называет SSO-прокси, поэтому userId приходит снаружи, а не из тела
-// запроса. Владелец сервера — тот, кто его завёл; делиться и удалять может только
-// он. Включать/выключать и вводить свои ключи может любой, кому сервер виден.
+// The person is named by the SSO proxy, so userId comes from outside, not from the request
+// body. The owner of a server is whoever created it; only they can share and delete it.
+// Anyone who can see the server can enable/disable it and enter their own keys.
 //
-// OAuth проходит здесь же, но браузер уводится на authorization server, а
-// callback возвращается в публичный (без заголовка SSO) маршрут: state связывает
-// ответ с человеком и сервером, поэтому доверять заголовку в callback не нужно.
+// OAuth runs here too, but the browser is sent to the authorization server, and the
+// callback returns to a public (no SSO header) route: state ties the
+// response to the person and the server, so there is no need to trust the header in the callback.
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { findUser, type IcarusConfig, type McpServerConfig } from '../config.ts';
 import { readJsonBody } from '../http/openai.ts';
@@ -62,11 +62,11 @@ import {
 
 type McpPanelContext = {
   config: IcarusConfig;
-  /** Отметить, что ресурсы человека поменялись: следующий ход поднимет pi заново. */
+  /** Note that the person's resources changed: the next turn will bring pi up again. */
   bump?: (userId: string) => void;
-  /** Подмена сети в тестах. */
+  /** Network override in tests. */
   fetchImpl?: FetchLike;
-  /** Подмена времени в тестах. */
+  /** Time override in tests. */
   now?: () => number;
 };
 
@@ -109,7 +109,7 @@ function boolOf(value: unknown): boolean | undefined {
   return typeof value === 'boolean' ? value : undefined;
 }
 
-/** Строки формы: объект или массив {name, value}. Пустой объект = «очистить». */
+/** Form rows: an object or an array {name, value}. Empty object = "clear". */
 function rowsOf(value: unknown): Record<string, string> | undefined {
   if (value === undefined || value === null) return undefined;
   if (Array.isArray(value)) {
@@ -144,7 +144,7 @@ function argsOf(value: unknown): string[] | undefined {
     .filter(Boolean);
 }
 
-/** Секреты из формы: один заголовок/переменная или client secret. */
+/** Secrets from the form: a single header/variable or a client secret. */
 function credentialsOf(body: Record<string, unknown>): McpCredentials | undefined {
   const headers = rowsOf(body.credentialHeaders);
   const env = rowsOf(body.credentialEnv);
@@ -157,7 +157,7 @@ function credentialsOf(body: Record<string, unknown>): McpCredentials | undefine
   };
 }
 
-/** Имена ключей из рецепта: массив строк, без значений. */
+/** Key names from the recipe: an array of strings, without values. */
 function namesOf(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
   return value.filter((item): item is string => typeof item === 'string');
@@ -190,7 +190,7 @@ function inputOf(body: Record<string, unknown>): McpServerInput {
   };
 }
 
-/** После любой правки: пересобрать mcp.json/AGENTS.md и перезапустить следующий ход. */
+/** After any edit: rebuild mcp.json/AGENTS.md and restart the next turn. */
 function apply(ctx: McpPanelContext, userId: string): void {
   const user = findUser(ctx.config, userId);
   if (!user) return;
@@ -210,7 +210,7 @@ function viewFor(config: IcarusConfig, userId: string, id: string): McpView | nu
   return viewOf(config, readStore(config), userId, id, Date.now());
 }
 
-/** Как сервер будет выглядеть для pi: для проверки нужен именно этот вид. */
+/** How the server will look for pi: this is exactly the view needed for the check. */
 function piConfigFor(
   config: IcarusConfig,
   userId: string,
@@ -229,8 +229,8 @@ function piConfigFor(
 }
 
 /**
- * Публичные маршруты: их зовёт не браузер с SSO-кукой, а authorization server и
- * редирект браузера. Никаких секретов в ответ не кладём.
+ * Public routes: they are called not by a browser with an SSO cookie, but by the authorization server and
+ * the browser redirect. We put no secrets into the response.
  */
 export async function handleMcpPublic(
   req: IncomingMessage,
@@ -315,8 +315,8 @@ export async function handleMcpApi(
       return;
     }
 
-    // Рецепты — общий каталог, не личный: он одинаков для всех и ничего не знает
-    // о человеке. Секретов в нём нет, только имена ключей.
+    // Recipes are a shared catalog, not a personal one: it is the same for everyone and knows nothing
+    // about the person. There are no secrets in it, only key names.
     if (req.method === 'GET' && name === 'recipes') {
       json(res, 200, {
         recipes: MCP_RECIPES,
@@ -327,8 +327,8 @@ export async function handleMcpApi(
       return;
     }
 
-    // Рецепт в виде, который понимает форма: заполнены команда, транспорт и
-    // несекретные настройки, пустыми остаются только значения ключей.
+    // A recipe in a form the form understands: command, transport and non-secret settings are
+    // filled in, only the key values remain empty.
     if (req.method === 'GET' && name === 'recipe') {
       const recipe = recipeById(url.searchParams.get('id') ?? '');
       if (!recipe) {
@@ -350,8 +350,8 @@ export async function handleMcpApi(
     if (name === 'add') {
       if (!findUser(config, userId)) throw new McpError('пользователь не заведён', 404);
       const credentials = credentialsOf(body);
-      // Секреты сохраняются одним заходом с описанием: если ключ не прошёл
-      // проверку, сервер не должен остаться полузаведённым.
+      // Secrets are saved in one go with the description: if the key did not pass
+      // validation, the server must not remain half-created.
       const server = createServer(config, userId, {
         ...inputOf(body),
         ...(credentials === undefined ? {} : { credentials }),
@@ -437,7 +437,7 @@ export async function handleMcpApi(
         url: started.url,
         state: started.state,
         redirectUri: started.redirectUri,
-        // Мимикрия: панель не уводит вкладку, а показывает адрес и ждёт вставки.
+        // Mimicry: the panel does not send the tab away, but shows the address and waits for a paste.
         mimic: started.mimic,
         expiresIn: Math.round(PENDING_TTL_MS / 1000),
       });
@@ -445,8 +445,8 @@ export async function handleMcpApi(
     }
 
     if (name === 'oauth/complete') {
-      // Ручное завершение: человек вставил адрес из строки браузера после того,
-      // как его вернуло на мёртвый loopback. Всё остальное — как в callback.
+      // Manual completion: the person pasted the address from the browser bar after
+      // being returned to the dead loopback. Everything else is like in the callback.
       if (!id) throw new McpError('не указан id');
       const server = serverForUser(config, userId, id);
       if (!server) throw new McpError('такого MCP нет или он не расшарен', 404);
@@ -465,8 +465,8 @@ export async function handleMcpApi(
       const now = ctx.now === undefined ? Date.now() : ctx.now();
       const info = peekAuthorization(parsed.state, now);
       if (!info) throw new OAuthError('ссылка авторизации устарела или уже использована — начни заново');
-      // state живёт в памяти сервиса и связывает вход с человеком и сервером:
-      // чужой адрес не должен завершить вход, даже если он валиден.
+      // state lives in the service's memory and ties the login to the person and the server:
+      // someone else's address must not complete the login, even if it is valid.
       if (info.userId !== userId) throw new McpError('этот вход начал другой человек', 403);
       if (info.serverId !== server.id) throw new McpError('этот вход относится к другому MCP-серверу');
       if (parsed.redirect !== undefined) {
@@ -502,8 +502,8 @@ export async function handleMcpApi(
 
     if (name === 'test') {
       if (!id) throw new McpError('не указан id');
-      // Просроченный токен обновляем здесь же: иначе проверка честно скажет «401»,
-      // хотя через секунду он бы обновился перед сессией.
+      // We refresh the expired token here as well: otherwise the check would honestly say "401",
+      // even though a second later it would have been refreshed before the session.
       const credentials = getCredentials(config, userId, id);
       if (credentials?.oauth && !tokenIsFresh(credentials.oauth) && credentials.oauth.refreshToken) {
         try {
@@ -517,8 +517,8 @@ export async function handleMcpApi(
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           saveOAuthCredentials(config, userId, id, { error: message });
-          // Просроченный сервер сразу убираем из mcp.json: держать там токен,
-          // который уже не пустят, значит обещать модели инструменты без доступа.
+          // We immediately remove an expired server from mcp.json: keeping a token there
+          // that will no longer be accepted means promising the model tools without access.
           apply(ctx, userId);
         }
       }

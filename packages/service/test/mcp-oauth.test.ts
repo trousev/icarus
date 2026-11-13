@@ -1,8 +1,8 @@
-// OAuth 2.1 для MCP: discovery, регистрация клиента, PKCE и обновление токена.
+// OAuth 2.1 for MCP: discovery, client registration, PKCE and token refresh.
 //
-// Тест держит не внутренности, а контракт с authorization server: какие адреса
-// сервис спрашивает, что кладёт в authorization URL и что отправляет на token
-// endpoint. Ошибка здесь — это «кнопка подключить» не работает у живого сервера.
+// The test pins not the internals but the contract with the authorization server: which addresses
+// the service asks for, what it puts into the authorization URL and what it sends to the token
+// endpoint. A bug here means the "connect" button does not work against a live server.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -97,7 +97,7 @@ function discoveryRoutes(overrides: Record<string, Handler> = {}): { fetchImpl: 
   });
 }
 
-test('discovery идёт по подсказке 401, а не по угадыванию well-known', async () => {
+test('discovery follows the 401 hint rather than guessing well-known', async () => {
   const { fetchImpl, calls } = discoveryRoutes();
   const discovery = await discoverOAuth({ serverUrl: MCP, fetchImpl });
 
@@ -115,7 +115,7 @@ test('discovery идёт по подсказке 401, а не по угадыв�
   ]);
 });
 
-test('startAuthorization регистрирует клиента и строит PKCE-ссылку с resource', async () => {
+test('startAuthorization registers the client and builds a PKCE link with resource', async () => {
   resetPendingForTests();
   const { fetchImpl } = discoveryRoutes({
     '/register': () => json({ client_id: 'client-42', client_secret: 'secret-42' }, 201),
@@ -140,7 +140,7 @@ test('startAuthorization регистрирует клиента и строит
   assert.equal(started.client.tokenEndpointAuthMethod, 'client_secret_post');
 });
 
-test('completeAuthorization обменивает код: verifier, client_secret и resource на месте', async () => {
+test('completeAuthorization exchanges the code: verifier, client_secret and resource are in place', async () => {
   resetPendingForTests();
   let tokenBody = '';
   const { fetchImpl } = discoveryRoutes({
@@ -166,8 +166,8 @@ test('completeAuthorization обменивает код: verifier, client_secret
   assert.equal(form.get('client_secret'), 'secret-42');
   assert.equal(form.get('resource'), MCP);
   assert.ok((form.get('code_verifier') ?? '').length >= 43);
-  // PKCE не «на глаз»: challenge в ссылке — это S256 от verifier, который уехал
-  // на token endpoint. Иначе авторизация пройдёт, а обмен кода — нет.
+  // PKCE is not "by eye": the challenge in the link is the S256 of the verifier that went
+  // to the token endpoint. Otherwise authorization would pass but the code exchange would not.
   const expectedChallenge = createHash('sha256')
     .update(form.get('code_verifier') ?? '')
     .digest('base64')
@@ -185,7 +185,7 @@ test('completeAuthorization обменивает код: verifier, client_secret
   assert.equal(tokenIsFresh(saved, 2_000 + 3_600_000), false);
 });
 
-test('готовый client_id и секрет не запускают динамическую регистрацию', async () => {
+test('a ready client_id and secret do not trigger dynamic registration', async () => {
   resetPendingForTests();
   const { fetchImpl, calls } = discoveryRoutes();
   const started = await startAuthorization({
@@ -199,7 +199,7 @@ test('готовый client_id и секрет не запускают дина�
   assert.equal(calls.filter((call) => new URL(call.url).pathname === '/register').length, 0);
 });
 
-test('секрет клиента уходит Basic-заголовком, когда сервер этого требует', async () => {
+test('the client secret goes as a Basic header when the server requires it', async () => {
   resetPendingForTests();
   let authorization = '';
   const { fetchImpl } = discoveryRoutes({
@@ -223,7 +223,7 @@ test('секрет клиента уходит Basic-заголовком, ко�
   assert.equal(decoded, 'known-client:known-secret');
 });
 
-test('CIMD: если сервер его поддерживает, client_id — ссылка на наш документ', async () => {
+test('CIMD: if the server supports it, client_id is a link to our document', async () => {
   resetPendingForTests();
   const { fetchImpl } = discoveryRoutes({
     '/.well-known/oauth-authorization-server': () =>
@@ -249,7 +249,7 @@ test('CIMD: если сервер его поддерживает, client_id —
   assert.deepEqual(document.document.redirect_uris, ['https://icarus.example.com/panel/mcp/oauth/callback']);
 });
 
-test('ручные endpoints работают без сети и без discovery', async () => {
+test('manual endpoints work without network and without discovery', async () => {
   resetPendingForTests();
   let called = 0;
   const fetchImpl: FetchLike = async () => {
@@ -270,7 +270,7 @@ test('ручные endpoints работают без сети и без discover
   assert.equal(called, 0, 'ни одного запроса: всё задано руками');
 });
 
-test('чужой state не завершает авторизацию', async () => {
+test('a foreign state does not complete authorization', async () => {
   resetPendingForTests();
   await assert.rejects(
     () => completeAuthorization({ state: 'чужой', code: 'code' }),
@@ -278,7 +278,7 @@ test('чужой state не завершает авторизацию', async ()
   );
 });
 
-test('refresh сохраняет ротацию refresh_token и не теряет client_id', async () => {
+test('refresh preserves refresh_token rotation and does not lose client_id', async () => {
   let body = '';
   const { fetchImpl } = routes({
     '/token': (_url, init) => {
@@ -309,17 +309,17 @@ test('refresh сохраняет ротацию refresh_token и не теряе
   assert.equal(next.expiresAt, 70_000);
 });
 
-test('канонический ресурс не тащит хвостовой слэш и фрагмент', () => {
+test('the canonical resource does not carry a trailing slash or fragment', () => {
   assert.equal(canonicalResource('https://mcp.example.com/mcp/'), 'https://mcp.example.com/mcp');
   assert.equal(canonicalResource('https://mcp.example.com/#x'), 'https://mcp.example.com');
 });
 
-// ── мимикрия: вход через мёртвый loopback ──────────────────────────────────
-// Такие authorization servers (Any.do) примут только redirect_uri из своего
-// белого списка. Мы регистрируемся как локальный клиент, как Claude Code, а код
-// человек вставляет руками.
+// ── mimicry: login via a dead loopback ─────────────────────────────────────
+// Such authorization servers (Any.do) accept only a redirect_uri from their own
+// whitelist. We register as a local client, like Claude Code, and the person
+// pastes the code by hand.
 
-test('мимикрия: регистрация и authorize идут на loopback, а не на панель', async () => {
+test('mimicry: registration and authorize go to loopback, not to the panel', async () => {
   resetPendingForTests();
   let registerBody: Record<string, unknown> = {};
   const { fetchImpl } = discoveryRoutes({
@@ -343,7 +343,7 @@ test('мимикрия: регистрация и authorize идут на loopba
   assert.equal(new URL(started.url).searchParams.get('redirect_uri'), 'http://localhost:47821/callback');
 });
 
-test('мимикрия: сохранённый redirect_uri не даёт переиспользовать чужого клиента', async () => {
+test('mimicry: a saved redirect_uri prevents reusing a foreign client', async () => {
   resetPendingForTests();
   const registrations: Array<Record<string, unknown>> = [];
   const { fetchImpl } = discoveryRoutes({
@@ -365,8 +365,8 @@ test('мимикрия: сохранённый redirect_uri не даёт пер
   const saved = credentialsFromCompleted(completed);
   assert.equal(saved.redirectUri, 'https://icarus.example.com/panel/mcp/oauth/callback');
 
-  // Включили мимикрию: адрес возврата другой, значит клиенту нужна новая
-  // регистрация — старый client_id привязан к публичному callback.
+  // Mimicry was enabled: the return address is different, so the client needs a new
+  // registration — the old client_id is tied to the public callback.
   const mimic = await startAuthorization({
     server: server({ mimic: true }),
     userId: 'probe',
@@ -377,7 +377,7 @@ test('мимикрия: сохранённый redirect_uri не даёт пер
   assert.equal(registrations.length, 2, 'клиент перерегистрирован под loopback');
   assert.equal(new URL(mimic.url).searchParams.get('client_id'), 'client-2');
 
-  // А повторный вход в том же режиме клиента уже переиспользует.
+  // A second login in the same mode already reuses the client.
   const repeated = await startAuthorization({
     server: server({ mimic: true }),
     userId: 'probe',
@@ -389,7 +389,7 @@ test('мимикрия: сохранённый redirect_uri не даёт пер
   assert.equal(new URL(repeated.url).searchParams.get('client_id'), 'client-2');
 });
 
-test('мимикрия несовместима с CIMD: наш документ объявляет публичный callback', async () => {
+test('mimicry is incompatible with CIMD: our document declares a public callback', async () => {
   resetPendingForTests();
   const { fetchImpl } = discoveryRoutes({
     '/.well-known/oauth-authorization-server': () =>
@@ -407,7 +407,7 @@ test('мимикрия несовместима с CIMD: наш документ
   );
 });
 
-test('вставленный адрес разбирается: полный URL, без схемы и один query', () => {
+test('a pasted address is parsed: full URL, without scheme, and a bare query', () => {
   const full = parseAuthorizationResponse(
     'http://localhost:47821/callback?code=abc&state=def&iss=https%3A%2F%2Fmcp.any.do%2F',
   );
@@ -437,7 +437,7 @@ test('вставленный адрес разбирается: полный URL
   assert.throws(() => parseAuthorizationResponse('что-то не то'), /code/);
 });
 
-test('peekAuthorization показывает, чей это вход, и исчезает после обмена', async () => {
+test('peekAuthorization shows whose login this is and disappears after the exchange', async () => {
   resetPendingForTests();
   const { fetchImpl } = discoveryRoutes({
     '/register': () => json({ client_id: 'client-42', token_endpoint_auth_method: 'none' }, 201),

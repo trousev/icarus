@@ -1,17 +1,19 @@
-// Telegram-бот Икара: длинный опрос Bot API и живая сессия pi на разговор.
+// Icarus's Telegram bot: long polling of the Bot API and a live pi session per conversation.
 //
-// Бот не заводит людей сам: человека он узнаёт по username из сообщения и берёт его
-// id из `telegram.mapping` в config.yaml. Незнакомцу отвечаем подсказкой, а не
-// разговором: без карты непонятно, чья это память и чей контейнер.
+// The bot doesn't create people itself: it recognizes a person by the username from the
+// message and takes their id from `telegram.mapping` in config.yaml. We answer a stranger
+// with a hint, not a conversation: without the map it's unclear whose memory and whose
+// container this is.
 //
-// Разговоров у человека столько, сколько он захочет: в личке — топики (Bot API 9.4,
-// включаются Threaded Mode в BotFather), в группе — по разговору на человека. Разговор
-// в терминах pi — это пара «чат + топик» (см. conversationIdFor): у каждого свой
-// процесс и своя история. Топики человек заводит сам в клиенте Telegram; бот узнаёт
-// о новом топике по служебному сообщению forum_topic_created и не мешает ему.
+// A person has as many conversations as they want: in a DM — topics (Bot API 9.4, enabled
+// via Threaded Mode in BotFather), in a group — one conversation per person. A conversation
+// in pi terms is a “chat + topic” pair (see conversationIdFor): each has its own process and
+// its own history. The person creates topics themselves in the Telegram client; the bot
+// learns about a new topic from the service message forum_topic_created and doesn't get in
+// its way.
 //
-// Вложения разбираем те же, что и HTTP-вход: картинки уезжают модели нативно
-// и ложатся в incoming/, голосовые — расшифровкой (см. attachments.ts, speech.ts).
+// We parse the same attachments as the HTTP input: images go to the model natively and land
+// in incoming/, voice ones — via transcription (see attachments.ts, speech.ts).
 import { DEFAULT_WORKSPACE, findTelegramUser, findUser, userPaths, type IcarusConfig, type UserConfig } from '../config.ts';
 import { log, redact } from '../log.ts';
 import { buildPrompt } from '../prompt.ts';
@@ -69,8 +71,9 @@ import {
 import { TelegramReply } from './reply.ts';
 import { answerFiles, deliverFiles, filesFailedText, stripLocalRefs, type FileRef } from './outgoing.ts';
 
-// Тексты и разбор команд общие с веб-чатом (sessions/commands.ts). Реэкспорт
-// оставляет прежний вход тем, кто уже берёт их из бота, — и тестам тоже.
+// Texts and command parsing are shared with the web chat (sessions/commands.ts). The
+// re-export keeps the former entry point for those who already take them from the bot —
+// and for the tests too.
 export {
   clearText,
   compactText,
@@ -85,19 +88,19 @@ export {
 };
 export type { ParsedCommand };
 
-/** Длинный опрос: Telegram держит запрос, пока не появится сообщение. */
+/** Long polling: Telegram holds the request until a message appears. */
 export const POLL_TIMEOUT_SECONDS = 50;
-/** Минимум между правками одного сообщения: чаще — 429. */
+/** Minimum between edits of one message: more often — 429. */
 export const EDIT_INTERVAL_MS = 1200;
-/** Пауза после сбойного опроса: сеть моргнула — не долбим Telegram в цикле. */
+/** Pause after a failed poll: the network blinked — we don't hammer Telegram in a loop. */
 const RETRY_AFTER_FAILURE_MS = 3000;
 /**
- * Сколько живёт «свежий топик» — топик, который Telegram завёл из общей ленты.
- * Столько даём клиенту на то, чтобы следом приехало само сообщение.
+ * How long a “fresh topic” lives — a topic Telegram created from the general feed. We
+ * give the client that much time for the message itself to arrive right after.
  */
 export const FRESH_TOPIC_WINDOW_MS = 60_000;
 
-/** Команды бота: они же в меню Telegram (описания короткие — там мало места). */
+/** Bot commands: the same ones in the Telegram menu (descriptions are short — little room there). */
 export const COMMANDS = [
   { command: 'help', description: 'что я умею' },
   { command: 'compact', description: 'подвести итог разговора' },
@@ -111,8 +114,9 @@ export const COMMANDS = [
 ];
 
 /**
- * Команды, которые бот разбирает сам. Всё остальное с косой черты — реплика для pi:
- * у него свои команды (`/skill:имя`, промпт-шаблоны), и отбирать их у человека нельзя.
+ * Commands the bot parses itself. Everything else starting with a slash is a reply for pi:
+ * it has its own commands (`/skill:name`, prompt templates), and one mustn't take them from
+ * the person.
  */
 export const BOT_COMMANDS = new Set([
   'start',
@@ -136,7 +140,7 @@ export const GREETING = [
   '/help — что я умею.',
 ].join('\n');
 
-/** Что показать на /help: те же команды, что в меню Telegram, но с объяснением. */
+/** What to show on /help: the same commands as in the Telegram menu, but with an explanation. */
 export const HELP = [
   'Что я умею в чате:',
   '',
@@ -156,14 +160,14 @@ export const HELP = [
 ].join('\n');
 
 /**
- * Приватный workspace в Telegram не выбирается: он только для чтения, и
- * переключать в него разговор нельзя — ни списком, ни по имени.
+ * A private workspace is not selectable in Telegram: it is read-only, and a conversation
+ * can't be switched into it — neither from the list nor by name.
  */
 export const WORKSPACE_PRIVATE_REFUSED = 'В приватный workspace переключить нельзя: он только для чтения.';
 
 /**
- * `/workspace` без имени: где разговор сейчас и какие папки есть. Имена — те же,
- * что в панели: человек ищет «Работу», а не slug `rabota`.
+ * `/workspace` without a name: where the conversation is now and which folders exist. The
+ * names are the same as in the panel: a person looks for “Work”, not the slug `rabota`.
  */
 export function workspacesText(current: string, available: Workspace[]): string {
   if (available.length === 0) return 'Переключать некуда: рабочих папок нет.';
@@ -183,9 +187,9 @@ export function workspaceFailed(reason: string): string {
 }
 
 /**
- * `/archive` прошёл: топик удалён вместе с сообщениями. Пишем в корень чата —
- * в самом топике сказать уже нечем. Возврат живёт только в панели: померла
- * так померла, второй топик Telegram не заводит.
+ * `/archive` succeeded: the topic is deleted together with the messages. We write to the
+ * chat root — in the topic itself there's nothing left to say with. The return lives only
+ * in the panel: if it's gone, it's gone, Telegram doesn't create a second topic.
  */
 export function archivedText(title: string, removedTopic: boolean): string {
   const head = `🗄 Убрал «${title}» в архив.`;
@@ -194,7 +198,7 @@ export function archivedText(title: string, removedTopic: boolean): string {
     : `${head}\nТопика здесь нет — удалять в Telegram нечего. В панели разговор в архиве.`;
 }
 
-/** Топик не удалился — разговор остался в Telegram, но в архив всё равно ушёл. */
+/** The topic wasn't deleted — the conversation remained in Telegram, but it went to the archive anyway. */
 export function archiveTopicFailed(reason: string): string {
   return `Убрал в архив, но топик не удалился: ${reason}. В Telegram разговор остался на месте.`;
 }
@@ -202,8 +206,9 @@ export function archiveTopicFailed(reason: string): string {
 export const ARCHIVE_NOT_FOUND = 'Не нашёл этот разговор в реестре — архивировать нечего.';
 
 /**
- * Ответ не доехал до топика. Говорим об этом в корне чата: в топике человек ждал бы
- * молча, а после серверных поломок топиков в личке (Bot API 10.0) — это не теория.
+ * The answer didn't reach the topic. We say this in the chat root: in the topic the person
+ * would wait in silence, and after server-side topic failures in DMs (Bot API 10.0) — this
+ * is not theory.
  */
 export function topicDeliveryFailed(reason: string): string {
   return [
@@ -217,24 +222,24 @@ export const NO_USERNAME =
   'Не могу тебя узнать: в Telegram у тебя не задан username, а я различаю людей по нему. ' +
   'Заведи username в настройках Telegram и напиши ещё раз.';
 
-/** Сообщение, из которого нечего взять: ни текста, ни вложения. */
+/** A message from which there's nothing to take: neither text nor attachment. */
 export const NOTHING_TO_READ = 'Тут нечего разбирать: пришли текстом, фото или голосовым.';
 
-/** Голосовое, а расшифровывать нечем: голосового провайдера нет или он выключен. */
+/** A voice message but nothing to transcribe with: no speech provider or it's disabled. */
 export const VOICE_NO_SPEECH =
   'Голосовые пока не расшифровываю: в конфиге не задана модель распознавания речи. Напиши словами.';
 
-/** Расшифровка вышла пустой: тишина, музыка или слишком тихая запись. */
+/** The transcription came out empty: silence, music, or too quiet a recording. */
 export const VOICE_EMPTY = 'В голосовом не разобрал ни слова — попробуй ещё раз или напиши словами.';
 
 export const BUSY = 'Ещё думаю над прошлым сообщением — секунду.';
 
 /**
- * Отбивка в Telegram перед ответом, если прошлая реплика разговора пришла из
- * другого канала. Разговор у нас один на все входы, поэтому в контексте pi уже
- * лежат сказанное в панели (и её файлы). Молча подмешивать это в ответ нельзя:
- * человек должен видеть, откуда Икар это знает, — иначе личная переписка из
- * панели тихо становится окном в Telegram.
+ * A note in Telegram before the answer if the previous reply of the conversation came from
+ * another channel. We have one conversation for all inputs, so what was said in the panel
+ * (and its files) already lies in the pi context. We can't silently mix this into the answer:
+ * the person must see where Icarus knows this from — otherwise personal correspondence from
+ * the panel quietly becomes a window into Telegram.
  */
 export function crossChannelNote(channel: ChatChannel): string {
   const from = channel === 'web' ? 'в панели' : channel === 'api' ? 'через API' : 'в другом канале';
@@ -242,9 +247,9 @@ export function crossChannelNote(channel: ChatChannel): string {
 }
 
 /**
- * Реплика поверх идущего хода. В Telegram кнопок нет, поэтому операция одна —
- * «сейчас»: прошлый ответ обрывается. Молчать об этом нельзя, иначе выглядит,
- * будто Икар просто перестал отвечать.
+ * A reply on top of an ongoing turn. There are no buttons in Telegram, so the operation is
+ * a single one — “now”: the previous answer is cut off. We can't stay silent about this,
+ * otherwise it looks like Icarus just stopped answering.
  */
 export const INTERRUPTED_NOTE = '⏹ Прервал прошлый ответ, чтобы взяться за твоё сообщение.\n\n';
 
@@ -255,9 +260,9 @@ export function unknownUser(username: string): string {
   );
 }
 
-/** Вложение, которое бот не разбирает: видео, стикер, аудиофайл, документ. */
+/** An attachment the bot doesn't parse: video, sticker, audio file, document. */
 export function unsupportedText(kind: string): string {
-  // Документ — единственное, что человек может прислать картинкой: подсказываем.
+  // A document is the only thing a person can send as an image: we give a hint.
   return kind === 'документ'
     ? 'Пока не разбираю документы: пришли нужное картинкой или словами.'
     : `Пока не разбираю ${kind}: пришли то же самое словами.`;
@@ -272,8 +277,8 @@ export function transcriptionFailed(reason: string): string {
 }
 
 /**
- * Голосовое в реплике помечаем: Икар должен знать, что это была диктовка, — в речи
- * нет ни пунктуации, ни разметки, и требовать их с человека не за что.
+ * We mark a voice message in the reply: Icarus must know it was dictation — speech has
+ * neither punctuation nor markup, and there's no point demanding them from the person.
  */
 export function voicePrompt(text: string, duration: number | null): string {
   const mark = duration === null ? '[голосовое]' : `[голосовое, ${Math.round(duration)} с]`;
@@ -281,10 +286,10 @@ export function voicePrompt(text: string, duration: number | null): string {
 }
 
 /**
- * Номер топика, если сообщение пришло внутри него. Корень чата и General-топик —
- * одно и то же место, и приходит оно то с `message_thread_id = 1`, то без него
- * вовсе, поэтому «единицу» тоже считаем корнем: иначе один разговор разъехался бы
- * на два.
+ * The topic number if the message came inside it. The chat root and the General topic are
+ * the same place, and it arrives sometimes with `message_thread_id = 1`, sometimes without
+ * it at all, so we count “one” as the root too: otherwise one conversation would split into
+ * two.
  */
 export function topicThreadId(message: TelegramMessage): number | null {
   const threadId = message.message_thread_id;
@@ -293,16 +298,16 @@ export function topicThreadId(message: TelegramMessage): number | null {
 }
 
 /**
- * Разговор в терминах сессий pi — «чат + топик + человек».
+ * A conversation in pi session terms — “chat + topic + person”.
  *
- * В личке без топиков разговор один на чат, и он переживает перезапуск сервиса.
- * С топиками каждый топик — отдельный разговор: у него свой процесс pi, своя история
- * в /workspace/.icarus/sessions и свой /compact. В группе людей может быть несколько, и у
- * каждого свой разговор — иначе они бы передрались за одну сессию (ход в ней один);
- * топик в группе разделяет и их тоже.
+ * In a DM without topics the conversation is one per chat, and it survives a service
+ * restart. With topics each topic is a separate conversation: it has its own pi process,
+ * its own history in /workspace/.icarus/sessions and its own /compact. In a group there can be
+ * several people, and each has their own conversation — otherwise they'd fight over one
+ * session (there's one turn in it); a topic in a group separates them too.
  *
- * Номер топика можно задать явно: у сообщения из общей ленты он выводится не из самого
- * сообщения, а из свежего топика (см. TelegramBot.resolveThread).
+ * The topic number can be set explicitly: for a message from the general feed it's derived
+ * not from the message itself but from the fresh topic (see TelegramBot.resolveThread).
  */
 export function conversationIdFor(
   message: TelegramMessage,
@@ -315,16 +320,16 @@ export function conversationIdFor(
 }
 
 /**
- * Куда относится реплика человека: топик (с поправкой на свежий топик из общей ленты),
- * разговор в терминах pi и якорь — сообщение внутри того же топика, ответом на которое
- * Telegram положит ответ в топик, даже если `message_thread_id` отобьёт.
+ * Where the person's reply belongs: the topic (adjusted for a fresh topic from the general
+ * feed), the conversation in pi terms, and the anchor — the message inside the same topic
+ * that Telegram will put the answer as a reply to, even if it rejects `message_thread_id`.
  */
 type Route = { threadId: number | null; conversationId: string; anchor?: number };
 
 /**
- * Номер топика, к которому относится сообщение. Считать его здесь, а не в обработчике,
- * нужно потому, что служебка о новом топике и первое сообщение из общей ленты едут
- * в разных очередях (см. TelegramBot.resolveThread).
+ * The topic number the message belongs to. Counting it here rather than in the handler is
+ * needed because the service message about a new topic and the first message from the
+ * general feed travel in different queues (see TelegramBot.resolveThread).
  */
 type ThreadRoute = { threadId: number | null };
 
@@ -332,20 +337,20 @@ export type TelegramBotOptions = {
   api?: TelegramApi;
   pollTimeoutSeconds?: number;
   editIntervalMs?: number;
-  /** Минимум между действиями Telegram; в тестах схлопывают в ноль. */
+  /** Minimum between Telegram actions; in tests they collapse to zero. */
   actionGapMs?: number;
-  /** Через сколько повторять действие, пока ход идёт; в тестах — чтобы не ждать. */
+  /** How often to repeat the action while the turn goes on; in tests — so as not to wait. */
   actionIntervalMs?: number;
-  /** Сколько живёт «свежий топик»; в тестах окно схлопывают в ноль. */
+  /** How long a “fresh topic” lives; in tests the window is collapsed to zero. */
   freshTopicWindowMs?: number;
-  /** Чем расшифровывать голосовые; null — не расшифровываем (подменяется в тестах). */
+  /** What to transcribe voice with; null — we don't transcribe (substituted in tests). */
   transcribe?: Transcriber | null;
 };
 
 /**
- * Очередь по ключу: сообщения одного чата обрабатываются строго по очереди (в сессии
- * pi один ход за раз), а чужие чаты друг друга не ждут. Сбой одной задачи очередь не
- * рвёт — следующая всё равно пойдёт после неё.
+ * A queue by key: messages of one chat are processed strictly in order (there's one turn at a
+ * time in a pi session), while other chats don't wait for each other. A failure of one task
+ * doesn't break the queue — the next one will still go after it.
  */
 export class KeyedQueue {
   private chains = new Map<string, Promise<void>>();
@@ -373,31 +378,31 @@ export class TelegramBot {
   private editIntervalMs: number;
   private actionGapMs: number | undefined;
   private actionIntervalMs: number | undefined;
-  /** null — распознавание речи не настроено: голосовые честно просим словами. */
+  /** null — speech recognition isn't configured: we honestly ask for words instead of voice. */
   private transcribe: Transcriber | null;
 
   private stopped = false;
   private abort = new AbortController();
   private offset: number | undefined;
-  /** Очередь по чату и топику: два сообщения подряд не должны спорить за одну сессию. */
+  /** Queue by chat and topic: two messages in a row must not fight over one session. */
   private queue = new KeyedQueue();
   /**
-   * Идущие ходы по чату и топику. Нужны, чтобы новое сообщение могло прервать
-   * текущий ход сразу, а не ждать своей очереди: в Telegram человеку никто не
-   * мешает писать поверх, и ждать пять минут ответа субагентов он не станет.
+   * Ongoing turns by chat and topic. Needed so a new message can interrupt the current turn
+   * right away rather than wait its turn: in Telegram nobody stops the person from writing
+   * on top, and they won't wait five minutes for subagents to answer.
    */
   private turns = new Map<string, { interrupt: () => Promise<void> }>();
-  /** Чаты, где новая реплика уже прервала ход: в ответе надо сказать об этом. */
+  /** Chats where a new reply has already interrupted the turn: the answer must say so. */
   private interrupted = new Set<string>();
   /**
-   * Топик, который человек только что завёл из общей ленты: клиент создаёт топик, а
-   * само сообщение приезжает как сообщение корня — см. resolveThread.
+   * A topic the person just created from the general feed: the client creates the topic, and
+   * the message itself arrives as a root message — see resolveThread.
    */
   private freshTopics = new Map<number, { threadId: number; at: number; name: string }>();
   private freshTopicWindowMs: number;
-  /** Очередь переименований: два события заголовка подряд не должны спорить за топик. */
+  /** Rename queue: two title events in a row must not fight over the topic. */
   private titles = new KeyedQueue();
-  /** Отписка от сводки панели — ставится на старте и снимается в `stop`. */
+  /** Unsubscribe from the panel summary — set at start and removed in `stop`. */
   private unwatchTitles: (() => void) | null = null;
 
   constructor(config: IcarusConfig, registry: SessionRegistry, options: TelegramBotOptions = {}) {
@@ -427,7 +432,7 @@ export class TelegramBot {
     this.unwatchTitles = null;
   }
 
-  /** Знакомство: пишем в лог, под чьим именем работаем, и раскладываем меню команд. */
+  /** Introduction: we write to the log under whose name we work, and set up the command menu. */
   private async announce(): Promise<void> {
     try {
       const me = await this.api.getMe();
@@ -442,9 +447,9 @@ export class TelegramBot {
   }
 
   /**
-   * Запоминает топик, который человек только что завёл из общей ленты. Служебка
-   * `forum_topic_created` приходит раньше первого сообщения, а само сообщение
-   * может приехать без `message_thread_id` — см. resolveThread.
+   * Remembers a topic the person just created from the general feed. The service message
+   * `forum_topic_created` arrives before the first message, and the message itself may
+   * arrive without `message_thread_id` — see resolveThread.
    */
   private noteTopicCreated(message: TelegramMessage): void {
     const topic = message.forum_topic_created;
@@ -458,15 +463,16 @@ export class TelegramBot {
   }
 
   /**
-   * Топик, к которому на самом деле относится сообщение.
+   * The topic the message actually belongs to.
    *
-   * Обычный случай — номер топика в самом сообщении. Но первое сообщение топика,
-   * заведённого человеком из общей ленты, приезжает как сообщение корня: клиент
-   * Telegram заводит топик, а текст уходит без `message_thread_id` (в личке с топиками
-   * это уже ловили и у нас, и у соседей). Считать такое сообщение корнем нельзя —
-   * ответ уедет в общую ленту, а топик останется пустым и человек решит, что разговор
-   * потерялся. Поэтому отдаём его свежему топику (см. noteTopicCreated), а если
-   * сообщение пришло с настоящим номером топика — свежий слот гасим: клиент справился сам.
+   * The usual case is the topic number in the message itself. But the first message of a
+   * topic created by a person from the general feed arrives as a root message: the Telegram
+   * client creates the topic, and the text goes without `message_thread_id` (in DMs with
+   * topics this has been caught both by us and by neighbors). Such a message can't be counted
+   * as the root — the answer would go to the general feed, and the topic would stay empty and
+   * the person would decide the conversation got lost. So we give it to the fresh topic (see
+   * noteTopicCreated), and if the message came with a real topic number — we clear the fresh
+   * slot: the client managed on its own.
    */
   private resolveThread(message: TelegramMessage): ThreadRoute {
     this.noteTopicCreated(message);
@@ -474,14 +480,16 @@ export class TelegramBot {
     const threadId = topicThreadId(message);
 
     if (threadId !== null) {
-      // Служебка о создании топика — не «клиент сам привязал сообщение»: топик только
-      // что завели, и первое сообщение в него ещё приедет (возможно, без номера).
+      // The service message about creating a topic is not “the client tied the message itself”:
+      // the topic was just created, and the first message will still arrive in it (possibly
+      // without a number).
       if (!message.forum_topic_created && this.freshTopics.get(chatId)?.threadId === threadId) {
         this.freshTopics.delete(chatId);
       }
       return { threadId };
     }
-    // Служебка без номера топика и чужие чаты — не наше дело: топиков там не заводят.
+    // A service message without a topic number and other people's chats are none of our
+    // business: they don't create topics there.
     if (message.forum_topic_created || message.chat.type !== 'private') {
       return { threadId: null };
     }
@@ -511,8 +519,8 @@ export class TelegramBot {
           ]),
         });
         for (const update of updates) {
-          // Подтверждаем сразу: недоигранное сообщение лучше не переигрывать при
-          // перезапуске — ошибку хода человек увидит ответом, а не тишиной.
+          // We confirm right away: it's better not to replay an unfinished message on restart —
+          // the person will see the turn's error as a reply, not as silence.
           this.offset = update.update_id + 1;
           void this.enqueue(update);
         }
@@ -525,13 +533,13 @@ export class TelegramBot {
   }
 
   /**
-   * Ставит сообщение в очередь своего чата и топика: разговоры разных людей и разных
-   * топиков не ждут друг друга. `/stop` идёт мимо очереди: ход, который он отменяет,
-   * сейчас в работе, и ждать его конца — значит не отменить ничего.
+   * Puts the message into its chat's and topic's queue: conversations of different people and
+   * different topics don't wait for each other. `/stop` goes past the queue: the turn it
+   * cancels is in progress right now, and waiting for it to end means canceling nothing.
    *
-   * Топик считаем здесь, а не в обработчике: служебное `forum_topic_created` и первое
-   * сообщение топика едут в разных очередях (у них разные номера топиков), и если
-   * разбирать их по очереди, топик может опоздать к собственному сообщению.
+   * We count the topic here rather than in the handler: the service `forum_topic_created` and
+   * the first message of the topic travel in different queues (they have different topic
+   * numbers), and if we parse them in order, the topic may arrive late for its own message.
    */
   enqueue(update: TelegramUpdate): Promise<void> {
     const message = update.message;
@@ -541,21 +549,21 @@ export class TelegramBot {
     const command = parseCommand(text);
     const task = (): Promise<void> => this.handleUpdate(update, thread);
 
-    // Реплика поверх идущего хода — это не «пусть подождёт»: Икар в этот момент
-    // может держать два десятка субагентов, и человек ждёт их молча. Прерываем
-    // сразу; сама реплика встанет в очередь и начнёт новый ход, когда прошлый
-    // действительно встанет (см. runTurn).
+    // A reply on top of an ongoing turn — this is not “let it wait”: at that moment Icarus
+    // may be holding two dozen subagents, and the person waits for them in silence. We
+    // interrupt right away; the reply itself will queue up and start a new turn when the
+    // previous one actually settles (see runTurn).
     //
-    // Команды бота (/stats, /compact) ход не трогают: они для того и сделаны, чтобы
-    // не тратить токены. А вот скилл или промпт-шаблон (`/skill:... текст`) — это
-    // обычная реплика для pi, и она прерывает.
+    // Bot commands (/stats, /compact) don't touch the turn: they exist precisely so as not to
+    // spend tokens. But a skill or a prompt template (`/skill:... text`) is a normal reply for
+    // pi, and it does interrupt.
     const botCommand = command !== null && BOT_COMMANDS.has(command.name);
     const startsTurn = !botCommand && (command === null || command.args !== '');
     if (startsTurn) {
       const running = this.turns.get(key);
       if (running) {
         log.info('телеграм: новое сообщение прерывает текущий ход', { key });
-        // Ответ на это сообщение начнётся с честной строки: прошлый ответ прерван.
+        // The answer to this message will start with an honest line: the previous answer was interrupted.
         this.interrupted.add(key);
         void running.interrupt().catch((error) => {
           log.warn('телеграм: прервать ход не вышло', { error: describeTelegramError(error) });
@@ -569,8 +577,8 @@ export class TelegramBot {
   }
 
   /**
-   * Разбирает сообщение. Топик приходит из `enqueue` — он же решает, в какую сессию pi
-   * и в какой топик уедет ответ. При прямом вызове (тесты, отладка) считаем его сами.
+   * Parses the message. The topic comes from `enqueue` — it also decides which pi session and
+   * which topic the answer will go to. On a direct call (tests, debugging) we count it ourselves.
    */
   async handleUpdate(update: TelegramUpdate, routed?: ThreadRoute): Promise<void> {
     const message = update.message;
@@ -580,9 +588,9 @@ export class TelegramBot {
     const thread = routed ?? this.resolveThread(message);
     const threadId = thread.threadId;
 
-    // Служебные сообщения топиков: завели или переименовали. Отвечать на них
-    // нечего, а разговором они не являются — но переименование человеком
-    // значит, что имя топика его, и его надо запомнить (см. noteTopicEdited).
+    // Service messages of topics: created or renamed. There's nothing to answer them with,
+    // and they aren't a conversation — but a rename by a person means the topic name is
+    // theirs, and it must be remembered (see noteTopicEdited).
     if (message.forum_topic_created || message.forum_topic_edited) {
       this.noteTopicEdited(message);
       return;
@@ -595,11 +603,12 @@ export class TelegramBot {
       return;
     }
 
-    // Куда относится реплика, считаем один раз: очередь, ответ и сессия pi должны
-    // говорить об одном и том же месте.
+    // We count where the reply belongs once: the queue, the answer and the pi session must
+    // all speak of the same place.
     const route = this.routeFor(message, user.id, thread);
-    // В логе видно и топик, и разговор: по этим строкам потом разбираются жалобы
-    // «ответ уехал не туда» — в самом Telegram номера топиков не показываются.
+    // The log shows both the topic and the conversation: complaints of “the answer went to
+    // the wrong place” are later sorted out by these lines — Telegram itself doesn't show
+    // topic numbers.
     log.info('телеграм: сообщение принято', {
       user: user.id,
       chatId,
@@ -621,27 +630,27 @@ export class TelegramBot {
       return;
     }
 
-    // Командой может быть и подпись к фото: человек шлёт снимок и просит подвести итог.
+    // A command can also be a photo caption: a person sends a shot and asks for a summary.
     const command = parseCommand(incoming.text);
     if (command) {
       if (BOT_COMMANDS.has(command.name)) {
         await this.runCommand(message, user, command, route);
         return;
       }
-      // Убранные команды объясняем сами — даже с аргументами, иначе они уедут в pi.
+      // We explain removed commands ourselves — even with arguments, otherwise they'd go to pi.
       if (REMOVED_COMMANDS.has(command.name)) {
         await this.say(chatId, TOPICS_REMOVED, route.threadId, route.anchor);
         return;
       }
-      // Незнакомая команда без аргументов — почти наверняка опечатка: подсказываем.
-      // С аргументами это уже реплика: у pi есть свои команды, и отбирать их нельзя.
+      // An unknown command without arguments is almost certainly a typo: we give a hint.
+      // With arguments it's already a reply: pi has its own commands, and one mustn't take them.
       if (command.args === '') {
         await this.say(chatId, UNKNOWN_COMMAND, route.threadId, route.anchor);
         return;
       }
     }
 
-    // Ни текста, ни вложения: остальное бот уже назвал бы отказом.
+    // Neither text nor attachment: the bot would have named the rest as a refusal itself.
     if (incoming.text === '' && incoming.images.length === 0 && !incoming.voice) {
       await this.say(chatId, NOTHING_TO_READ, route.threadId, route.anchor);
       return;
@@ -651,11 +660,11 @@ export class TelegramBot {
   }
 
   /**
-   * Место реплики: топик (с поправкой на свежий топик из общей ленты), разговор pi и
-   * якорь — сообщение человека в том же топике. Якорь нужен на случай, когда Telegram
-   * отбивает `message_thread_id`: ответ на сообщение из топика доезжает до топика.
-   * У сообщения из общей ленты топика нет, и якоря у него быть не может — иначе ответ
-   * вернулся бы в ленту.
+   * Where the reply belongs: the topic (adjusted for a fresh topic from the general feed),
+   * the pi conversation and the anchor — the person's message in the same topic. The anchor
+   * is needed for when Telegram rejects `message_thread_id`: a reply to a message from a
+   * topic reaches the topic. A message from the general feed has no topic, and it can't have
+   * an anchor — otherwise the answer would return to the feed.
    */
   private routeFor(message: TelegramMessage, userId: string, thread: ThreadRoute): Route {
     return {
@@ -668,9 +677,9 @@ export class TelegramBot {
   }
 
   /**
-   * Команда бота: человек ждёт короткого ответа, а не потока от модели. Разбирает
-   * команды бот, а не pi: у pi на каждую из них свой RPC-вызов, и половина смысла
-   * команды — в том, что она не тратит ни токенов, ни контекста разговора.
+   * A bot command: the person expects a short answer, not a stream from the model. The bot
+   * parses the commands, not pi: pi has a separate RPC call for each of them, and half the
+   * point of the command is that it spends neither tokens nor conversation context.
    */
   private async runCommand(
     message: TelegramMessage,
@@ -680,7 +689,7 @@ export class TelegramBot {
   ): Promise<void> {
     const chatId = message.chat.id;
     const conversationId = route.conversationId;
-    // Ответ на команду уезжает в тот же топик, где её написали.
+    // The answer to the command goes to the same topic where it was written.
     const { threadId, anchor } = route;
     const say = (text: string): Promise<void> => this.say(chatId, text, threadId, anchor);
 
@@ -711,8 +720,8 @@ export class TelegramBot {
   }
 
   /**
-   * Голосовое — в текст. null значит «расшифровать не вышло»: человеку уже сказали
-   * почему, и начинать ход не с чего.
+   * A voice message — into text. null means “transcription failed”: the person has already
+   * been told why, and there's no point starting a turn.
    */
   private async listen(voice: IncomingVoice, reply: TelegramReply): Promise<string | null> {
     if (!this.transcribe) {
@@ -721,8 +730,8 @@ export class TelegramBot {
       return null;
     }
 
-    // Действие уже стоит с начала хода (см. runTurn): здесь его не переставляем,
-    // а только ждём расшифровку.
+    // The action is already set from the start of the turn (see runTurn): here we don't
+    // move it, only wait for the transcription.
     let transcript: string;
     try {
       transcript = await this.transcribe(voice.audio, voice.mimeType);
@@ -732,10 +741,10 @@ export class TelegramBot {
       await reply.finish();
       return null;
     }
-    // Дальше слово снова у модели: наружу ничего не уходит, и показывать нечего.
+    // Then it's the model's turn again: nothing goes outside, and there's nothing to show.
     reply.setAction(THINKING_ACTION);
 
-    // Пустая расшифровка — это тишина или музыка: ход начинать не с чего.
+    // An empty transcription is silence or music: there's no point starting a turn.
     const spoken = transcript.trim();
     if (spoken === '') {
       reply.push(VOICE_EMPTY);
@@ -745,24 +754,25 @@ export class TelegramBot {
     return voicePrompt(spoken, voice.duration);
   }
 
-  /** Ход: действие Telegram, расшифровка голосового, реплика в pi, поток событий — в правки сообщения. */
+  /** Turn: a Telegram action, voice transcription, a reply into pi, the event stream — into message edits. */
   private async runTurn(message: TelegramMessage, user: UserConfig, incoming: Incoming, route: Route): Promise<void> {
     const conversationId = route.conversationId;
     const reply = new TelegramReply(this.api, message.chat.id, {
       intervalMs: this.editIntervalMs,
-      // Действие по умолчанию — «печатает», и каждая фаза хода только меняет его
-      // (см. chat-action.ts): словесного статуса в ответе больше нет.
+      // The default action is “typing”, and each phase of the turn only changes it
+      // (see chat-action.ts): there's no verbal status in the answer anymore.
       ...(this.actionGapMs === undefined ? {} : { actionGapMs: this.actionGapMs }),
       ...(this.actionIntervalMs === undefined ? {} : { actionIntervalMs: this.actionIntervalMs }),
-      // Разговор идёт в топике — ответ, «печатает…» и продолжения уезжают туда же.
+      // The conversation goes in a topic — the answer, “typing…”, and continuations go there too.
       threadId: route.threadId,
-      // Если Telegram отобьёт топик, ответ уедет ответом на реплику человека — в тот же топик.
+      // If Telegram rejects the topic, the answer will go as a reply to the person's message —
+      // into the same topic.
       ...(route.anchor === undefined ? {} : { anchorMessageId: route.anchor }),
     });
-    // Ход начинается сразу, до поднятия сессии: контейнер и pi стартуют секунды,
-    // и человек должен видеть, что его услышали, — действием, а не заготовкой
-    // с многоточием. Голосовое начинается с расшифровки, и обещать в это время
-    // «выбирает стикер» было бы враньём.
+    // The turn starts right away, before the session is brought up: the container and pi take
+    // seconds to start, and the person must see they were heard — with an action, not a
+    // placeholder with an ellipsis. A voice message starts with transcription, and promising
+    // “choosing a sticker” during that would be a lie.
     reply.start(incoming.voice && this.transcribe ? 'record_voice' : THINKING_ACTION);
 
     let text = incoming.text;
@@ -772,17 +782,18 @@ export class TelegramBot {
       text = spoken;
     }
 
-    // Ход отмечаем до поднятия сессии: контейнер и pi стартуют секунды, и сообщение,
-    // пришедшее в это время, должно прервать ещё не начавшийся ход, а не встать за
-    // ним в очередь на пять минут.
+    // We mark the turn before bringing up the session: the container and pi take seconds to
+    // start, and a message that arrives during this must interrupt a turn that hasn't even
+    // begun yet, not queue up behind it for five minutes.
     const turnKey = `${message.chat.id}:${route.threadId ?? 0}`;
     const turn = {
       interrupt: async (): Promise<void> => {
         await this.registry.interrupt(user, conversationId);
       },
     };
-    // Вторая операция тут одна: этот ход уже прервал прошлый. Говорим об этом
-    // первой строкой ответа — в Telegram нет ни кнопки «в очередь», ни индикатора.
+    // The only second operation here: this turn has already interrupted the previous one. We
+    // say this on the first line of the answer — Telegram has neither a “queue” button nor an
+    // indicator.
     if (this.interrupted.delete(turnKey)) reply.push(INTERRUPTED_NOTE);
     this.turns.set(turnKey, turn);
     const dropTurn = (): void => {
@@ -800,13 +811,13 @@ export class TelegramBot {
       return;
     }
 
-    // Место разговора в Telegram — в реестр: по нему топик переименовывается из панели
-    // и удаляется при архивации, и оно переживает перезапуск сервиса (см. setChatTelegram).
+    // The conversation's place in Telegram — into the registry: from it the topic is renamed
+    // from the panel and deleted on archiving, and it survives a service restart (see setChatTelegram).
     setChatTelegram(this.config, user, conversationId, message.chat.id, route.threadId);
 
-    // Сжатие прерывать нечем: это не ход, а переписывание контекста. Здесь честно
-    // просим подождать. Всё остальное — гонка с прерыванием из enqueue: ход уже
-    // останавливают, просто `agent_settled` ещё не приехал.
+    // There's nothing to interrupt compaction with: it's not a turn but a rewriting of the
+    // context. Here we honestly ask to wait. Everything else is a race with the interrupt from
+    // enqueue: the turn is already being stopped, it's just that `agent_settled` hasn't arrived yet.
     if (session.compacting) {
       dropTurn();
       reply.push(BUSY);
@@ -818,14 +829,14 @@ export class TelegramBot {
       await session.interrupt();
     }
 
-    // Прошлая реплика была не отсюда — значит в контексте есть чужой канал:
-    // говорим об этом до ответа, а не после. Панель может быть личным окном,
-    // и Telegram не должен становиться его продолжением молча.
+    // The previous reply was not from here — so the context contains another channel: we say
+    // this before the answer, not after. The panel may be a personal window, and Telegram must
+    // not silently become its continuation.
     const previous = lastTurnOf(this.config, user, conversationId);
     if (previous && previous.channel !== 'telegram') reply.push(crossChannelNote(previous.channel));
 
-    // Канал хода: файл сессии входы не различает, а шапка панели и отбивка
-    // в Telegram живут по этой отметке.
+    // The turn's channel: the session file doesn't distinguish inputs, while the panel header
+    // and the Telegram note live by this mark.
     recordTurn(this.config, user, conversationId, 'telegram');
 
     let settle: () => void = () => {};
@@ -836,8 +847,8 @@ export class TelegramBot {
     const toolArgs = new Map<string, Record<string, unknown>>();
     const reauth = new Map<string, { name: string; url: string }>();
 
-    // Ответ копится целиком: по нему видно, на какие файлы сослался агент, а по
-    // частям deltas этого не понять — путь приезжает кусками.
+    // The answer accumulates in full: from it you can see which files the agent referenced,
+    // while from the delta parts you can't — the path arrives in pieces.
     let answer = '';
 
     const unsubscribe = session.onEvent((event) => {
@@ -847,7 +858,7 @@ export class TelegramBot {
           if (delta?.type === 'text_delta' && delta.delta) {
             answer += delta.delta;
             reply.push(delta.delta);
-            // Текст поехал к человеку — и индикатор честно становится «печатает».
+            // The text has gone to the person — and the indicator honestly becomes “typing”.
             reply.setAction('typing');
           }
           break;
@@ -859,8 +870,8 @@ export class TelegramBot {
           break;
         }
         case 'tool_execution_update': {
-          // Прогресс приходит только от субагентов: он же — повод показать, что
-          // агенты ещё бегут. Кто именно и в каком порядке — это панель, не Telegram.
+          // Progress comes only from subagents: it's also a reason to show that the agents
+          // are still running. Which ones exactly and in what order — that's the panel, not Telegram.
           const partial = event.partialResult as { details?: unknown } | undefined;
           if (subagentStatus(partial?.details)) reply.setAction(actionForTool('subagent'));
           break;
@@ -897,8 +908,8 @@ export class TelegramBot {
     });
 
     try {
-      // Картинки уезжают модели нативно, а путь к ним — в реплике: без подписи
-      // текст остаётся пустым, и приписка про файлы держит реплику непустой.
+      // Images go to the model natively, and the path to them — in the reply: without a
+      // caption the text stays empty, and the note about files keeps the reply non-empty.
       await session.prompt(
         buildPrompt(
           text,
@@ -911,22 +922,22 @@ export class TelegramBot {
       log.error('телеграм: ход сорвался', { user: user.id, error: redact(String(error)) });
       reply.push(`⚠️ Ход сорвался: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
-      // Ссылку на повторный вход даём после ответа модели: она не должна
-      // выглядеть частью её текста, но обязана быть в том же сообщении.
+      // We give the re-entry link after the model's answer: it must not look like part of its
+      // text, but must be in the same message.
       for (const item of reauth.values()) {
         reply.push(`\n\n🔑 Доступ к MCP «${item.name}» истёк. Переподключить: ${item.url}`);
       }
       dropTurn();
       unsubscribe();
-      // Ссылки на локальные файлы в тексте заменяем вложениями: текст без них
-      // понятнее, а сам файл человек увидит отдельным сообщением (см. outgoing.ts).
+      // We replace links to local files in the text with attachments: the text is clearer
+      // without them, and the person will see the file itself as a separate message (see outgoing.ts).
       const files = answerFiles(answer);
       if (files.length > 0) reply.mapTail(stripLocalRefs);
       await reply.finish();
       if (files.length > 0) await this.deliverAnswerFiles(message, user, files, route);
       await this.reportUndelivered(message, route, reply);
-      // Имя разговора — после ответа: модель может подумать секунды, а человек не
-      // должен ждать её ради названия топика.
+      // The conversation name — after the answer: the model may think for seconds, and the
+      // person must not wait for it just for the topic name.
       void this.settleTitle(user, route).catch((error) => {
         log.warn('телеграм: заголовок разговора не вышел', { user: user.id, error: describeTelegramError(error) });
       });
@@ -934,16 +945,17 @@ export class TelegramBot {
   }
 
   /**
-   * Человек переименовал топик в клиенте Telegram — это его имя, и трогать его
-   * больше нельзя: запоминаем как ручное и переносим в заголовок разговора,
-   * чтобы панель показывала то же, что человек видит в Telegram. Свои
-   * переименования узнаём по имени, которое сами поставили: оно уже в `topicTitle`.
+   * The person renamed the topic in the Telegram client — this is their name, and it must not
+   * be touched anymore: we remember it as manual and carry it into the conversation title so
+   * the panel shows the same as the person sees in Telegram. We recognize our own renames by
+   * the name we set ourselves: it's already in `topicTitle`.
    */
   private noteTopicEdited(message: TelegramMessage): void {
     const name = message.forum_topic_edited?.name?.replace(/\s+/g, ' ').trim();
     if (!name) return;
-    // Человека и разговор находим сами: по чату и топику место разговора не
-    // поискать, а в `conversationId` номер топика не разобрать (см. conversationIdFor).
+    // We find the person and the conversation ourselves: by chat and topic the conversation
+    // place can't be looked up, and the topic number can't be parsed out of `conversationId`
+    // (see conversationIdFor).
     const user = findTelegramUser(this.config, message.from?.username);
     if (!user) return;
     const threadId = topicThreadId(message);
@@ -956,9 +968,9 @@ export class TelegramBot {
   }
 
   /**
-   * Имя разговора после хода. Эвристику из первой реплики уже мог поставить
-   * pi-сессия; модель уточняет её по первым репликам. Для Telegram это ещё и имя
-   * топика — единственное место, где его можно поменять (см. pushTopicTitle).
+   * The conversation name after a turn. The heuristic from the first reply may already have
+   * been set by the pi session; the model refines it from the first replies. For Telegram this
+   * is also the topic name — the only place where it can be changed (see pushTopicTitle).
    */
   private async settleTitle(user: UserConfig, route: Route): Promise<void> {
     refreshChatTitle(this.config, user, route.conversationId);
@@ -969,23 +981,24 @@ export class TelegramBot {
       route.conversationId,
     );
     const chat = findChatRecord(this.config, user, route.conversationId);
-    // Разговор не в реестре — и переименовывать нечего: имя живёт в chats.json.
+    // The conversation is not in the registry — and there's nothing to rename: the name lives in chats.json.
     if (!chat) return;
     await this.pushTopicTitle(user, route.conversationId, refined ?? chat.title);
   }
 
   /**
-   * Ставит топику имя разговора, если оно там ещё не стоит. Telegram не отдаёт
-   * текущее имя топика, поэтому сравниваем с тем, что сами поставили (`topicTitle`
-   * в chats.json): без этого каждое уточнение заголовка слало бы `editForumTopic`
-   * заново, а Telegram оставляет в топике служебку о переименовании.
+   * Sets the topic to the conversation name if it's not already there. Telegram doesn't return
+   * the current topic name, so we compare with what we set ourselves (`topicTitle` in
+   * chats.json): without this, every title refinement would send `editForumTopic` again, and
+   * Telegram leaves a rename service message in the topic.
    */
   private pushTopicTitle(user: UserConfig, conversationId: string, title: string): Promise<void> {
-    // Место разговора берём из реестра, а не из памяти бота: оно переживает
-    // перезапуск сервиса, поэтому имя из панели доедет до топика и после него (см. setChatTelegram).
+    // We take the conversation's place from the registry, not from the bot's memory: it
+    // survives a service restart, so a name from the panel reaches the topic after it too
+    // (see setChatTelegram).
     const place = findChatRecord(this.config, user, conversationId)?.telegram;
     const threadId = place?.threadId ?? null;
-    // Корень чата — не топик: там имя менять нечем.
+    // The chat root is not a topic: there's nothing to change the name with there.
     if (!place || threadId === null) return Promise.resolve();
     const name = title.replace(/\s+/g, ' ').trim().slice(0, TOPIC_NAME_LIMIT);
     if (!name) return Promise.resolve();
@@ -1001,7 +1014,7 @@ export class TelegramBot {
           name,
         });
       } catch (error) {
-        // Не форум или нет прав — молчим: имя в chats.json уже есть, панель его видит.
+        // Not a forum or no rights — we stay silent: the name is already in chats.json, the panel sees it.
         log.warn('телеграм: топик не переименовался', {
           user: user.id,
           threadId,
@@ -1012,9 +1025,9 @@ export class TelegramBot {
   }
 
   /**
-   * Подписка на уточнение заголовков. Разговором можно продолжать и из панели —
-   * у Telegram-разговора имя меняет веб-чат, — а имя топика живёт только в Telegram,
-   * поэтому за сводкой панели следим и мы.
+   * Subscription to title refinement. A conversation can be continued from the panel too — the
+   * web chat changes the name of a Telegram conversation — while the topic name lives only in
+   * Telegram, so we watch the panel summary too.
    */
   watchTitles(): () => void {
     if (this.unwatchTitles) return this.unwatchTitles;
@@ -1033,8 +1046,8 @@ export class TelegramBot {
   }
 
   /**
-   * Файлы, на которые сослался агент, — вложениями после текста. Ошибку не прячем:
-   * если агент написал «вот график», человек должен знать, почему графика нет.
+   * Files the agent referenced — as attachments after the text. We don't hide the error: if the
+   * agent wrote “here's the chart”, the person must know why there's no chart.
    */
   private async deliverAnswerFiles(
     message: TelegramMessage,
@@ -1053,8 +1066,9 @@ export class TelegramBot {
   }
 
   /**
-   * Ответ не доехал до топика (Telegram отбил и `message_thread_id`, и якорь). В топике
-   * человек ждал бы молча, поэтому говорим в корне чата: «ответа не будет, пиши сюда».
+   * The answer didn't reach the topic (Telegram rejected both `message_thread_id` and the
+   * anchor). In the topic the person would wait in silence, so we say in the chat root: “there
+   * will be no answer, write here”.
    */
   private async reportUndelivered(message: TelegramMessage, route: Route, reply: TelegramReply): Promise<void> {
     if (!reply.failed || route.threadId === null) return;
@@ -1068,9 +1082,9 @@ export class TelegramBot {
   }
 
   /**
-   * `/rename имя`: переименовывает текущий разговор. Имя живёт в chats.json и
-   * видно в панели; если разговор идёт в топике Telegram, переименовываем и его —
-   * человек должен увидеть новое имя там, где разговаривает.
+   * `/rename name`: renames the current conversation. The name lives in chats.json and is
+   * visible in the panel; if the conversation goes in a Telegram topic, we rename that too —
+   * the person must see the new name where they talk.
    */
   private async renameChat(
     message: TelegramMessage,
@@ -1097,21 +1111,21 @@ export class TelegramBot {
     }
 
     const outcome = await this.registry.rename(user, route.conversationId, name);
-    // Помним имя, чтобы потом автозаголовок не переименовал топик второй раз.
-    // После `registry.rename`: до него записи разговора может ещё не быть.
+    // We remember the name so that the auto-title doesn't rename the topic a second time.
+    // After `registry.rename`: before it the conversation record may not exist yet.
     if (route.threadId !== null) setTopicTitle(this.config, user, route.conversationId, name);
     await this.say(chatId, renameText(outcome), route.threadId, route.anchor);
   }
 
   /**
-   * `/archive`: разговор уходит в архив панели и выносится из Telegram. Это одно
-   * действие: в панели архив — это «убрать с глаз», и в Telegram топик убирается
-   * так же — целиком, вместе с сообщениями. Вернуть его Telegram не умеет, поэтому
-   * из архива разговор возвращается только в панель (см. archiveChat).
+   * `/archive`: the conversation goes to the panel archive and is removed from Telegram. This
+   * is one action: in the panel the archive is “out of sight”, and in Telegram the topic is
+   * removed the same way — entirely, together with the messages. Telegram can't bring it back,
+   * so a conversation returns from the archive only into the panel (see archiveChat).
    */
   private async archive(message: TelegramMessage, user: UserConfig, route: Route): Promise<void> {
     const chatId = message.chat.id;
-    // Есть ли что удалять в Telegram: у корня чата топика нет.
+    // Whether there's anything to delete in Telegram: the chat root has no topic.
     const hadTopic = (findChatRecord(this.config, user, route.conversationId)?.telegram?.threadId ?? null) !== null;
     const outcome = await archiveChat(this.config, user, route.conversationId, true, (chat) =>
       this.removeTopic(user, chat),
@@ -1121,18 +1135,20 @@ export class TelegramBot {
       await this.say(chatId, ARCHIVE_NOT_FOUND, route.threadId, route.anchor);
       return;
     }
-    // Топик не удалился — разговор всё равно в архиве, но говорим там, где человек писал.
+    // The topic wasn't deleted — the conversation is in the archive anyway, but we say it where
+    // the person wrote.
     if (outcome.topicError) {
       await this.say(chatId, archiveTopicFailed(outcome.topicError), route.threadId, route.anchor);
       return;
     }
-    // Топик удалён вместе с сообщениями — отвечать в нём уже нечем: пишем в корень чата.
+    // The topic is deleted together with the messages — there's nothing left to answer in it:
+    // we write to the chat root.
     await this.say(chatId, archivedText(chat.title, hadTopic));
   }
 
   /**
-   * Выносит разговор из Telegram: топик удаляется вместе с сообщениями. Зовут его
-   * и `/archive`, и панель — архивация у них одно действие (см. archiveChat).
+   * Removes the conversation from Telegram: the topic is deleted together with the messages.
+   * Both `/archive` and the panel call it — archiving is one action for them (see archiveChat).
    */
   async removeTopic(user: UserConfig, chat: ChatRecord): Promise<void> {
     const place = chat.telegram;
@@ -1146,10 +1162,10 @@ export class TelegramBot {
   }
 
   /**
-   * `/workspace [имя]`: рабочая папка разговора. Без имени — текущая и список
-   * доступных, с именем — переключение. Выбор живёт в chats.json вместе с
-   * разговором: его видит панель, и он переживает перезапуск бота. Приватный
-   * workspace не участвует ни в списке, ни в переключении.
+   * `/workspace [name]`: the conversation's working folder. Without a name — the current one
+   * and the list of available ones, with a name — switching. The choice lives in chats.json
+   * together with the conversation: the panel sees it, and it survives a bot restart. A private
+   * workspace participates neither in the list nor in switching.
    */
   private async selectWorkspace(
     message: TelegramMessage,
@@ -1161,7 +1177,7 @@ export class TelegramBot {
 
     const slug = workspaceForConversation(this.config, user, route.conversationId) ?? DEFAULT_WORKSPACE;
     const current = listWorkspaces(this.config, user).find((item) => item.slug === slug)?.name ?? slug;
-    // Имя с пробелами — обычное дело: «Работа над Атласом» человек пишет целиком.
+    // A name with spaces is a common thing: “Work on Atlas” is written by a person in full.
     const name = argument.replace(/\s+/g, ' ').trim();
 
     if (name === '') {
@@ -1199,13 +1215,14 @@ export class TelegramBot {
   }
 
   /**
-   * Короткое сообщение без потока: приветствие, отказ, ответ на команду. Якорь — id
-   * реплики человека в том же топике: если Telegram отобьёт топик, ответ уедет ответом
-   * на неё, то есть всё равно в топик (см. TelegramApi.sendMessage).
+   * A short message without a stream: a greeting, a refusal, an answer to a command. The
+   * anchor is the id of the person's reply in the same topic: if Telegram rejects the topic,
+   * the answer will go as a reply to it, that is, into the topic anyway (see
+   * TelegramApi.sendMessage).
    *
-   * Не доехало в топик — говорим об этом в корне: в топике человек ждал бы молча.
-   * Рекурсии нет: сообщение в корне уходит без номера топика, и второй попытки
-   * «сказать, что не сказалось» не будет.
+   * It didn't reach the topic — we say so in the root: in the topic the person would wait in
+   * silence. No recursion: a message in the root goes without a topic number, and there
+   * won't be a second attempt to “say that it wasn't said”.
    */
   private async say(chatId: number, text: string, threadId: number | null = null, anchor?: number): Promise<void> {
     try {
@@ -1218,7 +1235,7 @@ export class TelegramBot {
   }
 }
 
-/** Поднимает бота, если он настроен: нет токена или маппинга — сервис живёт как раньше. */
+/** Brings up the bot if it's configured: no token or mapping — the service lives as before. */
 export function startTelegramBot(config: IcarusConfig, registry: SessionRegistry): TelegramBot | null {
   if (!config.telegram) return null;
   const bot = new TelegramBot(config, registry);

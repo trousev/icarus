@@ -1,9 +1,9 @@
-// Раздел панели «Задачи»: расписания, по которым агент запускается сам.
+// "Tasks" panel section: schedules by which the agent starts on its own.
 //
-// Человека называет SSO-прокси (см. identity.ts), поэтому id человека в запросах нет:
-// чужие задачи через свою сессию не увидеть и не удалить. Промпт задачи уезжает в
-// новый разговор, поэтому «куда доставлять» тут нечего — проверяем только workspace:
-// папка должна быть у человека и быть доступной на запись.
+// The person is named by the SSO proxy (see identity.ts), so there is no user id in requests:
+// you cannot see or delete someone else's tasks through your session. A task's prompt goes into
+// a new conversation, so there is nothing to "deliver to" here — we only check workspace:
+// the folder must belong to the person and be writable.
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { findUser, type IcarusConfig } from '../config.ts';
 import { readJsonBody } from '../http/openai.ts';
@@ -27,7 +27,7 @@ export type TasksApiContext = { config: IcarusConfig; userId: string };
 
 export type TasksApi = (req: IncomingMessage, res: ServerResponse, url: URL, ctx: TasksApiContext) => Promise<boolean>;
 
-/** Задача в списке: рядом с id прошлого разговора — его имя, чтобы была ссылка. */
+/** A task in the list: next to the previous conversation's id — its name, so there is a link. */
 type TaskWithChat = TaskView & { lastChat: { id: string; title: string } | null };
 
 function json(res: ServerResponse, status: number, payload: unknown): void {
@@ -40,19 +40,19 @@ function fail(res: ServerResponse, error: unknown): void {
   json(res, 400, errorBody(message, 'invalid_request_error'));
 }
 
-/** Разговор прошлого запуска: по нему в списке есть ссылка «открыть». */
+/** The previous run's conversation: it's what the list's "open" link points to. */
 function lastChatOf(config: IcarusConfig, userId: string, task: ScheduledTask): TaskWithChat['lastChat'] {
   if (!task.lastChatId) return null;
   const user = findUser(config, userId);
   if (!user) return null;
   const chat = findChatRecord(config, user, task.lastChatId);
-  // Разговор могли удалить вместе с файлом: задача остаётся, ссылки нет.
+  // The conversation could have been deleted along with the file: the task remains, no link.
   return chat ? { id: chat.conversationId ?? chat.id, title: chat.title } : null;
 }
 
 /**
- * Workspace задачи: имя из формы может быть и slug'ом, и подписью папки. Приватный
- * не годится — агент там только читает, и запуск был бы пустой тратой.
+ * Task workspace: the name from the form may be either a slug or a folder label. A private one
+ * won't do — the agent only reads there, and the run would be a waste of time.
  */
 function workspaceOf(config: IcarusConfig, userId: string, value: unknown): string | undefined {
   const wanted = typeof value === 'string' ? value.trim() : '';
@@ -81,12 +81,12 @@ export const handleTasksApi: TasksApi = async (req, res, url, ctx) => {
     json(res, 200, {
       user: userId,
       timeZone,
-      // Часы сервера: по ним клиент подписывает «сегодня» и «завтра», а не по часам
-      // браузера, которые могут врать.
+      // Server clock: the client labels "today" and "tomorrow" by it, not by the
+      // browser clock, which can lie.
       now: now.toISOString(),
       tasks: readTasks(config, user)
         .map((task) => ({ ...taskView(task, now), lastChat: lastChatOf(config, userId, task) }))
-        // Ближайшие — сверху: это то, что человек проверяет чаще всего.
+        // Nearest first: this is what a person checks most often.
         .sort((left, right) => (left.nextRunAt ?? '9999').localeCompare(right.nextRunAt ?? '9999')),
       workspaces: selectableWorkspaces(config, user).map(({ slug, name }) => ({ slug, name })),
     });

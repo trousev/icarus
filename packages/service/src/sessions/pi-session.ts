@@ -1,5 +1,5 @@
-// Одна живая сессия pi = один разговор в чате.
-// Процесс живёт внутри контейнера пользователя, общение — JSONL по stdio.
+// One live pi session = one conversation in the chat.
+// The process lives inside the user's container, communication is JSONL over stdio.
 import { RpcClient, type RpcEvent, type Spawner } from './rpc-client.ts';
 import { channelForConversation, sessionIdFor } from './identity.ts';
 import { appendChatSession, findChatRecord, refreshChatTitle, sessionIdOf } from './chats.ts';
@@ -16,12 +16,12 @@ import {
   type UserConfig,
 } from '../config.ts';
 
-/** Реэкспорт для тех, кто по-прежнему ищет id сессии рядом с PiSession. */
+/** Re-export for those who still look for the session id next to PiSession. */
 export { sessionIdFor };
 
 /**
- * Что остаётся от расширений в приватном режиме: персона и всё, что только читает.
- * Экстрактор и уборщик памяти сюда не входят — они пишут в память фоном.
+ * What remains of the extensions in private mode: the persona and everything that only reads.
+ * The memory extractor and sweeper are not here — they write to memory in the background.
  */
 const PRIVATE_EXTENSIONS = [
   'persona.ts',
@@ -33,13 +33,13 @@ const PRIVATE_EXTENSIONS = [
   'private-guard.ts',
 ];
 
-/** Инструменты, которыми можно писать. В приватном workspace их не выдаём вовсе. */
+/** Tools that can write. In a private workspace we do not expose them at all. */
 const WRITE_TOOLS = 'write,edit,bash';
 
 /**
- * Артефакт, который правит разговор. Разговор об артефакте — это сессия pi не в
- * workspace, а в папке `/artifacts/<slug>`: только так модель работает в
- * репозитории артефакта, а не где-то рядом.
+ * The artifact that the conversation edits. A conversation about an artifact is a pi session not in a
+ * workspace, but in the folder `/artifacts/<slug>`: only this way the model works in the
+ * artifact's repository, and not somewhere nearby.
  */
 export type ArtifactSession = {
   slug: string;
@@ -65,7 +65,7 @@ export function piArgsFor(model: ModelConfig, sessionId: string, workspace: stri
       ? [
           '--no-extensions',
           ...PRIVATE_EXTENSIONS.flatMap((name) => ['-e', `${CONTAINER_PATHS.piAgent}/extensions/${name}`]),
-          // Даже если расширение не загрузится, тулы записи модель просто не увидит.
+          // Even if the extension fails to load, the model simply will not see the write tools.
           '--exclude-tools',
           WRITE_TOOLS,
         ]
@@ -74,45 +74,45 @@ export function piArgsFor(model: ModelConfig, sessionId: string, workspace: stri
 }
 
 /**
- * Сколько ждём сжатие. Это обычный вызов модели, но промпт у него — весь разговор,
- * поэтому таймаут щедрый: уборка памяти ходит в модель с тем же запасом в 10 минут.
+ * How long we wait for compaction. This is a normal model call, but its prompt is the whole conversation,
+ * so the timeout is generous: the memory sweeper goes to the model with the same 10-minute allowance.
  */
 export const COMPACT_TIMEOUT_MS = 600_000;
 
 /**
- * Итог сжатия. «Нечего сжимать» — не ошибка: у короткого разговора и у уже
- * сжатого контекста pi отвечает именно так.
+ * The result of compaction. "Nothing to compact" is not an error: for a short conversation and for
+ * an already compacted context pi answers exactly that.
  */
 export type CompactResult =
   | { status: 'compacted'; tokensBefore: number; tokensAfter: number }
   | { status: 'nothing' };
 
 /**
- * Что можно позвать в разговоре, кроме обычной реплики: скилл человека, промпт-шаблон
- * или команда расширения. Собирает их pi — свой список мы бы неизбежно разошёлся с ним.
+ * What can be called in a conversation besides a normal utterance: the person's skill, a prompt template
+ * or an extension command. pi collects them — our own list would inevitably diverge from it.
  */
 export type PiCommand = {
   name: string;
   description?: string;
-  /** Откуда команда: extension, prompt или skill. */
+  /** Where the command comes from: extension, prompt or skill. */
   source?: string;
-  /** Где лежит: user, project или path (у расширений не бывает). */
+  /** Where it lies: user, project or path (extensions never have it). */
   location?: string;
 };
 
 export class PiSession {
   readonly key: string;
   /**
-   * id сессии pi. Обычно выводится из разговора, но после `/clear` pi заводит
-   * новую сессию со своим id — тогда он приезжает из `get_state` и запоминается
-   * в chats.json, чтобы история и следующий запуск искали правильный файл.
+   * pi session id. Usually derived from the conversation, but after `/clear` pi starts a
+   * new session with its own id — then it comes from `get_state` and is remembered
+   * in chats.json, so the history and the next launch look for the right file.
    */
   sessionId: string;
   readonly container: string;
   /**
-   * Поколение ресурсов человека на момент запуска процесса (скиллы и всё остальное,
-   * что pi читает один раз при старте). Реестр сверяет его со свежим: не совпало —
-   * сессия пересоздаётся, иначе старый процесс о новом скилле просто не знает.
+   * The generation of the person's resources at the time the process was launched (skills and everything else
+   * that pi reads once at startup). The registry compares it with the fresh one: if they do not match —
+   * the session is recreated, otherwise the old process simply does not know about the new skill.
    */
   readonly generation: number;
   busy = false;
@@ -121,15 +121,15 @@ export class PiSession {
 
   readonly user: UserConfig;
   readonly conversationId: string;
-  /** В каком workspace'е идёт разговор: он же рабочий каталог процесса pi. */
+  /** In which workspace the conversation runs: it is also the working directory of the pi process. */
   readonly workspace: string;
-  /** Артефакт, если разговор открыт из раздела «Артефакты»: он и есть каталог. */
+  /** The artifact, if the conversation is opened from the "Artifacts" section: it is the directory. */
   readonly artifact?: ArtifactSession;
   private config: IcarusConfig;
   private client: RpcClient;
   private listeners = new Set<(event: RpcEvent) => void>();
   private detach: () => void;
-  /** Сжатие в полёте: пока оно идёт, ход в эту сессию пускать нельзя. */
+  /** Compaction in flight: while it runs, a turn must not be allowed into this session. */
   private compactingTask: Promise<void> | null = null;
 
   constructor(
@@ -139,7 +139,7 @@ export class PiSession {
     model: ModelConfig,
     container: string,
     generation = 0,
-    /** Чем запускать pi: в тестах — заглушкой, в бою — docker exec (см. RpcClient). */
+    /** What to launch pi with: a stub in tests, docker exec in production (see RpcClient). */
     spawner?: Spawner,
     workspace: string = DEFAULT_WORKSPACE,
     artifact?: ArtifactSession,
@@ -152,13 +152,13 @@ export class PiSession {
     this.key = `${user.id}:${conversationId}`;
     this.container = container;
     this.generation = generation;
-    // Разговор мог уже начаться заново (`/clear`): тогда pi ждёт id последней
-    // сессии из цепочки, а не выведенный из conversationId.
+    // The conversation may have already started over (`/clear`): then pi waits for the id of the last
+    // session in the chain, not the one derived from conversationId.
     const record = findChatRecord(config, user, conversationId);
     this.sessionId = record ? sessionIdOf(record, user) : sessionIdFor(user.id, conversationId);
 
-    // Канал нужен расширению-персоне: в веб-чате можно показать картинку
-    // markdown-ом, в Telegram — нельзя, и учить модель лишнему незачем.
+    // The channel is needed by the persona extension: in the web chat an image can be shown
+    // with markdown, in Telegram it cannot, and there is no reason to teach the model extra things.
     const channel = channelForConversation(conversationId);
     this.client = new RpcClient(
       config,
@@ -167,17 +167,17 @@ export class PiSession {
       spawner,
       {
         ICARUS_CHANNEL: channel,
-        // Поисковый роутер живёт в сервисе, а pi — в контейнере на той же
-        // docker-сети: имя compose-сервиса резолвится, токен не нужен.
+        // The search router lives in the service, and pi — in the container on the same
+        // docker network: the compose service name resolves, no token needed.
         ICARUS_SEARCH_URL: `http://${SERVICE_NAME}:${config.port}`,
         ...modelTierEnv(config),
-        // Ключи из .env и настроек панели: контейнер получил их при создании, но
-        // сохранённый в панели ключ должен доехать до следующего разговора без
-        // пересоздания контейнера. Здесь они перекрывают окружение контейнера.
+        // Keys from .env and panel settings: the container got them at creation, but
+        // a key saved in the panel must reach the next conversation without
+        // recreating the container. Here they override the container environment.
         ...(config.secretEnv ?? {}),
         ICARUS_WORKSPACE: workspace,
-        // Режим правки артефакта: персона по этим переменным собирает отдельный
-        // промпт, а процесс работает прямо в папке артефакта, а не в workspace.
+        // Artifact edit mode: the persona builds a separate prompt from these variables,
+        // and the process works directly in the artifact folder, not in the workspace.
         ...(artifact
           ? {
               ICARUS_ARTIFACT: artifact.slug,
@@ -191,13 +191,13 @@ export class PiSession {
       artifact ? `${CONTAINER_PATHS.artifacts}/${artifact.slug}` : containerWorkspace(workspace),
     );
     this.detach = this.client.onEvent((event) => {
-      // Во время сжатия сессия занята не ходом: `agent_settled` тут ни при чём,
-      // иначе ход влез бы в сессию посреди переписывания контекста.
+      // During compaction the session is busy not with a turn: `agent_settled` has nothing
+      // to do with it, otherwise the turn would wedge into the session in the middle of rewriting the context.
       if (event.type === 'agent_settled' && !this.compactingTask) {
         this.busy = false;
-        // У веб-чата заголовок ставит finishChat по тексту реплики. У Telegram
-        // и API такого места нет — берём кусок первой реплики из файла сессии,
-        // когда ход уже дописан, и не задерживаем ответ человеку.
+        // For the web chat the title is set by finishChat from the text of the utterance. Telegram
+        // and the API have no such place — we take a piece of the first utterance from the session file,
+        // when the turn is already written, and do not delay the answer to the person.
         if (!this.conversationId.startsWith('web-')) {
           queueMicrotask(() => refreshChatTitle(this.config, this.user, this.conversationId));
         }
@@ -224,7 +224,7 @@ export class PiSession {
     return () => this.listeners.delete(listener);
   }
 
-  /** Отправляет реплику. Ответ приходит событиями; ход завершает `agent_settled`. */
+  /** Sends an utterance. The answer comes as events; the turn is completed by `agent_settled`. */
   async prompt(text: string, images: Array<{ data: string; mimeType: string }> = []): Promise<void> {
     this.busy = true;
     this.lastUsed = Date.now();
@@ -244,26 +244,26 @@ export class PiSession {
   }
 
   /**
-   * Идёт ли сжатие: реестр по этому обещанию решает, подождать или пустить ход.
-   * Пока оно не завершилось, `busy` держится поднятым — вклиниться нельзя.
+   * Is compaction running: the registry uses this promise to decide whether to wait or let a turn in.
+   * While it has not finished, `busy` is kept raised — you cannot wedge in.
    */
   get compacting(): Promise<void> | null {
     return this.compactingTask;
   }
 
   /**
-   * Сжатие контекста: pi пересказывает моделью старую часть разговора и дописывает
-   * в сессию запись-пересказ — дальше в промпт едет пересказ и недавние реплики, а
-   * не вся история. История при этом не теряется, файл сессии append-only.
+   * Context compaction: pi retells the old part of the conversation with the model and appends
+   * a retelling record to the session — after that the prompt carries the retelling and recent utterances,
+   * not the whole history. The history is not lost, the session file is append-only.
    *
-   * Долго: это обычный вызов модели, но промпт у него — весь разговор. Поэтому на
-   * время сжатия сессия занята, и второй раз сжать её же нельзя.
+   * It takes long: this is a normal model call, but its prompt is the whole conversation. Therefore during
+   * compaction the session is busy, and it cannot be compacted a second time.
    */
   async compact(customInstructions?: string): Promise<CompactResult> {
     if (this.compactingTask) throw new Error('сжатие уже идёт');
     const task = this.runCompact(customInstructions);
-    // Хвост для ожидающих: своё падение они увидят сами, а `compacting` не должен
-    // превращаться в необработанный reject, если на него никто не подписался.
+    // Tail for the waiters: they will see their own failure themselves, and `compacting` must not
+    // turn into an unhandled reject if nobody subscribed to it.
     this.compactingTask = task.then(
       () => undefined,
       () => undefined,
@@ -276,17 +276,17 @@ export class PiSession {
   }
 
   /**
-   * Новый разговор внутри той же сессии: pi заводит новую сессию (`new_session`)
-   * и начинает с чистого контекста. Старый файл остаётся на диске, но разговор
-   * переезжает на новый id — его и запоминаем в chats.json.
+   * A new conversation inside the same session: pi starts a new session (`new_session`)
+   * and begins with a clean context. The old file remains on disk, but the conversation
+   * moves to a new id — that is what we remember in chats.json.
    */
   async newSession(): Promise<string> {
     const response = await this.client.request({ type: 'new_session' }, 30_000);
     if (response.success !== true) {
       throw new Error(`pi не начал разговор заново: ${String(response.error ?? 'без причины')}`);
     }
-    // Расширение может отменить замену сессии (before_switch): тогда id остался
-    // прежним, и записывать его как новый было бы враньём.
+    // An extension may cancel the session switch (before_switch): then the id stayed
+    // the same, and writing it as new would be a lie.
     if ((response.data as { cancelled?: unknown } | undefined)?.cancelled === true) {
       throw new Error('pi отменил начало нового разговора');
     }
@@ -298,8 +298,8 @@ export class PiSession {
     try {
       appendChatSession(this.config, this.user, this.conversationId, next);
     } catch (error) {
-      // Разговор уже начат заново; не записать id — значит потерять историю при
-      // следующем запуске. Это важнее «команда не сработала», поэтому пишем в лог.
+      // The conversation has already been started over; not writing the id means losing the history on
+      // the next launch. This is more important than "the command did not work", so we write to the log.
       log.warn('новая сессия не записалась', {
         user: this.user.id,
         conversation: this.conversationId,
@@ -323,7 +323,7 @@ export class PiSession {
       const response = await this.client.request(command, COMPACT_TIMEOUT_MS);
       if (response.success !== true) {
         const reason = String(response.error ?? '');
-        // Короткий разговор и уже сжатый контекст — это не поломка.
+        // A short conversation and an already compacted context are not a breakage.
         if (/nothing to compact|already compacted/i.test(reason)) return { status: 'nothing' };
         throw new Error(`pi отказался сжимать: ${reason || 'без причины'}`);
       }
@@ -345,9 +345,9 @@ export class PiSession {
   }
 
   /**
-   * Прерывание хода: соединение с клиентом оборвалось или человек попросил `/stop`.
-   * Отвечает, подтвердил ли pi прерывание: молчаливое «наверное, остановился» тут
-   * хуже ошибки — человек ждёт ответа и не знает, ждать ли ещё.
+   * Interrupting a turn: the connection to the client broke or the person asked for `/stop`.
+   * It answers whether pi confirmed the interruption: a silent "probably stopped" is
+   * worse than an error here — the person waits for an answer and does not know whether to wait more.
    */
   async abort(): Promise<boolean> {
     if (!this.client.alive) return false;
@@ -364,19 +364,19 @@ export class PiSession {
   }
 
   /**
-   * Прерывание хода вместе с очередью: человек написал новое, пока Икар работал.
+   * Interrupting a turn together with the queue: the person wrote something new while Icarus was working.
    *
-   * `abort` в pi не выбрасывает отложенные сообщения — он их доигрывает, поэтому
-   * очередь чистим до прерывания. И ждём `agent_settled`, а не просто ответ на
-   * команду: только к этому моменту ход действительно встал, инструменты (и дети
-   * субагентов) погашены, и в сессию можно писать следующую реплику.
+   * `abort` in pi does not discard queued messages — it plays them out, so we clear
+   * the queue before the interruption. And we wait for `agent_settled`, not just the answer to the
+   * command: only by that moment has the turn really stopped, the tools (and subagent
+   * children) are shut down, and the next utterance can be written to the session.
    */
   async interrupt(timeoutMs = 20_000): Promise<boolean> {
     if (!this.client.alive) return false;
     try {
       await this.client.request({ type: 'clear_queue' }, 5_000);
     } catch {
-      // Старый pi такой команды не знает: обойдёмся тем, что есть.
+      // An old pi does not know such a command: we make do with what we have.
     }
 
     let off = (): void => {};
@@ -425,8 +425,8 @@ export class PiSession {
   }
 
   /**
-   * Список команд разговора — скиллы, промпт-шаблоны, команды расширений. Спрашиваем
-   * у pi, а не читаем каталоги сами: он один знает и про пакеты, и про доверие к проекту.
+   * The list of conversation commands — skills, prompt templates, extension commands. We ask
+   * pi, rather than reading the directories ourselves: it alone knows about packages and about project trust.
    */
   async getCommands(): Promise<PiCommand[]> {
     const response = await this.client.request({ type: 'get_commands' }, 20_000);

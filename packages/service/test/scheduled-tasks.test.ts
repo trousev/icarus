@@ -1,9 +1,9 @@
-// Планировщик задач: что происходит, когда время пришло.
+// Task scheduler: what happens when the time has come.
 //
-// Тесты не ждут реального времени: часы подменяются, а `tick()` зовётся руками.
-// Проверяем именно то, что человек заметит: по расписанию запускается агент в новом
-// разговоре, выключенная задача молчит, занятость не съедает запуск, а пропущенный
-// запуск догоняется один раз, а не пачкой.
+// The tests do not wait for real time: the clock is stubbed, and `tick()` is called by hand.
+// We check exactly what a person will notice: on schedule an agent is launched in a new
+// conversation, a disabled task stays silent, being busy does not eat the launch, and a missed
+// launch is caught up once, not in a batch.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -26,7 +26,7 @@ const DAY = 24 * 3_600_000;
 
 type Launch = { user: UserConfig; task: ScheduledTask };
 
-/** Заглушка запуска: помнит, кого и с каким промптом просили запустить. */
+/** Launch stub: remembers whom and with which prompt it was asked to launch. */
 function makeLauncher(options: { busy?: boolean; error?: string } = {}) {
   const launches: Launch[] = [];
   let busy = options.busy === true;
@@ -53,9 +53,9 @@ function setup(options: { busy?: boolean; error?: string; graceMs?: number } = {
   return { config, user, ...stand, graceMs: options.graceMs };
 }
 
-test('задача создаётся со следующим запуском в поясе человека', () => {
+test('the task is created with the next run in the user\'s time zone', () => {
   const { config, user } = setup();
-  const now = new Date('2026-11-08T07:00:00Z'); // 7:00 по Дублину
+  const now = new Date('2026-11-08T07:00:00Z'); // 7:00 in Dublin
   const task = createTask(
     config,
     user,
@@ -77,7 +77,7 @@ test('задача создаётся со следующим запуском �
   assert.deepEqual(readTasks(config, user).map((item) => item.id), [task.id]);
 });
 
-test('своё имя задачи сохраняется и читается, пустое — не сохраняется', () => {
+test('a custom task name is saved and read, an empty one is not saved', () => {
   const { config, user } = setup();
   const now = new Date('2026-11-08T07:00:00Z');
   const named = createTask(
@@ -106,7 +106,7 @@ test('своё имя задачи сохраняется и читается, �
   assert.equal(readTasks(config, user)[0].prompt, 'Собери сводку по проекту X', 'промпт не тронут');
 });
 
-test('чужой человек не видит и не удаляет задачу', () => {
+test('another person cannot see or delete a task', () => {
   const { config } = setup();
   const owner = probe('probe');
   const stranger = probe('probe2');
@@ -120,7 +120,7 @@ test('чужой человек не видит и не удаляет зада�
   assert.equal(readTasks(config, owner).length, 1, 'хозяин задачу не потерял');
 });
 
-test('по расписанию запускается агент: промпт уходит в запуск, а не в чат-получатель', async () => {
+test('on schedule an agent is launched: the prompt goes into the launch, not to a chat recipient', async () => {
   const { config, user, launcher, launches } = setup();
   const created = new Date('2026-11-08T07:00:00Z');
   createTask(config, user, { prompt: 'Проверь почту и скажи, что важного', repeat: { kind: 'daily', time: '08:00' } }, created);
@@ -141,12 +141,12 @@ test('по расписанию запускается агент: промпт 
   assert.equal(task.nextRunAt, '2026-11-09T08:00:00.000Z', 'следующий запуск — завтра в 8:00');
 });
 
-test('пропущенные запуски догоняются один раз, а не пачкой', async () => {
+test('missed runs are caught up once, not in a batch', async () => {
   const { config, user, launcher, launches } = setup();
   const created = new Date('2026-11-08T07:00:00Z');
   createTask(config, user, { prompt: 'Собери утреннюю сводку', repeat: { kind: 'daily', time: '08:00' } }, created);
 
-  // Сервис лежал четыре дня: догоняющих запусков должно быть одно.
+  // The service was down for four days: there must be exactly one catch-up launch.
   const late = new Date(created.getTime() + 4 * DAY + 5 * 3_600_000);
   const scheduler = new ScheduledTasks(config, { launch: launcher, now: () => late });
   const outcome = await scheduler.tick();
@@ -154,11 +154,11 @@ test('пропущенные запуски догоняются один раз
   assert.deepEqual(outcome, { fired: 1, started: 1, failed: 0, skipped: 0 });
   assert.equal(launches.length, 1, 'один запуск, а не четыре');
   const [task] = readTasks(config, user);
-  // Следующий запуск считается от «сейчас»: завтра в 8:00, а не от пропущенного дня.
+  // The next run is computed from "now": tomorrow at 8:00, not from the missed day.
   assert.equal(task.nextRunAt, '2026-11-13T08:00:00.000Z');
 });
 
-test('выключенная задача не запускается, даже если время прошло', async () => {
+test('a disabled task is not launched even if the time has passed', async () => {
   const { config, user, launcher, launches } = setup();
   const created = new Date('2026-11-08T07:00:00Z');
   const task = createTask(config, user, { prompt: 'Проверь почту', repeat: { kind: 'daily', time: '08:00' } }, created);
@@ -173,7 +173,7 @@ test('выключенная задача не запускается, даже 
   assert.equal(readTasks(config, user)[0].nextRunAt, '2026-11-08T08:00:00.000Z', 'время не сдвинулось');
 });
 
-test('занято: запуск не теряется, а ждёт, пока человек освободится', async () => {
+test('busy: the launch is not lost, it waits until the person is free', async () => {
   const { config, user, launcher, launches, setBusy } = setup({ busy: true });
   const created = new Date('2026-11-08T07:00:00Z');
   createTask(config, user, { prompt: 'Собери сводку', repeat: { kind: 'daily', time: '08:00' } }, created);
@@ -185,19 +185,19 @@ test('занято: запуск не теряется, а ждёт, пока ч
   assert.equal(launches.length, 0, 'пока человек занят — не запускаем');
   assert.equal(readTasks(config, user)[0].nextRunAt, '2026-11-08T08:00:00.000Z', 'запуск остался в очереди');
 
-  // Человек освободился: следующий тик обязан догнать пропущенное время.
+  // The person is free: the next tick must catch up the missed time.
   setBusy(false);
   const second = await scheduler.tick();
   assert.deepEqual(second, { fired: 1, started: 1, failed: 0, skipped: 0 });
   assert.equal(launches.length, 1);
 });
 
-test('занят слишком долго: помечаем пропущенным, а не ждём вечно', async () => {
+test('busy for too long: we mark it missed instead of waiting forever', async () => {
   const { config, user, launcher, launches } = setup({ busy: true, graceMs: 60_000 });
   const created = new Date('2026-11-08T07:00:00Z');
   createTask(config, user, { prompt: 'Собери сводку', repeat: { kind: 'daily', time: '08:00' } }, created);
 
-  // Время пришло десять минут назад, а человек всё ещё занят.
+  // The time came ten minutes ago, and the person is still busy.
   const late = new Date('2026-11-08T08:10:00Z');
   const scheduler = new ScheduledTasks(config, { launch: launcher, now: () => late, graceMs: 60_000 });
   const outcome = await scheduler.tick();
@@ -209,7 +209,7 @@ test('занят слишком долго: помечаем пропущенн�
   assert.equal(task.nextRunAt, '2026-11-09T08:00:00.000Z', 'следующий запуск всё равно назначен');
 });
 
-test('ошибка запуска не теряется: она видна в задаче вместе с разговором', async () => {
+test('a launch error is not lost: it is visible in the task together with the conversation', async () => {
   const { config, user, launcher } = setup({ error: 'контейнер icarus-user-probe не найден' });
   const created = new Date('2026-11-08T07:00:00Z');
   createTask(config, user, { prompt: 'Собери сводку', repeat: { kind: 'daily', time: '08:00' } }, created);
@@ -224,7 +224,7 @@ test('ошибка запуска не теряется: она видна в з
   assert.equal(task.lastChatId, 'web-task-1', 'разговор попытки тоже записан');
 });
 
-test('одноразовая задача после запуска выключается сама', async () => {
+test('a one-time task disables itself after the launch', async () => {
   const { config, user, launcher } = setup();
   const now = new Date('2026-11-08T07:00:00Z');
   createTask(config, user, { prompt: 'Собери отчёт за квартал', repeat: { kind: 'once', date: '2026-11-08', time: '07:30' } }, now);
@@ -240,7 +240,7 @@ test('одноразовая задача после запуска выключ
   assert.equal((await scheduler.tick()).fired, 0);
 });
 
-test('задача без промпта не создаётся: запускать было бы нечего', () => {
+test('a task without a prompt is not created: there would be nothing to launch', () => {
   const { config } = setup();
   const timeZone = taskTimeZone(config);
   assert.throws(() => parseTaskInput({ prompt: '   ', repeat: { kind: 'daily', time: '08:00' } }, timeZone), /промпт/);
@@ -251,7 +251,7 @@ test('задача без промпта не создаётся: запуска
   );
 });
 
-test('панель видит, что запуск пора делать', () => {
+test('the panel sees that a run is due', () => {
   const task = {
     id: 'due',
     prompt: 'Собери сводку',

@@ -1,4 +1,4 @@
-// Панель управления: защита путей, поиск, забывание и git-откат.
+// Control panel: path protection, search, forgetting and git rollback.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -16,7 +16,7 @@ function tempRoot(): string {
   return root;
 }
 
-test('за пределы каталога памяти не выпускает', () => {
+test('does not let out of the memory directory', () => {
   const root = tempRoot();
   assert.ok(resolveInside(root, 'preferences.md'));
   assert.ok(resolveInside(root, 'people/barsik.md'));
@@ -26,13 +26,13 @@ test('за пределы каталога памяти не выпускает'
   assert.equal(resolveInside(root, 'people/../../secret.md'), null);
 });
 
-test('файлы перечисляются рекурсивно, служебное пропускается', () => {
+test('files are listed recursively, service ones are skipped', () => {
   const root = tempRoot();
   const files = listFiles(root).map((file) => file.path);
   assert.deepEqual(files.sort(), ['people/barsik.md', 'preferences.md']);
 });
 
-test('чтение файла и поиск по строкам', () => {
+test('reading a file and searching by lines', () => {
   const root = tempRoot();
   assert.match(String(readMemoryFile(root, 'preferences.md')), /Кофе без сахара/);
   assert.equal(readMemoryFile(root, '../../etc/passwd.md'), null);
@@ -46,7 +46,7 @@ test('чтение файла и поиск по строкам', () => {
   assert.deepEqual(searchMemory(root, 'к'), [], 'слишком короткий запрос не ищем');
 });
 
-test('забывание убирает ровно одну строку', () => {
+test('forgetting removes exactly one line', () => {
   const root = tempRoot();
   const result = removeLine(root, 'preferences.md', '- Не будить до 09:00');
   assert.equal(result.ok, true);
@@ -59,9 +59,9 @@ test('забывание убирает ровно одну строку', () =>
   assert.equal(removeLine(root, '../../etc/passwd.md', 'что-нибудь').ok, false);
 });
 
-test('файл удаляется целиком, но не за пределами памяти и не каталог', () => {
+test('a file is removed entirely, but not outside memory and not a directory', () => {
   const root = tempRoot();
-  // Каталог с «расширением» памяти всё равно не сносим: удаляем файл, а не полку.
+  // A directory with a memory «extension» is still not deleted: we remove a file, not a shelf.
   fs.mkdirSync(path.join(root, 'archive.md'), { recursive: true });
 
   assert.equal(removeFile(root, '../../etc/passwd.md').ok, false, 'за пределы памяти нельзя');
@@ -74,7 +74,7 @@ test('файл удаляется целиком, но не за предела�
   assert.ok(fs.existsSync(path.join(root, 'preferences.md')), 'соседние файлы целы');
 });
 
-test('git: история, дифф и откат', async () => {
+test('git: history, diff and rollback', async () => {
   const root = tempRoot();
   await ensureRepo(root);
   assert.equal(await commitAll(root, 'memory: первый разбор'), true);
@@ -97,20 +97,20 @@ test('git: история, дифф и откат', async () => {
   assert.match(content, /Кофе без сахара/);
 });
 
-test('откат по мусорному хешу не делается', async () => {
+test('rollback by a garbage hash is not performed', async () => {
   const root = tempRoot();
   await ensureRepo(root);
   assert.equal((await revert(root, 'не-хеш')).ok, false);
 });
 
-test('набор допустимых расширений задаётся снаружи и не размывается', () => {
+test('the set of allowed extensions is set from outside and is not blurred', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-rules-'));
-  // Свой набор — как у раздела, который открывает не только .md.
+  // Its own set — like the section that opens more than just .md.
   const allowed = new Set(['.jsonl', '.mw', '.gif']);
   fs.writeFileSync(path.join(root, 'osc.jsonl'), '{"code":"dsolve(...):"}\n');
   fs.writeFileSync(path.join(root, '0123456789abcdef.gif'), 'GIF89a');
   fs.writeFileSync(path.join(root, 'worksheet.mw'), '<worksheet/>');
-  // Чужой набор в этот раздел не подмешивается.
+  // An alien set is not mixed into this section.
   fs.writeFileSync(path.join(root, 'identity.md'), '- Кто-то\n');
 
   assert.deepEqual(
@@ -122,13 +122,13 @@ test('набор допустимых расширений задаётся сн
   const image = readImageFile(root, '0123456789abcdef.gif', allowed);
   assert.ok(image);
   assert.equal(image.type, 'image/gif');
-  // Не картинка и не разрешённое расширение — не отдаём.
+  // Not an image and not an allowed extension — we do not serve it.
   assert.equal(readImageFile(root, 'osc.jsonl', allowed), null);
   assert.equal(readImageFile(root, '../../etc/passwd.gif', allowed), null);
   assert.equal(readMemoryFile(root, 'identity.md', allowed), null);
 
-  // «Забыть строку» в чужом файле — нельзя: он не проходит по расширениям.
+  // «Forget a line» in an alien file is not allowed: it does not pass by extensions.
   assert.equal(removeLine(root, 'osc.jsonl', '- Любая строка').ok, false);
-  // А обычной памяти это по-прежнему можно.
+  // But for ordinary memory it is still possible.
   assert.equal(removeLine(root, 'identity.md', '- Кто-то').ok, true);
 });

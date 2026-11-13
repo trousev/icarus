@@ -1,9 +1,9 @@
-// Раздел скиллов в панели: человек пишет скилл, Икар получает его следующим ходом.
+// The skills section in the panel: a person writes a skill, Icarus gets it on the next turn.
 //
-// Тест идёт через живой HTTP-сервер, а не через хранилище: панель тут — автор
-// скиллов, и проверять надо весь путь целиком — запрос, файл в каталоге, который
-// читает pi, коммит в истории и пометку «ресурсы обновились», из-за которой живая
-// сессия pi пересобирается со свежим каталогом.
+// The test goes through a live HTTP server, not through storage: here the panel is the author
+// of skills, and the whole path must be exercised end to end — the request, the file in the
+// directory pi reads, the commit in history, and the "resources updated" mark that causes a
+// live pi session to be rebuilt with the fresh directory.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -13,15 +13,15 @@ import { createServer } from '../src/http/server.ts';
 import { userPaths, type IcarusConfig, type UserConfig } from '../src/config.ts';
 import { makeConfig, PANEL_USER_HEADER, probe } from './fixtures.ts';
 
-/** Так выглядит запрос, дошедший до сервиса через Authelia: он и назвал человека. */
+/** This is what a request that reached the service through Authelia looks like: it named the person. */
 function asUser(userId?: string): Record<string, string> {
   return userId === undefined ? {} : { [PANEL_USER_HEADER]: userId };
 }
 
 /**
- * Заглушка реестра сессий. Панель зовёт её за двумя вещами: отметить обновление
- * ресурсов и — кнопкой «напиши за меня» — спросить модель разово. Второе есть
- * только у того реестра, которому есть чем отвечать: `answer` включает `oneShot`.
+ * A stub session registry. The panel calls it for two things: to mark a resources
+ * update and — via the "write for me" button — to ask the model once. The latter exists
+ * only for a registry that has something to answer with: `answer` enables `oneShot`.
  */
 function makeRegistry(answer?: string | (() => Promise<string>)) {
   const bumped: string[] = [];
@@ -60,7 +60,7 @@ async function withServer(
   }
 }
 
-/** Запрос в раздел скиллов: раздел в адресе, человек — в заголовке. */
+/** A request to the skills section: the section in the address, the person in the header. */
 function call(base: string, route: string, init: RequestInit = {}, userId = 'probe'): Promise<Response> {
   return fetch(`${base}/panel/skills/${route}`, {
     ...init,
@@ -82,7 +82,7 @@ const DRAFT = {
   body: '# Как рычать\n\n1. Говори «йо-хо-хо».',
 };
 
-test('скилл из панели ложится в каталог pi, в историю и поднимает сессии', async () => {
+test('a skill from the panel lands in the pi directory, in history, and bumps sessions', async () => {
   await withServer(async (base, config, registry) => {
     const saved = await post(base, 'save', DRAFT);
     assert.equal(saved.status, 200);
@@ -92,14 +92,14 @@ test('скилл из панели ложится в каталог pi, в ис�
     assert.equal(result.committed, true, 'сохранение скилла — это коммит');
     assert.match(result.commit, /^[0-9a-f]{40}$/, 'панель отдаёт хеш, чтобы человек видел коммит');
 
-    // Файл лежит там, откуда его читает pi: каталог скиллов человека.
+    // The file lies where pi reads it: the person's skills directory.
     const file = path.join(skillsRoot(config, probe('probe')), 'pirate-mode', 'SKILL.md');
     assert.equal(fs.existsSync(file), true);
     assert.match(fs.readFileSync(file, 'utf8'), /name: pirate-mode/);
     assert.equal(fs.existsSync(path.join(skillsRoot(config, probe('probe')), '.git')), true, 'скиллы под git');
 
-    // Живой разговор узнает о скилле не сам: каталог pi читает при старте, поэтому
-    // панель обязана отметить, что ресурсы человека обновились.
+    // A live conversation does not learn about the skill by itself: pi reads the directory at startup, so
+    // the panel must mark that the person's resources have been updated.
     assert.deepEqual(registry.bumped, ['probe'], 'сессии человека помечены как устаревшие');
 
     const list = (await (await call(base, 'files')).json()) as {
@@ -117,7 +117,7 @@ test('скилл из панели ложится в каталог pi, в ис�
   });
 });
 
-test('скилл без описания панель не записывает: pi пропустил бы его молча', async () => {
+test('the panel does not save a skill without a description: pi would silently skip it', async () => {
   await withServer(async (base, config) => {
     const refused = await post(base, 'save', { ...DRAFT, description: '  ' });
     assert.equal(refused.status, 400);
@@ -125,14 +125,14 @@ test('скилл без описания панель не записывает:
     assert.match(String(body.error?.message), /описани/i);
     assert.equal(fs.existsSync(path.join(skillsRoot(config, probe('probe')), 'pirate-mode')), false);
 
-    // Имя проверяется там же: оно становится именем каталога, а «../» в нём —
-    // это запись мимо каталога скиллов.
+    // The name is validated in the same place: it becomes the directory name, and a "../" in it is
+    // a write outside the skills directory.
     const evil = await post(base, 'save', { ...DRAFT, name: '../evil' });
     assert.equal(evil.status, 400);
   });
 });
 
-test('чужого скилла через свою сессию не открыть и не тронуть', async () => {
+test('an alien skill cannot be opened or touched through one\'s own session', async () => {
   await withServer(async (base) => {
     await post(base, 'save', DRAFT, 'probe2');
 
@@ -150,14 +150,14 @@ test('чужого скилла через свою сессию не откры
   });
 });
 
-test('удаление скилла — коммит, и откат возвращает его вместе с бандлом', async () => {
+test('deleting a skill is a commit, and rollback brings it back together with the bundle', async () => {
   await withServer(async (base, config, registry) => {
     await post(base, 'save', DRAFT);
     const root = skillsRoot(config, probe('probe'));
     fs.mkdirSync(path.join(root, 'pirate-mode', 'scripts'), { recursive: true });
     fs.writeFileSync(path.join(root, 'pirate-mode', 'scripts', 'run.sh'), '#!/bin/sh\n');
-    // Бандл дописан уже после сохранения: скилл — это каталог, и файлы рядом с ним
-    // принадлежат ему, а не панели, поэтому в коммит удаления они попадают как есть.
+    // The bundle is added after the save: a skill is a directory, and the files next to it
+    // belong to it, not to the panel, so they end up in the delete commit as they are.
     const removed = await post(base, 'delete', { id: 'pirate-mode/SKILL.md' });
     assert.equal(removed.status, 200);
     assert.equal(fs.existsSync(path.join(root, 'pirate-mode')), false);
@@ -166,8 +166,8 @@ test('удаление скилла — коммит, и откат возвра
       commits: Array<{ hash: string; short: string; author: string; subject: string; added: number; removed: number }>;
     };
     assert.match(history.commits[0].subject, /удалить «pirate-mode»/);
-    // История скиллов приезжает той же формы, что история файла памяти: панель
-    // рисует их одной вёрсткой, и пропавшее поле выглядело бы в ней как «undefined».
+    // Skill history arrives in the same shape as memory file history: the panel
+    // renders them with one layout, and a missing field would look like "undefined" in it.
     const saved = history.commits.find((commit) => /скилл «pirate-mode»/.test(commit.subject));
     assert.ok(saved, 'коммит сохранения есть в истории');
     assert.match(saved.short, /^[0-9a-f]{7,}$/);
@@ -182,7 +182,7 @@ test('удаление скилла — коммит, и откат возвра
   });
 });
 
-test('SKILL.md скачивается как файл, а поиск находит скилл по содержимому', async () => {
+test('SKILL.md downloads as a file, and search finds the skill by content', async () => {
   await withServer(async (base) => {
     await post(base, 'save', DRAFT);
 
@@ -200,7 +200,7 @@ test('SKILL.md скачивается как файл, а поиск наход�
   });
 });
 
-test('страница раздела — редактор скиллов, а не список файлов памяти', async () => {
+test('the section page is a skill editor, not a list of memory files', async () => {
   await withServer(async (base) => {
     const response = await fetch(base + '/panel/skills', { headers: asUser('probe') });
     assert.equal(response.status, 200);
@@ -210,20 +210,20 @@ test('страница раздела — редактор скиллов, а н
     assert.match(html, /id="skill-body"/, 'тело SKILL.md правится тут же');
     assert.match(html, /id="skill-description"/, 'описание — отдельное поле: по нему модель и решает');
     assert.match(html, /СКИЛЛЫ АГЕНТА/);
-    // Раздел живёт в сайдбаре рядом с памятью и без области в адресе: области — это
-    // про память, у скиллов её нет.
+    // The section lives in the sidebar next to memory and without a scope in the address: scopes are
+    // about memory, skills have none.
     assert.match(html, /href="\/panel\/skills"/);
     assert.doesNotMatch(html, /href="\/panel\/skills\?/);
 
-    // Скрипт собирается из template literal: опечатка в бэкслешах ломает страницу
-    // целиком, а глазами такое не видно. Компиляция ловит сразу.
+    // The script is assembled from a template literal: a typo in the backslashes breaks the page
+    // entirely, and that is invisible to the eye. Compilation catches it immediately.
     const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
     assert.ok(script, 'в странице нет скрипта');
     assert.doesNotThrow(() => new Function(script), 'скрипт раздела скиллов не компилируется');
   });
 });
 
-test('«напиши за меня»: идея уезжает модели, черновик возвращается в редактор', async () => {
+test('"write for me": the idea goes to the model, the draft comes back to the editor', async () => {
   const draft = JSON.stringify({
     name: 'Voice Notes',
     description: 'Разбирает голосовые сообщения и складывает расшифровку в журнал.',
@@ -239,13 +239,13 @@ test('«напиши за меня»: идея уезжает модели, че
       assert.equal(result.name, 'voice-notes', 'имя приведено к правилам');
       assert.match(result.body, /Расшифруй/);
 
-      // Модель спрашивают там же, где живут ключи и pi, — и от имени того человека,
-      // чья панель открыта.
+      // The model is asked in the same place where the keys and pi live — and on behalf of the person
+      // whose panel is open.
       assert.equal(registry.asked.length, 1);
       assert.equal(registry.asked[0].user, 'probe');
       assert.match(registry.asked[0].prompt, /разбирать голосовые в текст и складывать в журнал/);
 
-      // Черновик — только черновик: на диске до «Сохранить» ничего не появляется.
+      // A draft is only a draft: nothing appears on disk until "Save".
       const root = userPaths(config, probe('probe')).skills;
       assert.equal(fs.existsSync(path.join(root, 'voice-notes')), false, 'файл пишет сохранение, а не генерация');
       const list = (await (await call(base, 'files')).json()) as { skills: unknown[] };
@@ -255,7 +255,7 @@ test('«напиши за меня»: идея уезжает модели, че
   );
 });
 
-test('имя из черновика не занимает чужое: занятое получает номер', async () => {
+test('a draft name does not take someone else\'s: a taken one gets a number', async () => {
   await withServer(
     async (base) => {
       await post(base, 'save', DRAFT);
@@ -269,7 +269,7 @@ test('имя из черновика не занимает чужое: заня�
   );
 });
 
-test('пустая идея и простыня до модели не доезжают', async () => {
+test('an empty idea and a wall of text do not reach the model', async () => {
   await withServer(
     async (base, _config, registry) => {
       assert.equal((await post(base, 'draft', { idea: '   ' })).status, 400, 'пустую идею модели не отправляем');
@@ -280,7 +280,7 @@ test('пустая идея и простыня до модели не доез�
   );
 });
 
-test('модель ответила болтовнёй — панель говорит это словами, а не падает', async () => {
+test('the model replied with chatter — the panel says so in words instead of crashing', async () => {
   await withServer(
     async (base) => {
       const response = await post(base, 'draft', { idea: 'что-нибудь' });
@@ -292,7 +292,7 @@ test('модель ответила болтовнёй — панель гово
   );
 });
 
-test('модель не ответила вовсе — это тоже не падение панели', async () => {
+test('the model did not reply at all — that is not a panel crash either', async () => {
   await withServer(
     async (base) => {
       const response = await post(base, 'draft', { idea: 'что-нибудь' });
@@ -304,7 +304,7 @@ test('модель не ответила вовсе — это тоже не п�
   );
 });
 
-test('без контейнера с моделью кнопки нет и маршрут честно отказывает', async () => {
+test('without a model container there is no button and the route honestly refuses', async () => {
   await withServer(
     async (base) => {
       const response = await post(base, 'draft', { idea: 'что-нибудь' });
@@ -313,8 +313,8 @@ test('без контейнера с моделью кнопки нет и ма�
       assert.match(String(body.error?.message), /некому/);
 
       const html = await (await fetch(base + '/panel/skills?new=1', { headers: asUser('probe') })).text();
-      // Разметку редактора собирает скрипт, поэтому «кнопки нет» проверяем по тому,
-      // что панель знает, писать ли ей: без этого блок был бы, но всегда отказывал.
+      // The editor markup is assembled by the script, so we check "no button" by what
+      // the panel knows about whether it can write: without that the block would exist but always refuse.
       assert.match(html, /"draftSkills":false/, 'панель знает, что писать некому');
       assert.match(html, /cfg\.draftSkills && !cfg\.file/, 'блок рисуется только когда есть кому писать');
       assert.match(html, /id="skill-body"/, 'остальной редактор на месте');

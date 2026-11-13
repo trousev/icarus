@@ -1,7 +1,7 @@
-// Страница раздела и публичный просмотр: разметка и клиентский скрипт.
+// The section page and public viewing: markup and the client script.
 //
-// Скрипт здесь по-настоящему компилируется и один раз исполняется: опечатка в
-// бэкслешах ломает всю страницу, а тест разметки этого не видит.
+// The script is really compiled here and executed once: a typo in the
+// backslashes breaks the whole page, and a markup test does not see it.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseHTML } from 'linkedom';
@@ -27,7 +27,7 @@ const OPTIONS = {
   counts: { artifacts: 3, personal: 4, skills: 5, mcp: 2 },
 };
 
-test('страница: глобальный список, поиск, права и публичная ссылка', () => {
+test('page: global list, search, rights and public link', () => {
   const html = artifactsPage(SESSION, OPTIONS);
   assert.match(html, /<title>Icarus Control Panel<\/title>/);
   assert.match(html, /АРТЕФАКТЫ/);
@@ -62,7 +62,7 @@ test('страница: глобальный список, поиск, прав�
   assert.match(html, /id="art-delete"/);
 });
 
-test('клиентский скрипт страницы компилируется и знает права', () => {
+test('the page client script compiles and knows the rights', () => {
   const html = artifactsPage(SESSION, OPTIONS);
   const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
   assert.ok(scripts.length >= 3, 'конфиг, markdown и клиент едут отдельными скриптами');
@@ -119,9 +119,9 @@ function artifact(overrides: Partial<Artifact> = {}): Artifact {
 }
 
 /**
- * Страница артефакта с уже открытым боковым чатом. Маршруты ищутся по подстроке
- * пути; `{ stream: [...] }` отдаёт NDJSON-поток, остальное — JSON. Всё, что не
- * задано, отвечает как обычная панель: список, чтение артефакта и пустая история.
+ * The artifact page with the side chat already open. Routes are matched by a substring
+ * of the path; `{ stream: [...] }` returns an NDJSON stream, everything else — JSON. Anything not
+ * specified responds like the ordinary panel: list, artifact read and empty history.
  */
 async function openArtifactChat(
   routes: Record<string, (url: string, init?: RequestInit) => unknown> = {},
@@ -205,7 +205,7 @@ async function openArtifactChat(
   return { document, calls, input, pressEnter };
 }
 
-test('публичная страница: markdown рендерится, html — в песочнице, картинка — сама', () => {
+test('public page: markdown is rendered, html — in a sandbox, the image — by itself', () => {
   const md = publicArtifactPage(artifact(), '# План на четверг\n\n1. Стендап\n');
   assert.match(md, /План на четверг/);
   assert.match(md, /ПУБЛИЧНЫЙ АРТЕФАКТ/);
@@ -249,7 +249,7 @@ test('публичная страница: markdown рендерится, html �
   assert.doesNotMatch(image, /<iframe/);
 });
 
-test('скрипт страницы исполняется: глобальный список рисуется, markdown открывается', async () => {
+test('the page script runs: the global list is drawn, markdown opens', async () => {
   const html = artifactsPage(SESSION, OPTIONS);
   const { document, window } = parseHTML(html);
   const scripts = [...document.querySelectorAll('script')]
@@ -321,7 +321,7 @@ test('скрипт страницы исполняется: глобальный
   assert.equal(document.getElementById('art-preview-restore')?.hidden, false);
 });
 
-test('кнопка «Чат» открывает панель и читает историю разговора артефакта', async () => {
+test('the "Chat" button opens the panel and reads the artifact conversation history', async () => {
   const html = artifactsPage(SESSION, OPTIONS);
   const { document, window } = parseHTML(html);
   const scripts = [...document.querySelectorAll('script')]
@@ -386,8 +386,8 @@ test('кнопка «Чат» открывает панель и читает и
   assert.match(log?.textContent ?? '', /Добавь заголовок/);
   assert.match(log?.textContent ?? '', /Добавил заголовок/);
 
-  // Ответ ИИ — это .md без пузыря, как в основном чате. Пустой пузырь ответа
-  // (он висел под шагом, пока модель думала) и был багом боковой панели.
+  // The AI answer is .md without a bubble, as in the main chat. The empty answer bubble
+  // (it hung under the step while the model was thinking) was the bug of the side panel.
   assert.equal(log?.querySelectorAll('.turn.assistant .md').length, 1, 'ответ живёт в .md');
   assert.equal(log?.querySelector('.turn.assistant .md')?.textContent, 'Добавил заголовок.');
   assert.equal(log?.querySelector('.art-chat-bubble'), null, 'старого пузыря ответа нет');
@@ -396,7 +396,7 @@ test('кнопка «Чат» открывает панель и читает и
   assert.equal(log?.querySelector('.turn.assistant .typing')?.hasAttribute('hidden'), true);
 });
 
-test('/clear в боковом чате — команда чата, а не реплика модели', async () => {
+test('/clear in the side chat is a chat command, not a model message', async () => {
   const stand = await openArtifactChat({
     '/panel/api/chat/command': () => ({ handled: true, text: 'Начали с чистого листа.', cleared: true }),
   });
@@ -418,7 +418,7 @@ test('/clear в боковом чате — команда чата, а не р�
   assert.equal(stand.input.value, '', 'поле очищено после команды');
 });
 
-test('команда pi в боковом чате уезжает в разговор обычной репликой', async () => {
+test('a pi command in the side chat goes into the conversation as an ordinary message', async () => {
   const stand = await openArtifactChat({
     '/panel/api/chat/command': () => ({ handled: false }),
     '/panel/api/chat/send': () => ({
@@ -438,7 +438,7 @@ test('команда pi в боковом чате уезжает в разго�
   assert.match(stand.document.getElementById('art-chat-log')?.textContent ?? '', /скилл сработал/);
 });
 
-test('стили ответа и трассировки у бокового чата — общие с основным чатом', () => {
+test('answer and trace styles for the side chat are shared with the main chat', () => {
   const html = artifactsPage(SESSION, OPTIONS);
   assert.match(html, /\.turn\.user \.bubble/, 'пузырь человека — из общего файла');
   assert.match(html, /\.md \{ font-size: 14px/, 'типографика ответа — из общего файла');
@@ -447,7 +447,7 @@ test('стили ответа и трассировки у бокового ча
   assert.doesNotMatch(html, /\.art-chat-bubble/, 'у ответа пузыря больше нет');
 });
 
-test('кнопка «Поделиться»: права меняются сразу, публичное чтение даёт ссылку', async () => {
+test('the "Share" button: rights change immediately, public read gives a link', async () => {
   const html = artifactsPage(SESSION, OPTIONS);
   const { document, window } = parseHTML(html);
   const scripts = [...document.querySelectorAll('script')]
@@ -455,8 +455,8 @@ test('кнопка «Поделиться»: права меняются сра�
     .filter(Boolean);
   const item = artifact();
   const calls: Array<{ url: string; body: string }> = [];
-  // linkedom отдаёт select.value только на чтение: для теста даём обычный
-  // сеттер, как в браузере, иначе клиент не может выставить выбранный уровень.
+  // linkedom gives select.value as read-only: for the test we provide an ordinary
+  // setter, as in the browser, otherwise the client cannot set the chosen level.
   for (const id of ['acl-me', 'acl-family', 'acl-public']) {
     const select = document.getElementById(id);
     const options = [...select.querySelectorAll('option')];
@@ -536,7 +536,7 @@ test('кнопка «Поделиться»: права меняются сра�
   assert.match(document.getElementById('acl-link')?.value ?? '', /\/a\/plan\/abcdefghijklmnopqrstuvwx\//);
 });
 
-// Адрес элемента из предпросмотра: та же панель, только HTML-артефакт.
+// Element address from the preview: the same panel, only an HTML artifact.
 const HTML_REF = 'main.page/section.hero/h1.title';
 
 async function htmlStand(options: { canWrite?: boolean; textStatus?: number } = {}) {
@@ -641,7 +641,7 @@ async function pickOn(stand: Awaited<ReturnType<typeof htmlStand>>) {
   await new Promise((resolve) => setTimeout(resolve, 20));
 }
 
-test('выбор элемента: адрес и цитата уезжают в боковой чат', async () => {
+test('element selection: the address and quote go into the side chat', async () => {
   const stand = await htmlStand();
   const { document, win, calls } = stand;
   const pick = document.getElementById('art-pick');
@@ -674,13 +674,13 @@ test('выбор элемента: адрес и цитата уезжают в 
   assert.equal(document.getElementById('art-chat-ref')?.hidden, true, '«убрать из ссылки» снимает чип');
 });
 
-test('правка текста из предпросмотра пишется в исходник с отпечатком версии', async () => {
+test('editing text from the preview writes to the source with a version fingerprint', async () => {
   const stand = await htmlStand();
   const { document, win, calls } = stand;
   await pickOn(stand);
 
-  // Открытие чата не должно сбрасывать отпечаток: иначе правка после ссылки
-  // уезжает с пустым base и сервер честно отказывает.
+  // Opening the chat must not reset the fingerprint: otherwise an edit after a link
+  // goes with an empty base and the server honestly refuses.
   win.artPickHandle({ type: 'ref', ref: HTML_REF, quote: 'Атлас', tag: 'h1' });
   await new Promise((resolve) => setTimeout(resolve, 20));
 
@@ -702,7 +702,7 @@ test('правка текста из предпросмотра пишется �
   );
 });
 
-test('отказ сохранения виден в панели, а не притворяется успехом', async () => {
+test('a save failure is visible in the panel, not pretending to be success', async () => {
   const stand = await htmlStand({ textStatus: 409 });
   const { document, win } = stand;
   await pickOn(stand);
@@ -713,7 +713,7 @@ test('отказ сохранения виден в панели, а не при
   assert.match(document.getElementById('art-note')?.textContent ?? '', /измениться/);
 });
 
-test('без права записи выбор элемента недоступен', async () => {
+test('without write rights element selection is unavailable', async () => {
   const stand = await htmlStand({ canWrite: false });
   assert.equal(stand.document.getElementById('art-pick')?.hasAttribute('disabled'), true);
   await pickOn(stand);
@@ -724,7 +724,7 @@ test('без права записи выбор элемента недосту�
   );
 });
 
-test('ссылка уезжает в сообщение вместе с задачей и снимается после отправки', async () => {
+test('the link goes into the message together with the task and is removed after sending', async () => {
   const stand = await htmlStand();
   const { document, win, calls } = stand;
   await pickOn(stand);

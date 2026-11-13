@@ -1,9 +1,9 @@
-// Раздел «Задачи» в панели: страница и API расписаний.
+// The "Tasks" section in the panel: the page and the schedules API.
 //
-// Тест идёт через живой HTTP-сервер: важно проверить весь путь — форма в панели,
-// файл задачи в dataDir человека и то, что из списка видно прошлый запуск. Сам
-// запуск агента проверяется отдельно (task-launch.test.ts, scheduled-tasks.test.ts):
-// здесь докера нет, и поднимать его ради формы незачем.
+// The test goes through a live HTTP server: it is important to check the whole path — the form in the panel,
+// the task file in the person's dataDir and the fact that the last run is visible from the list. The agent
+// launch itself is checked separately (task-launch.test.ts, scheduled-tasks.test.ts):
+// there is no docker here, and there is no point starting it for the form.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
@@ -59,7 +59,7 @@ function taskBody(response: Response): Promise<TaskBody> {
   return response.json() as Promise<TaskBody>;
 }
 
-test('раздел «Задачи» есть в сайдбаре и открывается', async () => {
+test('the "Tasks" section is in the sidebar and opens', async () => {
   await withServer(async (base) => {
     const page = await fetch(`${base}/panel/tasks`, { headers: asUser() });
     assert.equal(page.status, 200);
@@ -72,21 +72,21 @@ test('раздел «Задачи» есть в сайдбаре и открыв
     assert.match(html, /window\.__TASKS_CFG__/, 'клиент знает свой раздел');
     assert.match(html, /Europe\/Dublin/, 'человек видит, в каком поясе считается расписание');
     assert.match(html, /id="task-list"/);
-    // Текста напоминания больше нет: задача — это расписание и промпт.
+    // The reminder text is gone: a task is a schedule and a prompt.
     assert.equal(/task-text/.test(html), false);
   });
 });
 
-test('страница задач видна в сайдбаре рядом с остальными разделами', async () => {
+test('the tasks page is visible in the sidebar next to the other sections', async () => {
   await withServer(async (base) => {
     const html = await (await fetch(`${base}/panel/tasks`, { headers: asUser() })).text();
     assert.match(html, /href="\/panel\/tasks"[^>]*>Задачи/);
-    // И раздел не спрятан от обычного человека: задачи — его собственные.
+    // And the section is not hidden from an ordinary person: the tasks are their own.
     assert.match(html, /href="\/panel\/memory"/);
   });
 });
 
-test('GET отдаёт задачи, пояс и рабочие папки', async () => {
+test('GET returns tasks, the time zone and workspaces', async () => {
   await withServer(async (base, config) => {
     const created = await post(base, 'create', {
       prompt: PROMPT,
@@ -108,7 +108,7 @@ test('GET отдаёт задачи, пояс и рабочие папки', asy
   });
 });
 
-test('название задачи сохраняется и видно в списке', async () => {
+test('a task name is saved and visible in the list', async () => {
   await withServer(async (base) => {
     const created = await post(base, 'create', {
       name: 'Сводка по проекту',
@@ -121,7 +121,7 @@ test('название задачи сохраняется и видно в сп
   });
 });
 
-test('задача без промпта не создаётся', async () => {
+test('a task without a prompt is not created', async () => {
   await withServer(async (base, config) => {
     const response = await post(base, 'create', {
       prompt: '   ',
@@ -133,7 +133,7 @@ test('задача без промпта не создаётся', async () => {
   });
 });
 
-test('прошедшее время у одноразовой задачи не принимается', async () => {
+test('a past time for a one-off task is not accepted', async () => {
   await withServer(async (base, config) => {
     const response = await post(base, 'create', {
       prompt: PROMPT,
@@ -145,7 +145,7 @@ test('прошедшее время у одноразовой задачи не 
   });
 });
 
-test('запуск в неизвестной или приватной папке не принимается', async () => {
+test('a run in an unknown or private folder is not accepted', async () => {
   await withServer(async (base, config) => {
     const missing = await post(base, 'create', {
       prompt: PROMPT,
@@ -166,7 +166,7 @@ test('запуск в неизвестной или приватной папк�
   });
 });
 
-test('в списке видно прошлый запуск и его разговор', async () => {
+test('the list shows the last run and its chat', async () => {
   await withServer(async (base, config) => {
     const user = probe('probe');
     const chat = createChatRecord(config, user, 'talk', new Date(), { title: 'Сводка по X' });
@@ -188,7 +188,7 @@ test('в списке видно прошлый запуск и его разг�
   });
 });
 
-test('выключение и удаление через API', async () => {
+test('disable and delete via the API', async () => {
   await withServer(async (base, config) => {
     await post(base, 'create', { prompt: PROMPT, repeat: { kind: 'daily', time: '09:00' } });
     const id = readTasks(config, probe('probe'))[0].id;
@@ -205,7 +205,7 @@ test('выключение и удаление через API', async () => {
   });
 });
 
-test('задача другого человека не видна, не выключается и не удаляется', async () => {
+test("another person's task is not visible, cannot be disabled or deleted", async () => {
   await withServer(async (base, config) => {
     await post(base, 'create', { prompt: PROMPT, repeat: { kind: 'daily', time: '08:00' } });
     const taskId = readTasks(config, probe('probe'))[0].id;
@@ -218,7 +218,7 @@ test('задача другого человека не видна, не вык�
   });
 });
 
-test('без SSO раздел задач не отдаётся', async () => {
+test('without SSO the tasks section is not served', async () => {
   await withServer(async (base) => {
     const page = await fetch(`${base}/panel/tasks`);
     assert.equal(page.status, 401);
@@ -227,12 +227,12 @@ test('без SSO раздел задач не отдаётся', async () => {
   });
 });
 
-test('архивный разговор прошлого запуска остаётся ссылкой, но не мешает списку', async () => {
+test('an archived chat of the last run stays a link but does not interfere with the list', async () => {
   await withServer(async (base, config) => {
     const user = probe('probe');
     const chat = createChatRecord(config, user, 'talk', new Date(), { title: 'Старая сводка' });
     setChatArchived(config, user, chat.id, true, new Date());
-    // Архив не должен превращать задачу в «неизвестную»: подпись берётся из реестра.
+    // Archiving must not turn the task into "unknown": the caption comes from the registry.
     assert.equal(readChats(config, user).length, 1);
     writeTasks(config, user, [
       {

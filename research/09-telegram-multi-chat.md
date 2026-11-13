@@ -1,487 +1,484 @@
-# 09 — Мультичат Икара в Telegram: Mini App или нативные топики
+# 09 — Icarus multi-chat in Telegram: Mini App or native topics
 
-**Статус:** разбор к решению, ничего не сделано. **Дата:** 08.10.2026.
-**Вопрос.** Хочу мультичат в Telegram для Икара (список разговоров, как в ChatGPT/LibreChat),
-и слышал про Telegram Apps — приложения, открывающиеся прямо в телеге. Реально ли это?
-**Метод.** Первоисточники Telegram: Bot API reference (v10.3, 24.08.2026), `bots/features`,
-`bots/webapps`, `bots/api-changelog`, `bots/faq`, блог telegram.org. Свой код:
-`packages/service/src/**` (текущая ветка). Чужой опыт: hermes-agent (NousResearch) — прямой
-аналог нашей задачи, nekoclaw (тот же `pi`, Docker на человека), tg-llm-router (Mini App для
-LLM). Где источник — не документация, а чужой код/сообщество, это сказано явно. Что проверить
-руками — §10.
+**Status:** analysis for decision, nothing done. **Date:** 08.10.2026.
+**Question.** I want multi-chat in Telegram for Icarus (a list of conversations, like in ChatGPT/LibreChat),
+and I heard about Telegram Apps — apps that open right inside Telegram. Is that real?
+**Method.** Telegram primary sources: Bot API reference (v10.3, 24.08.2026), `bots/features`,
+`bots/webapps`, `bots/api-changelog`, `bots/faq`, the telegram.org blog. My own code:
+`packages/service/src/**` (current branch). Others' experience: hermes-agent (NousResearch) — a direct
+analog of our task, nekoclaw (same `pi`, Docker per person), tg-llm-router (Mini App for
+LLM). Where the source is not documentation but someone else's code/community, that is stated explicitly. What to check
+by hand — §10.
 
 ---
 
-## Короткий ответ
+## Short answer
 
-1. **Да, Mini App — реальная штука**, и мультичат в нём собрать можно: Telegram даёт webview,
-   подписанные данные о человеке и запуск в один тап. Но это **не лучший инструмент именно для
-   чата**: Mini App не имеет доступа к переписке (кроме attachment-menu режима), не умеет
-   пушить, живёт только пока открыт, и весь UI — включая список чатов, историю и стриминг —
-   придётся написать и хостить самим.
+1. **Yes, Mini App is a real thing**, and you can build multi-chat in it: Telegram gives you a webview,
+   signed data about the person, and launch in one tap. But it is **not the best tool specifically for
+   chat**: a Mini App has no access to the conversation (except in attachment-menu mode), can't
+   push, lives only while open, and the entire UI — including the chat list, history and streaming —
+   would have to be written and hosted by us.
 
-2. **Мультичат в Telegram уже есть нативно, и он ровно про наш случай.** Bot API 9.3
-   (31.12.2025) и 9.4 (09.02.2026) добавили **топики в личке с ботом**: бот и человек заводят
-   внутри одного личного чата отдельные топики, у каждого своя история. Документация Telegram
-   сама продаёт это как замену веб-чатам с ИИ: *«Topics in Private Chats keep separate projects
+2. **Multi-chat in Telegram already exists natively, and it's exactly our case.** Bot API 9.3
+   (31.12.2025) and 9.4 (09.02.2026) added **topics in private chats with a bot**: the bot and the person create
+   separate topics inside one private chat, each with its own history. Telegram's documentation
+   itself sells this as a replacement for web AI chats: *«Topics in Private Chats keep separate projects
    or support cases organized — improving on established web-based AI chat UIs»*
    ([features#ai-agents](https://core.telegram.org/bots/features#ai-agents)).
-   Включается одной галкой в BotFather, а не разработкой.
+   It's enabled by one checkbox in BotFather, not by development.
 
-3. **Икару это стоит почти нуля изменений.** Ключ сессии у нас уже `(человек, разговор)`
-   (`sessions/registry.ts`), а `conversationId` для лички — `telegram-<chat_id>`
-   (`telegram/bot.ts:conversationIdFor`). Достаточно добавить в ключ `thread_id`, и каждый
-   топик автоматически получит свой процесс pi, свою историю в `/workspace/.sessions`
-   (`sessions/pi-session.ts:sessionIdFor`) и свой `/compact`. Никакой БД не нужно: привязка
-   топик→разговор выводится из самого сообщения.
+3. **For Icarus this costs almost zero changes.** Our session key is already `(person, conversation)`
+   (`sessions/registry.ts`), and `conversationId` for a private chat is `telegram-<chat_id>`
+   (`telegram/bot.ts:conversationIdFor`). It's enough to add `thread_id` to the key, and each
+   topic automatically gets its own pi process, its own history in `/workspace/.sessions`
+   (`sessions/pi-session.ts:sessionIdFor`) and its own `/compact`. No DB needed: the
+   topic→conversation binding is derived from the message itself.
 
-4. **Правильная роль Mini App у нас — панель, а не чат.** Панель уже есть
-   (`control/ui.ts`, `control/identity.ts`), у неё архитектура разделов (`SECTIONS` в
-   `control/index.ts`), и Mini App — естественный способ открыть её с телефона в один тап,
-   с авторизацией через `initData` вместо SSO-прокси. Чат-клиент в webview — это вторая,
-   сильно более дорогая история с уведомлениями, которых у Mini App нет.
+4. **The right role for the Mini App in our case is a panel, not a chat.** The panel already exists
+   (`control/ui.ts`, `control/identity.ts`), it has a section architecture (`SECTIONS` in
+   `control/index.ts`), and a Mini App is the natural way to open it from a phone in one tap,
+   with authorization via `initData` instead of the SSO proxy. A chat client in a webview is a second,
+   far more expensive story, with notifications that a Mini App simply doesn't have.
 
-5. **Из 2026 года Икару нужны не Mini Apps, а три вещи из Bot API:** `sendMessageDraft`
-   (нативный стриминг ответа + кнопка Stop вместо нашей правки сообщения раз в 1.2 с),
-   rich messages (таблицы и LaTeX — прямо про Maple) и, если захочется, guest mode
-   (позвать `@icarus` в любой чат, не добавляя бота). Подробности — §6.
+5. **As of 2026, what Icarus needs is not Mini Apps but three things from the Bot API:** `sendMessageDraft`
+   (native streaming of the answer + a Stop button instead of our editing the message once every 1.2 s),
+   rich messages (tables and LaTeX — directly relevant to Maple) and, if we want it, guest mode
+   (invite `@icarus` into any chat without adding the bot). Details — §6.
 
-**Итого:** «Telegram Apps» — реально, но мультичат делать надо не в них. Сначала §2 (топики),
-потом §5 (Mini App как панель), Mini App как чат-клиент — только если первых двух не хватит.
+**Bottom line:** "Telegram Apps" is real, but multi-chat should not be built in them. First §2 (topics),
+then §5 (Mini App as a panel), Mini App as a chat client — only if the first two aren't enough.
 
 ---
 
-## 1. Что случилось в Telegram за 2026 год (таймлайн для нас)
+## 1. What happened in Telegram during 2026 (timeline for us)
 
-Всё ниже — Bot API changelog и `bots/features`; версия API на дату разбора — **10.3
+Everything below is from the Bot API changelog and `bots/features`; the API version at the date of this analysis is **10.3
 (24.08.2026)**.
 
-| Дата | Версия | Что появилось | Чем полезно Икару |
+| Date | Version | What appeared | How it helps Icarus |
 |---|---|---|---|
-| 31.12.2025 | 9.3 | **Topics in private chats**: `has_topics_enabled` в `getMe`, `message_thread_id`/`is_topic_message` в личке | Список разговоров внутри личного чата |
-| 09.02.2026 | 9.4 | Бот сам создаёт топики в личке (`createForumTopic`), `allows_users_to_create_topics` | `/topic` заводит топик из бота |
-| 01.03.2026 | 9.5 | `sendMessageDraft` разрешён всем ботам, эмодзи на кнопках | — |
-| 03.04.2026 | 9.6 | Managed bots, `WebApp.requestChat` | Не нужно |
-| 08.05.2026 | 10.0 | **Guest mode** (бот отвечает в чатах, где его нет), бизнес-боты без Premium | Позвать Икара в любой чат |
-| 11.06.2026 | 10.1 | **Rich messages** + `sendRichMessage`, `sendRichMessageDraft`, join-request Mini Apps | Таблицы/формулы, стриминг |
-| 14.07.2026 | 10.2 | **Ephemeral messages** в группах, Communities; закрытие Mini App-методов для чужих origin (с 20.07.2026) | Личный ответ в общем чате |
-| 24.08.2026 | 10.3 | Правки rich/ephemeral, `can_stop`/`keep_on_stop`, `MessageGenerationStopped` | Stop у стрима |
+| 31.12.2025 | 9.3 | **Topics in private chats**: `has_topics_enabled` in `getMe`, `message_thread_id`/`is_topic_message` in private chats | A list of conversations inside a private chat |
+| 09.02.2026 | 9.4 | The bot itself creates topics in private chats (`createForumTopic`), `allows_users_to_create_topics` | `/topic` creates a topic from the bot |
+| 01.03.2026 | 9.5 | `sendMessageDraft` allowed for all bots, emoji on buttons | — |
+| 03.04.2026 | 9.6 | Managed bots, `WebApp.requestChat` | Not needed |
+| 08.05.2026 | 10.0 | **Guest mode** (the bot replies in chats where it isn't a member), business bots without Premium | Invite Icarus into any chat |
+| 11.06.2026 | 10.1 | **Rich messages** + `sendRichMessage`, `sendRichMessageDraft`, join-request Mini Apps | Tables/formulas, streaming |
+| 14.07.2026 | 10.2 | **Ephemeral messages** in groups, Communities; closing of Mini App methods for foreign origins (from 20.07.2026) | A private reply in a shared chat |
+| 24.08.2026 | 10.3 | Fixes to rich/ephemeral, `can_stop`/`keep_on_stop`, `MessageGenerationStopped` | Stop for a stream |
 
-Главный вывод из таблицы: **пока мы думали про Mini App, Telegram закрыл нашу задачу
-штатными средствами.** Дальше — по вариантам.
+The main takeaway from the table: **while we were thinking about a Mini App, Telegram closed off our task
+with built-in tools.** What follows — by option.
 
 ---
 
-## 2. Вариант A (рекомендую): топики в личке — нативный мультичат
+## 2. Option A (recommended): topics in private chats — native multi-chat
 
-### 2.1 Как это выглядит для человека
+### 2.1 What it looks like for the person
 
-В личном чате с ботом появляется тот же интерфейс, что у форума в супергруппе: список топиков
-сверху, внутри — отдельная лента сообщений. Человек может заводить топики сам — через кнопку
-**All Messages** в шапке чата с ботом: отправленное там сообщение создаёт новый топик (так это
-описано в [доках hermes-agent](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/messaging/telegram.md),
-у Telegram в Bot API пользовательский сценарий не расписан). Бот создаёт топики вызовом API.
-Формулировка документации:
+In a private chat with a bot, the same interface appears as a forum in a supergroup: a list of topics
+at the top, and inside — a separate message feed. A person can create topics themselves — via the
+**All Messages** button in the header of the bot chat: a message sent there creates a new topic (that's how it's
+described in the [hermes-agent docs](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/messaging/telegram.md);
+Telegram's Bot API doesn't spell out the user scenario). The bot creates topics by calling the API.
+The documentation's phrasing:
 *«Bots and users can organize long-running private conversations into separate topics — for
 example, one topic for an order, another for technical support and a third for a recurring
 task»* ([features#topics-in-private-chats](https://core.telegram.org/bots/features#topics-in-private-chats)).
 
-Это буквально ChatGPT-подобный сайдбар, но нативный: ни вёрстки, ни хостинга, ни онбординга.
+It's literally a ChatGPT-like sidebar, but native: no markup, no hosting, no onboarding.
 
-### 2.2 Что нужно включить (и где обычно спотыкаются)
+### 2.2 What needs to be enabled (and where people usually stumble)
 
-Настройка — **на стороне владельца бота, в Mini App BotFather**, а не в чате:
+The setting is **on the bot owner's side, in the BotFather Mini App**, not in the chat:
 
-1. Открыть **Mini App** BotFather: в поиске Telegram набрать `botfather` и нажать синюю кнопку
-   **Open** у результата (прямая ссылка — <https://t.me/BotFather?startapp>). Текстовое меню
-   `/mybots` этого пункта **не показывает** — на этом спотыкаются все;
-2. `My bots → <бот> → Bot Settings →` прокрутить до **Threads Settings**;
-3. **Threaded Mode** — включить; **«Disallow users to create new threads»** — оставить
-   выключенным (иначе человек не заведёт топик сам, `allows_users_to_create_topics: false`).
+1. Open the **BotFather Mini App**: in Telegram search, type `botfather` and tap the blue
+   **Open** button on the result (direct link — <https://t.me/BotFather?startapp>). The text menu
+   `/mybots` does **not** show this item — that's where everyone stumbles;
+2. `My bots → <bot> → Bot Settings →` scroll down to **Threads Settings**;
+3. **Threaded Mode** — enable; **«Disallow users to create new threads»** — leave
+   off (otherwise the person can't create a topic themselves, `allows_users_to_create_topics: false`).
 
-Наглядный скриншот пути лежит у hermes-agent:
+An illustrative screenshot of the path is in hermes-agent:
 `gateway/assets/telegram-botfather-threads-settings.jpg`
-([файл](https://github.com/NousResearch/hermes-agent/blob/main/gateway/assets/telegram-botfather-threads-settings.jpg)),
-а история «не нашёл галку» разобрана в
-[issue #48811](https://github.com/NousResearch/hermes-agent/issues/48811) — закрыт как проблема
-навигации, а не rollout'а.
+([file](https://github.com/NousResearch/hermes-agent/blob/main/gateway/assets/telegram-botfather-threads-settings.jpg)),
+and the story of "couldn't find the checkbox" is analyzed in
+[issue #48811](https://github.com/NousResearch/hermes-agent/issues/48811) — closed as a navigation
+problem, not a rollout problem.
 
-Проверка — `getMe`:
+Verification — `getMe`:
 
 * `has_topics_enabled` — *«True, if the bot has forum topic mode enabled in private chats»*;
 * `allows_users_to_create_topics` — *«True, if the bot allows users to create and delete
   topics in private chats»*.
 
-Если режим выключен, `createForumTopic` возвращает `400 the chat is not a forum`. Поэтому наш
-бот считает флаги из `getMe` (лениво, при первом `/topic` или `/start`) и в выключенном режиме
-показывает инструкцию вместо ошибки Telegram. В личке с ботом галки «Topics» нет — она есть
-только у групп; живой баг-репорт про это:
+If the mode is off, `createForumTopic` returns `400 the chat is not a forum`. That's why our
+bot reads the flags from `getMe` (lazily, on the first `/topic` or `/start`) and, when the mode is off,
+shows an instruction instead of Telegram's error. In a private chat with a bot there's no "Topics" checkbox — it exists
+only for groups; a live bug report about this:
 [hermes-agent#115019](https://github.com/NousResearch/hermes-agent/issues/115019).
 
-### 2.3 API: что можно, а что нельзя
+### 2.3 API: what you can and can't do
 
-| Метод | В личке с ботом | Примечание |
+| Method | In a private chat with a bot | Note |
 |---|---|---|
-| `createForumTopic` | да | *«Use this method to create a topic in a forum supergroup chat **or a private chat with a user**»*; `name` 1-128, `icon_color` из 6 значений, `icon_custom_emoji_id` |
-| `editForumTopic` | да | Переименование и смена иконки, `message_thread_id` обязателен |
-| `deleteForumTopic` | да | Удаляет топик вместе с сообщениями |
-| `unpinAllForumTopicMessages` | да | — |
-| `closeForumTopic` / `reopenForumTopic` | скорее нет | В документации на 10.3 — только «forum supergroup chat»; для лички не упомянуты. Похоже на не обновлённый текст, а не на запрет — **UNVERIFIED**, проверить вызовом |
-| `message_thread_id` в `send*`, `sendChatAction`, `copy*`, `forward*` | да | `sendChatAction` явно оговаривает: *«for supergroups and private chats of bots with forum topic mode enabled only»* |
-| `getForumTopicIconStickers` | да | Иконки-эмодзи для топика |
+| `createForumTopic` | yes | *«Use this method to create a topic in a forum supergroup chat **or a private chat with a user**»*; `name` 1-128, `icon_color` from 6 values, `icon_custom_emoji_id` |
+| `editForumTopic` | yes | Renaming and changing the icon, `message_thread_id` required |
+| `deleteForumTopic` | yes | Deletes the topic together with its messages |
+| `unpinAllForumTopicMessages` | yes | — |
+| `closeForumTopic` / `reopenForumTopic` | probably not | In the docs as of 10.3 — only "forum supergroup chat"; not mentioned for private chats. Looks like un-updated text rather than a prohibition — **UNVERIFIED**, verify by calling it |
+| `message_thread_id` in `send*`, `sendChatAction`, `copy*`, `forward*` | yes | `sendChatAction` explicitly states: *«for supergroups and private chats of bots with forum topic mode enabled only»* |
+| `getForumTopicIconStickers` | yes | Emoji icons for the topic |
 
-Как бот узнаёт про топик, созданный человеком: приходит служебное сообщение
-`forum_topic_created` (`ForumTopicCreated`) с полем `is_name_implicit` — *«True, if the name
+How the bot learns about a topic created by a person: a service message arrives,
+`forum_topic_created` (`ForumTopicCreated`) with the field `is_name_implicit` — *«True, if the name
 of the topic wasn't specified explicitly by its creator and likely needs to be changed by the
-bot»*. То есть Telegram сам намекает: имя «New Topic» надо переписать осмысленным. У нас для
-этого уже есть генератор заголовков (`http/title.ts`) — и `oneShot` в реестре, которым
-заголовки и делаются.
+bot»*. That is, Telegram itself hints: the name "New Topic" needs to be rewritten with something meaningful. For this we already have
+a title generator (`http/title.ts`) — and the `oneShot` in the registry, which is what titles are made with.
 
-Важная деталь маршрутизации: **General-топик** (закреплённый сверху) в личке — это корень
-чата, и его сообщения могут приходить как с `message_thread_id=1`, так и вообще без
-`thread_id`. Обрабатывать надо оба случая, иначе корень и General разъедутся в два разговора
-(так это решено у hermes-agent, см. §7).
+An important routing detail: the **General topic** (pinned at the top) in a private chat is the root of the
+chat, and its messages can arrive either with `message_thread_id=1` or without any
+`thread_id` at all. Both cases must be handled, otherwise the root and General will split into two conversations
+(that's how hermes-agent solved it, see §7).
 
-### 2.4 Чего в документации нет
+### 2.4 What's not in the documentation
 
-* **Предел числа топиков в личке** — не задокументирован. Для супергрупп клиенты умеют
-  пагинацию (`getForumTopics` в TDLib), жёсткого «максимум N» в Bot API нет. **UNVERIFIED**,
-  проверить на стенде (§10).
-* **Требования к версии клиента** (с какого релиза Telegram в iOS/Android/Desktop показывает
-  список топиков в личке с ботом) — в Bot API не указано. Практически: фича от 31.12.2025,
-  любой клиент 2026 года её умеет; старые клиенты покажут ленту без топиков. **UNVERIFIED.**
-* Поведение `sendMessageDraft` внутри топика лички: параметр `message_thread_id` в методе
-  есть, но примеров в доках нет. **UNVERIFIED**, проверяется одним вызовом.
+* **The limit on the number of topics in a private chat** — not documented. For supergroups, clients can
+  paginate (`getForumTopics` in TDLib), and there's no hard "maximum N" in the Bot API. **UNVERIFIED**,
+  verify on the stand (§10).
+* **Client version requirements** (from which release Telegram on iOS/Android/Desktop shows the
+  list of topics in a private chat with a bot) — not specified in the Bot API. In practice: the feature is from 31.12.2025,
+  any 2026 client supports it; older clients will show a feed without topics. **UNVERIFIED.**
+* The behavior of `sendMessageDraft` inside a private-chat topic: the `message_thread_id` parameter is
+  present in the method, but there are no examples in the docs. **UNVERIFIED**, verifiable with one call.
 
-### 2.5 Что это значит для нашего кода
+### 2.5 What this means for our code
 
-Хорошая новость: менять почти нечего, потому что мультиразговорность у нас уже есть.
+The good news: there's almost nothing to change, because we already have multi-conversation support.
 
-* `telegram/bot.ts:conversationIdFor(message, userId)` → добавить `thread_id`:
-  личка без топика — `telegram-<chat_id>`, топик — `telegram-<chat_id>-<thread_id>`.
-* `sessions/registry.ts` уже держит `Map<"<user>:<conversationId>", PiSession>` — топики
-  разъедутся сами, каждый со своим контейнером/сессией.
-* `sessions/pi-session.ts:sessionIdFor(user, conversationId)` → SHA1 → свой файл истории в
-  `/workspace/.sessions`. История на топик появляется даром.
-* `/compact` уже работает по `conversationId` — в топике сожмёт только этот разговор.
-* Новые команды: `/topic [имя]` (создать топик), `/topics` (список + привязка), `/rename`, при
-  желании `/close` — последнее только для супергрупп.
-* Автопереименование: `forum_topic_created` с `is_name_implicit` + наш `title.ts` → топик
-  сам становится «Разбор письма из налоговой».
+* `telegram/bot.ts:conversationIdFor(message, userId)` → add `thread_id`:
+  private chat without a topic — `telegram-<chat_id>`, with a topic — `telegram-<chat_id>-<thread_id>`.
+* `sessions/registry.ts` already holds `Map<"<user>:<conversationId>", PiSession>` — topics
+  will split on their own, each with its own container/session.
+* `sessions/pi-session.ts:sessionIdFor(user, conversationId)` → SHA1 → its own history file in
+  `/workspace/.sessions`. Per-topic history appears for free.
+* `/compact` already works by `conversationId` — in a topic it will compact only that conversation.
+* New commands: `/topic [name]` (create a topic), `/topics` (list + binding), `/rename`, and
+  if desired `/close` — the latter only for supergroups.
+* Auto-renaming: `forum_topic_created` with `is_name_implicit` + our `title.ts` → the topic
+  turns itself into «Разбор письма из налоговой» [“Parsing a letter from the tax office”].
 
-Оценка: **1-2 дня** работы с тестами, из них полдня — на BotFather, флаги и разбор
-`General`-топика. Ни схемы БД, ни миграций, ни новой инфраструктуры.
+Estimate: **1-2 days** of work with tests, of which half a day — for BotFather, the flags and handling the
+`General` topic. No DB schema, no migrations, no new infrastructure.
 
 ---
 
-## 3. Вариант B: Mini App как чат-клиент — реально, но дорого и с изъянами
+## 3. Option B: Mini App as a chat client — real, but expensive and flawed
 
-### 3.1 Что даёт
+### 3.1 What it gives
 
-Полный контроль над UI: свой список чатов, поиск по истории, папки, кастомный стриминг,
-вложения, настройки. Запуск — кнопкой меню, инлайн-кнопкой под сообщением, из профиля бота
-(main Mini App), прямой ссылкой `t.me/<bot>/<app>?startapp=...`. Внутри — `initData` с
-подписанными данными человека, тема Telegram, safe-area, BackButton, haptic. Уже есть
-`fetch`, значит наш SSE-стриминг (`http/sse.ts`) подключается как есть.
+Full control over the UI: your own chat list, search through history, folders, custom streaming,
+attachments, settings. Launch — by a menu button, an inline button under a message, from the bot's profile
+(main Mini App), a direct link `t.me/<bot>/<app>?startapp=...`. Inside — `initData` with
+signed data about the person, the Telegram theme, safe-area, BackButton, haptics. There's already
+`fetch`, so our SSE streaming (`http/sse.ts`) plugs in as is.
 
-### 3.2 Что не даёт (и это главное)
+### 3.2 What it doesn't give (and this is the main thing)
 
-| Ограничение | Формулировка/источник |
+| Limitation | Wording/source |
 |---|---|
-| Нет доступа к чатам | *«Mini Apps opened from a direct link have **no access** to the chat – they can't read messages or send new ones on behalf of the user»*; то же для inline-режима ([webapps](https://core.telegram.org/bots/webapps)) |
-| Нет пушей | Mini App не может разбудить человека. Единственный канал уведомления — сообщение бота; чтобы вернуть человека в приложение, нужна кнопка `web_app` в этом сообщении |
-| Живёт только пока открыт | Закрылся webview — нет процесса, нет фоновой работы; фоновые задачи всё равно на сервере |
-| Отдельный хостинг | HTTPS-URL, домен, привязка в BotFather; с Bot API 10.2 Mini App-методы запрещены с чужих origin (включено для всех с 20.07.2026) |
-| Своя авторизация | `initData` + HMAC, а не наш SSO-заголовок (см. 3.3) |
-| Свой UI целиком | История, скролл, клавиатура, iOS-специфика — всё на нас; нативного списка сообщений в webview нет |
+| No access to chats | *«Mini Apps opened from a direct link have **no access** to the chat – they can't read messages or send new ones on behalf of the user»*; same for inline mode ([webapps](https://core.telegram.org/bots/webapps)) |
+| No push | A Mini App can't wake a person. The only notification channel is a bot message; to bring the person back into the app, you need a `web_app` button in that message |
+| Lives only while open | The webview closes — no process, no background work; background tasks are on the server anyway |
+| Separate hosting | HTTPS URL, domain, binding in BotFather; as of Bot API 10.2, Mini App methods are forbidden from foreign origins (enabled for everyone from 20.07.2026) |
+| Its own authorization | `initData` + HMAC, not our SSO header (see 3.3) |
+| The entire UI on us | History, scroll, keyboard, iOS specifics — all on us; there's no native message list in a webview |
 
-Доступ к чату есть только у Mini App, запущенного из **attachment menu**, — и этот путь нам
-закрыт: *«Attachment menu integration is currently only available for major advertisers on the
+Chat access exists only for a Mini App launched from the **attachment menu**, and that path is
+closed to us: *«Attachment menu integration is currently only available for major advertisers on the
 Telegram Ad Platform. However, all bots can use it in the test server environment»*
-([webapps](https://core.telegram.org/bots/webapps#adding-bots-to-the-attachment-menu)). Плюс
-`query_id` даёт право отправить сообщение от имени человека, но `answerWebAppQuery` при этом
-**закрывает** приложение — как транспорт это не годится, это «вернуть результат в чат».
+([webapps](https://core.telegram.org/bots/webapps#adding-bots-to-the-attachment-menu)). Plus
+`query_id` gives the right to send a message on behalf of the person, but `answerWebAppQuery` at the same time
+**closes** the app — as a transport that's no good, it's "return the result to the chat".
 
-Справедливости ради: **отсутствие доступа к чатам — не приговор нашей затее.** История
-разговоров и так лежит у нас (`/workspace/.sessions`), а не в Telegram, и Mini App, открытый
-инлайн-кнопкой или кнопкой меню, получает `initData` и `query_id` — этого хватает, чтобы
-работать со своим бэкендом по HTTPS. Приговор — не это, а уведомления и жизненный цикл: из
-webview нельзя написать человеку, а «фонового» Mini App не существует.
+To be fair: **the lack of access to chats is not a death sentence for our idea.** Conversation
+history lives with us anyway (`/workspace/.sessions`), not in Telegram, and a Mini App opened by an
+inline button or a menu button gets `initData` and `query_id` — that's enough to
+work with our own backend over HTTPS. What kills it is not this, but notifications and lifecycle: from a
+webview you can't write to a person, and a "background" Mini App doesn't exist.
 
-### 3.3 Авторизация: `initData` вместо SSO-прокси
+### 3.3 Authorization: `initData` instead of the SSO proxy
 
-Правило из доков: *«Validate data from this field before using it on the bot's server»*.
-Алгоритм: `secret_key = HMAC_SHA256(bot_token, "WebAppData")`,
-`hex(HMAC_SHA256(data_check_string, secret_key)) == hash`, где `data_check_string` — все поля
-кроме `hash`, отсортированные по имени, `key=value` через `\n`; плюс проверка `auth_date` от
-протухания ([webapps#validating-data](https://core.telegram.org/bots/webapps)).
+The rule from the docs: *«Validate data from this field before using it on the bot's server»*.
+Algorithm: `secret_key = HMAC_SHA256(bot_token, "WebAppData")`,
+`hex(HMAC_SHA256(data_check_string, secret_key)) == hash`, where `data_check_string` is all fields
+except `hash`, sorted by name, `key=value` separated by `\n`; plus an `auth_date` check against
+expiry ([webapps#validating-data](https://core.telegram.org/bots/webapps)).
 
-Для нас это ложится на `control/identity.ts`: сейчас человека называет SSO-прокси заголовком
-(`panel.userHeader`), Mini App должен уметь второй путь — «валидный `initData` → telegram id →
-`telegram.mapping` → человек из `users`». Тогда панель открывается из телеги без логина.
-Тонкость, которую надо проверить на живых клиентах: webview Telegram — отдельное хранилище
-cookies, и SSO-сессия браузера туда, скорее всего, не доедет (то есть надеяться на заголовок
-прокси не получится). Хуже: если URL приложения отвечает редиректом на логин, открывается
-пустая оболочка — *«the Mini App itself opens successfully: initData is received correctly…
+For us this maps onto `control/identity.ts`: right now the person is named by the SSO proxy via a header
+(`panel.userHeader`), and the Mini App must be able to take a second path — "valid `initData` → telegram id →
+`telegram.mapping` → person from `users`". Then the panel opens from Telegram without login.
+A subtlety to check on live clients: the Telegram webview is a separate cookie store, and the browser's SSO
+session probably won't carry over (that is, you can't count on the proxy header). Worse: if the app's URL
+answers with a redirect to login, an empty shell opens — *«the Mini App itself opens successfully: initData is received correctly…
 However, all WebApp API methods stop working»*
-([Telegram-Mini-Apps#85](https://github.com/Telegram-Mini-Apps/issues/issues/85), сообщество,
-**UNVERIFIED**). То есть панель за SSO и Mini App — это **два разных входных хоста**: наружу
-смотрит публичный HTTPS без редиректов, а человека называет `initData`. Проверяется первым же
-запуском; `initData`-путь надёжнее в любом случае. И помнить, что `telegram.mapping` у нас
-ключуется по username, а `initData` отдаёт и id, и username.
+([Telegram-Mini-Apps#85](https://github.com/Telegram-Mini-Apps/issues/issues/85), community,
+**UNVERIFIED**). That is, the panel behind SSO and the Mini App are **two different entry hosts**: facing outward
+is a public HTTPS without redirects, and the person is named by `initData`. It's verified by the very first
+launch; the `initData` path is more reliable in any case. And remember that our `telegram.mapping` is
+keyed by username, while `initData` returns both the id and the username.
 
-### 3.4 Стоимость и риски
+### 3.4 Cost and risks
 
-* Фронтенд: однофайловое приложение в стиле нашей панели (`ui.ts` — один HTML без сборки)
-  реально, но чат-клиент — не панель памяти: виртуализация списка, стриминг, скролл-анкоры,
-  вложения. Реалистично **1-2 недели** до «не стыдно пользоваться», и дальше он живёт.
-* Каталог Mini Apps (Apps-таб) нам не нужен и не грозит: для попадания нужно Main Mini App +
-  >1000 DAU + >1000 Stars/день; обычный запуск из профиля/кнопки/ссылки работает без каталога
-  и без модерации ([разбор требований](https://kak-v-telegramme.ru/boty-mini-apps/kak-razmeshhat-mini-app-v-kataloge-telegram-2/),
-  вторичный источник).
-* Хранилища (если понадобятся): CloudStorage — 1024 ключа на человека, значение ≤4096
-  символов; DeviceStorage — 5 МБ на человека; SecureStorage — 10 элементов (Keychain/Keystore).
-* Приоритет: пока топики дают 80% результата за 1 день, Mini App-чат — это 20% сверху за две
-  недели. Делать его первым — значит заплатить за то, что Telegram уже отдал бесплатно.
+* Frontend: a single-file app in the style of our panel (`ui.ts` — one HTML without a build)
+  is feasible, but a chat client is not a memory panel: list virtualization, streaming, scroll anchors,
+  attachments. Realistically **1-2 weeks** to "not embarrassing to use", and after that it lives on.
+* The Mini Apps catalog (Apps tab) we don't need and it doesn't threaten us: to get in you need a Main Mini App +
+  >1000 DAU + >1000 Stars/day; an ordinary launch from the profile/button/link works without the catalog
+  and without moderation ([breakdown of the requirements](https://kak-v-telegramme.ru/boty-mini-apps/kak-razmeshhat-mini-app-v-kataloge-telegram-2/),
+  secondary source).
+* Storages (if needed): CloudStorage — 1024 keys per person, value ≤4096
+  characters; DeviceStorage — 5 MB per person; SecureStorage — 10 elements (Keychain/Keystore).
+* Priority: while topics give 80% of the result in 1 day, a Mini App chat is 20% more for two
+  weeks. Doing it first means paying for what Telegram already gave away for free.
 
-### 3.5 Что конкретно ломается у людей (и о чём надо знать до старта)
+### 3.5 What specifically breaks for people (and what to know before starting)
 
-Всё ниже — сообщество и трекер Telegram-Mini-Apps, не документация; помечено как **UNVERIFIED**,
-но именно эти грабли определяют объём работ:
+Everything below is from the community and the Telegram-Mini-Apps tracker, not documentation; marked as **UNVERIFIED**,
+but it's precisely these rakes that determine the scope of work:
 
-* **Webview перезагружается сам.** На Android есть открытый баг: клиент перезагружает Mini App
-  каждые 5-10 секунд (*«12 full page loads in 6 minutes»* на реальном устройстве,
-  [#86](https://github.com/Telegram-Mini-Apps/issues/issues/86), OPEN). При сворачивании в
-  трей соединение рвётся с кодом 1006 ([#78](https://github.com/Telegram-Mini-Apps/issues/issues/78)).
-  Вывод: длинный ход pi живёт на сервере и ключуется разговором, а UI — переподключаемое
-  представление серверного состояния, а не владелец процесса. Наш `SessionRegistry` это уже
-  умеет, Mini App обязан просто переподключаться к SSE.
-* **Минимизация ≠ фон.** С 2024 года Mini App можно свернуть в полоску внизу экрана и вернуть
-  без перезагрузки, на desktop есть вкладки
-  ([анонс](https://telegram.org/blog/mini-app-bar-paid-media-and-more#mini-app-bar)), но
-  фонового выполнения и гарантий жизни webview нет.
-* **Deep-link не переключает разговор.** Если экземпляр уже открыт, новые `startapp`-параметры
-  игнорируются ([#44](https://github.com/Telegram-Mini-Apps/issues/issues/44)), а экземпляров
-  может быть несколько ([#70](https://github.com/Telegram-Mini-Apps/issues/issues/70)). Значит
-  «уведомление открывает чат №123» само по себе не работает: нужна маршрутизация внутри
-  приложения и «активный разговор» с сервера.
-* **`ready()` и версия клиента.** Без `ready()` заглушка снимается только после полной загрузки;
-  старые клиенты отдают старый Bot API, поэтому всё новое — через `isVersionAtLeast()`
-  ([#55](https://github.com/Telegram-Mini-Apps/issues/issues/55)). Официального репозитория
-  `telegram-web-app.js` нет: файл отдаётся минифицированным с telegram.org и
-  кэш-бастится вручную (`?64`) — вендорить и пинить самим.
-* **iOS/Android-специфика:** неверный `viewportHeight` при открытой клавиатуре
-  ([#14](https://github.com/Telegram-Mini-Apps/issues/issues/14)), прыгающие нижние панели из-за
-  safe-area ([#39](https://github.com/Telegram-Mini-Apps/issues/issues/39)), Service Workers не
-  работают на iOS ([#27](https://github.com/Telegram-Mini-Apps/issues/issues/27), OPEN),
-  `ClosingConfirmation` врёт и надёжного события закрытия нет
+* **The webview reloads itself.** On Android there's an open bug: the client reloads the Mini App
+  every 5-10 seconds (*«12 full page loads in 6 minutes»* on a real device,
+  [#86](https://github.com/Telegram-Mini-Apps/issues/issues/86), OPEN). When minimized to the
+  tray, the connection drops with code 1006 ([#78](https://github.com/Telegram-Mini-Apps/issues/issues/78)).
+  Conclusion: a long pi turn lives on the server and is keyed by conversation, while the UI is a reconnectable
+  view of server state, not the owner of the process. Our `SessionRegistry` already knows how to do this, and the Mini App is obliged to simply reconnect to the SSE.
+* **Minimizing ≠ background.** Since 2024 a Mini App can be collapsed into a strip at the bottom of the screen and restored
+  without reloading, and on desktop there are tabs
+  ([announcement](https://telegram.org/blog/mini-app-bar-paid-media-and-more#mini-app-bar)), but
+  there's no background execution and no guarantees for the webview's life.
+* **A deep link doesn't switch the conversation.** If an instance is already open, new `startapp` parameters
+  are ignored ([#44](https://github.com/Telegram-Mini-Apps/issues/issues/44)), and there can be several
+  instances ([#70](https://github.com/Telegram-Mini-Apps/issues/issues/70)). So
+  "the notification opens chat #123" doesn't work by itself: you need routing inside
+  the app and an "active conversation" from the server.
+* **`ready()` and client version.** Without `ready()` the placeholder is removed only after full loading;
+  older clients expose an older Bot API, so everything new — via `isVersionAtLeast()`
+  ([#55](https://github.com/Telegram-Mini-Apps/issues/issues/55)). There's no official repository for
+  `telegram-web-app.js`: the file is served minified from telegram.org and
+  cache-busted manually (`?64`) — vendor and pin it ourselves.
+* **iOS/Android specifics:** wrong `viewportHeight` when the keyboard is open
+  ([#14](https://github.com/Telegram-Mini-Apps/issues/issues/14)), jumping bottom panels due to
+  safe-area ([#39](https://github.com/Telegram-Mini-Apps/issues/issues/39)), Service Workers don't
+  work on iOS ([#27](https://github.com/Telegram-Mini-Apps/issues/issues/27), OPEN),
+  `ClosingConfirmation` lies and there's no reliable close event
   ([#1](https://github.com/Telegram-Mini-Apps/issues/issues/1),
-  [#69](https://github.com/Telegram-Mini-Apps/issues/issues/69)) — то есть «сохранить черновик
-  при закрытии» асинхронным запросом не получится.
-* **Ревью при публикации нет.** Создал бота → `/newapp` → указал HTTPS-URL, и всё; каталог
-  (Apps-таб) — отдельная история про featured и Stars. Для личного Икара это не нужно вовсе.
-* **История чатов в Telegram-хранилищах не помещается:** CloudStorage — 4096 символов на ключ
-  (1024 ключа), то есть ~4 КБ; DeviceStorage — 5 МБ; SecureStorage — 10 элементов. История
-  остаётся на нашем сервере, в облако кладём только состояние UI (курсор, активный разговор).
+  [#69](https://github.com/Telegram-Mini-Apps/issues/issues/69)) — that is, "save the draft
+  on close" won't work with an asynchronous request.
+* **There's no review at publication.** Created a bot → `/newapp` → specified the HTTPS URL, and that's it; the catalog
+  (Apps tab) is a separate story about featured and Stars. For a personal Icarus this isn't needed at all.
+* **Chat history doesn't fit into Telegram's storages:** CloudStorage — 4096 characters per key
+  (1024 keys), that is ~4 KB; DeviceStorage — 5 MB; SecureStorage — 10 elements. History
+  stays on our server; we put only the UI state into the cloud (cursor, active conversation).
 
 ---
 
-## 4. Вариант C: супергруппа с топиками (старый путь, до 9.3)
+## 4. Option C: a supergroup with topics (the old path, before 9.3)
 
-Классика: супергруппа-форум, бот-админ с `can_manage_topics`, каждый топик — разговор, разные
-люди в одной группе. Работает с 2022 года, ограничений почти нет, топики можно закрывать
-(`closeForumTopic`). Но: человеку надо вступить в группу, у группы есть участники и правила,
-личная память Икара перемешивается с групповой видимостью, а «просто поговорить с Икаром»
-превращается в «зайти в комнату». Для семьи/команды — да; для личного мультичата — нет.
+The classic: a forum supergroup, the bot an admin with `can_manage_topics`, each topic a conversation, different
+people in one group. It has worked since 2022, there are almost no limitations, topics can be closed
+(`closeForumTopic`). But: the person has to join the group, the group has members and rules,
+Icarus's personal memory gets mixed with group visibility, and "just talk to Icarus"
+turns into "go into a room". For a family/team — yes; for a personal multi-chat — no.
 
 ---
 
-## 5. Вариант D (второй по приоритету): Mini App как панель
+## 5. Option D (second in priority): Mini App as a panel
 
-Здесь Mini App на своём месте: конфигурация, approvals, дашборды — формулировка самих
-доков: *«Mini Apps provide a richer workspace for configuration, approvals and dashboards»*
+Here the Mini App is in its element: configuration, approvals, dashboards — in the words of the docs
+themselves: *«Mini Apps provide a richer workspace for configuration, approvals and dashboards»*
 ([features#ai-agents](https://core.telegram.org/bots/features#ai-agents)).
 
-Что даёт нам: панель (`/panel`, память, история git, Maple-графики) уже написана и уже
-разделена на `SECTIONS`. Кнопка меню бота (`setChatMenuButton` с `MenuButtonWebApp`:
-`type: web_app`, `text`, `web_app: WebAppInfo`; можно поставить дефолтом или только для
-личного чата с человеком) → панель открывается одним тапом из чата, `initData` называет
-человека, долгий логин не нужен. Дальше туда же естественно просятся:
-* список разговоров и их `/compact`/удаление (то, что в чате живёт командами);
-* память (уже есть);
-* статус: живые сессии, контейнеры, расход (`registry.list()` и `/healthz` уже это отдают).
+What it gives us: the panel (`/panel`, memory, git history, Maple charts) is already written and already
+split into `SECTIONS`. The bot's menu button (`setChatMenuButton` with `MenuButtonWebApp`:
+`type: web_app`, `text`, `web_app: WebAppInfo`; can be set as the default or only for the
+private chat with a person) → the panel opens in one tap from the chat, `initData` names the
+person, no long login needed. After that, naturally asking to go there too are:
+* the list of conversations and their `/compact`/deletion (things that in the chat live as commands);
+* memory (already there);
+* status: live sessions, containers, spend (`registry.list()` and `/healthz` already return this).
 
-Оценка: **1-2 дня** на раздел «чаты» + initData-путь в `identity.ts`. Именно так Mini App
-усиливает чат, не пытаясь его заменить.
+Estimate: **1-2 days** for the "chats" section + the initData path in `identity.ts`. This is exactly how a Mini App
+strengthens the chat without trying to replace it.
 
 ---
 
-## 6. Что ещё из 2026 стоит забрать (независимо от варианта)
+## 6. What else from 2026 is worth taking (regardless of the option)
 
-1. **Стриминг: `sendMessageDraft` / `sendRichMessageDraft`.** *«stream a partial message to a
+1. **Streaming: `sendMessageDraft` / `sendRichMessageDraft`.** *«stream a partial message to a
    user while the message is being generated… the streamed draft is ephemeral and acts as a
    temporary 30-second preview — once the output is finalized, you must call sendMessage»*.
-   Пустой текст = плейсхолдер «Thinking…». `draft_id` — один на генерацию, изменения с тем же
-   id анимируются. `can_stop: true` показывает человеку кнопку Stop, бот получает апдейт
-   `MessageGenerationStopped` (`chat`, `message_thread_id`, `draft_id`) и может прервать ход.
-   Это прямая замена нашего `EDIT_INTERVAL_MS = 1200` и текстов «Ещё думаю над прошлым
-   сообщением»: сейчас мы правим одно сообщение и молимся на 429, теперь можно отдавать
-   партиалы нативно, а финал — обычным `sendMessage`.
-   **Оговорка:** `chat_id` у метода описан как «Unique identifier for the target **private**
-   chat» — то есть в группах стриминг черновиками недоступен, там остаётся наш
-   `editMessageText`. В личке (и в топиках лички) — работает, `message_thread_id` в параметрах
-   есть.
-   **Риск:** FAQ по-прежнему требует «не больше одного сообщения в секунду в чат»; как это
-   соотносится с частотой черновиков — не задокументировано. **UNVERIFIED**, мерить на стенде.
-2. **Rich messages (`sendRichMessage`).** Заголовки, списки, таблицы, сворачиваемые блоки,
-   LaTeX (inline и блоками), медиа, кнопки внутри сообщения. Для Икара это ответ про Maple:
-   формулы и таблицы поедут нативно, а не картинкой через `/maple/`.
-3. **Ephemeral messages (10.2).** В группе бот может ответить так, что увидит только один
-   человек (и бот): *«let bots send private responses inside group chats – visible only to a
-   specific user and the bot»*. Сценарий: в общем чате спросили личное — Икар отвечает
-   шёпотом, а не молчит.
+   Empty text = the placeholder "Thinking…". `draft_id` — one per generation, changes with the same
+   id are animated. `can_stop: true` shows the person a Stop button, the bot receives the update
+   `MessageGenerationStopped` (`chat`, `message_thread_id`, `draft_id`) and can interrupt the turn.
+   This is a direct replacement for our `EDIT_INTERVAL_MS = 1200` and the texts «Ещё думаю над прошлым
+   сообщением» [“Still thinking about the previous message”]: right now we edit one message and pray against 429, now we can emit
+   partials natively, and the final one — with a regular `sendMessage`.
+   **Caveat:** the method's `chat_id` is described as "Unique identifier for the target **private**
+   chat" — that is, in groups, streaming by drafts is unavailable, and there our
+   `editMessageText` remains. In a private chat (and in private-chat topics) it works, `message_thread_id` is
+   among the parameters.
+   **Risk:** the FAQ still requires "no more than one message per second per chat"; how this
+   relates to the frequency of drafts — not documented. **UNVERIFIED**, measure on the stand.
+2. **Rich messages (`sendRichMessage`).** Headings, lists, tables, collapsible blocks,
+   LaTeX (inline and block), media, buttons inside the message. For Icarus this is the answer about Maple:
+   formulas and tables will render natively, not as an image via `/maple/`.
+3. **Ephemeral messages (10.2).** In a group, the bot can reply so that only one
+   person sees it (and the bot): *«let bots send private responses inside group chats – visible only to a
+   specific user and the bot»*. Scenario: someone asks something personal in a shared chat — Icarus answers in a
+   whisper rather than staying silent.
 4. **Guest mode (10.0).** *«allowing bots to receive certain messages and issue replies within
-   chats they are not a member of»*: человек пишет `@icarus_bot <вопрос>` в любом чате, бот
-   получает это сообщение (и то, на что отвечали) и может ответить один раз, без добавления в
-   чат. Доступ к истории и участникам при этом не даётся. Это ровно «Икар рядом, когда нужен»,
-   и это дешевле, чем заводить его в каждый чат.
-5. **Secretary mode / business bots (10.0).** Бот подключается к аккаунту и отвечает в личных
-   чатах от имени человека; права (`can_reply`, `can_read_messages`, удаление) выдаёт
-   владелец, Premium больше не требуется. Для Икара это отдельное решение про приватность, не
-   про мультичат; в этом же разборе не рассматриваем.
-6. **Bot-to-bot (10.0/10.1).** Если когда-нибудь появятся боты-помощники (Maple-бот, бот-
-   архивариус), они смогут переписываться напрямую. Пока не нужно.
+   chats they are not a member of»*: a person writes `@icarus_bot <question>` in any chat, the bot
+   receives this message (and the one being replied to) and can reply once, without being added to the
+   chat. Access to history and members is not granted in this case. This is exactly "Icarus is around when you need him",
+   and it's cheaper than adding him to every chat.
+5. **Secretary mode / business bots (10.0).** The bot connects to an account and replies in private
+   chats on behalf of the person; the owner grants the rights (`can_reply`, `can_read_messages`, deletion),
+   and Premium is no longer required. For Icarus this is a separate decision about privacy, not
+   about multi-chat; we don't consider it in this analysis.
+6. **Bot-to-bot (10.0/10.1).** If helper bots ever appear (a Maple bot, an
+   archivist bot), they'll be able to talk to each other directly. Not needed yet.
 
 ---
 
-## 7. Чужой опыт: как это уже сделали
+## 7. Others' experience: how it's already been done
 
-* **hermes-agent (NousResearch)** — агентная платформа, у которой есть и config-driven топики
-  (`extra.dm_topics`), и **user-driven режим `/topic`**: *«A ChatGPT-style multi-session DM —
+* **hermes-agent (NousResearch)** — an agent platform that has both config-driven topics
+  (`extra.dm_topics`) and a **user-driven `/topic` mode**: *«A ChatGPT-style multi-session DM —
   one bot, many parallel conversations… The end user flips it on with /topic, then taps the
   Telegram + button to create as many topics as they want, each one a fully independent
   session»* ([telegram.md](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/messaging/telegram.md)).
-  Полезное оттуда:
-  * ключ изоляции — `chat_id + thread_id` (у нас будет то же в `conversationId`);
-  * корень лички превращают в «лобби»: обычные сообщения отклоняются с подсказкой, системные
-    команды работают (у нас корень остаётся разговором — решать нам);
-  * авто-переименование топика по сгенерированному заголовку сессии (и флаг, чтобы выключить);
-  * `General`-топик считается корнем независимо от того, пришёл `thread_id=1` или ничего;
-  * темы, созданные человеком, подхватываются по `forum_topic_created`, без перезапуска;
-  * напоминания в корне — с rate-limit, чтобы человек не получал десять ответов «вы в лобби».
-  * Реализация: коммит [5506139](https://github.com/NousResearch/hermes-agent/commit/55061390fc726c08975456e7f3bef1d56b90e5fc)
+  Useful bits from there:
+  * the isolation key is `chat_id + thread_id` (ours will be the same in `conversationId`);
+  * the root of the private chat is turned into a "lobby": ordinary messages are rejected with a hint, system
+    commands work (in our case the root stays a conversation — that's for us to decide);
+  * auto-renaming the topic to the generated session title (and a flag to turn it off);
+  * the `General` topic is treated as the root regardless of whether `thread_id=1` arrived or nothing;
+  * topics created by a person are picked up via `forum_topic_created`, without a restart;
+  * reminders in the root — with a rate limit, so the person doesn't get ten "you're in the lobby" replies.
+  * Implementation: commit [5506139](https://github.com/NousResearch/hermes-agent/commit/55061390fc726c08975456e7f3bef1d56b90e5fc)
     (`_create_dm_topic`, `_setup_dm_topics`, `_persist_dm_topic_thread_id`,
-    `_cache_dm_topic_from_message`) — 290 строк на адаптер. Масштаб правки показывает, что это
-    небольшая задача, а не проект.
-* **nekoclaw** ([github](https://github.com/oines/nekoclaw)) — сосед по архитектуре: тот же
-  `pi-coding-agent`, Docker-контейнер на агента, память в Markdown, Telegram через grammy. Ни
-  Mini App, ни топиков для мультичата там нет — то есть «мультичат» не является обязательным
-  атрибутом зрелого ИИ-бота в телеге.
-* **tg-llm-router** ([github](https://github.com/x100Value/tg-llm-router)) — пример Mini App
-  поверх LLM (роутер моделей, BYOK, TON Connect). Полезен как референс «как выглядит TMA для
-  LLM», но это именно клиент-приложение, а не мультичат в чате бота.
-* **hermes-miniapp** ([github](https://github.com/jessicarust/hermes-miniapp)) — ближайший
-  аналог варианта B: *«full-screen mobile chat interface… Streaming chat — responses appear
+    `_cache_dm_topic_from_message`) — 290 lines per adapter. The scale of the change shows that this is
+    a small task, not a project.
+* **nekoclaw** ([github](https://github.com/oines/nekoclaw)) — an architectural neighbor: the same
+  `pi-coding-agent`, a Docker container per agent, memory in Markdown, Telegram via grammy. There's
+  neither a Mini App nor topics for multi-chat — that is, "multi-chat" is not a mandatory
+  attribute of a mature AI bot in Telegram.
+* **tg-llm-router** ([github](https://github.com/x100Value/tg-llm-router)) — an example of a Mini App
+  on top of an LLM (a model router, BYOK, TON Connect). Useful as a reference of "what a TMA for an
+  LLM looks like", but it's specifically a client app, not multi-chat in a bot chat.
+* **hermes-miniapp** ([github](https://github.com/jessicarust/hermes-miniapp)) — the closest
+  analog of option B: *«full-screen mobile chat interface… Streaming chat — responses appear
   token-by-token… Persistent sessions — conversation history survives app restarts… The mini
-  app authenticates via Telegram WebApp initData»*; эндпоинты `/v1/webapp/auth` (initData →
-  session token) и `/v1/webapp/chat` (SSE), HTTPS через туннель. Репозиторий свежий и
-  малозвёздный — качество **UNVERIFIED**, но архитектура ровно та, что описана в §3:
-  initData-авторизация, SSE-стриминг, сессии, привязанные к telegram id.
-* **`web_app`-кнопка как уведомление** — так это делают и в самом hermes-agent: отдельный PR
-  добавляет *«an optional `web_app_button` payload for Telegram private chats»*
-  ([PR #67864](https://github.com/NousResearch/hermes-agent/pull/67864)). Это подтверждает
-  единственную рабочую схему: бот = канал уведомлений, Mini App = поверхность чтения.
-* **notepher-bot** ([github](https://github.com/deptyped/notepher-bot)) — пример Mini App со
-  списком и деталью, offline-first, синхронизация через CloudStorage: полезен как референс
-  хранения состояния UI, если до варианта B дойдёт.
-* **Честный итог по prior art:** зрелого открытого «списка чатов + окна разговора» на Mini App
-  нет; мейнстрим LLM-ботов в Telegram — обычные сообщения бота. Случаев, где стриминг ответа
-  LLM идёт через webview с надёжным уведомлением о завершении, найти не удалось: это
-  **UNVERIFIED** территория, и проектировать надо с расчётом на переподключение.
+  app authenticates via Telegram WebApp initData»*; endpoints `/v1/webapp/auth` (initData →
+  session token) and `/v1/webapp/chat` (SSE), HTTPS via a tunnel. The repository is fresh and
+  low-star — quality **UNVERIFIED**, but the architecture is exactly what's described in §3:
+  initData authorization, SSE streaming, sessions tied to the telegram id.
+* **The `web_app` button as a notification** — this is also how it's done in hermes-agent itself: a separate PR
+  adds *«an optional `web_app_button` payload for Telegram private chats»*
+  ([PR #67864](https://github.com/NousResearch/hermes-agent/pull/67864)). This confirms
+  the only working scheme: the bot = the notification channel, the Mini App = the reading surface.
+* **notepher-bot** ([github](https://github.com/deptyped/notepher-bot)) — an example of a Mini App with a
+  list and a detail view, offline-first, synchronization via CloudStorage: useful as a reference for
+  storing UI state, if it ever comes to option B.
+* **An honest summary on prior art:** there's no mature open "chat list + conversation window" on a Mini App;
+  the mainstream of LLM bots in Telegram is plain bot messages. I couldn't find a single case where an
+  LLM's answer streaming goes through a webview with a reliable completion notification: this is
+  **UNVERIFIED** territory, and it must be designed with reconnection in mind.
 
 ---
 
-## 8. Чего не делать
+## 8. What not to do
 
-* **Не писать свой клиент Telegram** и не пытаться читать чужие чаты: у Bot API такого нет, а
-  userbot (MTProto/TDLib от лица человека) — это другой класс рисков (ToS, блокировки) и
-  отдельный разговор, не для мультичата.
-* **Не заводить БД под привязки топиков**, пока `conversationId` выводится из сообщения. Файлы
-  сессий у нас и так append-only в `/workspace/.sessions`.
-* **Не тащить Mini App-чат «потому что можно»**: уведомлений в нём нет, а именно уведомления —
-  причина, по которой Икар живёт в телеге, а не в браузере.
-* **Не включать топики молча**: если человек привык к одной ленте, включённый Threaded Mode
-  меняет ему интерфейс. Это переключатель, а не дефолт (и он на стороне BotFather, то есть
-  требует ручного шага владельца бота).
+* **Don't write your own Telegram client** and don't try to read other people's chats: the Bot API has no such
+  thing, and a userbot (MTProto/TDLib on behalf of a person) is a different class of risks (ToS, bans) and
+  a separate discussion, not for multi-chat.
+* **Don't set up a DB for topic bindings** as long as `conversationId` is derived from the message. Our
+  session files are append-only in `/workspace/.sessions` anyway.
+* **Don't drag in a Mini App chat "because you can"**: there are no notifications in it, and it's precisely notifications that are
+  the reason Icarus lives in Telegram and not in a browser.
+* **Don't enable topics silently**: if the person is used to a single feed, enabling Threaded Mode
+  changes their interface. It's a toggle, not a default (and it's on the BotFather side, that is,
+  it requires a manual step by the bot owner).
 
 ---
 
-## 9. Итог по вариантам
+## 9. Bottom line on the options
 
-| Вариант | Что даёт | Цена | Вердикт |
+| Option | What it gives | Cost | Verdict |
 |---|---|---|---|
-| A. Топики в личке | Нативный список разговоров, изоляция контекста, `/compact` на разговор | 1-2 дня, ключ `conversationId` + команды | **Делать первым** |
-| B. Mini App-чат | Свой UI, поиск, папки | 1-2 недели + хостинг/домен + initData-авторизация, без пушей и фона, перезагрузки webview, deep-link не переключает разговор | Позже, если A не хватит |
-| C. Супергруппа-форум | Общий мультичат для семьи/команды | Онбординг в группу, общая видимость | Когда появится «для всех» |
-| D. Mini App-панель | Чаты/память/статус с телефона в один тап | 1-2 дня поверх существующей панели | **Делать вторым** |
+| A. Topics in a private chat | A native conversation list, context isolation, `/compact` per conversation | 1-2 days, `conversationId` key + commands | **Do first** |
+| B. Mini App chat | Its own UI, search, folders | 1-2 weeks + hosting/domain + initData authorization, no push and no background, webview reloads, a deep link doesn't switch the conversation | Later, if A isn't enough |
+| C. Forum supergroup | A shared multi-chat for a family/team | Onboarding into the group, shared visibility | When "for everyone" appears |
+| D. Mini App panel | Chats/memory/status from a phone in one tap | 1-2 days on top of the existing panel | **Do second** |
 
 ---
 
-## 10. Что проверить руками на стенде (spike, полдня)
+## 10. What to check by hand on the stand (spike, half a day)
 
 1. BotFather (Mini App) → Bot Settings → **Threads Settings → Threaded Mode**; `getMe` →
-   `has_topics_enabled: true`, `allows_users_to_create_topics: true`. Выключить обратно →
-   убедиться, что `createForumTopic` даёт `400 the chat is not a forum` (это наша понятная
-   ошибка для человека, а не стектрейс).
-2. `createForumTopic` из бота → отправить сообщение в топик → получить ответ в топике.
-3. Создать топик руками в клиенте → проверить, что пришёл `forum_topic_created` и что
-   `is_name_implicit=true` (значит, можно переименовывать под заголовок разговора).
-4. Корень лички vs General: посмотреть, с каким `message_thread_id` приходят сообщения
-   (1 или ничего) — от этого зависит `conversationIdFor`.
-5. `sendMessageDraft` в топике: анимация, «Thinking…» на пустом тексте, `can_stop` → апдейт
-   `stopped_message_generation`; замерить, сколько апдейтов в секунду держит Telegram до 429.
-6. `/compact` внутри топика — сжимается только этот разговор, соседние не трогаются.
-7. Клиенты: iOS, Android, Desktop, Web — виден ли список топиков и что показывают старые
-   версии; проверить, что разговор в корне не смешивается с топиками.
-8. Отдельно — насколько `rich messages` рисуются в наших клиентах (LaTeX/таблицы), прежде чем
-   обещать Maple-вывод в чате.
+   `has_topics_enabled: true`, `allows_users_to_create_topics: true`. Turn it back off →
+   make sure `createForumTopic` gives `400 the chat is not a forum` (this is our understandable
+   error for the person, not a stack trace).
+2. `createForumTopic` from the bot → send a message to the topic → get a reply in the topic.
+3. Create a topic manually in the client → check that `forum_topic_created` arrived and that
+   `is_name_implicit=true` (so it can be renamed to the conversation title).
+4. Root of the private chat vs General: see which `message_thread_id` the messages arrive with
+   (1 or nothing) — `conversationIdFor` depends on this.
+5. `sendMessageDraft` in a topic: animation, "Thinking…" on empty text, `can_stop` → the update
+   `stopped_message_generation`; measure how many updates per second Telegram holds before 429.
+6. `/compact` inside a topic — only that conversation is compacted, neighbors are untouched.
+7. Clients: iOS, Android, Desktop, Web — is the topic list visible and what do older
+   versions show; check that the conversation at the root doesn't get mixed with topics.
+8. Separately — how well `rich messages` render in our clients (LaTeX/tables), before
+   promising Maple output in the chat.
 
-**Если всё-таки решимся на Mini App (вариант B/D)** — проверять до кода, а не после:
-9. Публичный HTTPS без редиректов: открыть URL из инлайн-кнопки за нашим SSO-прокси и
-   убедиться, что WebApp-методы работают (а не только страница открывается).
-10. Deep-link в уже открытый экземпляр: `?startapp=<разговор>` при живом приложении —
-    увидеть своими глазами, что параметры игнорируются, и решить, как это обходить.
+**If we do decide on a Mini App (option B/D)** — verify before the code, not after:
+9. Public HTTPS without redirects: open the URL from an inline button behind our SSO proxy and
+   make sure the WebApp methods work (and not just that the page opens).
+10. A deep link into an already open instance: `?startapp=<conversation>` while the app is alive —
+    see with your own eyes that the parameters are ignored, and decide how to work around it.
 
 ---
 
-## Источники
+## Sources
 
-**Первоисточники Telegram**
-* Bot API 10.3 и справочник методов/классов: <https://core.telegram.org/bots/api> (сверялось 08.10.2026)
-* Changelog по версиям (9.3 — 31.12.2025, 9.4 — 09.02.2026, 10.0 — 08.05.2026, 10.1 — 11.06.2026, 10.2 — 14.07.2026, 10.3 — 24.08.2026): <https://core.telegram.org/bots/api-changelog>
-* Фичи ботов: топики в личке, стриминг, ephemeral, rich messages, guest bots, business/secretary, AI-агенты: <https://core.telegram.org/bots/features>
-* Mini Apps: способы запуска, доступ к чату, `initData` и его проверка, хранилища: <https://core.telegram.org/bots/webapps>
-* Лимиты (1 сообщение/сек в чат, 20/мин в группе, ~30/сек рассылка): <https://core.telegram.org/bots/faq>
-* Анонс AI-фич (guest bots, bot-to-bot, стриминг, chat automation): <https://telegram.org/blog/ai-bot-revolution-11-new-features>
-* Анонс Mini App Bar (сворачивание приложений в полоску, возврат без перезагрузки): <https://telegram.org/blog/mini-app-bar-paid-media-and-more>
-* Трекер Telegram-Mini-Apps (перезагрузки webview, deep-link, SSO-редиректы, iOS/Android-баги): <https://github.com/Telegram-Mini-Apps/issues/issues>
+**Telegram primary sources**
+* Bot API 10.3 and the method/class reference: <https://core.telegram.org/bots/api> (checked 08.10.2026)
+* Changelog by version (9.3 — 31.12.2025, 9.4 — 09.02.2026, 10.0 — 08.05.2026, 10.1 — 11.06.2026, 10.2 — 14.07.2026, 10.3 — 24.08.2026): <https://core.telegram.org/bots/api-changelog>
+* Bot features: topics in private chats, streaming, ephemeral, rich messages, guest bots, business/secretary, AI agents: <https://core.telegram.org/bots/features>
+* Mini Apps: launch methods, chat access, `initData` and its validation, storages: <https://core.telegram.org/bots/webapps>
+* Limits (1 message/sec per chat, 20/min in a group, ~30/sec for broadcast): <https://core.telegram.org/bots/faq>
+* Announcement of AI features (guest bots, bot-to-bot, streaming, chat automation): <https://telegram.org/blog/ai-bot-revolution-11-new-features>
+* Announcement of the Mini App Bar (collapsing apps into a strip, restoring without reload): <https://telegram.org/blog/mini-app-bar-paid-media-and-more>
+* Telegram-Mini-Apps tracker (webview reloads, deep links, SSO redirects, iOS/Android bugs): <https://github.com/Telegram-Mini-Apps/issues/issues>
 
-**Чужой опыт и вторичные источники**
-* hermes-agent: доки по Telegram (в т.ч. Private Chat Topics и `/topic`): <https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/messaging/telegram.md>
-* Баг-репорт про BotFather Threaded Mode и `has_topics_enabled`: <https://github.com/NousResearch/hermes-agent/issues/115019>
-* Реализация DM-топиков (коммит): <https://github.com/NousResearch/hermes-agent/commit/55061390fc726c08975456e7f3bef1d56b90e5fc>
-* `web_app`-кнопка как канал «уведомление → приложение»: <https://github.com/NousResearch/hermes-agent/pull/67864>
-* hermes-miniapp — Mini App как чат-клиент агента (initData + SSE, свежий, качество не проверено): <https://github.com/jessicarust/hermes-miniapp>
-* notepher-bot — Mini App список+деталь с CloudStorage: <https://github.com/deptyped/notepher-bot>
-* Гайды по Mini Apps от сообщества (initData, создание приложения): <https://docs.telegram-mini-apps.com/platform/init-data>
-* nekoclaw — ИИ-агент на `pi` + Docker в Telegram: <https://github.com/oines/nekoclaw>
-* tg-llm-router — Mini App для LLM: <https://github.com/x100Value/tg-llm-router>
-* Требования каталога Mini Apps (вторичный источник): <https://kak-v-telegramme.ru/boty-mini-apps/kak-razmeshhat-mini-app-v-kataloge-telegram-2/>
+**Others' experience and secondary sources**
+* hermes-agent: Telegram docs (including Private Chat Topics and `/topic`): <https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/messaging/telegram.md>
+* Bug report about BotFather Threaded Mode and `has_topics_enabled`: <https://github.com/NousResearch/hermes-agent/issues/115019>
+* Implementation of DM topics (commit): <https://github.com/NousResearch/hermes-agent/commit/55061390fc726c08975456e7f3bef1d56b90e5fc>
+* The `web_app` button as a "notification → app" channel: <https://github.com/NousResearch/hermes-agent/pull/67864>
+* hermes-miniapp — a Mini App as an agent chat client (initData + SSE, fresh, quality unchecked): <https://github.com/jessicarust/hermes-miniapp>
+* notepher-bot — a Mini App list+detail with CloudStorage: <https://github.com/deptyped/notepher-bot>
+* Community guides on Mini Apps (initData, creating an app): <https://docs.telegram-mini-apps.com/platform/init-data>
+* nekoclaw — an AI agent on `pi` + Docker in Telegram: <https://github.com/oines/nekoclaw>
+* tg-llm-router — a Mini App for an LLM: <https://github.com/x100Value/tg-llm-router>
+* Mini Apps catalog requirements (secondary source): <https://kak-v-telegramme.ru/boty-mini-apps/kak-razmeshhat-mini-app-v-kataloge-telegram-2/>
 
-**Наш код, на который опирается разбор**
-* `packages/service/src/telegram/bot.ts` — `conversationIdFor`, `/compact`, `EDIT_INTERVAL_MS`, опрос и очередь по чату
-* `packages/service/src/sessions/registry.ts` — сессии по `(человек, разговор)`, сжатие простаивающих
-* `packages/service/src/sessions/pi-session.ts` — `sessionIdFor` → файл истории в `/workspace/.sessions`
-* `packages/service/src/http/sse.ts`, `http/title.ts` — стриминг и заголовки разговоров
-* `packages/service/src/control/{index,identity,ui}.ts` — панель, SSO-идентификация, однофайловый UI
-* `config.example.yaml`, раздел `telegram:` — маппинг username → человек, речь
+**Our code that this analysis relies on**
+* `packages/service/src/telegram/bot.ts` — `conversationIdFor`, `/compact`, `EDIT_INTERVAL_MS`, polling and the per-chat queue
+* `packages/service/src/sessions/registry.ts` — sessions by `(person, conversation)`, compaction of idle ones
+* `packages/service/src/sessions/pi-session.ts` — `sessionIdFor` → the history file in `/workspace/.sessions`
+* `packages/service/src/http/sse.ts`, `http/title.ts` — streaming and conversation titles
+* `packages/service/src/control/{index,identity,ui}.ts` — the panel, SSO identification, single-file UI
+* `config.example.yaml`, the `telegram:` section — username → person mapping, speech

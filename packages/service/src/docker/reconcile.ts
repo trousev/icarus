@@ -1,5 +1,5 @@
-// План реконсиляции: что делать с контейнерами, которые уже есть на хосте.
-// Чистая функция — решения принимаются здесь, а исполняет их docker/manager.
+// Reconciliation plan: what to do with containers that already exist on the host.
+// A pure function — decisions are made here, and docker/manager executes them.
 import type { IcarusConfig, UserConfig } from '../config.ts';
 import { containerNameFor, specFor } from './spec.ts';
 
@@ -11,15 +11,15 @@ export type ManagedContainer = {
 };
 
 export type ReconciliationPlan = {
-  /** Совпал отпечаток, контейнер работает — не трогаем. */
+  /** Fingerprint matched, the container is running — do not touch. */
   keep: string[];
-  /** Совпал отпечаток, но контейнер остановлен — поднять. */
+  /** Fingerprint matched, but the container is stopped — start it. */
   start: string[];
-  /** Отпечаток разошёлся (образ, маунты, окружение) — удалить и создать заново. */
+  /** Fingerprint diverged (image, mounts, environment) — delete and recreate. */
   recreate: string[];
-  /** Человека больше нет в конфиге — остановить. */
+  /** The person is no longer in the config — stop it. */
   stop: string[];
-  /** Контейнера ещё нет — создать. */
+  /** The container does not exist yet — create it. */
   create: string[];
 };
 
@@ -37,8 +37,8 @@ export function planReconciliation(input: {
       plan.stop.push(container.name);
       continue;
     }
-    // Контейнеры, созданные до появления меток, приходят с spec = null и попадают
-    // в пересоздание — так проходит миграция на новый формат.
+    // Containers created before labels appeared come with spec = null and fall
+    // into recreation — that is how migration to the new format happens.
     if (container.spec !== specFor(config, user)) {
       plan.recreate.push(container.name);
       continue;
@@ -55,7 +55,7 @@ export function planReconciliation(input: {
   return plan;
 }
 
-/** Есть ли в плане хоть что-то, кроме «оставить как есть». */
+/** Is there anything in the plan besides "leave as is". */
 export function planIsQuiet(plan: ReconciliationPlan): boolean {
   return (
     plan.start.length === 0 &&

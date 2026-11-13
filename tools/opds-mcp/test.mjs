@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// Быстрый самотест разбора OPDS на фикстурах: без сети и без pi.
+// A quick self-test of OPDS parsing on fixtures: no network and no pi.
 //
 //   node tools/opds-mcp/test.mjs
 //
-// Полный сценарий (stdio-протокол, ошибки, скачивание) живёт в
-// packages/service/test/opds-mcp.test.ts и гоняется через ./script/test.
+// The full scenario (stdio protocol, errors, downloading) lives in
+// packages/service/test/opds-mcp.test.ts and runs via ./script/test.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -16,7 +16,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const fixture = (name) => fs.readFileSync(path.join(HERE, 'fixtures', name), 'utf8');
 const read = (name) => parseFeed(fixture(name), `https://example.invalid/${name}`, 'application/atom+xml');
 
-test('корень: название каталога и разделы', () => {
+test('root: catalog title and sections', () => {
   const feed = read('root.opds');
   assert.equal(feed.title, 'Project Gutenberg');
   assert.ok(feed.entries.length >= 3);
@@ -26,7 +26,7 @@ test('корень: название каталога и разделы', () => 
   assert.ok(feed.links.some((link) => /search/.test(link.rel)), 'ссылка поиска в корне есть');
 });
 
-test('поиск: книги, авторы и ссылки на карточки', () => {
+test('search: books, authors and card links', () => {
   const feed = read('search-dickens.opds');
   const book = feed.entries.find((entry) => entry.detail.includes('/ebooks/98.opds'));
   assert.ok(book, 'A Tale of Two Cities есть в выдаче');
@@ -35,7 +35,7 @@ test('поиск: книги, авторы и ссылки на карточки
   assert.ok(feed.entries.some((entry) => entry.title === 'Authors'), 'разделы каталога не потерялись');
 });
 
-test('карточка: автор, год, языки, форматы и аннотация без служебных полей', () => {
+test('card: author, year, languages, formats and annotation without service fields', () => {
   const feed = read('book-98.opds');
   const entry = feed.entries.find((item) => item.acquisitions.length > 0);
   assert.ok(entry, 'в карточке есть ссылки на скачивание');
@@ -50,7 +50,7 @@ test('карточка: автор, год, языки, форматы и анн
   assert.doesNotMatch(annotation, /Reading Level:/, 'служебное поле не часть аннотации');
 });
 
-test('форматы и предпочтение', () => {
+test('formats and preference', () => {
   assert.equal(formatOf({ type: 'application/epub+zip', href: '/b/1' }), 'epub');
   assert.equal(formatOf({ type: 'application/x-mobipocket-ebook', href: '/b/1' }), 'mobi');
   assert.equal(formatOf({ type: 'application/octet-stream', href: '/b/1.fb2' }), 'fb2');

@@ -1,5 +1,5 @@
-// Конфиг — единственное, что человек правит руками, поэтому проверяем и разбор,
-// и внятность ошибок: молчаливое «undefined» в контейнере дороже, чем падение старта.
+// The config is the only thing a person edits by hand, so we check both parsing
+// and the clarity of errors: a silent "undefined" in a container costs more than a startup failure.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -32,11 +32,11 @@ users:
   - probe
 `;
 
-test('по умолчанию конфиг ищется в корне репозитория', () => {
+test('by default the config is looked up in the repository root', () => {
   assert.equal(DEFAULT_CONFIG_PATH, path.join(REPO_ROOT, 'config.yaml'));
 });
 
-test('минимальный конфиг дочитывается умолчаниями', () => {
+test('a minimal config is filled in with defaults', () => {
   const config = loadConfig(writeConfig(MINIMAL), {});
 
   assert.equal(config.apiKey, 'test-token');
@@ -56,7 +56,7 @@ test('минимальный конфиг дочитывается умолча�
   assert.equal(config.speech, null, 'без ключа провайдера голосовые не расшифровываются');
 });
 
-test('общее для всех читается целиком: модели, ключи, маунты, MCP', () => {
+test('shared settings are read in full: models, keys, mounts, MCP', () => {
   const file = writeConfig(`apiKey: token
 url: https://icarus.example:8443
 dataDir: /data
@@ -105,8 +105,8 @@ users:
   assert.deepEqual(config.users, [{ id: 'probe' }, { id: 'probe2' }]);
 });
 
-// Секреты общего MCP: в конфиге только имена, значения — у каждого человека свои.
-test('mcp.secrets: имена секретов доезжают до панели, значений в конфиге нет', () => {
+// Shared MCP secrets: the config holds only names, values are per-person.
+test('mcp.secrets: secret names reach the panel, no values in the config', () => {
   const file = writeConfig(`apiKey: token
 models: [{ provider: deepinfra, id: flash, tier: fast }]
 mcp:
@@ -127,8 +127,8 @@ users: [probe]
   assert.equal(config.mcp.homeassistant?.transport, undefined, 'транспорт выведет mcp.json: url — это HTTP');
 });
 
-// Ключ MCP больше не приходит из .env: иначе он был бы один на всех и мимо панели.
-test('mcp: подстановка ${VAR} и env: в заголовках и env ломается с понятной ошибкой', () => {
+// The MCP key no longer comes from .env: otherwise it would be shared by all and bypass the panel.
+test('mcp: ${VAR} substitution and env: in headers and env fail with a clear error', () => {
   for (const block of [
     '    headers:\n      Authorization: Bearer ${HOMEASSISTANT_TOKEN}\n',
     '    env:\n      TODOIST_API_KEY: env:TODOIST_TOKEN\n',
@@ -144,7 +144,7 @@ ${block}users: [probe]
   }
 });
 
-test('mcp.secrets: значение секрета в config.yaml — ошибка, а не тихая утечка', () => {
+test('mcp.secrets: a secret value in config.yaml is an error, not a silent leak', () => {
   const file = writeConfig(`apiKey: token
 models: [{ provider: deepinfra, id: flash, tier: fast }]
 mcp:
@@ -158,7 +158,7 @@ users: [probe]
   assert.throws(() => loadConfig(file, {}), /mcp\.homeassistant\.secrets: «Authorization» объявлен секретом/);
 });
 
-test('mcp.headers: не строка — ошибка с путём до заголовка', () => {
+test('mcp.headers: a non-string is an error with the path to the header', () => {
   const file = writeConfig(`apiKey: token
 models: [{ provider: deepinfra, id: flash, tier: fast }]
 mcp:
@@ -175,7 +175,7 @@ users: [probe]
   );
 });
 
-test('mcp.hidden: служебный сервер не теряется при разборе и не пускает строку', () => {
+test('mcp.hidden: the service server is not lost on parse and does not accept a string', () => {
   const file = writeConfig(`${MINIMAL}mcp:
   artifacts:
     command: node
@@ -196,7 +196,7 @@ test('mcp.hidden: служебный сервер не теряется при �
   assert.throws(() => loadConfig(broken, {} as NodeJS.ProcessEnv), /mcp\.artifacts\.hidden: ожидалось true или false/);
 });
 
-test('в примере конфига артефакты включены, скрыты и ленивы', () => {
+test('in the example config artifacts are enabled, hidden and lazy', () => {
   const config = loadConfig(path.join(REPO_ROOT, 'config.example.yaml'), {
     DEEPINFRA_API_KEY: 'sk-test',
   } as NodeJS.ProcessEnv);
@@ -207,9 +207,9 @@ test('в примере конфига артефакты включены, ск
   assert.match(artifacts.description ?? '', /артефакт/i);
 });
 
-// Дефолтный стек не должен поднимать MCP-процессы на старте разговора: каждый
-// eager — это процесс на каждую сессию, и «не скейлится» начинается именно здесь.
-test('в примере конфига нет eager MCP: на старте разговора ничего не поднимается', () => {
+// The default stack must not start MCP processes on chat start: each
+// eager one is a process per session, and "does not scale" starts right here.
+test('the example config has no eager MCP: nothing starts on chat start', () => {
   const config = loadConfig(path.join(REPO_ROOT, 'config.example.yaml'), {
     DEEPINFRA_API_KEY: 'sk-test',
   } as NodeJS.ProcessEnv);
@@ -218,7 +218,7 @@ test('в примере конфига нет eager MCP: на старте ра�
   }
 });
 
-test('docker.dns: список адресов, опечатка — ошибка с путём до поля', () => {
+test('docker.dns: a list of addresses, a typo is an error with the path to the field', () => {
   const withDns = writeConfig(`apiKey: token
 docker:
   dns: ['1.1.1.1', '2606:4700:4700::1111']
@@ -236,7 +236,7 @@ users: [probe]
   assert.throws(() => loadConfig(broken, {}), /docker\.dns\[0\]: «1\.1\.1\.1 8\.8\.8\.8» — ожидался адрес DNS-сервера/);
 });
 
-test('~ и переменные окружения подставляются, где обещаны', () => {
+test('~ and environment variables are substituted where promised', () => {
   const file = writeConfig(`apiKey: env:MY_TOKEN
 dataDir: ~/icarus-test
 models: [{ provider: deepinfra, id: flash, tier: fast }]
@@ -251,7 +251,7 @@ users: [probe]
   assert.deepEqual(config.auth, { deepinfra: 'secret' });
 });
 
-test('Maple монтируется сам: путь берётся из MAPLE_DIR', () => {
+test('Maple is mounted by itself: the path comes from MAPLE_DIR', () => {
   const file = writeConfig(`${MINIMAL}mcp:
   maple:
     command: node
@@ -263,7 +263,7 @@ test('Maple монтируется сам: путь берётся из MAPLE_DI
   assert.throws(() => loadConfig(file, { MAPLE_DIR: 'относительный' } as NodeJS.ProcessEnv), /абсолютный/);
 });
 
-test('старый mounts в конфиге не роняет старт: его просто больше нет', () => {
+test('an old mounts in the config does not break startup: it simply no longer exists', () => {
   const file = writeConfig(`${MINIMAL}mounts:
   - host: /host/repo
     container: /workspace/repo
@@ -272,7 +272,7 @@ test('старый mounts в конфиге не роняет старт: его
   assert.equal('mounts' in config, false, 'кастомные маунты выпилены из модели конфига');
 });
 
-test('пример конфига из репозитория разбирается', () => {
+test('the example config from the repository parses', () => {
   const config = loadConfig(path.join(REPO_ROOT, 'config.example.yaml'), {
     DEEPINFRA_API_KEY: 'sk-test',
   } as NodeJS.ProcessEnv);
@@ -282,20 +282,20 @@ test('пример конфига из репозитория разбирает
   assert.deepEqual(config.auth, { deepinfra: 'sk-test' }, 'ключ из .env подхватывается без auth в конфиге');
 });
 
-// --- ключи из .env ------------------------------------------------------------
+// --- keys from .env -----------------------------------------------------------
 
-test('ключ провайдера из окружения сам уезжает в auth', () => {
+test('a provider key from the environment goes into auth by itself', () => {
   const config = loadConfig(writeConfig(MINIMAL), { DEEPINFRA_API_KEY: 'sk-env' } as NodeJS.ProcessEnv);
   assert.deepEqual(config.auth, { deepinfra: 'sk-env' });
 });
 
-test('detectAuth знает имена переменных pi и чистит пробелы', () => {
+test('detectAuth knows the names of pi variables and trims spaces', () => {
   const models = [{ provider: 'google', id: 'gemini-flash' }, { provider: 'deepinfra', id: 'flash' }];
   const auth = detectAuth(models, { GEMINI_API_KEY: ' g ', DEEPINFRA_API_KEY: '' } as NodeJS.ProcessEnv);
   assert.deepEqual(auth, { google: 'g' }, 'пустое значение — это отсутствие ключа');
 });
 
-test('detectAuth знает и редких провайдеров pi, включая общий ключ на двоих', () => {
+test('detectAuth also knows rare pi providers, including a shared key for two', () => {
   const models = ['moonshotai-cn', 'qwen-token-plan-cn', 'xiaomi-token-plan-ams', 'opencode-go'].map(
     (provider) => ({ provider, id: `${provider}-model` }),
   );
@@ -313,7 +313,7 @@ test('detectAuth знает и редких провайдеров pi, вклю�
   });
 });
 
-test('в auth попадают только провайдеры из models', () => {
+test('only providers from models end up in auth', () => {
   const config = loadConfig(writeConfig(MINIMAL), {
     DEEPINFRA_API_KEY: 'sk-deepinfra',
     OPENAI_API_KEY: 'sk-openai',
@@ -321,18 +321,18 @@ test('в auth попадают только провайдеры из models', (
   assert.deepEqual(config.auth, { deepinfra: 'sk-deepinfra' });
 });
 
-test('пустой ключ в окружении — всё равно что нет', () => {
+test('an empty key in the environment is as good as absent', () => {
   const config = loadConfig(writeConfig(MINIMAL), { DEEPINFRA_API_KEY: '  ' } as NodeJS.ProcessEnv);
   assert.deepEqual(config.auth, {});
 });
 
-test('явный auth в config.yaml сильнее ключа из окружения', () => {
+test('an explicit auth in config.yaml overrides a key from the environment', () => {
   const file = writeConfig(`${MINIMAL}auth:\n  deepinfra: env:MY_KEY\n`);
   const config = loadConfig(file, { MY_KEY: 'явный', DEEPINFRA_API_KEY: 'из-окружения' } as NodeJS.ProcessEnv);
   assert.deepEqual(config.auth, { deepinfra: 'явный' });
 });
 
-test('.env читается в окружение, но не перетирает уже заданное', () => {
+test('.env is read into the environment but does not overwrite what is already set', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-env-'));
   const file = path.join(dir, '.env');
   fs.writeFileSync(file, '# ключи\nICARUS_TEST_FROM_FILE=файл\nICARUS_TEST_PRESET="из файла"\n');
@@ -348,18 +348,18 @@ test('.env читается в окружение, но не перетирае�
   }
 });
 
-test('нет .env — не ошибка: ключи могут прийти из окружения', () => {
+test('no .env is not an error: keys may come from the environment', () => {
   assert.doesNotThrow(() => loadEnvFile('/nope/.env'));
 });
 
-test('пустая переменная окружения не перебивает .env', () => {
+test('an empty environment variable does not override .env', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-env-'));
   const file = path.join(dir, '.env');
   fs.writeFileSync(file, 'ICARUS_TEST_EMPTY=из файла\n');
 
-  // Незаданная repo-переменная в deploy.yml приезжает на прод именно так — пустой
-  // строкой в окружении (envs SSH-экшена). Заданной её считать нельзя: она затрёт
-  // рабочее значение из .env, и ${MAPLE_DIR} в config.yaml раскроется в ''.
+  // An unset repo variable in deploy.yml arrives in prod exactly like this — as an empty
+  // string in the environment (envs of the SSH action). It must not be treated as set: it would overwrite
+  // the working value from .env, and ${MAPLE_DIR} in config.yaml would expand to ''.
   process.env.ICARUS_TEST_EMPTY = '';
   try {
     loadEnvFile(file);
@@ -369,15 +369,15 @@ test('пустая переменная окружения не перебива
   }
 });
 
-test('прод-сценарий деплоя #57: пустой MAPLE_DIR из CI не ломает конфиг', () => {
+test('prod deploy scenario #57: an empty MAPLE_DIR from CI does not break the config', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-deploy-'));
   const env = path.join(dir, '.env');
   const config = path.join(dir, 'config.yaml');
   fs.writeFileSync(env, 'MAPLE_DIR=/opt/maple18\n');
   fs.writeFileSync(config, `${MINIMAL}mcp:\n  maple:\n    command: node\n`);
 
-  // Как на проде: vars.MAPLE_DIR не задана — workflow прокинул пустую строку,
-  // script/redeploy положил дефолт в .env, а окружение так и осталось пустым.
+  // As in prod: vars.MAPLE_DIR is unset — the workflow passed an empty string,
+  // script/redeploy put a default into .env, and the environment stayed empty.
   process.env.MAPLE_DIR = '';
   try {
     loadEnvFile(env);
@@ -387,41 +387,41 @@ test('прод-сценарий деплоя #57: пустой MAPLE_DIR из CI
   }
 });
 
-// --- ошибки -------------------------------------------------------------------
+// --- errors -------------------------------------------------------------------
 
-test('без apiKey не стартуем', () => {
+test('without apiKey we do not start', () => {
   const file = writeConfig('models: [{ provider: deepinfra, id: flash }]\nusers: [probe]\n');
   assert.throws(() => loadConfig(file, {}), /apiKey/);
 });
 
-test('неподставившаяся переменная в apiKey — это ошибка, а не пустой токен', () => {
+test('an unsubstituted variable in apiKey is an error, not an empty token', () => {
   const file = writeConfig('apiKey: env:NO_SUCH_TOKEN\nmodels: [{ provider: d, id: m }]\nusers: [probe]\n');
   assert.throws(() => loadConfig(file, {}), /apiKey: пустой/);
 });
 
-test('пустой ключ провайдера ловим на старте, а не в контейнере', () => {
+test('an empty provider key is caught at startup, not in the container', () => {
   const file = writeConfig(`${MINIMAL}auth:\n  deepinfra: env:NO_SUCH_KEY\n`);
   assert.throws(() => loadConfig(file, {}), /auth\.deepinfra: пусто/);
 });
 
-test('без моделей не стартуем', () => {
+test('without models we do not start', () => {
   const file = writeConfig('apiKey: token\nusers: [probe]\n');
   assert.throws(() => loadConfig(file, {}), /ни одной модели/);
 });
 
-test('без людей не стартуем', () => {
+test('without people we do not start', () => {
   const file = writeConfig('apiKey: token\nmodels: [{ provider: d, id: m }]\nusers: []\n');
   assert.throws(() => loadConfig(file, {}), /ни одного человека/);
 });
 
-test('флаг админа: старый конфиг получает его по миграции, новый — явно', () => {
-  // Миграция: до появления флага ключи правил один trousev. Конфиг, написанный
-  // строками, продолжает работать — админом становится ровно он.
+test('the admin flag: an old config gets it by migration, a new one explicitly', () => {
+  // Migration: before the flag existed, one trousev ran the keys. A config written
+  // with strings keeps working — exactly that person becomes the admin.
   const legacy = writeConfig('apiKey: token\nmodels: [{ provider: d, id: m }]\nusers: [trousev, probe]\n');
   assert.deepEqual(loadConfig(legacy, {}).users, [{ id: 'trousev', admin: true }, { id: 'probe' }]);
 
-  // Явные объекты: флаг выдают и забирают, не трогая остальных. false в модели не
-  // хранится: «нет флага» и «флаг снят» — одно и то же.
+  // Explicit objects: the flag is granted and revoked without touching the rest. false is not
+  // stored in the model: "no flag" and "flag revoked" are the same thing.
   const explicit = writeConfig(
     'apiKey: token\nmodels: [{ provider: d, id: m }]\nusers:\n' +
       '  - id: trousev\n    admin: false\n  - id: vita\n    admin: true\n  - id: probe\n',
@@ -438,7 +438,7 @@ test('флаг админа: старый конфиг получает его �
   );
 });
 
-test('id человека проверяем: он идёт в имя контейнера и в путь на диске', () => {
+test("a person's id is validated: it goes into the container name and the path on disk", () => {
   const bad = ['../etc', 'probe/2', 'с пробелом', '-probe'];
   for (const id of bad) {
     const file = writeConfig(`apiKey: token\nmodels: [{ provider: d, id: m }]\nusers: ['${id}']\n`);
@@ -446,39 +446,39 @@ test('id человека проверяем: он идёт в имя конте
   }
 });
 
-test('повторяющийся id ловим', () => {
+test('a duplicate id is caught', () => {
   const file = writeConfig('apiKey: token\nmodels: [{ provider: d, id: m }]\nusers: [probe, probe]\n');
   assert.throws(() => loadConfig(file, {}), /повторяется/);
 });
 
-test('неизвестный tier у модели — ошибка', () => {
+test('an unknown tier on a model is an error', () => {
   const file = writeConfig('apiKey: token\nmodels: [{ provider: d, id: m, tier: быстрый }]\nusers: [probe]\n');
   assert.throws(() => loadConfig(file, {}), /tier/);
 });
 
 
 
-test('битый YAML объясняет, что файл не разобрать', () => {
+test('broken YAML explains that the file cannot be parsed', () => {
   const file = writeConfig('apiKey: token\n  models: [\n');
   assert.throws(() => loadConfig(file, {}), /не разбирается как YAML/);
 });
 
-test('несуществующий файл — понятная ошибка, а не стек', () => {
+test('a non-existent file is a clear error, not a stack trace', () => {
   assert.throws(() => loadConfig('/nope/config.yaml', {}), /не читается конфиг/);
 });
 
-test('пустой файл не притворяется конфигом', () => {
+test('an empty file does not pretend to be a config', () => {
   assert.throws(() => loadConfig(writeConfig(''), {}), /ожидался объект/);
 });
 
 // --- telegram -----------------------------------------------------------------
 
-/** Маппинг telegram → человек: в yaml имя с «@» берётся в кавычки, иначе не разберётся. */
+/** Telegram -> person mapping: in yaml a name with "@" is quoted, otherwise it will not parse. */
 const TELEGRAM = `${MINIMAL}telegram_mapping:
   '@trousev': probe
 `;
 
-test('маппинг telegram читается отдельным ключом и по имени без «@»', () => {
+test('the telegram mapping is read from a separate key and matches a name without "@"', () => {
   const config = loadConfig(writeConfig(TELEGRAM), { TELEGRAM_BOT_TOKEN: 'bot-token' });
 
   assert.deepEqual(config.telegram, { token: 'bot-token', mapping: { trousev: 'probe' } });
@@ -488,7 +488,7 @@ test('маппинг telegram читается отдельным ключом �
   assert.equal(findTelegramUser(config, undefined), undefined);
 });
 
-test('telegram.mapping внутри блока — то же самое, и токен можно задать строкой', () => {
+test('telegram.mapping inside the block is the same, and the token can be set as a string', () => {
   const file = writeConfig(`${MINIMAL}telegram:
   token: \${MY_BOT_TOKEN}
   mapping:
@@ -498,7 +498,7 @@ test('telegram.mapping внутри блока — то же самое, и то
   assert.deepEqual(config.telegram, { token: 'from-env', mapping: { trousev: 'probe' } });
 });
 
-test('без токена и без маппинга бот просто выключен', () => {
+test('without a token and without a mapping the bot is simply off', () => {
   assert.equal(loadConfig(writeConfig(MINIMAL), {}).telegram, null, 'нет ни токена, ни маппинга');
   assert.equal(loadConfig(writeConfig(TELEGRAM), {}).telegram, null, 'есть маппинг, но нет токена');
   assert.equal(
@@ -508,25 +508,25 @@ test('без токена и без маппинга бот просто вык�
   );
 });
 
-test('telegram-имя, ведущее к незаведённому человеку, — ошибка', () => {
+test('a telegram name leading to a person who does not exist is an error', () => {
   const file = writeConfig(`${MINIMAL}telegram_mapping:\n  '@trousev': vita\n`);
   assert.throws(() => loadConfig(file, { TELEGRAM_BOT_TOKEN: 'bot-token' }), /нет в users/);
 });
 
-test('имя без «@» в yaml не разбирается — и об этом сказано словами', () => {
+test('a name without "@" does not parse in yaml, and it says so in words', () => {
   const file = writeConfig(`${MINIMAL}telegram_mapping:\n  @trousev: probe\n`);
-  // yaml падает на «@» раньше нас: сообщение объясняет, что имя надо взять в кавычки.
+  // yaml fails on "@" before we do: the message explains that the name must be quoted.
   assert.throws(() => loadConfig(file, { TELEGRAM_BOT_TOKEN: 'bot-token' }), /не разбирается как YAML/);
 });
 
-test('мусор вместо telegram username ловим с подсказкой про кавычки', () => {
+test('garbage instead of a telegram username is caught with a hint about quotes', () => {
   const file = writeConfig(`${MINIMAL}telegram_mapping:\n  'трусев': probe\n`);
   assert.throws(() => loadConfig(file, { TELEGRAM_BOT_TOKEN: 'bot-token' }), /не похоже на telegram username/);
 });
 
-// --- голосовые ----------------------------------------------------------------
+// --- voice --------------------------------------------------------------------
 
-test('по умолчанию голосовые расшифровывает Whisper у DeepInfra', () => {
+test('by default voice messages are transcribed by Whisper at DeepInfra', () => {
   const config = loadConfig(writeConfig(MINIMAL), { DEEPINFRA_API_KEY: 'deepinfra-key' });
 
   assert.deepEqual(config.speech, {
@@ -537,7 +537,7 @@ test('по умолчанию голосовые расшифровывает Wh
   });
 });
 
-test('speech задаётся явно: провайдер, модель, язык', () => {
+test('speech is set explicitly: provider, model, language', () => {
   const file = writeConfig(`${MINIMAL}speech:
   provider: deepinfra
   model: openai/whisper-large-v3-turbo
@@ -550,23 +550,23 @@ test('speech задаётся явно: провайдер, модель, язы
   assert.equal(config.speech?.apiKey, 'deepinfra-key', 'ключ берётся из auth, а не из блока');
 });
 
-test('speech: none выключает распознавание даже с ключом', () => {
+test('speech: none disables recognition even with a key', () => {
   const off = loadConfig(writeConfig(`${MINIMAL}speech: none\n`), { DEEPINFRA_API_KEY: 'key' });
   assert.equal(off.speech, null);
   assert.equal(loadConfig(writeConfig(`${MINIMAL}speech: false\n`), { DEEPINFRA_API_KEY: 'key' }).speech, null);
 });
 
-test('провайдер без ключа — распознавание выключено, а не падение', () => {
+test('a provider without a key means recognition is off, not a crash', () => {
   assert.equal(loadConfig(writeConfig(MINIMAL), {}).speech, null);
   assert.equal(loadConfig(writeConfig(MINIMAL), { OPENAI_API_KEY: 'openai-key' }).speech, null);
 });
 
-test('незнакомый провайдер без адреса — ошибка с подсказкой', () => {
+test('an unknown provider without an address is an error with a hint', () => {
   const file = writeConfig(`${MINIMAL}speech:\n  provider: whisperbox\n`);
   assert.throws(() => loadConfig(file, {}), /не знаю адреса распознавания.*speech\.baseUrl/s);
 });
 
-test('незнакомому провайдеру адрес, модель и ключ задаются руками', () => {
+test('for an unknown provider the address, model and key are set by hand', () => {
   const file = writeConfig(`${MINIMAL}auth:
   whisperbox: secret
 speech:
@@ -581,12 +581,12 @@ speech:
   assert.equal(config.speech?.apiKey, 'secret');
 });
 
-test('адрес есть, а модели нет — тоже ошибка, а не выдуманный id', () => {
+test('an address but no model is also an error, not a made-up id', () => {
   const file = writeConfig(`${MINIMAL}speech:\n  provider: whisperbox\n  baseUrl: https://speech.example/v1\n`);
   assert.throws(() => loadConfig(file, {}), /не знаю модели распознавания.*speech\.model/s);
 });
 
-test('провайдер распознавания может не быть среди моделей чата', () => {
+test('the recognition provider need not be among the chat models', () => {
   const file = writeConfig(`${MINIMAL}speech:\n  provider: openai\n`);
   const config = loadConfig(file, { OPENAI_API_KEY: 'openai-key' });
 
@@ -595,16 +595,16 @@ test('провайдер распознавания может не быть с�
   assert.equal(config.speech?.model, 'whisper-1', 'у каждого провайдера своя модель распознавания');
 });
 
-// --- секрет панели ------------------------------------------------------------
+// --- panel secret -------------------------------------------------------------
 
-test('publicHost прячет «слушать везде»', () => {
+test('publicHost hides "listen everywhere"', () => {
   assert.equal(publicHost('0.0.0.0'), 'localhost');
   assert.equal(publicHost('::'), 'localhost');
   assert.equal(publicHost(''), 'localhost');
   assert.equal(publicHost('icarus.example'), 'icarus.example');
 });
 
-test('панель: заголовок прокси по умолчанию, а devUser проверяется по людям', () => {
+test('panel: the proxy header defaults, and devUser is validated against people', () => {
   const plain = loadConfig(writeConfig(MINIMAL), {});
   assert.equal(plain.panel.userHeader, 'Remote-User', 'умолчание — заголовок Authelia');
   assert.equal(plain.panel.devUser, undefined, 'без SSO панель никого не пускает');
@@ -613,7 +613,7 @@ test('панель: заголовок прокси по умолчанию, а 
   assert.equal(custom.panel.userHeader, 'X-Forwarded-User', 'заголовок другого прокси задаётся конфигом');
   assert.equal(custom.panel.devUser, 'probe');
 
-  // Опечатка в devUser — это «панель не пустит никого», и знать об этом надо на старте.
+  // A typo in devUser means "the panel lets no one in", and you need to know about it at startup.
   assert.throws(
     () => loadConfig(writeConfig(`${MINIMAL}panel:\n  devUser: probe2\n`), {}),
     /panel\.devUser: человека «probe2» нет в users/,

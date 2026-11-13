@@ -1,25 +1,25 @@
-// Страница раздела «Артефакты» и публичный просмотр.
+// The "Artifacts" section page and public view.
 //
-// Артефакты глобальные: список один на всех, без workspace-переключателя.
-// Каркас — как у остальных разделов панели: сайдбар, крошки, поиск; справа сам
-// артефакт. Список и содержимое приезжают клиентом (artifacts-client.js), стили
-// и markdown лежат отдельными файлами — как у чата и MCP.
+// Artifacts are global: one list for everyone, no workspace switcher.
+// The frame is like other panel sections: sidebar, breadcrumbs, search; the artifact itself
+// on the right. The list and content arrive client-side (artifacts-client.js), styles
+// and markdown live in separate files — like for chat and MCP.
 import fs from 'node:fs';
 import type { Artifact } from '../artifacts.ts';
 import { escapeHtml, sessionStrings, sessionUiLanguage, shell, type PanelSession } from './ui.ts';
 
 const CLIENT_CSS = fs.readFileSync(new URL('./artifacts-client.css', import.meta.url), 'utf8');
-// Сообщения (пузыри, трассировка, .md) — тот же файл, что и у основного чата:
-// ответ ИИ в боковой панели должен выглядеть так же, как в большой ленте.
+// Messages (bubbles, trace, .md) — the same file as the main chat:
+// the AI answer in the side panel should look the same as in the big feed.
 const MESSAGES_CSS = fs.readFileSync(new URL('./chat-messages.css', import.meta.url), 'utf8');
 const CLIENT_MD = fs.readFileSync(new URL('./artifacts-markdown.js', import.meta.url), 'utf8');
 const CLIENT_JS = fs.readFileSync(new URL('./artifacts-client.js', import.meta.url), 'utf8');
-// Чат правки — отдельным файлом: у него свой поток и своя лента, и вместе с
-// клиентом раздела это был бы один нечитаемый скрипт.
+// The edit chat — as a separate file: it has its own stream and its own feed, and together with
+// the section client it would be one unreadable script.
 const CLIENT_CHAT = fs.readFileSync(new URL('./artifacts-chat.js', import.meta.url), 'utf8');
 
-// Иконки панели действий: подписи живут в title/aria-label, на экране — только
-// знак. Один и тот же набор у панели и у публичного просмотра.
+// Action panel icons: labels live in title/aria-label, on screen — only
+// the sign. The same set for the panel and for the public view.
 const ICON_SHARE = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/><path d="m8.4 10.8 7.2-4.3"/><path d="m8.4 13.2 7.2 4.3"/></svg>';
 const ICON_HISTORY = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 2.7-6.4L3 8"/><path d="M3 3v5h5"/><path d="M12 7.5V12l3.2 2"/></svg>';
 const ICON_CHAT = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H9l-5 4V6a1 1 0 0 1 1-1z"/></svg>';
@@ -28,7 +28,7 @@ const ICON_DOWNLOAD = '<svg viewBox="0 0 24 24" width="15" height="15" fill="non
 const ICON_DELETE = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M10 4h4"/><path d="M6.5 7l.8 12.1a1 1 0 0 0 1 .9h7.4a1 1 0 0 0 1-.9L17.5 7"/><path d="M10 11v5M14 11v5"/></svg>';
 const ICON_COPY = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg>';
 const ICON_GLOBE = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17"/><path d="M12 3.5c2.2 2.3 3.3 5.2 3.3 8.5s-1.1 6.2-3.3 8.5c-2.2-2.3-3.3-5.2-3.3-8.5s1.1-6.2 3.3-8.5z"/></svg>';
-// Курсор: «выбрать блок на странице» — не «открыть файл».
+// Cursor: "select a block on the page" — not "open a file".
 const ICON_PICK = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 3 6.5 17 2.4-6.1L20 11.5z"/></svg>';
 
 export type ArtifactsPageOptions = {
@@ -36,7 +36,7 @@ export type ArtifactsPageOptions = {
   counts: Record<string, number>;
 };
 
-/** Меню настроек — прежний плоский список; артефакты в него не входят. */
+/** Settings menu — the former flat list; artifacts are not part of it. */
 function navLinks(session: PanelSession, active: string, counts: Record<string, number>): string {
   return session.sections
     .map((item) => {
@@ -194,9 +194,9 @@ export function artifactsPage(session: PanelSession, options: ArtifactsPageOptio
 }
 
 /**
- * Публичный просмотр: та же панель, но без списка чужих артефактов и без правки.
- * Человек с ссылкой видит только этот артефакт; «без панели» — отдельный адрес,
- * который отдаёт сам файл (см. http/server.ts).
+ * Public view: the same panel, but without the list of other people's artifacts and without editing.
+ * A person with the link sees only this artifact; "bare" — a separate address
+ * that serves the file itself (see http/server.ts).
  */
 export function publicArtifactPage(artifact: Artifact, content: string | null): string {
   const base = artifact.urls.public ?? '';

@@ -1,145 +1,145 @@
-# Стенд персоны Икара
+# Icarus persona testbed
 
-Здесь живёт «перешеек»: промпт Икара (циничный и очень смешной друг, но не школьный задира) и стенд,
-на котором он прокачивается. Стенд ничего не знает про docker и сервис — это чистый текст и LLM.
+This is where the "isthmus" lives: Icarus's prompt (a cynical and very funny friend, but not a schoolyard bully) and the testbed
+on which it's tuned. The testbed knows nothing about docker and the service — it's pure text and an LLM.
 
-## Файлы
+## Files
 
-| файл | что это |
+| file | what it is |
 | --- | --- |
-| боевой промпт | `../../icarus.md` — единственный источник правды; стенд читает его по умолчанию |
-| `icarus-v0.md` | исходный `../../icarus.md` без комментариев — базовая линия |
-| `persona-vN.md` | версии-кандидаты, из которых выбирается следующая |
-| `criteria.md` | рубрика судьи: шесть осей 0–10 и условие «диалог ОК» |
-| `scenarios.json` | 10 сценариев ядра + 5 probe-сценариев (редкие случаи) |
-| `stock.txt` | промпт стокового вежливого ассистента — контроль «не хуже ChatGPT» |
-| `probe-ru.mjs` | точечная проверка русского: один вопрос, разные модели и правки промпта |
-| `probe-language.mjs` | проверка языка ответа: русский промпт + человек на другом языке |
-| `history.md` | журнал шагов: что меняли и что получилось |
-| `leaderboard.md` | сводная таблица всех прогонов |
-| `logs/<label>/` | артефакты прогона: промпт, диалоги, оценки, предложение критика |
+| the live prompt | `../../icarus.md` — the single source of truth; the testbed reads it by default |
+| `icarus-v0.md` | the original `../../icarus.md` without comments — the baseline |
+| `persona-vN.md` | candidate versions, from which the next one is chosen |
+| `criteria.md` | the judge's rubric: six axes 0–10 and the "dialogue OK" condition |
+| `scenarios.json` | 10 core scenarios + 5 probe scenarios (rare cases) |
+| `stock.txt` | the prompt of a stock polite assistant — the "no worse than ChatGPT" control |
+| `probe-ru.mjs` | a targeted Russian check: one question, different models and prompt edits |
+| `probe-language.mjs` | response language check: a Russian prompt + a person in another language |
+| `history.md` | the log of steps: what was changed and what came of it |
+| `leaderboard.md` | a summary table of all runs |
+| `logs/<label>/` | run artifacts: prompt, dialogues, scores, the critic's suggestion |
 
-## Как запускать
+## How to run
 
 ```bash
 cd tools/persona-flywheel
 
-./flywheel.sh step step08-v8 persona-v8.md          # 10 сценариев + судья + критик
-./flywheel.sh step step08-v8 persona-v8.md --set probe   # probe-сценарии
-./flywheel.sh duel duel-v8-v7 persona-v8.md persona-v7.md --set core  # парная дуэль
-./flywheel.sh budget persona-v8.md                  # бюджет: ≤90 непустых строк
-./flywheel.sh table                                 # таблица лидеров
+./flywheel.sh step step08-v8 persona-v8.md          # 10 scenarios + judge + critic
+./flywheel.sh step step08-v8 persona-v8.md --set probe   # probe scenarios
+./flywheel.sh duel duel-v8-v7 persona-v8.md persona-v7.md --set core  # paired duel
+./flywheel.sh budget persona-v8.md                  # budget: ≤90 non-empty lines
+./flywheel.sh table                                 # leaderboard
 ```
 
-`step` пишет `logs/<label>/scores.json` (машинные оценки), `report.md` (диалоги целиком),
-`next-persona.md` и `critique.json` (что предложил критик).
+`step` writes `logs/<label>/scores.json` (machine scores), `report.md` (the dialogues in full),
+`next-persona.md` and `critique.json` (what the critic suggested).
 
-`duel` гоняет два промпта на одних сценариях, судит дважды с переменой мест и выносит вердикт
-по большинству — это устойчивее, чем сравнивать абсолютные баллы.
+`duel` runs two prompts on the same scenarios, judges twice with the positions swapped and issues a verdict
+by majority — that's more robust than comparing absolute scores.
 
-## Язык: probe-language.mjs
+## Language: probe-language.mjs
 
-Отдельный стенд для настройки «Пользователь» (русский / английский ответ). Он не про характер,
-а про сборку промпта как в бою: русский `icarus.md` + раздел «Язык» из `AGENTS.md`.
+A separate testbed for tuning the "User" setting (Russian / English response). It's not about character,
+but about assembling the prompt as in the live run: the Russian `icarus.md` + the "Language" section from `AGENTS.md`.
 
 ```bash
-node probe-language.mjs                 # все сценарии, flash и pro
-node probe-language.mjs --lang en       # только англоязычные
-node probe-language.mjs --lang ru       # контроль на русском
-node probe-language.mjs --model flash   # одна модель
+node probe-language.mjs                 # all scenarios, flash and pro
+node probe-language.mjs --lang en       # English-language only
+node probe-language.mjs --lang ru       # control in Russian
+node probe-language.mjs --model flash   # one model
 ```
 
-`step` тут не годится: он гоняет один файл-промпт, а язык живёт в `AGENTS.md` —
-второй половине системного сообщения. Поэтому стенд собирает систему сам.
+`step` won't do here: it runs a single prompt file, while the language lives in `AGENTS.md` —
+the second half of the system message. That's why the testbed assembles the system itself.
 
-Что проверяет, по одному свойству на сценарий:
+What it checks, one property per scenario:
 
-| сценарий | что ловит |
+| scenario | what it catches |
 | --- | --- |
-| `plain-en` | база: английская реплика при русском промпте |
-| `russian-user-en-setting` | **человек пишет по-русски, настройка английская** — язык собеседника не перебивает настройку |
-| `russian-quote-en` | русская цитата внутри английской реплики |
-| `tech-en` | термины и логи не переводятся, а реплика — на языке настройки |
-| `grief-en` | настоящая боль: язык держится, шутить нельзя |
-| `lazy-en` | односложный человек: без переспросов про язык |
-| `once-request-en` | разовая просьба: «следующее сообщение на грузинском» — выполнить один ответ и вернуться |
-| `mode-request-en` | режим: «с этого момента ты переводчик» — держать, пока не отменят |
-| `mode-cancel-en` | отмена режима: заметить и вернуться к настройке |
-| `control-ru` | контроль: русская настройка отвечает по-русски |
+| `plain-en` | the base: an English reply with a Russian prompt |
+| `russian-user-en-setting` | **the person writes in Russian, the setting is English** — the interlocutor's language doesn't override the setting |
+| `russian-quote-en` | a Russian quote inside an English reply |
+| `tech-en` | terms and logs aren't translated, but the reply is in the setting's language |
+| `grief-en` | real pain: the language holds, joking is not allowed |
+| `lazy-en` | a monosyllabic person: no asking back about the language |
+| `once-request-en` | a one-off request: "the next message in Georgian" — fulfill one reply and return |
+| `mode-request-en` | a mode: "from now on you're a translator" — hold it until cancelled |
+| `mode-cancel-en` | cancelling the mode: notice and return to the setting |
+| `control-ru` | control: a Russian setting answers in Russian |
 
-Язык определяется **правилом по буквам** (кириллица, латиница, грузинский), а не судьёй.
-Грузинский ищется наличием букв, а не перевесом: живой перевод ставит пояснение на одном
-языке, а строку перевода — на другом, и перевес наказывал бы за нормальный стиль.
+The language is determined **by a rule on characters** (Cyrillic, Latin, Georgian), not by the judge.
+Georgian is detected by the presence of letters, not by weight: a live translation puts the explanation in one
+language and the translation line in another, and weight would penalize normal style.
 
-**Судья в вердикте не участвует** — только пишет замечания в `samples.md`. На этих
-сценариях он трижды ошибся: счёл выполненную просьбу нарушением, потребовал от одной
-реплики противоречивых вещей и поставил 2 из 10 хорошему диалогу. Язык — факт, и его
-проверяет правило; голос оценивает человек, читая диалоги.
+**The judge doesn't participate in the verdict** — it only writes comments into `samples.md`. On these
+scenarios it was wrong three times: it considered a fulfilled request a violation, demanded contradictory
+things from a single reply and gave 2 out of 10 to a good dialogue. Language is a fact, and it's
+checked by a rule; the voice is evaluated by the human reading the dialogues.
 
-Пишет `logs/lang-probe-<метка>/{samples.md,verdict.json}`. Артефакты замеров 03.11.2026
-лежат под понятными именами: `logs/lang-baseline/` (с разделом «Язык») и
-`logs/lang-ablation-no-rule/` (без него).
+It writes `logs/lang-probe-<label>/{samples.md,verdict.json}`. The measurement artifacts from 03.11.2026
+are under clear names: `logs/lang-baseline/` (with the "Language" section) and
+`logs/lang-ablation-no-rule/` (without it).
 
-**Замер (04.11.2026), `logs/lang-baseline/` и `logs/lang-ablation-no-rule/`** —
-одна и та же сборка, разница только в наличии раздела «Язык»:
+**Measurement (04.11.2026), `logs/lang-baseline/` and `logs/lang-ablation-no-rule/`** —
+the same build, the only difference being the presence of the "Language" section:
 
-| сборка | прошло | lang_ok | voice_ok | переспросил про язык |
+| build | passed | lang_ok | voice_ok | asked back about the language |
 | --- | --- | --- | --- | --- |
-| с разделом (лестница) | **9/10** | 9.0 | 9.0 | 0 |
-| без раздела (абляция) | **1/10** | 1.4 | 7.4 | 0 |
+| with the section (ladder) | **9/10** | 9.0 | 9.0 | 0 |
+| without the section (ablation) | **1/10** | 1.4 | 7.4 | 0 |
 
-Без правила всё съезжает в русский (`ru,ru,ru` почти во всех сценариях). С правилом
-держится. Это и есть цена абзаца.
+Without the rule everything slides into Russian (`ru,ru,ru` in almost all scenarios). With the rule
+it holds. That's the price of the paragraph.
 
-Что дала переформулировка. Первая версия правила была мягкой — «человек пишет не на
-твоём языке, отвечай на своём» — и на проде не держала: при настройке `en` и русской
-речи Икар отвечал по-русски. Форма «лестницы» из трёх императивов с жёсткими глаголами
-(ВСЕГДА ИГНОРИРУЙ / ТЩАТЕЛЬНО СЛЕДУЙ / ПО УМОЛЧАНИЮ ВСЕГДА ОТВЕЧАЙ НА ЯЗЫКЕ: English)
-держит и подняла `voice_ok` с 8.5 до 9.0 на том же наборе.
+What the rephrasing achieved. The first version of the rule was soft — "the person isn't writing in
+your language, answer in yours" — and it didn't hold in production: with the `en` setting and Russian
+speech, Icarus answered in Russian. The "ladder" form of three imperatives with strong verbs
+(ALWAYS IGNORE / CAREFULLY FOLLOW / BY DEFAULT ALWAYS ANSWER IN THE LANGUAGE: English)
+holds and raised `voice_ok` from 8.5 to 9.0 on the same set.
 
-В промпт идёт **полное имя языка** (English, Russian), никогда не код: `en` и `ru` —
-детали хранения в config.yaml и profile.json. На это есть тест.
+The prompt gets the **full language name** (English, Russian), never the code: `en` and `ru` are
+storage details in config.yaml and profile.json. There's a test for that.
 
-Известный провал — flash на `mode-cancel-en`: входит в переводческий режим на ход
-раньше, чем человек договорил. Это мягче прежнего («отвечает не на том языке»),
-но всё ещё дефект.
+A known failure is flash on `mode-cancel-en`: it enters translation mode a turn
+earlier than the person finished speaking. That's milder than before ("answers in the wrong language"),
+but still a defect.
 
-## Регрессия: smoke-language.mjs
+## Regression: smoke-language.mjs
 
-Отдельно от probe-language — воспроизведение боевого бага «настройка English, человек
-пишет по-русски». Берёт РЕАЛЬНЫЙ системный промпт (дамп боевой сессии) и гоняет
-разговоры, где первая реплика всегда русская.
+Separate from probe-language — a reproduction of the production bug "English setting, person
+writes in Russian". It takes the REAL system prompt (a dump of a live session) and runs
+conversations where the first message is always Russian.
 
 ```bash
-node smoke-language.mjs            # бой: правило в конце AGENTS.md — 0/10
-node smoke-language.mjs --fix      # патч: правило отдельным system-сообщением — 20/20
-node smoke-language.mjs --fix --lang Russian --prompt /tmp/prompt-ru.md   # контроль на ru
+node smoke-language.mjs            # live: the rule at the end of AGENTS.md — 0/10
+node smoke-language.mjs --fix      # patch: the rule as a separate system message — 20/20
+node smoke-language.mjs --fix --lang Russian --prompt /tmp/prompt-ru.md   # control in ru
 ```
 
-Почему не probe-language: там человека играет модель, которой велено писать
-по-английски, — и главного случая (человек сам открывает по-русски) в наборе нет.
-Патч живёт в `packages/extensions/language.ts`.
+Why not probe-language: there the person is played by a model that's told to write
+in English — and the main case (the person opening in Russian themselves) isn't in the set.
+The patch lives in `packages/extensions/language.ts`.
 
-## Как читать оценки
+## How to read the scores
 
-- `avg` — среднее шести осей: W тепло, H юмор, L игривость, S безопасность удара, N естественность, C краткость.
-- `pass` — доля сценариев, где avg ≥ 8 и S ≥ 8 и H ≥ 7 (в сценариях «шутить нельзя» условие H не применяется).
-- `joke` — доля реплик Икара с признаками шутки (грубая эвристика, нужна как тренд, а не как истина).
-- Судья намеренно строгий: «нормально и мило» — это 6–7, девятки редки.
+- `avg` — the average of six axes: W warmth, H humor, L playfulness, S safety of the blow, N naturalness, C brevity.
+- `pass` — the share of scenarios where avg ≥ 8 and S ≥ 8 and H ≥ 7 (in "joking is not allowed" scenarios the H condition isn't applied).
+- `joke` — the share of Icarus's replies with signs of a joke (a crude heuristic, needed as a trend, not as truth).
+- The judge is deliberately strict: "fine and nice" is 6–7, nines are rare.
 
-## Рабочий цикл (flywheel)
+## The workflow (flywheel)
 
-1. Взять лучшую версию и поменять **одну гипотезу** (одну-три строки промпта).
-2. Прогнать `step` на 10 сценариях ядра и, если правка про редкий случай, `--set probe`.
-3. Посмотреть не только баллы, но и диалоги: провалы судьи — это цитаты, а не приговор.
-4. Спорные версии сводить `duel`, а не сравнением абсолютных баллов.
-5. Фиксировать итог в `history.md`, лучшую версию — в боевой `../../icarus.md`.
-6. Промпт не должен пухнуть: `budget` держит 90 непустых строк.
-7. Каждые несколько шагов сверяться со `stock.txt` — Икар обязан быть заметно живее стокового ассистента.
+1. Take the best version and change **one hypothesis** (one to three lines of the prompt).
+2. Run `step` on the 10 core scenarios and, if the edit is about a rare case, `--set probe`.
+3. Look not only at the scores but also at the dialogues: the judge's failures are quotes, not a verdict.
+4. Settle disputed versions with `duel`, not by comparing absolute scores.
+5. Record the outcome in `history.md`, the best version — in the live `../../icarus.md`.
+6. The prompt must not bloat: `budget` holds 90 non-empty lines.
+7. Every few steps, check against `stock.txt` — Icarus must be noticeably livelier than the stock assistant.
 
-## Как добавить сценарий
+## How to add a scenario
 
-Дописать объект в `scenarios.json`: `id`, `title`, `why`, `userModel` (кто такой собеседник и в каком он
-состоянии), `turns` (первая реплика скриптовая, дальше пользователя играет модель), при необходимости
-`context` (вложенный файл), `noJokes` (шутить нельзя) или `wantsList` (пользователь просил список),
-`probe: true` — чтобы сценарий не попал в ядро сравнения.
+Add an object to `scenarios.json`: `id`, `title`, `why`, `userModel` (who the interlocutor is and what
+state they're in), `turns` (the first reply is scripted, after that the model plays the user), if necessary
+`context` (a nested file), `noJokes` (joking is not allowed) or `wantsList` (the user asked for a list),
+`probe: true` — so the scenario doesn't get into the comparison core.

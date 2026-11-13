@@ -1,12 +1,12 @@
-// Папки в левом меню панели: человек сам раскладывает разговоры по полкам.
+// Folders in the panel's left menu: the person sorts conversations onto shelves themselves.
 //
-// Это только порядок в списке, а не рабочая папка: workspace у разговора остаётся
-// своим, и перенос в папку ничего не двигает на диске. Настроек у папки нет
-// специально — с ними папка превращается во второй workspace, а вместо порядка
-// получается вторая система управления (см. идею 06).
+// This is only the order in the list, not a working folder: a conversation keeps its own
+// workspace, and moving it into a folder moves nothing on disk. There are deliberately no
+// settings per folder — with them a folder turns into a second workspace, and instead of order
+// you get a second management system (see idea 06).
 //
-// Храним в `<dataDir>/users/<id>/folders.json`, рядом с chats.json: принадлежность
-// чата — поле в самом реестре, а не второй индекс.
+// We store it in `<dataDir>/users/<id>/folders.json`, next to chats.json: a chat's membership
+// is a field in the registry itself, not a second index.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -19,13 +19,13 @@ export type ChatFolder = {
   name: string;
   createdAt: string;
   /**
-   * Свёрнута ли папка в меню. Состояние живёт на сервере, а не в localStorage:
-   * разговор один и тот же с любого устройства, и меню не должно разъезжаться.
+   * Whether the folder is collapsed in the menu. The state lives on the server, not in localStorage:
+   * the conversation is the same from any device, and the menu must not diverge.
    */
   collapsed: boolean;
 };
 
-/** Сколько чатов вернулось во «Входящие» после удаления папки. */
+/** How many chats returned to "Inbox" after deleting a folder. */
 export type DeletedFolder = { folder: ChatFolder; movedChats: number };
 
 export class FolderError extends Error {
@@ -45,7 +45,7 @@ function foldersFile(config: IcarusConfig, user: UserConfig): string {
   return path.join(userPaths(config, user).root, 'folders.json');
 }
 
-/** Имя папки: без крайних пробелов и без двойных — иначе в меню одна строка на вид. */
+/** Folder name: no leading/trailing spaces and no doubles — otherwise two rows would look the same in the menu. */
 export function folderName(raw: unknown): string {
   if (typeof raw !== 'string') return '';
   return raw.replace(/\s+/g, ' ').trim().slice(0, NAME_LIMIT);
@@ -65,7 +65,7 @@ function normalize(value: unknown): ChatFolder | null {
   };
 }
 
-/** Список папок читается целиком: это маленький реестр, а не история. */
+/** The folder list is read in full: this is a small registry, not a history. */
 export function readFolders(config: IcarusConfig, user: UserConfig): ChatFolder[] {
   try {
     const parsed = JSON.parse(fs.readFileSync(foldersFile(config, user), 'utf8')) as { folders?: unknown };
@@ -85,7 +85,7 @@ export function readFolders(config: IcarusConfig, user: UserConfig): ChatFolder[
   }
 }
 
-/** Пишем через временный файл: оборванная запись не должна оставить меню пустым. */
+/** We write via a temporary file: an interrupted write must not leave the menu empty. */
 export function writeFolders(config: IcarusConfig, user: UserConfig, folders: ChatFolder[]): void {
   const file = foldersFile(config, user);
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -99,7 +99,7 @@ export function findFolder(config: IcarusConfig, user: UserConfig, id: string): 
   return readFolders(config, user).find((folder) => folder.id === id) ?? null;
 }
 
-/** Одинаковые имена в меню не различить на глаз — поэтому не даём их завести. */
+/** Identical names in the menu can't be told apart by eye — so we don't allow creating them. */
 function assertFreeName(folders: ChatFolder[], name: string, except?: string): void {
   const taken = folders.some(
     (folder) => folder.id !== except && folder.name.toLocaleLowerCase('ru') === name.toLocaleLowerCase('ru'),
@@ -147,7 +147,7 @@ export function renameFolder(
   return folder;
 }
 
-/** Свёрнутость меняется кликом по заголовку, поэтому отдельной операцией. */
+/** Collapsed state changes on a click on the header, so it's a separate operation. */
 export function setFolderCollapsed(
   config: IcarusConfig,
   user: UserConfig,
@@ -165,8 +165,8 @@ export function setFolderCollapsed(
 }
 
 /**
- * Удаление папки не удаляет разговоры: они возвращаются во «Входящие». Файлы
- * истории при этом и так не трогаются — они лежат в общей папке сессий.
+ * Deleting a folder does not delete conversations: they return to "Inbox". History files
+ * are not touched anyway — they live in the shared sessions folder.
  */
 export function deleteFolder(config: IcarusConfig, user: UserConfig, id: string): DeletedFolder {
   const folders = readFolders(config, user);

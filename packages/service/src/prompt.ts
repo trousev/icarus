@@ -1,8 +1,8 @@
-// Реплика для pi: текст человека плюс список файлов, которые уже лежат на диске.
+// The reply for pi: the human's text plus the list of files already on disk.
 //
-// Одно место на все входы — Telegram и OpenAI-клиент: чем бы вложение ни прислали,
-// модель должна видеть его одинаково, по одному и тому же пути и с той же
-// припиской. Иначе «картинка не дошла» превращается в две разные истории.
+// One place for all inputs — Telegram and the OpenAI client: however an attachment
+// arrives, the model must see it the same way, at the same path and with the same
+// note. Otherwise “the image didn't arrive” turns into two different stories.
 export function buildPrompt(text: string, files: string[]): string {
   if (files.length === 0) return text;
   const list = files.map((file) => `- ${file}`).join('\n');

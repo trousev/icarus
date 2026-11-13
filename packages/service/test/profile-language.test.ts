@@ -1,11 +1,11 @@
-// Язык ответов: настройка человека, которая живёт в профиле, а не в конфиге.
+// Answer language: a person's setting that lives in the profile, not in the config.
 //
-// Тут охраняется одно свойство, ради которого всё и делалось: язык из настроек
-// старше языка промпта. Персона, AGENTS.md и память написаны по-русски, и модель
-// обязана это пережить — иначе англоязычный человек получает русского Икара.
+// Here we protect one property that everything was done for: the language from the settings
+// is senior to the language of the prompt. The persona, AGENTS.md and memory are written in Russian, and the model
+// must survive that — otherwise an English-speaking person gets a Russian Icarus.
 //
-// Проверяем три уровня: где хранится (профиль), что уезжает в контейнер (AGENTS.md)
-// и что видит человек (панель).
+// We check three levels: where it is stored (profile), what goes into the container (AGENTS.md)
+// and what the person sees (panel).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -25,7 +25,7 @@ import {
 import { languageRule } from '../src/workspace.ts';
 import { loadConfig } from '../src/config.ts';
 
-test('без профиля язык берётся из конфига, а без конфига — русский', () => {
+test('without a profile the language comes from the config, and without a config — Russian', () => {
   const config = makeConfig();
   assert.equal(languageOf(config, probe()), DEFAULT_LANGUAGE);
 
@@ -33,18 +33,18 @@ test('без профиля язык берётся из конфига, а бе
   assert.equal(languageOf(english, probe()), 'en');
 });
 
-test('профиль человека старше умолчания конфига', () => {
+test('a person\'s profile is senior to the config default', () => {
   const config = makeConfig({ userLanguage: 'ru' });
   writeProfile(config, probe(), { language: 'en', uiLanguage: 'ru' });
   assert.equal(languageOf(config, probe()), 'en');
 
-  // И обратно: конфиг английский, человек выбрал русский.
+  // And vice versa: the config is English, the person chose Russian.
   const english = makeConfig({ userLanguage: 'en' });
   writeProfile(english, probe(), { language: 'ru', uiLanguage: 'ru' });
   assert.equal(languageOf(english, probe()), 'ru');
 });
 
-test('профиль лежит рядом с памятью человека, а не в общем конфиге', () => {
+test('the profile lies next to the person\'s memory, not in the shared config', () => {
   const config = makeConfig();
   const file = profilePath(config, probe());
   assert.match(file, /users\/probe\/workspaces\/\.icarus\/profile\.json$/);
@@ -53,13 +53,13 @@ test('профиль лежит рядом с памятью человека, �
   assert.equal(fs.existsSync(file), true);
   assert.deepEqual(readProfile(config, probe()), { language: 'en', uiLanguage: 'ru' });
 
-  // Права закрытые: в профиле может появиться что-то личное, и открытым на чтение
-  // он быть не должен по той же причине, что auth.json и mcp.json.
+  // Rights are closed: the profile may contain something personal, and it must not be
+  // open for reading for the same reason as auth.json and mcp.json.
   const mode = fs.statSync(file).mode & 0o777;
   assert.equal(mode, 0o600, 'профиль пишется закрытым на чтение');
 });
 
-test('битый или чужой профиль не ломает разговор', () => {
+test('a broken or foreign profile does not break the conversation', () => {
   const config = makeConfig({ userLanguage: 'en' });
   const file = profilePath(config, probe());
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -71,80 +71,80 @@ test('битый или чужой профиль не ломает разгов
   assert.equal(languageOf(config, probe()), 'en', 'неизвестный язык — тоже умолчание');
 });
 
-test('требование языка держит настроенный язык, а не язык реплики', () => {
+test('the language requirement holds the configured language, not the language of the message', () => {
   const en = languageRule('en');
   const ru = languageRule('ru');
 
-  // Форма важнее формулировок, и это выяснилось на проде. Мягкое правило («человек
-  // пишет не на твоём языке — отвечай на своём») не держало: при настройке `en` и
-  // русской речи Икар отвечал по-русски. Держит императив с именем языка в первой
-  // строке плюс прямое «настройка, а не язык реплики».
+  // Form matters more than wording, and this was discovered in production. The soft rule ("the person
+  // writes not in your language — answer in your own") did not hold: with the `en` setting and
+  // Russian speech, Icarus answered in Russian. What holds is an imperative with the language name in the first
+  // line plus a direct "setting, not the language of the message".
   //
-  // Обычный случай держит короткая строка у реплики (language.ts, `languageOverride`):
-  // 136 символов давали 10/10 там, где 894 — 9/10 (PR #114). Раздел в промпте — про
-  // исключения (разово/режим), которых у реплики нет.
+  // The ordinary case is held by a short line next to the message (language.ts, `languageOverride`):
+  // 136 characters gave 10/10 where 894 gave 9/10 (PR #114). The section in the prompt is about
+  // exceptions (one-off/regime), which the message line does not have.
   assert.match(en, /Отвечай на языке: \*\*English\*\*/);
   assert.match(en, /настройка человека, а не язык его реплики/);
   assert.match(ru, /Отвечай на языке: \*\*Russian\*\*/);
 
-  // В промпт идёт полное имя языка, а не код: «English», не «en».
-  // Код — деталь хранения (config.yaml, profile.json), в тексте ему делать нечего.
+  // The full language name goes into the prompt, not the code: "English", not "en".
+  // The code is a storage detail (config.yaml, profile.json), it has nothing to do in the text.
   for (const [code, text] of [['en', en], ['ru', ru]] as const) {
     assert.doesNotMatch(text, new RegExp(`\\b${code}\\b`), `код «${code}» не должен попадать в промпт`);
   }
   assert.doesNotMatch(en, /английск(ий|ого)\.|English\. English/, 'имя языка не рассыпано по прозе');
 });
 
-test('раздел про язык короткий: он едет в каждый разговор', () => {
-  // Раздел — редко нужное исключение (перевод/режим), а не ежедневное правило.
-  // Когда он разросся до 2.2k символов, это была самая крупная статья промпта,
-  // и платил за неё каждый разговор, включая тот, где просьбы не было вовсе.
-  // Обычный случай держит строка у реплики, поэтому тут держим потолок: разрослось —
-  // значит обратно вернули прозу, которую уже вычищали.
+test('the language section is short: it goes into every conversation', () => {
+  // The section is a rarely needed exception (translation/regime), not a daily rule.
+  // When it grew to 2.2k characters, it was the largest item of the prompt,
+  // and every conversation paid for it, including ones where there was no request at all.
+  // The ordinary case is held by the line next to the message, so here we keep a ceiling: if it grew,
+  // then the prose we had already cleaned up has come back.
   const en = languageRule('en');
   assert.ok(en.length < 1200, `раздел про язык разросся: ${en.length} символов`);
 });
 
-test('исключение описано и ограничено просьбой', () => {
+test('the exception is described and bounded by a request', () => {
   const en = languageRule('en');
 
-  // Просьба — единственное исключение, и она бывает двух видов.
+  // A request is the only exception, and it comes in two kinds.
   assert.match(en, /Прямая просьба человека важнее настройки/);
   assert.match(en, /\*\*Разово\*\*/);
   assert.match(en, /\*\*Режим\*\*/);
 
-  // Оба конца держатся в коротком тексте: выполнил просьбу — вернулся к настройке;
-  // режим кончается, когда человек его снимает.
+  // Both ends are held in the short text: you fulfilled the request — you returned to the setting;
+  // the regime ends when the person removes it.
   assert.match(en, /возвращаешься к English/);
   assert.match(en, /пока человек его не снимет/);
 });
 
-test('в разделе про язык иероглифы названы браком', () => {
-  // 08.11.2026 модель вставила 理论上 вместо «теоретически» посреди русской фразы.
-  // Правило должно называть дефект своим словом: «пиши по-русски» этого не ловило.
+test('in the language section hieroglyphs are called a defect', () => {
+  // 08.11.2026 the model inserted 理论上 instead of "теоретически" in the middle of a Russian phrase.
+  // The rule must call the defect by its name: "write in Russian" did not catch this.
   for (const code of LANGUAGES) {
     const text = languageRule(code);
     assert.match(text, /иероглифов в ответе нет, даже в цитате/i, `у «${code}» нет запрета иероглифов`);
     assert.match(text, /китайское\s+имя пишешь буквами/);
   }
-  // Исключение остаётся ниже по тексту: просьба перевести сильнее запрета.
+  // The exception remains lower in the text: a request to translate is stronger than the prohibition.
   assert.match(languageRule('ru'), /Прямая просьба человека важнее настройки/);
 });
 
-test('формы языка не разъезжаются: код один, имя одно', () => {
-  // Один словарь на язык вместо четырёх параллельных карт: добавили язык — одна строка.
+test('language forms do not diverge: one code, one name', () => {
+  // One dictionary per language instead of four parallel maps: added a language — one line.
   for (const code of LANGUAGES) {
     assert.ok(languageName(code).length > 0, `у «${code}» нет полного имени`);
     assert.ok(LANGUAGE_LABELS[code].length > 0, `у «${code}» нет подписи для панели`);
     assert.ok(languageForms(code).adjective.length > 0, `у «${code}» нет прилагательного`);
-    // Имя — не код: «English», а не «en».
+    // The name is not the code: "English", not "en".
     assert.notEqual(languageName(code), code);
   }
   assert.equal(languageName('en'), 'English');
   assert.equal(languageName('ru'), 'Russian');
 });
 
-test('язык из конфига разбирается, опечатка не роняет сервис', () => {
+test('the language from the config is parsed, a typo does not bring the service down', () => {
   const dir = fs.mkdtempSync(path.join(makeConfig().dataDir, 'cfg-'));
   const file = path.join(dir, 'config.yaml');
   const base = `
@@ -166,7 +166,7 @@ users: [probe]
   assert.equal(loadConfig(file, {}).userLanguage, undefined);
 });
 
-test('в панели у языка есть подписи, и обе — человеческие', () => {
+test('in the panel the language has labels, and both are human', () => {
   assert.deepEqual(Object.keys(LANGUAGE_LABELS).sort(), ['en', 'ru']);
   for (const label of Object.values(LANGUAGE_LABELS)) {
     assert.ok(label.length > 0 && /[А-Яа-яA-Za-z]/.test(label));

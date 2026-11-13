@@ -1,120 +1,120 @@
-# Icarus — план v1
+# Icarus — plan v1
 
-> Уточнён по итогам интервью (27 вопросов). Черновик v0 и история решений — ниже в разделе «Решения».
+> Refined after the interview (27 questions). The v0 draft and the decision history are below in the "Decisions" section.
 
-## Что строим
+## What we're building
 
-Личного агента для семьи из 2–5 человек, который **хорош в обычном разговоре**, но при этом умеет читать и править
-файлы, исполнять команды, искать в вебе и **помнить**. Наружу — OpenAI-совместимый эндпоинт
-(`POST /v1/chat/completions`, `GET /v1/models`), внутрь смотрит LibreChat. Своего чат-UI не делаем; исключение —
-мини-панель управления памятью.
+A personal agent for a family of 2–5, one that is **good at ordinary conversation** but can also read and edit
+files, run commands, search the web, and **remember**. Outward — an OpenAI-compatible endpoint
+(`POST /v1/chat/completions`, `GET /v1/models`), inward LibreChat looks at it. We don't build our own chat UI; the exception is
+the mini memory control panel.
 
-**Главная ставка: память — это продукт.** «Проекты» и репозитории — не самоцель, а способ сделать память
-структурированной. Работа с кодом в репозиториях — не в MVP.
+**The main bet: memory is the product.** "Projects" and repositories are not a goal in themselves but a way to make memory
+structured. Working with code in repositories is not in the MVP.
 
-## Решения, зафиксированные интервью
+## Decisions fixed by the interview
 
-| # | Вопрос | Решение |
-|---|--------|---------|
-| 1 | Пользователи | 2–5 близких: изоляция настоящая, но без SaaS-обвязки |
-| 2 | Изоляция | Docker-контейнер на человека; люди перечислены в конфиге сервиса; контейнерами управляем программно |
-| 3 | Маунты | только внутренние: корень workspace'ов, `shared-memory`, установка Maple. Кастомные каталоги с хоста не поддерживаются — нужен репозиторий, делаем чекаут в workspace |
-| 4 | Наполнение памяти | Гибрид: «запомни» — сразу; плюс фоновый экстрактор, прозрачно и с откатом |
-| 5 | Форма памяти | Полки по смыслу + журнал: `identity.md`, `people/`, `preferences.md`, `projects/`, `journal/YYYY-MM.md` |
-| 6 | Чтение памяти | Компактное ядро всегда в промпте; остальное — тулами поиска (ещё и защита prompt-кеша) |
-| 7 | Режим работы | Всегда агент, один режим; болтовня обязана быть сверхбыстрой |
-| 8 | Скорость | Два уровня модели, эскалация по ходу разговора |
-| 9 | Доступы | Только API-ключи |
-| 10 | Модели | Декларативный конфиг: endpoint, model name, token, thinking effort. По умолчанию DeepSeek V4.1 на DeepInfra с разным effort |
-| 11 | Выбор уровня | Автоматически. Пресеты наружу не выставляем: LibreChat их не умеет, а при нормальной эскалации не нужны |
-| 12 | Общая память | В `shared-memory/` — **только по явной просьбе**; авто-разбор пишет исключительно в личное |
-| 13 | Где pi | pi внутри контейнера пользователя, реальные ключи в `~/.pi/agent/auth.json`. **Никакого мега-прокси** |
-| 14 | История | Всегда продолжаем свою сессию (pi — истина); расхождения с историей LibreChat логируем с диффом |
-| 15 | Жизненный цикл | Контейнеры всегда запущены; отдельный pi-процесс на разговор (RPC по stdio) |
-| 16 | Персона | Циничный ироничный друг; системный промпт живёт в `icarus.md`, пишет владелец |
-| 17 | Возможности | Веб-поиск и чтение страниц + MCP-серверы как слот для всего остального |
-| 18 | Деплой | Домашний сервер, всё на одной машине, docker compose |
-| 19 | Видимость работы | Активность тулов — свёрнутым блоком «размышлений» (`reasoning_content`) |
-| 20 | Апстрим | Без форка: pi как npm-зависимость с пинами; всё наше — расширения и сервис |
-| 21 | Сеть | Открытый интернет из контейнеров + отдельный ключ на человека (отзываемость вместо изоляции) |
-| 22 | Экстрактор | Расширение pi внутри контейнера, срабатывает после затишья (дебаунс) |
-| 23 | Операции с памятью | Мини-веб-панель: смотреть, искать, откатывать |
-| 24 | MVP | Разговор через эндпоинт + память между разговорами + двое изолированных + панель + поиск/MCP |
-| 25 | Вложения | Сохраняем в workspace (`incoming/`), агент сам решает, что с ними делать |
-| 26 | Версионирование | Память — git-репозиторий, коммит на каждый разбор; откат через git; бэкап — зеркало |
-| 27 | Тесты | Сценарные тесты памяти + контракт OpenAI-формы + e2e с LibreChat в докере |
+| # | Question | Decision |
+|---|----------|----------|
+| 1 | Users | 2–5 close people: real isolation, but without SaaS scaffolding |
+| 2 | Isolation | A Docker container per person; people are listed in the service config; we manage containers programmatically |
+| 3 | Mounts | internal only: the workspaces root, `shared-memory`, the Maple install. Custom host directories are not supported — if you need a repository, we check it out into the workspace |
+| 4 | Filling memory | Hybrid: "remember this" — immediately; plus a background extractor, transparent and with rollback |
+| 5 | Shape of memory | Shelves by meaning + a journal: `identity.md`, `people/`, `preferences.md`, `projects/`, `journal/YYYY-MM.md` |
+| 6 | Reading memory | A compact core always in the prompt; the rest — via search tools (also prompt-cache protection) |
+| 7 | Mode of operation | Always an agent, one mode; small talk must be ultra-fast |
+| 8 | Speed | Two model tiers, escalation as the conversation goes |
+| 9 | Access | API keys only |
+| 10 | Models | A declarative config: endpoint, model name, token, thinking effort. By default DeepSeek V4.1 on DeepInfra with different effort |
+| 11 | Choosing the tier | Automatically. We don't expose presets: LibreChat can't do them, and with proper escalation they aren't needed |
+| 12 | Shared memory | In `shared-memory/` — **only on explicit request**; auto-extraction writes exclusively to personal |
+| 13 | Where pi lives | pi inside the user's container, real keys in `~/.pi/agent/auth.json`. **No mega-proxy** |
+| 14 | History | We always continue our own session (pi is the truth); divergences from LibreChat's history are logged with a diff |
+| 15 | Lifecycle | Containers are always running; a separate pi process per conversation (RPC over stdio) |
+| 16 | Persona | A cynical, ironic friend; the system prompt lives in `icarus.md`, written by the owner |
+| 17 | Capabilities | Web search and page reading + MCP servers as a slot for everything else |
+| 18 | Deployment | A home server, everything on one machine, docker compose |
+| 19 | Visibility of work | Tool activity — as a collapsed "reasoning" block (`reasoning_content`) |
+| 20 | Upstream | No fork: pi as an npm dependency with pins; all of ours is extensions and the service |
+| 21 | Network | Open internet from the containers + a separate key per person (revocability instead of isolation) |
+| 22 | Extractor | A pi extension inside the container, fires after quiet (debounce) |
+| 23 | Memory operations | A mini web panel: view, search, roll back |
+| 24 | MVP | Conversation through the endpoint + memory across conversations + two isolated users + panel + search/MCP |
+| 25 | Attachments | We save them to the workspace (`incoming/`), the agent decides what to do with them |
+| 26 | Versioning | Memory — a git repository, a commit per extraction; rollback via git; backup — a mirror |
+| 27 | Tests | Scenario tests for memory + the OpenAI shape contract + e2e with LibreChat in docker |
 
-## Архитектура
+## Architecture
 
 ```
 LibreChat (docker)
-  │  POST /v1/chat/completions   заголовки: X-User-Id, X-Conversation-Id
+  │  POST /v1/chat/completions   headers: X-User-Id, X-Conversation-Id
   ▼
-icarus (docker, Node/TS) — тонкий фасад, без знания о внутренностях памяти
-  ├─ OpenAI-слой: /v1/models, /v1/chat/completions (SSE), отмена по обрыву
-  ├─ Роутинг: user_id → контейнер, conversation_id → pi-процесс
-  ├─ Реестр сессий: (user, conversation) → `docker exec -i … pi --mode rpc`
-  ├─ Дивергенция: сверка присланной истории с сессией → лог + дифф
-  ├─ Учёт: токены и стоимость из событий/статистики сессии
-  └─ Мини-панель памяти (статика + API поверх git-репозиториев)
+icarus (docker, Node/TS) — a thin facade, with no knowledge of memory internals
+  ├─ OpenAI layer: /v1/models, /v1/chat/completions (SSE), cancel on disconnect
+  ├─ Routing: user_id → container, conversation_id → pi process
+  ├─ Session registry: (user, conversation) → `docker exec -i … pi --mode rpc`
+  ├─ Divergence: reconcile the submitted history with the session → log + diff
+  ├─ Accounting: tokens and cost from session events/stats
+  └─ Memory mini panel (static + API over git repositories)
   │  stdio (JSONL)
   ▼
-Контейнер пользователя (node + pi + git + ripgrep)
-  /workspaces                        ← bind: ~/icarus/<user>/workspaces   (корень, rw)
-    .icarus/memory                   ← git, общая память человека
+User container (node + pi + git + ripgrep)
+  /workspaces                        ← bind: ~/icarus/<user>/workspaces   (root, rw)
+    .icarus/memory                   ← git, the person's shared memory
     .icarus/shared-memory            ← bind: ~/icarus/shared (git)
-    .icarus/sessions                 ← история разговоров pi
-    .icarus/AGENTS.md                ← генерирует сервис: раскладка и правила
-    .icarus/icarus.md                ← системный промпт (руками)
-    talk/                            ← workspace по умолчанию, свой AGENTS.md
-      .maple/                        ← журналы и графики Maple (в рабочей папке разговора)
-    private/                         ← bind ro: только чтение
-    <имя>/                           ← новые workspace'ы: просто папки
-  ~/.pi/agent/auth.json     ← ключ этого человека
-  ~/.pi/agent/models.json   ← уровни моделей и thinking effort
-  расширения pi: persona, memory-core, memory-extractor, escalation
+    .icarus/sessions                 ← pi conversation history
+    .icarus/AGENTS.md                ← generated by the service: layout and rules
+    .icarus/icarus.md                ← system prompt (by hand)
+    talk/                            ← default workspace, its own AGENTS.md
+      .maple/                        ← Maple journals and plots (in the conversation's working folder)
+    private/                         ← bind ro: read-only
+    <name>/                          ← new workspaces: just folders
+  ~/.pi/agent/auth.json     ← this person's key
+  ~/.pi/agent/models.json   ← model tiers and thinking effort
+  pi extensions: persona, memory-core, memory-extractor, escalation
 ```
 
-**Ключевая идея разделения:** вся «кухня» (персона, память, экстрактор, эскалация) живёт **внутри контейнера как
-расширения pi**. icarus снаружи знает только про протокол, контейнеры и сессии. Это делает сервис тонким, а поведение
-Икара — обычными файлами, которые можно читать и править.
+**The key split idea:** all the "kitchen" (persona, memory, extractor, escalation) lives **inside the container as
+pi extensions**. icarus outside knows only about the protocol, containers, and sessions. This keeps the service thin, and Icarus's
+behavior — ordinary files that can be read and edited.
 
-## Проверка допущений (M0, шаг 1)
+## Assumption check (M0, step 1)
 
-Проверено по документации и исходникам, до всякого кода:
+Checked against documentation and sources, before any code:
 
-| Допущение | Статус | Что выяснено |
+| Assumption | Status | What we found out |
 |---|---|---|
-| LibreChat шлёт `conversationId` в теле | ✅ | Реализовано в [#9095](https://github.com/danny-avila/LibreChat/commit/d7d02766eaa82ba810ece2cdded763a7a65acb89): `{{LIBRECHAT_BODY_CONVERSATIONID}}`, `…PARENTMESSAGEID`, `…MESSAGEID`; есть и `{{LIBRECHAT_CONVERSATION_ID}}`. Позже ужесточали безопасность резолвинга ([#12260](https://github.com/danny-avila/LibreChat/commit/951d261f5c19d488b245a977d37569a5b069a45e)) |
-| Идентичность пользователя приходит заголовком | ✅ | `{{LIBRECHAT_USER_ID}}` / `…_EMAIL` / `…_USERNAME` и др. |
-| Вложения доходят до кастомного эндпоинта | ✅ (форма — в M0) | «Upload to Provider» для OpenAI-совместимых кастомных эндпоинтов включён ([PR #10336](https://github.com/danny-avila/LibreChat/pull/10336)); список допустимых типов местами захардкожен ([#12482](https://github.com/danny-avila/LibreChat/issues/12482)) |
-| pi запускается на нашем Node | ✅ | pi 0.85.1, MIT, `engines: node >= 22.19`, у нас Node 24.14 |
-| Есть официальный серверный протокол | ⚠️ есть, но experimental | `@earendil-works/pi-server` — «experimental server package», транспорт unix + CBOR-протокол (`pi-protocol`). В M0 берём документированный `--mode rpc` (JSONL), сервер держим в уме |
-| pi отдаёт модель в JSONL по stdio | ✅ | Проверено локально: `pi --mode rpc --no-session` + `{"type":"get_state"}` → корректный `response`, чистый stderr |
-| Модели описываются декларативно | ✅ | `pi.registerProvider()` / `models.json`: `baseUrl`, `apiKey`, `api: "openai-completions"`, `reasoning`, `thinkingLevelMap`, `cost`, `contextWindow`, `maxTokens`. Для DeepSeek есть готовый `compat.thinkingFormat: "deepseek"` (шлёт `thinking: {type}` + `reasoning_effort`) — ровно наш случай «разный thinking effort на одной модели» |
-| Заголовки на живом запросе | ✅ | Снят реальный запрос: все плейсхолдеры подставлены (см. «Снятый контракт») |
-| История шлётся целиком | ✅ | На втором сообщении пришло `user → assistant → user`; наш ответ попал в историю как есть |
-| `docker exec` + RPC по stdio работает | ✅ | Проверено на живом контейнере: `get_state`, `bash`, стриминг событий — всё через stdio |
-| Тулы работают в песочнице | ✅ | Запись в `memory/journal/` из контейнера видна на хосте |
-| AGENTS.md подхватывается | ✅ | Расширение выгрузило системный промпт — наш `AGENTS.md` внутри |
-| Настоящий ответ модели | ✅ | Полный ход на `deepseek-ai/DeepSeek-V4.1-Flash`: агент сам прочитал память и сам её дописал |
-| Форма вложений | ✅ | Картинки приходят мультимодальной частью контента с base64 data-URL (см. ниже) |
-| Отмена | ✅ | LibreChat рвёт соединение с эндпоинтом посреди стрима — icarus это увидит и пошлёт `abort` в pi |
+| LibreChat sends `conversationId` in the body | ✅ | Implemented in [#9095](https://github.com/danny-avila/LibreChat/commit/d7d02766eaa82ba810ece2cdded763a7a65acb89): `{{LIBRECHAT_BODY_CONVERSATIONID}}`, `…PARENTMESSAGEID`, `…MESSAGEID`; there is also `{{LIBRECHAT_CONVERSATION_ID}}`. Later they tightened the security of resolution ([#12260](https://github.com/danny-avila/LibreChat/commit/951d261f5c19d488b245a977d37569a5b069a45e)) |
+| User identity arrives in a header | ✅ | `{{LIBRECHAT_USER_ID}}` / `…_EMAIL` / `…_USERNAME` and others |
+| Attachments reach the custom endpoint | ✅ (the shape — in M0) | "Upload to Provider" is enabled for OpenAI-compatible custom endpoints ([PR #10336](https://github.com/danny-avila/LibreChat/pull/10336)); the list of allowed types is hardcoded in places ([#12482](https://github.com/danny-avila/LibreChat/issues/12482)) |
+| pi runs on our Node | ✅ | pi 0.85.1, MIT, `engines: node >= 22.19`, we have Node 24.14 |
+| There is an official server protocol | ⚠️ there is, but experimental | `@earendil-works/pi-server` — an "experimental server package", transport unix + CBOR protocol (`pi-protocol`). In M0 we take the documented `--mode rpc` (JSONL) and keep the server in mind |
+| pi returns the model in JSONL over stdio | ✅ | Verified locally: `pi --mode rpc --no-session` + `{"type":"get_state"}` → a correct `response`, clean stderr |
+| Models are described declaratively | ✅ | `pi.registerProvider()` / `models.json`: `baseUrl`, `apiKey`, `api: "openai-completions"`, `reasoning`, `thinkingLevelMap`, `cost`, `contextWindow`, `maxTokens`. For DeepSeek there is a ready-made `compat.thinkingFormat: "deepseek"` (sends `thinking: {type}` + `reasoning_effort`) — exactly our case of "different thinking effort on one model" |
+| Headers on a live request | ✅ | A real request was captured: all placeholders are substituted (see "Captured contract") |
+| History is sent in full | ✅ | On the second message `user → assistant → user` arrived; our answer went into the history as is |
+| `docker exec` + RPC over stdio works | ✅ | Verified on a live container: `get_state`, `bash`, event streaming — all over stdio |
+| Tools work in the sandbox | ✅ | A write to `memory/journal/` from the container is visible on the host |
+| AGENTS.md is picked up | ✅ | The extension dumped the system prompt — our `AGENTS.md` is inside |
+| A real model answer | ✅ | A full turn on `deepseek-ai/DeepSeek-V4.1-Flash`: the agent read the memory itself and wrote to it itself |
+| The shape of attachments | ✅ | Images arrive as a multimodal content part with a base64 data-URL (see below) |
+| Cancellation | ✅ | LibreChat cuts the connection to the endpoint mid-stream — icarus will see it and send `abort` to pi |
 
-### Снятый контракт LibreChat (проверено на стенде)
+### Captured LibreChat contract (verified on the bench)
 
-Стенд: `docker/librechat/` (api + mongo, порт 3090), эхо-сервер `probe-server.mjs` на 4099, лог — `probe-log.jsonl`.
+Bench: `docker/librechat/` (api + mongo, port 3090), the echo server `probe-server.mjs` on 4099, log — `probe-log.jsonl`.
 
-**Маршрут:** `POST /api/agents/chat`, тело:
+**Route:** `POST /api/agents/chat`, body:
 `{ endpoint: "EchoProbe", endpointType: "custom", model, text, conversationId, parentMessageId, messageId, isCreatedByUser: true }`.
-Ответ — `{ streamId, conversationId, status: "started" }`; сам контент идёт отдельным SSE
+The response is `{ streamId, conversationId, status: "started" }`; the content itself goes as a separate SSE
 (`GET /api/agents/chat/stream/:streamId`). `streamId === conversationId`.
 
-**Что реально приходит на кастомный эндпоинт:**
+**What actually arrives at the custom endpoint:**
 
 ```
 POST /v1/chat/completions
-authorization: Bearer <apiKey из конфига>
+authorization: Bearer <apiKey from config>
 user-agent: langchainjs-openai/1.0.0 ((node/v24.16.0; linux; x64))
 x-probe-user-id: 6aad2b3673fd8b71f64d6437          ← {{LIBRECHAT_USER_ID}}
 x-probe-user-email: probe@local.test               ← {{LIBRECHAT_USER_EMAIL}}
@@ -123,606 +123,606 @@ x-probe-conversation-id: 0a00eb41-…                ← {{LIBRECHAT_BODY_CONVER
 x-probe-message-id: 452d4c65-…                     ← {{LIBRECHAT_BODY_MESSAGEID}}
 x-probe-parent-message-id: e72a8051-…              ← {{LIBRECHAT_BODY_PARENTMESSAGEID}}
 
-{ "model": "echo-probe", "user": "<id пользователя LibreChat>", "stream": true, "messages": [...] }
+{ "model": "echo-probe", "user": "<LibreChat user id>", "stream": true, "messages": [...] }
 ```
 
-На первом сообщении `messages` содержит только новую реплику; на втором — всю историю
-(`user → assistant → user`), причём ответ ассистента — это наш собственный текст из стрима.
+On the first message `messages` contains only the new utterance; on the second — the whole history
+(`user → assistant → user`), and the assistant's answer is our own text from the stream.
 
-**Вложения.** Загружаются через `POST /api/files` (multipart: `file`, `file_id`, `endpoint`, `endpointType`,
-`message_file=true`), ответ содержит `llmDeliveryPath: "provider"`. В чат передаётся **запись, которую вернул
-сервер**, а не присланный `temp_file_id` — иначе LibreChat молча выбрасывает вложение. На эндпоинт картинка
-приходит так:
+**Attachments.** Uploaded via `POST /api/files` (multipart: `file`, `file_id`, `endpoint`, `endpointType`,
+`message_file=true`), the response contains `llmDeliveryPath: "provider"`. What is passed into the chat is **the record the
+server returned**, not the `temp_file_id` that was sent — otherwise LibreChat silently drops the attachment. The image
+arrives at the endpoint like this:
 
 ```json
 {
   "role": "user",
   "content": [
-    { "type": "text", "text": "что на картинке?" },
+    { "type": "text", "text": "what's in the picture?" },
     { "type": "image_url",
       "image_url": { "url": "data:image/png;base64,iVBORw0KGgo…", "detail": "auto" } }
   ]
 }
 ```
 
-То есть icarus должен уметь и мультимодальные части, и раскодирование data-URL в файл внутри workspace.
+That is, icarus must handle both multimodal parts and decoding a data-URL into a file inside the workspace.
 
-**Отмена.** При прерывании в UI LibreChat **закрывает HTTP-соединение со стендом посреди стрима**
-(в логе эхо-сервера: `connection_closed`, `writableEnded: false`, финального `stream_done` нет).
-Значит, icarus ловит отмену через `res.on('close')` при `writableEnded === false` и отправляет в pi
-`{"type":"abort"}`; ничего изобретать не нужно.
+**Cancellation.** When interrupted in the UI, LibreChat **closes the HTTP connection to the bench mid-stream**
+(in the echo server log: `connection_closed`, `writableEnded: false`, no final `stream_done`).
+So icarus catches the cancellation via `res.on('close')` when `writableEnded === false` and sends pi
+`{"type":"abort"}`; nothing needs to be invented.
 
-**Контейнер пользователя.** Образ `docker/user/Dockerfile` (node:24-slim + pi + git + ripgrep, пользователь `node`
-с uid 1000). Контейнер `icarus-test` поднят с примонтированными `memory/`, `shared-memory/`, `scratchpad/` (в тесте
-read-only) и `~/.pi/agent` для ключей и расширений. Проверено:
+**The user container.** Image `docker/user/Dockerfile` (node:24-slim + pi + git + ripgrep, user `node`
+with uid 1000). The container `icarus-test` is up with `memory/`, `shared-memory/`, `scratchpad/` mounted (read-only
+in the test) and `~/.pi/agent` for keys and extensions. Verified:
 
-- `docker exec -i icarus-test pi --mode rpc --no-session` → JSONL по stdio работает, `get_state` и `bash` отвечают,
-  `bash_execution_update` стримятся;
-- запись в `memory/journal/2026-09.md` через bash-тул видна на хосте — значит, память реально персистентна;
-- расширения из `~/.pi/agent/extensions/` загружаются: диагностическое расширение выгрузило системный промпт,
-  и в нём есть наш `AGENTS.md`.
+- `docker exec -i icarus-test pi --mode rpc --no-session` → JSONL over stdio works, `get_state` and `bash` respond,
+  `bash_execution_update` is streamed;
+- a write to `memory/journal/2026-09.md` through the bash tool is visible on the host — so memory is really persistent;
+- extensions from `~/.pi/agent/extensions/` are loaded: a diagnostic extension dumped the system prompt,
+  and our `AGENTS.md` is in it.
 
-**Важное следствие:** дефолтный системный промпт pi — это промпт *кодинг-ассистента* («You are an expert coding
-assistant…»). Значит, переопределение промпта на `icarus.md` — не украшение, а обязательный шаг, и делать его надо
-расширением (`persona`), а не настройкой сервиса.
+**An important consequence:** pi's default system prompt is a *coding assistant* prompt ("You are an expert coding
+assistant…"). So overriding the prompt with `icarus.md` is not a decoration but a mandatory step, and it must be done with
+an extension (`persona`), not by service configuration.
 
-**Грабли, которые стоили времени (и которые надо помнить при автотестах):**
-- без браузерного `User-Agent` LibreChat отвечает `Illegal request` (`uaParser`);
-- кастомный эндпоинт передаётся как `endpoint: "<Имя>"` + `endpointType: "custom"`, а не наоборот;
-- перед чатом LibreChat требует загруженный каталог моделей (`GET /api/models`) — иначе
+**Gotchas that cost time (and that we must remember in automated tests):**
+- without a browser `User-Agent` LibreChat responds `Illegal request` (`uaParser`);
+- a custom endpoint is passed as `endpoint: "<Name>"` + `endpointType: "custom"`, not the other way around;
+- before a chat LibreChat requires a loaded model catalog (`GET /api/models`) — otherwise
   `endpoint_models_not_loaded`;
-- имя эндпоинта попадает в каталог моделей как ключ (`EchoProbe: ["echo-probe"]`);
-- конфиг `version: 1.3.13` ещё принимается, но LibreChat ругается, что актуальная 1.3.16.
+- the endpoint name lands in the model catalog as a key (`EchoProbe: ["echo-probe"]`);
+- the config `version: 1.3.13` is still accepted, but LibreChat complains that the current one is 1.3.16.
 
-Ещё из окружения: Docker 29.1.3 и Compose 2.40.3 на месте, pi не был установлен.
-**Старый Graphiti выведен из эксплуатации:** удалены три контейнера (`icarus-graphiti-1` и два из ворктри `rename-*`),
-их сети и тома. Данных не потеряно — тома были пустыми (`/data` внутри образа оказался симлинком на
-`/var/lib/falkordb/data`, то есть старые графы жили в слое контейнера и были эфемерными). Образ на 902 МБ снесён.
-Заодно разобрана свалка в `~/.worktrees/`: девять ворктри четырёх посторонних проектов (`lm`, `storyteller`,
-`visyond`, `skillset`, ~7 ГБ) убраны через `git worktree remove` — ни в одной ветке не было уникальных коммитов,
-ссылки на ветки целы, единственная незакоммиченная правка сохранена в `~/.worktrees-archive/lm-test-branch-name.patch`.
+Also from the environment: Docker 29.1.3 and Compose 2.40.3 are present, pi was not installed.
+**The old Graphiti is decommissioned:** three containers were deleted (`icarus-graphiti-1` and two from the `rename-*`
+worktrees), along with their networks and volumes. No data was lost — the volumes were empty (inside the image `/data` turned out to be a symlink to
+`/var/lib/falkordb/data`, that is, the old graphs lived in the container layer and were ephemeral). A 902 MB image was removed.
+While at it, the dump in `~/.worktrees/` was cleaned up: nine worktrees of four unrelated projects (`lm`, `storyteller`,
+`visyond`, `skillset`, ~7 GB) were removed via `git worktree remove` — no branch had unique commits,
+the branch refs are intact, and the only uncommitted edit was saved to `~/.worktrees-archive/lm-test-branch-name.patch`.
 
-## Итог M0
+## M0 result
 
-Все допущения проверены на живом стеке, ни одного «наверное, сработает» не осталось:
+All assumptions were verified on the live stack, not a single "probably will work" is left:
 
-| Что | Как проверено |
+| What | How verified |
 |---|---|
-| Контракт LibreChat | Снят живой запрос: заголовки с плейсхолдерами, тело, история, вложения, отмена |
-| pi в контейнере | `docker exec -i icarus-test pi --mode rpc` — JSONL по stdio, события стримятся |
-| Тулы в песочнице | bash-тул работает в `/workspaces/<workspace>`, пишет в память через `/workspaces/.icarus`; файл появляется на хосте |
-| Расширения | Загружаются из `~/.pi/agent/extensions/`; расширение-персона подменило промпт |
-| Персона | Дефолтный промпт кодинг-ассистента вытеснен; `AGENTS.md` сохранён в промпте |
-| Живой диалог | Реплика «Ты помнишь, кто я?» → агент сам прочитал `memory/`; «Запомни: люблю кофе без сахара» → сам дописал `preferences.md` (проверено на хосте) |
-| Скорость | Первый ход с тулами ~4.5 с, простая реплика ~1.2 с (thinking выключен), два хода подряд — 7.4 с |
+| LibreChat contract | A live request was captured: headers with placeholders, body, history, attachments, cancellation |
+| pi in the container | `docker exec -i icarus-test pi --mode rpc` — JSONL over stdio, events are streamed |
+| Tools in the sandbox | the bash tool works in `/workspaces/<workspace>`, writes to memory through `/workspaces/.icarus`; the file appears on the host |
+| Extensions | Loaded from `~/.pi/agent/extensions/`; the persona extension replaced the prompt |
+| Persona | The default coding assistant prompt was displaced; `AGENTS.md` is preserved in the prompt |
+| Live dialogue | The utterance "Do you remember who I am?" → the agent read `memory/` itself; "Remember: I like coffee without sugar" → it wrote `preferences.md` itself (verified on the host) |
+| Speed | The first turn with tools ~4.5 s, a simple utterance ~1.2 s (thinking off), two turns in a row — 7.4 s |
 
-Черновой клиент к pi лежит в `tools/rpc-probe.mjs` — это заготовка будущего моста в icarus.
+The draft pi client lives in `tools/rpc-probe.mjs` — it is a prototype of the future bridge into icarus.
 
-Модели, которые pi видит на DeepInfra: `deepseek-ai/DeepSeek-V4.1-Flash` — одна на все уровни, потому что
-она и думает, и принимает картинки. Провайдера `deepinfra` pi сам не знает: его описание (адрес, протокол,
-ключ, метаданные моделей) собирается в `models.json` — см. `packages/service/src/providers.ts`.
+The models pi sees on DeepInfra: `deepseek-ai/DeepSeek-V4.1-Flash` — one for all tiers, because
+it both thinks and accepts images. pi does not know the `deepinfra` provider by itself: its description (address, protocol,
+key, model metadata) is assembled in `models.json` — see `packages/service/src/providers.ts`.
 
-## Итог M1
+## M1 result
 
-Сервис написан и работает: `packages/service` (Node + TypeScript без единой зависимости), расширение-персона в
-`packages/extensions`, тесты — `npm test` (36 тестов, все зелёные).
+The service is written and works: `packages/service` (Node + TypeScript with not a single dependency), the persona extension in
+`packages/extensions`, tests — `npm test` (36 tests, all green).
 
-| Пункт готовности | Как проверено |
+| Readiness item | How verified |
 |---|---|
-| LibreChat получает стрим от icarus | Живой диалог: текст, финал `stop`, `[DONE]`, `usage` |
-| Активность видна в чате | LibreChat рендерит наши фразы отдельной частью `think` |
-| Два пользователя изолированы | Второй разговор поднял `icarus-user-probe2` со своей пустой памятью |
-| Разговор переживает перезапуск | После рестарта сервиса Икар вспомнил начало того же разговора |
-| Отмена останавливает агента | `POST /api/agents/chat/abort` → в логе «клиент оборвал соединение — прерываю ход» |
-| Вложения доходят | PNG оказался в `incoming/`, агент прочитал его и отметил в журнале |
-| Тесты | 36 зелёных: контракт формы, сверка истории, фразы тулов, вложения, RPC на заглушке, HTTP целиком |
+| LibreChat receives a stream from icarus | Live dialogue: text, final `stop`, `[DONE]`, `usage` |
+| Activity is visible in the chat | LibreChat renders our phrases as a separate `think` part |
+| Two users are isolated | The second conversation brought up `icarus-user-probe2` with its own empty memory |
+| A conversation survives a restart | After a service restart Icarus remembered the beginning of the same conversation |
+| Cancellation stops the agent | `POST /api/agents/chat/abort` → in the log "client broke the connection — interrupting the turn" |
+| Attachments arrive | The PNG ended up in `incoming/`, the agent read it and noted it in the journal |
+| Tests | 36 green: the shape contract, history reconciliation, tool phrases, attachments, RPC on a stub, full HTTP |
 
-**Что выяснилось по ходу и учтено в коде:**
-- `usage` в стриме отдаём **только** если клиент прислал `stream_options.include_usage`;
-- первый чанк потока несёт `delta.role`, иначе клиенты не собирают сообщение;
-- сверять историю надо по репликам **пользователя**: pi дробит ответ ассистента на несколько сообщений
-  (текст → тулы → текст), а LibreChat склеивает их в одно — построчное сравнение давало ложное расхождение на
-  каждом ходу с тулами;
-- быстрая модель **не умела картинки**: при вложении она честно говорила об этом и лезла разбирать файл руками.
-  Теперь на всех уровнях `DeepSeek-V4.1-Flash`, а она картинки видит, — отдельный vision-вариант не нужен,
-  и это работа для эскалации из M2.
+**What came to light along the way and was taken into account in the code:**
+- we return `usage` in the stream **only** if the client sent `stream_options.include_usage`;
+- the first chunk of the stream carries `delta.role`, otherwise clients don't assemble the message;
+- history must be reconciled by the **user's** utterances: pi splits the assistant's answer into several messages
+  (text → tools → text), while LibreChat glues them into one — line-by-line comparison produced a false divergence on
+  every turn with tools;
+- the fast model **couldn't do images**: when given an attachment it honestly said so and went off to parse the file by hand.
+  Now all tiers use `DeepSeek-V4.1-Flash`, and it can see images, — so a separate vision variant is not needed,
+  and this is work for the escalation from M2.
 
-## Итог M2
+## M2 result
 
-Память работает по-настоящему: `packages/extensions` — персона, ядро памяти и фоновый разбор; всё живёт внутри
-контейнера и не требует участия сервиса. Тестов теперь 48.
+Memory works for real: `packages/extensions` — the persona, the memory core, and background extraction; everything lives inside
+the container and doesn't require the service's involvement. Tests are now 48.
 
-| Что | Как проверено |
+| What | How verified |
 |---|---|
-| Ядро памяти в промпте | Новый разговор спросил «какой у меня кот?» и получил ответ **без единого обращения к файлам** |
-| Разбор после затишья | Разговор затих → расширение позвало дешёвую модель отдельным процессом |
-| Раскладка по полкам | Факты легли в `preferences.md`, `people/barsik.md`, запись появилась в журнале |
-| Память — git | `memory: разбор разговора (3 файлов)` — коммит на каждый разбор |
-| Дедупликация | Повторный разбор не создал ни второго файла про кота, ни дублей в предпочтениях |
-| В семейную память не пишем | Разбор отклоняет `shared-memory/**`; туда только сам агент по явной просьбе |
-| В память идут только слова человека | Разбор видит роли реплик, требует дословную цитату из реплики пользователя и рядом с фактом её сохраняет; запись по словам Икара отклоняется |
+| Memory core in the prompt | A new conversation asked "what cat do I have?" and got an answer **without a single file access** |
+| Extraction after quiet | The conversation went quiet → the extension called a cheap model in a separate process |
+| Placement on shelves | Facts landed in `preferences.md`, `people/barsik.md`, an entry appeared in the journal |
+| Memory is git | `memory: разбор разговора (3 файлов)` — a commit per extraction |
+| Deduplication | A repeated extraction created neither a second file about the cat nor duplicates in preferences |
+| We don't write to family memory | Extraction rejects `shared-memory/**`; only the agent itself writes there, on explicit request |
+| Only the person's words go into memory | Extraction sees the roles of the utterances, requires a verbatim quote from the user's utterance and saves it next to the fact; a record based on Icarus's words is rejected |
 
-**Две ошибки, которые нашлись только на живом прогоне** (обе стоили отладки и обе теперь закрыты тестами или кодом):
+**Two mistakes that were found only on a live run** (both cost debugging time and both are now covered by tests or code):
 
-1. Путь до корня репозитория считался на уровень выше, и расширения **молча не копировались** — агент работал
-   без персоны и памяти, а сервис при этом не жаловался. Теперь копирование падает с ошибкой, если расширений нет.
-2. `before_agent_start` расширения применяются по очереди, а персона **заменяет** промпт целиком — поэтому
-   отдельное расширение с ядром памяти затиралось. Ядро переехало внутрь персоны, а общий модуль — в
-   `extensions/lib/`, который pi расширением не считает.
+1. The path to the repository root was computed one level too high, and the extensions were **silently not copied** — the agent worked
+   without the persona and memory, and the service didn't complain. Now copying fails with an error if there are no extensions.
+2. The `before_agent_start` extensions are applied in turn, and the persona **replaces** the prompt entirely — so
+   the separate extension with the memory core got overwritten. The core moved inside the persona, and the shared module — into
+   `extensions/lib/`, which pi does not consider an extension.
 
-Ещё две мелочи про качество разбора: модель получает **индекс уже записанного** (пути файлов и их пункты), иначе
-она заводит `people/Барсик.md` рядом с `people/barsik.md`; и строки сравниваются не по точному совпадению, а по
-пересечению слов, чтобы «не будить раньше 09:00» и «не будить раньше 9 утра» не жили вместе.
+Two more small things about the quality of extraction: the model gets an **index of what's already written** (file paths and their items), otherwise
+it creates `people/Барсик.md` next to `people/barsik.md`; and lines are compared not by exact match but by
+word overlap, so that "don't wake me before 09:00" and "don't wake me before 9 in the morning" don't live together.
 
-**Правка после живого прогона: чей это факт.** Первый же разбор показал, что модель с одинаковым удовольствием
-пересказывает в память и слова человека, и **свои собственные советы**: реплики уходили в промпт склеенными
-(«Пользователь: … Икар: …»), а правила не мешали приписать человеку то, что Икар сам и предложил. Отсюда и
-`preferences.md`, состоявший из протоколов заварки, которые Икар же и продиктовал. Теперь разговор идёт в промпт
-размеченным по ролям (`ЧЕЛОВЕК` против `ИКАР (контекст, не источник)`), у каждого факта обязательна дословная
-цитата из реплики человека (`evidence`), и `applyExtraction` сверяет её только со словами человека — не с полной
-склейкой разговора. Факт пишется вместе с цитатой («- Пьёт сенчу (его слова: «пью сенчу каждый день»)»), так что
-видно происхождение записи. Короткое «да» в ответ на вопрос Икара цитатой быть не перестало: реплики Икара
-остаются в промпте как контекст. Побочный эффект: оформление списка больше не мешает дедупликации — строка
-сравнивается вместе с ведущим «- », как она и ляжет в файл.
+**A fix after the live run: whose fact is it.** The very first extraction showed that the model retells into memory with equal pleasure
+both the person's words and **its own advice**: the utterances went into the prompt glued together
+("User: … Icarus: …"), and the rules didn't prevent attributing to the person what Icarus himself had suggested. That's where
+`preferences.md` came from, consisting of brewing instructions that Icarus himself had dictated. Now the conversation goes into the prompt
+marked up by roles (`ЧЕЛОВЕК` vs `ИКАР (контекст, не источник)`), every fact requires a verbatim
+quote from the person's utterance (`evidence`), and `applyExtraction` checks it only against the person's words — not against the full
+glued conversation. A fact is written together with the quote ("- Drinks sencha (his words: \"I drink sencha every day\")"), so that
+the origin of the record is visible. A short "yes" in reply to Icarus's question hasn't stopped being a quote: Icarus's utterances
+remain in the prompt as context. A side effect: list formatting no longer interferes with deduplication — the line
+is compared together with the leading "- ", as it will lie in the file.
 
-## Итог M3 (частично): веб-поиск и MCP
+## M3 result (partial): web search and MCP
 
-**MCP.** pi принципиально не включает MCP («you can build or install those workflows as extensions or packages»),
-поэтому взяли готовое расширение [`pi-mcp-extension`](https://pi.dev/packages/pi-mcp-extension) (MIT, 1.5.0,
-20K загрузок в месяц) — оно читает `~/.pi/agent/mcp.json`, то есть ровно наш примонтированный каталог. Сервис
-из конфига генерирует два файла: `settings.json` (пакет подключается только если у человека есть MCP-серверы)
-и `mcp.json` (сами серверы). Проверено на своём минимальном MCP-сервере (`docker/user/mcp/echo-server.mjs`):
-агент сам вызвал `mcp_echo_ping` и получил ответ с временем и рабочим каталогом.
+**MCP.** pi fundamentally doesn't include MCP ("you can build or install those workflows as extensions or packages"),
+so we took the ready-made extension [`pi-mcp-extension`](https://pi.dev/packages/pi-mcp-extension) (MIT, 1.5.0,
+20K downloads per month) — it reads `~/.pi/agent/mcp.json`, which is exactly our mounted directory. The service
+generates two files from the config: `settings.json` (the package is only connected if the person has MCP servers)
+and `mcp.json` (the servers themselves). Verified on our own minimal MCP server (`docker/user/mcp/echo-server.mjs`):
+the agent called `mcp_echo_ping` itself and got a response with the time and the working directory.
 
-**Веб-поиск.** Своё расширение `web-search.ts` — два инструмента: `web_search` (по умолчанию DuckDuckGo без
-ключа; `brave` и `searxng` переключаются переменными окружения) и `web_fetch` (страница → текст, без
-зависимостей). Проверено живьём: на вопрос про погоду агент сам сделал `web_search`, затем `web_fetch` и выдал
-ответ со ссылкой на источник.
+**Web search.** Our own extension `web-search.ts` — two tools: `web_search` (DuckDuckGo by default without
+a key; `brave` and `searxng` are switched via environment variables) and `web_fetch` (page → text, without
+dependencies). Verified live: when asked about the weather the agent did `web_search` itself, then `web_fetch`, and gave an
+answer with a source link.
 
-Тестов теперь **53**. Мелочь на будущее: `typebox` в расширении импортируется в рантайме, поэтому в корне
-репозитория он лежит как devDependency — иначе тесты чистых функций не запускаются вне контейнера.
+Tests are now **53**. A small thing for the future: `typebox` in the extension is imported at runtime, so at the repository
+root it's kept as a devDependency — otherwise tests of pure functions don't run outside the container.
 
-## Итог: эскалация моделей и зрение
+## Result: model escalation and vision
 
-Расширение `escalation.ts` решает, какой уровень ведёт ход, и переключает модель на лету:
+The `escalation.ts` extension decides which tier leads the turn and switches the model on the fly:
 
-| Сигнал | Уровень |
+| Signal | Tier |
 |---|---|
-| В реплике есть картинка | `vision` (`deepseek-ai/DeepSeek-V4.1-Flash`) |
-| Агент полез руками: `bash`, правки файлов, MCP | `strong` (`deepseek-ai/DeepSeek-V4.1-Flash`, thinking из конфига) |
-| Поиск и чтение — разведка: до трёх тулов ход остаётся на `fast`, дальше это уже работа | `strong` |
-| Длинная реплика или явная просьба о работе | `strong` |
-| Всё остальное | `fast` (`deepseek-ai/DeepSeek-V4.1-Flash`, thinking low) |
+| The utterance has an image | `vision` (`deepseek-ai/DeepSeek-V4.1-Flash`) |
+| The agent got its hands dirty: `bash`, file edits, MCP | `strong` (`deepseek-ai/DeepSeek-V4.1-Flash`, thinking from the config) |
+| Search and reading are reconnaissance: up to three tools the turn stays on `fast`, beyond that it's work | `strong` |
+| A long utterance or an explicit request for work | `strong` |
+| Everything else | `fast` (`deepseek-ai/DeepSeek-V4.1-Flash`, thinking low) |
 
-Уровни не зашиты в код: сервис собирает их из `models` в конфиге человека и отдаёт контейнеру переменными
-`ICARUS_MODEL_FAST` / `_STRONG` / `_VISION` в виде `provider/model:thinking`. Наружу по-прежнему одна модель —
-`icarus`, как решили в интервью.
+The tiers are not hardcoded: the service assembles them from `models` in the person's config and passes them to the container as the variables
+`ICARUS_MODEL_FAST` / `_STRONG` / `_VISION` in the form `provider/model:thinking`. Outward there is still one model —
+`icarus`, as decided in the interview.
 
-Уровень размышлений эскалация отдаёт ровно тот, что записан в конфиге. pi сам поднял бы неподдерживаемый уровень
-до ближайшего доступного (`medium` у прежней модели в каталоге был помечен как отсутствующий, и `thinking: medium`
-молча превращался в `high`), поэтому расширение правит карту уровней у модели и шлёт `reasoning_effort` как есть.
-У DeepSeek на DeepInfra `reasoning_effort` — документированный параметр, так что уровень уезжает модели без
-посредников.
+Escalation passes exactly the thinking level that is recorded in the config. pi would itself raise an unsupported level
+to the nearest available one (`medium` for the previous model was marked as absent in the catalog, and `thinking: medium`
+was silently turning into `high`), so the extension fixes the model's level map and sends `reasoning_effort` as is.
+For DeepSeek on DeepInfra `reasoning_effort` is a documented parameter, so the level reaches the model without
+intermediaries.
 
-Проверено живьём по логам эскалации: картинка → `vision` и ответ «Красный квадрат» (до эскалации быстрая модель
-честно говорила, что не умеет смотреть изображения); болтовня → `fast` за 1.6 с; просьба разобрать код → `strong`
-за 5.6 с.
+Verified live from the escalation logs: an image → `vision` and the answer "Red square" (before escalation the fast model
+honestly said it couldn't look at images); small talk → `fast` in 1.6 s; a request to parse code → `strong`
+in 5.6 s.
 
-Заодно картинки теперь уходят в pi **нативно** (часть `images` в команде `prompt`), а не только файлом на диске —
-модель их действительно видит. Файл при этом всё равно остаётся в `incoming/`.
+While at it, images now go to pi **natively** (an `images` part in the `prompt` command), not only as a file on disk —
+the model really sees them. The file still stays in `incoming/` anyway.
 
-Мелочь на будущее: в pi 0.85.1 нет `getModel` из `@earendil-works/pi-ai`, хотя документация его упоминает —
-рабочий путь `ctx.modelRegistry.find(provider, id)`.
+A small thing for the future: pi 0.85.1 doesn't have `getModel` from `@earendil-works/pi-ai`, although the docs mention it —
+the working path is `ctx.modelRegistry.find(provider, id)`.
 
-## Итог M3: мини-панель памяти — MVP собран
+## M3 result: the mini memory panel — MVP assembled
 
-Панель живёт на самом icarus: `http://<хост>:8080/panel?key=<panelKey>`. Без ключа показывается страница входа,
-ключ хранится в localStorage. Внутри — один HTML без сборки и зависимостей.
+The panel lives on icarus itself: `http://<host>:8080/panel?key=<panelKey>`. Without a key a login page is shown,
+the key is stored in localStorage. Inside — one HTML file with no build and no dependencies.
 
-Что умеет: выбрать человека и область (личная/семейная), смотреть файлы, искать по всей памяти с номерами строк,
-смотреть историю разборов, открывать дифф любого коммита, **откатывать** коммит обратным коммитом (история не
-переписывается) и **забывать** отдельную строку — тоже коммитом.
+What it can do: pick a person and a scope (personal/family), view files, search the whole memory with line numbers,
+view the extraction history, open the diff of any commit, **roll back** a commit with a reverse commit (history is not
+rewritten), and **forget** a single line — also with a commit.
 
-Проверено на живой памяти: поиск нашёл факты по файлам, дифф показал разбор, «забыть» убрало строку и создало
-коммит `memory: забыть «…»`, «откатить» вернул строку обратно.
+Verified on live memory: the search found facts by file, the diff showed an extraction, "forget" removed a line and created
+the commit `memory: забыть «…»`, "roll back" brought the line back.
 
-**Позже доступ переделали:** общего ключа у панели больше нет. Икар выдаёт каждому личную ссылку
-(`get_memory_management_link`): она живёт сутки и открывает память только этого человека — никого другого.
+**Later the access was redone:** the panel no longer has a shared key. Icarus issues each person a personal link
+(`get_memory_management_link`): it lives for a day and opens only that person's memory — nobody else's.
 
-**Ещё позже в панель добавили удаление файла целиком** — кнопка «удалить файл» в шапке открытого файла.
-Это тоже коммит (`memory: удалить файл «…»`), поэтому промах видно в истории и он откатывается обратным
-коммитом. Раздел математики тогда был отдельным и только для чтения; позже его убрали совсем —
-расчёты Maple живут в рабочей папке разговора, а сам Maple стал обычным встроенным MCP.
+**Even later, deleting a whole file was added to the panel** — a "delete file" button in the header of an open file.
+This is also a commit (`memory: удалить файл «…»`), so a mistake is visible in the history and is rolled back by a reverse
+commit. The math section was separate then and read-only; later it was removed altogether —
+Maple's calculations live in the conversation's working folder, and Maple itself became an ordinary built-in MCP.
 
-**И совсем позже от ссылок отказались.** Панель стала **Icarus Control Panel** и стоит за SSO-прокси
-(nginx + Authelia на проде): человека называет заголовок `Remote-User`, вход — обычная учётка человека,
-и открывается ему только его память. Одноразовые пропуска, секрет панели и ключи в контейнерах людей
-(`ICARUS_PANEL_KEY`) убраны целиком — пускать и не пускать теперь дело прокси (см. README, «Панель управления»).
+**And much later they gave up on links.** The panel became the **Icarus Control Panel** and sits behind an SSO proxy
+(nginx + Authelia in production): the person is named by the `Remote-User` header, login is the person's ordinary account,
+and only that person's memory opens for them. One-time passes, the panel secret, and keys in people's containers
+(`ICARUS_PANEL_KEY`) were removed entirely — who gets in and who doesn't is now the proxy's business (see README, "Control Panel").
 
-**MVP собран целиком** — все пункты, которые были отмечены в интервью как обязательные:
+**The MVP is fully assembled** — all the items that were marked as mandatory in the interview:
 
-| Пункт MVP | Статус |
+| MVP item | Status |
 |---|---|
-| Разговор через OpenAI-эндпоинт | ✅ M1 |
-| Память между разговорами | ✅ M2 |
-| Двое, у каждого своё | ✅ M1 |
-| Мини-панель памяти | ✅ M3 |
-| Веб-поиск и MCP | ✅ M3 |
+| Conversation through the OpenAI endpoint | ✅ M1 |
+| Memory across conversations | ✅ M2 |
+| Two people, each with their own | ✅ M1 |
+| Mini memory panel | ✅ M3 |
+| Web search and MCP | ✅ M3 |
 
-## Итог: провайдер — DeepInfra, поиск — Tavily
+## Result: the provider is DeepInfra, search is Tavily
 
-Модели уехали на DeepInfra (`https://api.deepinfra.com/v1/openai`) — прежнего провайдера в коде и конфиге
-не осталось. DeepInfra —
-OpenAI-совместимый хост, но во встроенном каталоге pi его нет: провайдер описывается в
-`~/.pi/agent/models.json`, который сервис собирает из `models` (см. `packages/service/src/providers.ts`).
-Там же живут `baseUrl`, протокол `openai-completions` и `compat` для DeepSeek: `supportsDeveloperRole: false`
-(роль `developer` эти модели не принимают, системный промпт идёт как `system`) и `thinkingFormat: "openai"`
-(DeepInfra знает `reasoning_effort`, а поле `thinking: {type}` из DeepSeek API молча игнорирует). Уровни pi
-описаны в `thinkingLevelMap`: `off → none`, остальные — как есть. Ключ — `DEEPINFRA_API_KEY`,
-он же попадает в `auth.json` через `PROVIDER_ENV`.
+The models moved to DeepInfra (`https://api.deepinfra.com/v1/openai`) — the previous provider is gone from the code and config.
+DeepInfra is an
+OpenAI-compatible host, but it's not in pi's built-in catalog: the provider is described in
+`~/.pi/agent/models.json`, which the service assembles from `models` (see `packages/service/src/providers.ts`).
+There also live `baseUrl`, the `openai-completions` protocol, and `compat` for DeepSeek: `supportsDeveloperRole: false`
+(these models don't accept the `developer` role, the system prompt goes as `system`) and `thinkingFormat: "openai"`
+(DeepInfra knows `reasoning_effort`, while it silently ignores the `thinking: {type}` field from the DeepSeek API). pi's levels
+are described in `thinkingLevelMap`: `off → none`, the rest — as is. The key is `DEEPINFRA_API_KEY`,
+and it also lands in `auth.json` through `PROVIDER_ENV`.
 
-Вместе с моделями пришлось переехать и поиску, потому что серверного веб-поиска у DeepInfra нет: тул
-`web_search` она отклоняет для всех чат-моделей каталога («not supported for model»), а поисковых моделей
-у неё не бывает. Скрейпинг поисковиков остаётся тупиком: DuckDuckGo отдаёт ботам 403 и страницу-заглушку,
-Mojeek — капчу, а разобранная в ноль страница выглядела для агента как «Ничего не нашлось.» — отказ
-поисковика был неотличим от честной пустой выдачи, и агент повторял запрос по кругу вместо того, чтобы
-сказать, что поиск сломан. Поэтому `web_search` по умолчанию ходит в Tavily
-(`ICARUS_SEARCH_PROVIDER=tavily`, ключ `TAVILY_API_KEY`): простой POST, который отдаёт ссылки с выдержками.
-Провайдер ключа моделей тут не годится — у поиска свой ключ, и наоборот. `brave` и `searxng` остались
-явными альтернативами. Поиск перестал быть ходом модели и стал дешёвым HTTP-запросом, а «Ничего не
-нашлось.» теперь значит ровно пустую выдачу: ошибка HTTP, отказ сервиса и битый ответ называются своими
-именами. Тестов теперь **189**.
+Search had to move along with the models, because DeepInfra has no server-side web search: it rejects the
+`web_search` tool for all chat models in the catalog ("not supported for model"), and it doesn't have search models at all.
+Scraping search engines remains a dead end: DuckDuckGo gives bots a 403 and a stub page,
+Mojeek — a captcha, and a page parsed down to nothing looked to the agent like "Nothing found." — a search engine's refusal
+was indistinguishable from an honest empty result, and the agent repeated the query in a loop instead of
+saying the search was broken. So `web_search` now goes to Tavily by default
+(`ICARUS_SEARCH_PROVIDER=tavily`, key `TAVILY_API_KEY`): a simple POST that returns links with snippets.
+The model key provider is no good here — search has its own key, and vice versa. `brave` and `searxng` remained
+explicit alternatives. Search stopped being a model turn and became a cheap HTTP request, and "Nothing
+found." now means exactly an empty result: an HTTP error, a service refusal, and a broken response are called by their own
+names. Tests are now **189**.
 
-## Итог: скиллы LibreChat доезжали до pi — и мы это убрали
+## Result: LibreChat skills were reaching pi — and we removed that
 
-Скиллы (один и тот же `SKILL.md` у LibreChat и у pi) одно время синхронизировались: icarus забирал
-их через Management API LibreChat (`GET /api/agents/v1/skills`, только OIDC machine-токен) и
-раскладывал в `~/.pi/agent/skills` человека, а персона дописывала каталог в промпт
-(`packages/extensions/lib/skills-core.ts`), потому что заменяет системный промпт pi целиком.
+Skills (the same `SKILL.md` in LibreChat and in pi) were synchronized for a while: icarus pulled
+them through the LibreChat Management API (`GET /api/agents/v1/skills`, OIDC machine token only) and
+laid them out into the person's `~/.pi/agent/skills`, and the persona appended the catalog to the prompt
+(`packages/extensions/lib/skills-core.ts`), because it replaces pi's system prompt entirely.
 
-**Убрали.** Разбор всей цепочки и настройка стенда — в `research/08-librechat-skills.md`, но вывод
-короткий: Management API требует того, чего у нас на проде нет и не появится без отдельной стройки —
-OIDC-провайдера с machine-клиентом, тенанта у пользователя и скилла, и LibreChat свежее v0.8.8
-(на проде стоял v0.8.6-rc1, где `managementApi` нет вообще). Плюс сама синхронизация умела молчать
-о том, что не нашла ни одного скилла, — то есть выглядела сломанной, не оставляя следов.
+**Removed.** The full breakdown of the chain and the bench setup is in `research/08-librechat-skills.md`, but the conclusion
+is short: the Management API requires what we don't have in production and won't have without a separate build —
+an OIDC provider with a machine client, a per-user tenant and skill, and LibreChat newer than v0.8.8
+(production ran v0.8.6-rc1, where `managementApi` doesn't exist at all). Plus the synchronization itself could stay silent
+about the fact that it found not a single skill, — that is, it looked broken without leaving a trace.
 
-Что осталось: скиллы pi как механизм. Каталог `~/.pi/agent/skills` монтируется сервисом и заводится
-пустым, персона показывает модели имена и описания, тело читается по требованию. Автор скиллов —
-панель, раздел «Скиллы»: `SKILL.md` пишется там же, каталог лежит под git (история, откат, удаление),
-а сохранение поднимает поколение ресурсов человека, чтобы живая сессия pi пересобралась со свежим
-каталогом.
+What remains: pi skills as a mechanism. The `~/.pi/agent/skills` directory is mounted by the service and created
+empty, the persona shows the model names and descriptions, and the body is read on demand. The author of skills is the
+panel, the "Skills" section: `SKILL.md` is written right there, the catalog is under git (history, rollback, deletion),
+and saving bumps the person's resource generation so that a live pi session is rebuilt with a fresh
+catalog.
 
-## Характер Икара
+## Icarus's character
 
-`icarus.md` больше не шаблон: это рабочий системный промпт. Не набор прилагательных, а правила поведения —
-коротко по умолчанию, ирония по делу, никакого подхалимства, есть своё мнение, руками работает молча и
-отчитывается результатом, в семейную память пишет только по прямой просьбе.
+`icarus.md` is no longer a template: it's a working system prompt. Not a set of adjectives but rules of behavior —
+short by default, irony where it's due, no sycophancy, has its own opinion, works with its hands silently and
+reports with the result, writes to family memory only on direct request.
 
-Проверено живьём:
+Verified live:
 
-- «привет, как жизнь?» → «Жизнь сносная. Барсик, судя по записям, рыжий и толстый — то есть у него всё отлично,
-  а значит и у меня. А ты чего среди дня объявился?» (факт взят из памяти, без похода в файлы);
-- «я придумал гениальную идею: переписать весь проект на ассемблере» → «Гениально. Особенно если цель — не
-  выпустить проект, а занять себя до пенсии. Что за проект-то? Хочу понять масштаб катастрофы.»
+- "hi, how's life?" → "Life's tolerable. Barsik, judging by the records, is ginger and fat — so he's doing great,
+  and so am I. What brings you out in the middle of the day?" (the fact was taken from memory, without going to the files);
+- "I've come up with a brilliant idea: rewrite the whole project in assembly" → "Brilliant. Especially if the goal is not to
+  ship the project but to occupy yourself until retirement. What's the project, anyway? I want to understand the scale of the catastrophe."
 
-Персона одна на всех, источник истины — репозиторий: сервис копирует файл каждому человеку при старте, иначе
-правки не доезжали бы до уже заведённых пользователей.
+The persona is one for everyone, the source of truth is the repository: the service copies the file to each person at startup, otherwise
+edits wouldn't reach already-created users.
 
-Ещё одна ловушка, которую стоит помнить: **Docker создаёт отсутствующий путь монтирования каталогом**. Из-за
-этого запись `icarus.md` и `AGENTS.md` падала с `EISDIR`, а сервис не поднимался вовсе. Теперь запись файлов
-сначала сносит каталог-обманку.
+One more trap worth remembering: **Docker creates a missing mount path as a directory**. Because of
+that, writing `icarus.md` and `AGENTS.md` failed with `EISDIR`, and the service didn't come up at all. Now writing files
+first deletes the decoy directory.
 
-## Владение контейнерами
+## Container ownership
 
-Раньше контейнеры жили сами по себе: сервис создавал их при первом запросе и больше о них не думал.
-Проверка показала три дыры — контейнеры выбывших людей оставались навсегда, пересобранный образ не
-подхватывался (старый контейнер продолжал работать на старом образе), а отличить свои контейнеры от чужих
-было нечем.
+Previously containers lived on their own: the service created them on the first request and didn't think about them again.
+A check revealed three holes — containers of departed people stuck around forever, a rebuilt image wasn't
+picked up (the old container kept running on the old image), and there was nothing to tell our containers from
+someone else's.
 
-Теперь у контейнера есть **отпечаток** `icarus.spec` — хеш образа, маунтов и окружения, и **метки владения**
-`icarus.managed` и `icarus.user`. На старте сервис делает реконсиляцию:
+Now a container has a **fingerprint** `icarus.spec` — a hash of the image, mounts, and environment, and **ownership labels**
+`icarus.managed` and `icarus.user`. On startup the service does a reconciliation:
 
-| Ситуация | Что делает сервис |
+| Situation | What the service does |
 |---|---|
-| Отпечаток совпал, контейнер работает | оставляет |
-| Отпечаток совпал, контейнер остановлен | поднимает (тёплый старт) |
-| Отпечаток разошёлся: новый образ, маунты или окружение | удаляет и создаёт заново |
-| Контейнера ещё нет | создаёт сразу, не дожидаясь запроса |
-| Человека больше нет в конфиге | **останавливает**, но не удаляет — данные в томах, решение оператора |
-| Контейнер без меток (создан до этой правки) | опознаёт по имени и пересоздаёт с метками |
+| Fingerprint matched, container running | leaves it |
+| Fingerprint matched, container stopped | brings it up (warm start) |
+| Fingerprint diverged: new image, mounts, or environment | deletes and recreates |
+| No container yet | creates it right away, without waiting for a request |
+| Person no longer in the config | **stops** it, but doesn't delete it — the data is in the volumes, the operator decides |
+| Container without labels (created before this fix) | identifies it by name and recreates it with labels |
 
-`/healthz` показывает это состояние: `{managed, running, stale, orphaned, missing}`.
+`/healthz` shows this state: `{managed, running, stale, orphaned, missing}`.
 
-Проверено на живом стеке: контейнер без меток опознан по имени и пересоздан; смена переменной окружения
-привела к удалению и пересозданию с новым отпечатком; выбывший `probe2` был остановлен (`Exited`), а после
-возврата в конфиг — поднят обратно; на старте оба контейнера сразу тёплые.
+Verified on the live stack: a container without labels was identified by name and recreated; changing an environment variable
+led to a delete and recreate with a new fingerprint; the departed `probe2` was stopped (`Exited`), and after
+returning to the config — brought back up; at startup both containers are warm right away.
 
-Что осталось проговорить честно: **смерть контейнеров сервисом не гарантируется** — это осознанный выбор в
-пользу тёплого старта. Сессии, в отличие от контейнеров, умирают вместе с сервисом — pi завершается
-по EOF на stdin (проверено и на `SIGTERM`, и на `SIGKILL`).
+What's left to say honestly: **the death of containers is not guaranteed by the service** — this is a deliberate choice in
+favor of a warm start. Sessions, unlike containers, die together with the service — pi terminates
+on EOF on stdin (verified on both `SIGTERM` and `SIGKILL`).
 
-## Стек под docker compose
+## The stack under docker compose
 
-Хозяином контейнеров сервис пробыл недолго. Ручное `docker run` упиралось в него же: упал сервис —
-пересоздавать контейнеры некому, перезагрузилась машина — icarus не вернётся, а `--restart unless-stopped`
-умел пережить рестарт docker, но не поднять сам сервис. Плюс состояние на хосте зависело от того, дожил ли
-процесс до своей реконсиляции, — а «мы верим только себе» это плохая гарантия.
+The service didn't stay the containers' owner for long. Manual `docker run` ran into the same wall: the service crashes —
+there's no one to recreate the containers, the machine reboots — icarus won't come back, and `--restart unless-stopped`
+could survive a docker restart but couldn't bring the service itself up. On top of that, the state on the host depended on whether
+the process lived to its reconciliation, — and "we trust only ourselves" is a poor guarantee.
 
-Теперь `./script/server` не запускает процесс, а **собирает `docker-compose.yml`** из `config.yaml`
-(сервис, по контейнеру на человека, по флагу — стенд LibreChat) и поднимает его через
-`docker compose up`. По умолчанию `up` идёт на переднем плане: логи в консоли, Ctrl-C гасит стек;
-`-d` уводит стек в фон — так он переживает и закрытый терминал, и перезагрузку.
-Сам icarus тоже едет в контейнере: образ `icarus-service:dev` — это node, git (панель памяти)
-и клиент docker, которым сервис делает `docker exec` в контейнеры людей. Репозиторий и `dataDir`
-монтируются по тем же путям, что на хосте, поэтому пути маунтов внутри и снаружи совпадают.
+Now `./script/server` doesn't launch a process but **assembles `docker-compose.yml`** from `config.yaml`
+(the service, one container per person, and behind a flag — the LibreChat bench) and brings it up via
+`docker compose up`. By default `up` runs in the foreground: logs in the console, Ctrl-C kills the stack;
+`-d` sends the stack to the background — that way it survives both a closed terminal and a reboot.
+Icarus itself also rides in a container: the `icarus-service:dev` image is node, git (the memory panel)
+and the docker client, with which the service does `docker exec` into people's containers. The repository and `dataDir`
+are mounted at the same paths as on the host, so the mount paths inside and outside coincide.
 
-Обновление разведено на две фазы ради меньшего простоя: **сначала образы, потом пересоздание**.
-Самая долгая часть — сборка (`docker compose build` для сервиса и `docker build` для общего
-образа человека), и она идёт, пока старые контейнеры ещё работают; `up` остаётся только
-пересоздать изменившееся, а это секунды. Build-секция есть только у сервиса: образ человека
-общий на всех, и на каждом юзер-сервисе compose собирал бы его заново, подменяя тег разными
-результатами сборки.
+Updating is split into two phases for less downtime: **first the images, then the recreation**.
+The longest part is the build (`docker compose build` for the service and `docker build` for the shared
+person image), and it runs while the old containers are still working; `up` only has left
+to recreate what changed, and that's seconds. The build section exists only for the service: the person's image
+is shared by everyone, and on each user-service compose would rebuild it, substituting the tag with different
+build results.
 
-Роли разделились так:
+The roles split up like this:
 
-| Кто | За что отвечает |
+| Who | Responsible for |
 |---|---|
-| docker compose | жизненный цикл: `restart: unless-stopped` (возврат после падения и перезагрузки), пересоздание при смене образа, маунтов и окружения, удаление выбывших людей (`--remove-orphans`) |
-| `script/server` | собрать файл из конфига, пересобрать образы до пересоздания, подготовить каталоги людей на хосте (иначе docker создаст их root-овыми), один раз перевести контейнеры прошлых версий под compose |
-| сервис icarus | ничего не создавать: дождаться контейнеры, погасить осиротевшие pi, сделать `docker exec` для RPC |
+| docker compose | the lifecycle: `restart: unless-stopped` (return after a crash and a reboot), recreation when the image, mounts, or environment change, removal of departed people (`--remove-orphans`) |
+| `script/server` | assemble the file from the config, rebuild images before recreation, prepare people's directories on the host (otherwise docker would create them as root), one-time migrate containers from previous versions under compose |
+| the icarus service | create nothing: wait for the containers, kill orphaned pi, do `docker exec` for RPC |
 
-Отпечаток `icarus.spec` и метки `icarus.managed` / `icarus.user` остались: compose проставляет их же,
-а `/healthz` по-прежнему показывает `{managed, running, stale, orphaned, missing}`. Пропавший контейнер
-больше не «сейчас создадим» — сервис честно говорит `подними стек: ./script/server`.
+The `icarus.spec` fingerprint and the `icarus.managed` / `icarus.user` labels remain: compose sets the same ones,
+and `/healthz` still shows `{managed, running, stale, orphaned, missing}`. A missing container
+is no longer "we'll create it right now" — the service honestly says `bring the stack up: ./script/server`.
 
-Проверено на живом стеке: `./script/server` собирает образы и поднимает сервис с контейнером человека
-(и в переднем плане, и с `-d`), `/healthz` и панель отвечают, `kill -9` процесса внутри контейнера
-возвращает его по restart-политике, повторный `./script/server` ничего не пересоздаёт, `--down` убирает
-контейнеры и сеть. Переезд со старой схемы — тот же `./script/server`: контейнеры с нашими именами,
-но без метки проекта, сносятся один раз и создаются заново уже под compose.
+Verified on the live stack: `./script/server` builds the images and brings up the service with the person's container
+(both in the foreground and with `-d`), `/healthz` and the panel respond, `kill -9` of a process inside the container
+brings it back per the restart policy, a repeated `./script/server` recreates nothing, `--down` removes
+the containers and the network. Migrating from the old scheme — the same `./script/server`: containers with our names,
+but without the project label, are torn down once and created anew under compose.
 
-## Как проходит один запрос
+## How a single request goes
 
-1. LibreChat шлёт полную историю + заголовки пользователя и разговора.
-2. icarus находит (или поднимает) pi-процесс этого разговора.
-3. Сверяет присланную историю со своей: совпадает префикс → просто подаём новую реплику; разошлось → пишем в лог
-   дифф и продолжаем свою сессию.
-4. pi отвечает: смена модели при необходимости, тулы, память ядром в промпте.
-5. icarus транслирует `text_delta` в SSE, а события тулов — в короткие человеческие фразы в `reasoning_content`.
-   Видимый текст уходит не по дельте, а законченными кусками (`AnswerBuffer`): LibreChat заводит новую часть
-   сообщения на каждом переключении канала и рисует её отдельным блоком, поэтому незаконченный хвост
-   придерживается и склеивается с продолжением — иначе ответ рвётся там, где модель оборвалась на тул.
-6. После затишья расширение-экстрактор зовёт дешёвую модель, раскладывает факты по полкам, дописывает журнал и
-   коммитит в git.
+1. LibreChat sends the full history + the user's and the conversation's headers.
+2. icarus finds (or brings up) the pi process for that conversation.
+3. It reconciles the incoming history with its own: the prefix matches → we just feed the new utterance; it diverged → we log the
+   diff and continue our session.
+4. pi answers: a model switch if needed, tools, the memory core in the prompt.
+5. icarus translates `text_delta` into SSE, and tool events into short human phrases in `reasoning_content`.
+   Visible text doesn't go out per-delta but in finished chunks (`AnswerBuffer`): LibreChat starts a new part of the
+   message on every channel switch and draws it as a separate block, so an unfinished tail
+   is held back and glued to the continuation — otherwise the answer breaks where the model stopped at a tool.
+6. After quiet, the extractor extension calls a cheap model, puts facts on the shelves, appends to the journal and
+   commits to git.
 
-## Этапы
+## Stages
 
-- **M0. Спайк (1–2 дня).** pi в контейнере + icarus с `/v1/models` и `/v1/chat/completions` + LibreChat в докере.
-  Один человек, без памяти. Проверяем: стриминг, отмену, реальную работу тулов, `docker exec` + RPC по stdio.
-- **M1. Каркас.** Двое пользователей, генерация compose, ключ и образ на человека, сессии по `conversation_id`,
-  идентичность из заголовков, дифф расхождений, эскалация моделей, активность как `reasoning_content`.
-- **M2. Память.** Полки + журнал, ядро в промпте, экстрактор по затишью, git-коммиты, сценарные тесты памяти.
-- **M3. Продукт.** Мини-панель памяти, веб-поиск, MCP, приём вложений в `incoming/`.
-- **M4. Потом.** Репозитории в контейнере, картинки и голос, напоминания, egress-политика.
+- **M0. Spike (1–2 days).** pi in a container + icarus with `/v1/models` and `/v1/chat/completions` + LibreChat in docker.
+  One person, no memory. We check: streaming, cancellation, real tool operation, `docker exec` + RPC over stdio.
+- **M1. Framework.** Two users, compose generation, a key and an image per person, sessions by `conversation_id`,
+  identity from headers, divergence diff, model escalation, activity as `reasoning_content`.
+- **M2. Memory.** Shelves + journal, the core in the prompt, an extractor on quiet, git commits, scenario memory tests.
+- **M3. Product.** The mini memory panel, web search, MCP, receiving attachments into `incoming/`.
+- **M4. Later.** Repositories in the container, images and voice, reminders, egress policy.
 
-## План: многочатовый стриминг и точки в сайдбаре
+## Plan: multi-chat streaming and dots in the sidebar
 
-> Поставлено 04.11.2026. Сейчас панель блокирует весь интерфейс, пока идёт ход: один
-> булев `streaming` в `chat-client.js` одновременно значит «ход идёт вот в этом разговоре»
-> и «замри, всё». Хотим обратное — пока один разговор думает, можно открыть другой, выбрать
-> его, начать новый, а в сайдбаре видно, кто в работе и где есть непрочитанное.
+> Set 04.11.2026. Right now the panel blocks the whole interface while a turn runs: a single
+> boolean `streaming` in `chat-client.js` means both "a turn is running in this conversation"
+> and "freeze, everything". We want the opposite — while one conversation is thinking, you can open another, select
+> it, start a new one, and the sidebar shows who's working and where there's unread.
 
-### Что уже есть и на что опираемся
+### What already exists and what we rely on
 
-- `SessionRegistry.sessions` ключ `user:conversation`; `PiSession.busy` — флаг процесса.
-  Все проверки (`compact`, `abort`, `clear`, `reapIdle`) ходят через `sessions.get(key)`,
-  общего замка нет. Два занятых разговора сервис уже переживает без правок.
-- Ход переживает зрителя: `chat-live.ts` копит события в `Turn.events`, подписчики — писцы
-  HTTP-ответов, `res.on('close')` лишь вычёркивает зрителя. `GET /panel/api/chat/stream`
-  отдаёт накопленное с нуля и живёт до `done` — переподключение к идущему ходу работает.
-- Событие `done` несёт обновлённую запись разговора: клиент уже зовёт по нему
-  `rememberChat(event.chat, box.text)`.
+- `SessionRegistry.sessions` key `user:conversation`; `PiSession.busy` — the process flag.
+  All checks (`compact`, `abort`, `clear`, `reapIdle`) go through `sessions.get(key)`,
+  there's no global lock. The service already survives two busy conversations without changes.
+- A turn survives its viewer: `chat-live.ts` accumulates events in `Turn.events`, the subscribers are the writers
+  of HTTP responses, `res.on('close')` merely strikes out the viewer. `GET /panel/api/chat/stream`
+  serves the accumulated events from scratch and lives until `done` — reconnecting to a running turn works.
+- The `done` event carries the updated conversation record: the client already calls
+  `rememberChat(event.chat, box.text)` on it.
 
-### Чего не хватает
+### What's missing
 
-Одной штуки: **широковещательного канала поверх разговоров**. Сейчас подписка возможна только
-внутри одного `Turn`; узнать, что «чат X стал занят» или «чат X закончил», не подписавшись на
-весь его поток, нельзя. Отсюда и весь глобальный лок: клиент не знает про чужие ходы ничего.
+One thing: **a broadcast channel on top of conversations**. Right now a subscription is possible only
+inside a single `Turn`; you can't find out that "chat X became busy" or "chat X finished" without subscribing to
+its entire stream. Hence the whole global lock: the client knows nothing about other people's turns.
 
-### Три канала
+### Three channels
 
-| Канал | Область | Что несёт | Откуда |
+| Channel | Scope | What it carries | From |
 |---|---|---|---|
-| Живой (есть) | один разговор | всё: дельты текста, шаги, thinking | `POST /chat/send`, `GET /chat/stream` |
-| Сводка (новый) | все разговоры | busy/idle, финальный текст | `GET /chat/events` |
-| Прочитано (новый) | все разговоры | зелёные точки | только localStorage |
+| Live (exists) | one conversation | everything: text deltas, steps, thinking | `POST /chat/send`, `GET /chat/stream` |
+| Summary (new) | all conversations | busy/idle, the final text | `GET /chat/events` |
+| Read (new) | all conversations | green dots | localStorage only |
 
-Сводка молчит во время хода — иначе она была бы вторым стримом. Только старт, только финал.
+The summary stays silent during a turn — otherwise it would be a second stream. Only the start, only the finish.
 
-### Сервер
+### Server
 
-1. `chat-live.ts`: глобальная подписка `watchAll(watcher)` + `broadcast(event)`. Событие несёт
-   `userId`, чтобы чужие ходы не утекли.
-2. `busy` шлём из `startTurn` (единственная точка старта — `streamTurn` в `chat.ts`).
-   `idle` шлём из `finishChat` с готовой записью разговора: хаб — тупой журнал событий,
-   запись знает тот, кто закрывает ход, и именно она едет в `event.chat`.
-3. `finishChat` — единственное место, где ход встаёт окончательно (и успех, и провал
-   проходят через него), поэтому `idle` шлёт он же, а не `streamTurn`. Иначе «request closed»
-   или любой другой ранний выход оставляли бы разговор жёлтым навсегда.
-4. `GET /panel/api/chat/events` — SSE (`text/event-stream`). Кука уже есть, значит `EventSource`
-   в браузере и бесплатный автоматический реконнект; руками писать backoff не надо.
-   Разрыв теряет события — поэтому есть пункт 5.
-5. `GET /panel/api/chat/status` — снимок `{busy: [chatId, …]}` на загрузке страницы и после каждого
-   реконнекта. Источник — живые сессии реестра с поднятым `busy`.
+1. `chat-live.ts`: a global subscription `watchAll(watcher)` + `broadcast(event)`. The event carries
+   `userId` so other people's turns don't leak.
+2. We send `busy` from `startTurn` (the only start point is `streamTurn` in `chat.ts`).
+   We send `idle` from `finishChat` with the finished conversation record: the hub is a dumb event journal,
+   the record is known to whoever closes the turn, and it's exactly it that rides in `event.chat`.
+3. `finishChat` is the only place where a turn comes to a definitive stop (both success and failure
+   go through it), so it's the one that sends `idle`, not `streamTurn`. Otherwise "request closed"
+   or any other early exit would leave the conversation yellow forever.
+4. `GET /panel/api/chat/events` — SSE (`text/event-stream`). The cookie already exists, so `EventSource`
+   in the browser and free automatic reconnect; there's no need to hand-write backoff.
+   A break loses events — hence item 5.
+5. `GET /panel/api/chat/status` — a snapshot `{busy: [chatId, …]}` on page load and after every
+   reconnect. The source — live registry sessions with `busy` raised.
 
-### Клиент
+### Client
 
-Состояние разъезжается на три штуки вместо одного `streaming`:
+State splits into three things instead of one `streaming`:
 
 ```js
-let liveChatId = null;        // чей ход мы СМОТРИМ
-const busyChats = new Set();  // у кого ход идёт вообще (из сводки)
-const unread = new Set();     // зелёные точки (localStorage)
+let liveChatId = null;        // whose turn we are WATCHING
+const busyChats = new Set();  // who has a turn running at all (from the summary)
+const unread = new Set();     // green dots (localStorage)
 ```
 
-`streaming` остаётся, но становится производным: `liveChatId === currentId`. Дальше — по местам:
+`streaming` stays, but becomes derived: `liveChatId === currentId`. Then — spot by spot:
 
-1. `openChat` не отказывает никогда. Уходим из разговора с живой подпиской — отписываемся,
-   не авортим: ход доживёт на сервере (уже так и работает).
-2. `startDraft`, `openWorkspace`, `startPrompt` — ранний выход по `streaming` выкидывается целиком.
-3. `sendText` отказывает только если `busyChats.has(currentId)` — то есть занят *этот* разговор.
-   Чужой ход отправке не мешает.
-4. Возврат в занятый разговор: `openChat` видит `busyChats.has(id)` → `attachLive()`. Серверный код
-   не нужен, переиспользуется существующий replay.
+1. `openChat` never refuses. We leave a conversation with a live subscription — we unsubscribe,
+   we don't abort: the turn will live on on the server (that's already how it works).
+2. `startDraft`, `openWorkspace`, `startPrompt` — the early exit on `streaming` is thrown out entirely.
+3. `sendText` refuses only if `busyChats.has(currentId)` — that is, if *this* conversation is busy.
+   Someone else's turn doesn't get in the way of sending.
+4. Returning to a busy conversation: `openChat` sees `busyChats.has(id)` → `attachLive()`. No server code
+   is needed, the existing replay is reused.
 
-### Точки
+### Dots
 
-- В `renderChats()`, на строке `.chat-item`, слева от заголовка — один `<span class="chat-dot">`.
-- Жёлтая — `busyChats.has(id)`. Зелёная — `unread.has(id)`. Если оба, жёлтая старше: «в работе»
-  важнее, чем «есть новости».
-- Зелёная ставится на `done` из сводки, если разговор не текущий **или** вкладка скрыта
-  (`document.hidden`). Читаешь ответ прямо на экране — точки не надо.
-- Снимается по `selectChat(id)` и по `window.focus`, если разговор текущий.
-- LocalStorage, ключ `icarus.unread` — массив id. Персиста сверх этого не заводим.
-- При загрузке множество чистится на пересечение с загруженными `chats`: удалённый разговор
-  не должен оставлять вечную точку.
+- In `renderChats()`, on the `.chat-item` row, to the left of the title — a single `<span class="chat-dot">`.
+- Yellow — `busyChats.has(id)`. Green — `unread.has(id)`. If both, yellow is older: "working"
+  matters more than "there's news".
+- Green is set on the summary's `done` if the conversation isn't the current one **or** the tab is hidden
+  (`document.hidden`). You're reading the answer right on the screen — no dot needed.
+- Cleared on `selectChat(id)` and on `window.focus`, if it's the current conversation.
+- LocalStorage, key `icarus.unread` — an array of ids. We don't add persistence beyond that.
+- On load the set is cleaned to the intersection with the loaded `chats`: a deleted conversation
+  mustn't leave an eternal dot.
 
-### Что решено сознательно (не баги)
+### What's decided deliberately (not bugs)
 
-- **Прочитанность — на браузер, не на аккаунт.** Откроешь на телефоне — там своя. Для дома
-  на 2–5 человек с одним браузером на человека это нормально; пишем в README, чтобы не удивлялись.
-- **Два хода в одном контейнере.** Разговоры разные, `pi` разный, а контейнер, `/workspaces`
-  и git — одни. Два агента, правящих одну папку одновременно, — проблема человека, а не блокировка.
-  Отмечаем в README, не чиним.
-- **Уход из разговора не оставляет подписки.** Вернулся — ответ достримился и виден целиком,
-  но ровно одним телом: повторный вход в тот же идущий ход подхватывает уже добавленное
-  тело, а не заводит второе (иначе два возврата — два ответа в ленте).
+- **Read state is per browser, not per account.** You open it on your phone — it has its own. For a home
+  of 2–5 people with one browser per person that's fine; we write it in the README so no one's surprised.
+- **Two turns in one container.** The conversations are different, `pi` is different, but the container, `/workspaces`
+  and git are shared. Two agents editing one folder at the same time is the person's problem, not a lock.
+  We note it in the README, we don't fix it.
+- **Leaving a conversation doesn't leave a subscription.** You come back — the answer streamed to the end and is visible in full,
+  but as exactly one body: re-entering the same running turn picks up the already-added
+  body rather than starting a second one (otherwise two returns — two answers in the feed).
 
-### Порядок работ
+### Order of work
 
-1. Сводка на сервере: `watchAll`/`broadcast`, `/chat/events`, `/chat/status`. Поведение не меняется.
-2. Клиент: `liveChatId` + `busyChats` вместо глобального `streaming`, выкинуть пять ранних выходов.
-   Это и есть фича; точки — оформление.
-3. Точки и unread в localStorage.
-4. Тесты в `chat-live.test.ts` и `chat-ui.test.ts`: два занятых чата разом, уход не авортит,
-   unread переживает перезагрузку, чужие id вычищаются.
+1. The summary on the server: `watchAll`/`broadcast`, `/chat/events`, `/chat/status`. Behavior doesn't change.
+2. The client: `liveChatId` + `busyChats` instead of the global `streaming`, throw out the five early exits.
+   That's the feature itself; the dots are decoration.
+3. The dots and unread in localStorage.
+4. Tests in `chat-live.test.ts` and `chat-ui.test.ts`: two busy chats at once, leaving doesn't abort,
+   unread survives a reload, other people's ids are cleaned out.
 
-## Итог: артефакты — общая библиотека с правами папок
+## Result: artifacts — a shared library with folder permissions
 
-Задача: дать Икару готовые вещи для человека — страницы, документы и картинки, — которые
-открываются по ссылке и не требуют отдельного «движка артефактов».
+The task: give Icarus ready-made things for the person — pages, documents and images — that
+open by a link and don't require a separate "artifact engine".
 
-Решения (follow-up: глобальная библиотека и права):
+Decisions (follow-up: the global library and permissions):
 
-- **Артефакт — папка в общей библиотеке** `<dataDir>/artifacts/<slug>/`, а не в workspace.
-  Она монтируется в каждый контейнер как `/artifacts`; список в панели глобальный. Внутри
-  ровно один index-файл (`index.html`, `index.md` или `index.png|jpg|svg`) и обязательный
-  `index.ai.md`; ассеты лежат рядом, ссылки в HTML относительные.
-- **Права — матрица «субъект × уровень»**: владелец и два субъекта, `me`/`family`, уровни
-  `none ⊂ read ⊂ write ⊂ admin`. `none` — артефакта нет в списках панели и MCP, его нельзя
-  прочитать или изменить; это уровень для очень личных вещей. `.folder-acl.json` лежит в папке;
-  по умолчанию `me=admin`, `family=none` — новый артефакт личный, пока владелец не откроет
-  семье доступ.
-  `write` умеет читать, `admin` — ещё права, удаление и публичную ссылку. Владелец всегда
-  управляет своим артефактом, даже если выставил себе `read`; выставить себе `none` нельзя.
-- **Generic folder-guard**: расширение проверяет `.folder-acl.json` у любого защищённого
-  корня (сегодня `/artifacts`, завтра — другие через `ICARUS_ACL_ROOTS`). Блокируются
-  `read`/`write`/`edit`/`grep`/`find`/`ls` без прав, а `bash` с абсолютным путём к `/artifacts` — целиком,
-  чтобы права не обходились. Это слой для тулов агента, а не только для артефактов.
-- **`artifact_new` — не генератор, а заявка на папку.** Он создаёт папку и ACL; без него
-  `write` в `/artifacts` блокируется, иначе владельца и права взять неоткуда. Дальше pi
-  пишет index-файлы обычными write.
-- **MCP `artifacts` — hidden + lazy.** В панели MCP его нет и выключить нельзя; в `AGENTS.md`
-  едет только короткий триггер, полные инструкции приезжают в `instructions` после
-  `mcp_connect`. Требование «инструкции скрыты, но разворачиваются по упоминанию» — тем же
-  механизмом, что у Maple.
-- **Ссылка по умолчанию внутренняя**: `/panel/artifacts?artifact=…`. Публичная
-  `/a/<артефакт>/<publicId>/` создаётся только `artifact_link public: true` (нужен admin) и
-  открывается без SSO; `?bare=1` — без панели. `publicId` — случайные 18 байт в
-  `.artifact.json`; HTML/SVG едут с CSP sandbox. Старые ссылки
-  `/a/<человек>/<workspace>/<артефакт>/<id>/` редиректят на новый адрес.
-- **Панель:** «Артефакты» — отдельная дверь рядом с «Настройками», глобальный список без
-  workspace-переключателя. Владелец видит тип, размер, владельца, уровень; кнопка «Поделиться»
-  (иконка) меняет `me`/`family` и включает публичное чтение со ссылкой; удаление — в
+- **An artifact is a folder in the shared library** `<dataDir>/artifacts/<slug>/`, not in the workspace.
+  It's mounted into every container as `/artifacts`; the list in the panel is global. Inside
+  there's exactly one index file (`index.html`, `index.md`, or `index.png|jpg|svg`) and a mandatory
+  `index.ai.md`; the assets lie next to it, the links in the HTML are relative.
+- **Permissions are a "subject × level" matrix**: the owner and two subjects, `me`/`family`, levels
+  `none ⊂ read ⊂ write ⊂ admin`. `none` — the artifact isn't in the panel's or MCP's lists, it can't be
+  read or changed; this is the level for very personal things. `.folder-acl.json` lies in the folder;
+  by default `me=admin`, `family=none` — a new artifact is personal until the owner opens
+  access to the family.
+  `write` can read, `admin` — also permissions, deletion and a public link. The owner always
+  manages their own artifact, even if they've set themselves `read`; you can't set yourself `none`.
+- **Generic folder-guard**: the extension checks `.folder-acl.json` on any protected
+  root (today `/artifacts`, tomorrow — others via `ICARUS_ACL_ROOTS`). Blocked are
+  `read`/`write`/`edit`/`grep`/`find`/`ls` without permissions, and `bash` with an absolute path to `/artifacts` — entirely,
+  so permissions can't be bypassed. This is a layer for the agent's tools, not just for artifacts.
+- **`artifact_new` is not a generator but an application for a folder.** It creates the folder and the ACL; without it
+  `write` to `/artifacts` is blocked, because otherwise the owner and the permissions have nowhere to come from. After that pi
+  writes the index files with ordinary write.
+- **The MCP `artifacts` — hidden + lazy.** It isn't in the panel's MCP list and can't be turned off; in `AGENTS.md`
+  only a short trigger rides, the full instructions arrive in `instructions` after
+  `mcp_connect`. The requirement "instructions are hidden but unfold on mention" — by the same
+  mechanism as Maple's.
+- **The default link is internal**: `/panel/artifacts?artifact=…`. The public
+  `/a/<artifact>/<publicId>/` is created only by `artifact_link public: true` (admin needed) and
+  opens without SSO; `?bare=1` — without the panel. `publicId` — random 18 bytes in
+  `.artifact.json`; HTML/SVG go out with a CSP sandbox. The old links
+  `/a/<person>/<workspace>/<artifact>/<id>/` redirect to the new address.
+- **Panel:** "Artifacts" — a separate door next to "Settings", a global list without
+  a workspace switcher. The owner sees the type, size, owner, level; the "Share" button
+  (an icon) changes `me`/`family` and enables public reading with a link; deletion — to
   `artifacts/.trash/`.
-- **Миграция:** старые артефакты из `workspace/artifacts/` при первом запуске переезжают в
-  общую библиотеку, владелец — автор workspace, ACL `me=admin, family=none`, publicId
-  сохраняется.
-- **Почему `index.ai.md` обязателен:** модель не должна парсить HTML и «смотреть» картинку,
-  чтобы понять, о чём артефакт. Это дешевле, надёжнее и переживает смену формата index-файла.
+- **Migration:** old artifacts from `workspace/artifacts/` move on first launch into
+  the shared library, the owner is the workspace's author, ACL `me=admin, family=none`, publicId
+  is preserved.
+- **Why `index.ai.md` is mandatory:** the model shouldn't parse HTML and "look at" an image
+  to understand what the artifact is about. It's cheaper, more reliable, and survives a change of the index file format.
 
-### История версий: откат без «git для человека»
+### Version history: rollback without "git for the person"
 
-Каждый артефакт — свой маленький git-репозиторий, но человек про это не знает. В панели
-«История» — боковая панель: клик по версии показывает её в предпросмотре, «Вернуть эту версию» —
-только после подтверждения. В публичном виде истории нет.
+Every artifact is its own little git repository, but the person doesn't know about it. In the panel
+"History" is a side panel: clicking a version shows it in the preview, "Restore this version" —
+only after confirmation. In the public view there's no history.
 
-- **Императивно, без ИИ.** Расширение `extensions/artifact-git.ts` на `tool_call` фиксирует снимок
-  «как было» перед `write`/`edit`, на `tool_result` — коммит после успешной записи, на `turn_end`
-  добирает изменения от MCP/других инструментов. Модель ничего не решает и не пишет commit message.
-- **Гарантия после каждого обновления.** `write`/`edit` коммитятся сразу; `turn_end` — страховка;
-  сервис при старте заводит initial-коммит у всех существующих артефактов, чтобы откат был к
-  состоянию «до первого изменения ИИ».
-- **Служебное не версионируется.** `.folder-acl.json` и `.artifact.json` исключены через
-  `.git/info/exclude`: откат контента не меняет права и публичную ссылку. `.git` скрыт от панели,
-  публичных маршрутов и файловых тулов; folder-guard блокирует `.git` и метаданные.
-- **Откат не переписывает историю.** `read-tree` возвращает дерево к выбранной версии, затем
-  обычный коммит `restore`: старые версии остаются, человек видит «вернул к …».
-- **Предпросмотр:** `GET /panel/artifacts/api/preview` и
-  `GET /panel/artifacts/version/<slug>/<commit>/<path>` читают версию из git, не меняя рабочую папку.
-- **Панель:** `GET /panel/artifacts/api/history`, `POST /panel/artifacts/api/restore`; вернуть может
-  тот, кто может менять артефакт (`write`/`admin`/владелец).
+- **Imperative, no AI.** The `extensions/artifact-git.ts` extension on `tool_call` takes a snapshot
+  "as it was" before `write`/`edit`, on `tool_result` — commits after a successful write, on `turn_end`
+  picks up changes from MCP/other tools. The model decides nothing and writes no commit message.
+- **A guarantee after every update.** `write`/`edit` are committed immediately; `turn_end` is insurance;
+  the service on startup creates an initial commit for all existing artifacts, so that a rollback is possible to
+  the state "before the AI's first change".
+- **Service data isn't versioned.** `.folder-acl.json` and `.artifact.json` are excluded via
+  `.git/info/exclude`: rolling back the content doesn't change the permissions and the public link. `.git` is hidden from the panel,
+  public routes and file tools; folder-guard blocks `.git` and the metadata.
+- **Rollback doesn't rewrite history.** `read-tree` returns the tree to the chosen version, then
+  an ordinary `restore` commit: the old versions remain, the person sees "restored to …".
+- **Preview:** `GET /panel/artifacts/api/preview` and
+  `GET /panel/artifacts/version/<slug>/<commit>/<path>` read a version from git without changing the working folder.
+- **Panel:** `GET /panel/artifacts/api/history`, `POST /panel/artifacts/api/restore`; whoever can
+  change the artifact can restore (`write`/`admin`/owner).
 
-Файлы: `tools/artifacts-mcp/` (сервер и самотест), `packages/service/src/artifacts.ts` (глобальная
-библиотека, ACL, миграция), `packages/service/src/artifacts-git.ts` (репозитории, история, restore),
-`extensions/artifact-git.ts` (авто-коммиты pi), `control/artifacts.ts` (API, публичный маршрут,
-песочница),
-`control/artifacts-ui.ts` и `artifacts-client.*` (страница), `control/artifacts-markdown.js`
-(рендер документа), `extensions/lib/folder-access.ts` + `extensions/folder-guard.ts` (generic
-права папок для тулов).
+Files: `tools/artifacts-mcp/` (the server and self-test), `packages/service/src/artifacts.ts` (the global
+library, ACL, migration), `packages/service/src/artifacts-git.ts` (repositories, history, restore),
+`extensions/artifact-git.ts` (pi's auto-commits), `control/artifacts.ts` (API, public route,
+sandbox),
+`control/artifacts-ui.ts` and `artifacts-client.*` (the page), `control/artifacts-markdown.js`
+(document rendering), `extensions/lib/folder-access.ts` + `extensions/folder-guard.ts` (generic
+folder permissions for tools).
 
-Проверено: `./script/test`, `tsc` + `eslint`, самотест MCP (`node tools/artifacts-mcp/test.mjs`),
-живой стенд: миграция, `/artifacts` в контейнере, artifact_new, внутренняя ссылка, панель с правами,
-авто-коммиты и откат версии.
+Verified: `./script/test`, `tsc` + `eslint`, the MCP self-test (`node tools/artifacts-mcp/test.mjs`),
+the live bench: migration, `/artifacts` in the container, artifact_new, the internal link, the panel with permissions,
+auto-commits and version rollback.
 
-## Риски и как их держим
+## Risks and how we hold them
 
-- **pi молодой и быстро меняется**, внешние PR'ы авто-закрываются → пины версий, вся наша логика в расширениях,
-  контрактные тесты протокола, чтобы обновление pi не проходило молча.
-- **Латентность болтовни** → тёплые контейнеры, дешёвая модель по умолчанию, короткое ядро памяти, тулы только по делу;
-  пул прогретых pi-процессов, если старт окажется заметным.
-- **Правки в LibreChat не откатывают сессию** → принято осознанно; дифф в логах, чтобы это не было сюрпризом.
-- **LibreChat режет сообщение на части по каналам** (проверено на v0.8.8-rc3: новая часть на каждое
-  переключение `content` ↔ `reasoning_content`, опции склейки нет) → незаконченный хвост ответа придерживаем
-  в icarus и склеиваем сами; ответ должен идти одним каналом.
-- **Ключи внутри контейнера** при открытом интернете → отдельный ключ на человека, ротация, никакого общего ключа.
-- **Экстрактор может мусорить** → ежедневная уборка сводит файлы-близнецы, дробит разросшиеся файлы по темам
-  и уводит закрытое из `identity.md`; git и панель делают её обратимой, а журналы она не трогает вовсе.
-- **Личное утечёт в семейное** → авто-разбор пишет только в личное; в `shared-memory` — лишь явная просьба.
+- **pi is young and changes fast**, external PRs auto-close → version pins, all our logic in extensions,
+  contract protocol tests so that a pi update doesn't happen silently.
+- **Small-talk latency** → warm containers, a cheap model by default, a short memory core, tools only when needed;
+  a pool of pre-warmed pi processes if startup turns out to be noticeable.
+- **Edits in LibreChat don't roll back the session** → accepted deliberately; a diff in the logs so it isn't a surprise.
+- **LibreChat cuts a message into parts by channel** (verified on v0.8.8-rc3: a new part on every
+  switch of `content` ↔ `reasoning_content`, there's no gluing option) → we hold the unfinished tail of the answer
+  in icarus and glue it ourselves; the answer must go through one channel.
+- **Keys inside the container** with an open internet → a separate key per person, rotation, no shared key.
+- **The extractor can litter** → a daily cleanup merges twin files, splits overgrown files by topic
+  and takes what's closed out of `identity.md`; git and the panel make it reversible, and it doesn't touch the journals at all.
+- **Personal will leak into family** → auto-extraction writes only to personal; into `shared-memory` — only an explicit request.
 
-## Открытые мелочи (решаем по ходу)
+## Open small things (we decide as we go)
 
-Формат и лимит «ядра» памяти; как именно детектится затишье и что делать с неразобранным при остановке контейнера;
-политика очистки `incoming/`; аутентификация мини-панели; выключать ли `titleConvo` в LibreChat, чтобы заголовки не
-гоняли лишний агентский прогон.
+The format and limit of the memory "core"; exactly how quiet is detected and what to do with the unparsed when the container stops;
+the cleanup policy for `incoming/`; authentication of the mini panel; whether to turn off `titleConvo` in LibreChat so that titles don't
+run an extra agent pass.
 
-## Структура репозитория
+## Repository structure
 
 ```
 icarus/
-  PLAN.md            # этот файл
-  icarus.md          # системный промпт Икара (владелец пишет сам)
-  config.yaml        # локальный конфиг (в git не попадает)
-  docker-compose.yml # стек, который собирает ./script/server (в git не попадает)
+  PLAN.md            # this file
+  icarus.md          # Icarus's system prompt (the owner writes it themselves)
+  config.yaml        # local config (not committed to git)
+  docker-compose.yml # the stack that ./script/server assembles (not committed to git)
   packages/
-    service/         # OpenAI-фасад, docker-менеджер, реестр сессий, панель памяти
+    service/         # OpenAI facade, docker manager, session registry, memory panel
     extensions/      # persona, memory-core, memory-extractor, escalation
   docker/
-    user/            # образ контейнера пользователя
-    service/         # образ самого icarus: node, git, клиент docker
-    librechat/       # стенд для проверки стыка с LibreChat
+    user/            # user container image
+    service/         # the icarus image itself: node, git, docker client
+    librechat/       # bench for testing the LibreChat integration
   tools/
-    artifacts-mcp/   # встроенный MCP артефактов
-    maple-mcp/       # встроенный MCP Maple
-  specs/             # спеки этапов
+    artifacts-mcp/   # built-in artifacts MCP
+    maple-mcp/       # built-in Maple MCP
+  specs/             # stage specs
 ```

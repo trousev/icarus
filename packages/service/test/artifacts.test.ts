@@ -1,7 +1,8 @@
-// Ядро артефактов: глобальная папка, ACL, публичная ссылка и миграция.
+// Artifacts core: global folder, ACL, public link and migration.
 //
-// Артефакт — общий для семьи, поэтому тест смотрит на него глазами разных
-// людей: владельца, «семьи» с none/read/write/admin и постороннего без ACL.
+// An artifact is shared with the family, so the test looks at it through the eyes
+// of different people: the owner, "family" with none/read/write/admin, and an
+// outsider without ACL.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -47,7 +48,7 @@ function artifact(box: ReturnType<typeof makeConfig>, slug: string, files: Recor
   return dir;
 }
 
-test('артефакты — глобальная папка с index-файлом; тип определяется по нему', () => {
+test('artifacts are a global folder with an index file; the type is determined by it', () => {
   const box = config();
   artifact(box, 'plan', {
     'index.md': '# План на четверг\n\n1. Стендап\n',
@@ -61,7 +62,7 @@ test('артефакты — глобальная папка с index-файло
     'index.svg': '<svg xmlns="http://www.w3.org/2000/svg"></svg>',
     'index.ai.md': '# Идеи подарка\n\nТри идеи для Анны.\n',
   });
-  // Папка без ACL или index — не артефакт.
+  // A folder without ACL or index is not an artifact.
   seed(dirOf(box, 'draft'), { 'index.md': '# без прав', 'index.ai.md': '# без прав' });
   seed(dirOf(box, 'empty'), { 'notes.txt': 'черновик' });
 
@@ -81,7 +82,7 @@ test('артефакты — глобальная папка с index-файло
   assert.equal(items.find((item) => item.name === 'gift')!.type, 'image');
 });
 
-test('ACL: me для владельца, family для остальных, уровни включают друг друга', () => {
+test('ACL: me for the owner, family for everyone else, levels include each other', () => {
   assert.equal(allows('admin', 'write'), true);
   assert.equal(allows('write', 'read'), true);
   assert.equal(allows('read', 'write'), false);
@@ -101,7 +102,7 @@ test('ACL: me для владельца, family для остальных, ур�
   assert.equal(owner.canManage, true);
 });
 
-test('none: артефакт не существует для семьи, но остаётся доступен владельцу', () => {
+test('none: the artifact does not exist for the family, but stays available to the owner', () => {
   assert.deepEqual(DEFAULT_ACL, { me: 'admin', family: 'none' }, 'по умолчанию артефакт личный');
   assert.equal(allows('none', 'read'), false);
   assert.equal(allows('none', 'write'), false);
@@ -123,14 +124,14 @@ test('none: артефакт не существует для семьи, но �
   assert.throws(() => readArtifact(box, 'probe2', 'diary'), /нет права читать/);
   assert.equal(artifactFile(box, 'probe2', 'diary', 'index.md'), null);
 
-  // Владелец может открыть доступ позже, а себе none выставить нельзя.
+  // The owner can open access later, but cannot set none for themselves.
   const shared = setAcl(box, 'probe', 'diary', { me: 'admin', family: 'read' });
   assert.deepEqual(shared.acl, { me: 'admin', family: 'read' });
   assert.equal(inspectArtifact(box, 'diary', 'probe2')!.canRead, true);
   assert.throws(() => setAcl(box, 'probe', 'diary', { me: 'none', family: 'read' }), /владельцу нельзя/);
 });
 
-test('family none не мешает публичной ссылке: её открывают осознанно', () => {
+test('family none does not prevent a public link: it is opened deliberately', () => {
   const box = config({ url: 'https://icarus.example' });
   artifact(box, 'secret', { 'index.md': '# Секрет', 'index.ai.md': '# Секрет' }, { me: 'admin', family: 'none' });
   const id = 'abcdefghijklmnopqrstuvwx';
@@ -138,7 +139,7 @@ test('family none не мешает публичной ссылке: её отк
   assert.equal(publicArtifact(box, 'secret', id)?.artifact.name, 'secret');
 });
 
-test('write даёт чтение и запись, но не управление; admin даёт управление', () => {
+test('write grants read and write, but not management; admin grants management', () => {
   const box = config();
   artifact(box, 'plan', { 'index.md': '# План', 'index.ai.md': '# План' }, { me: 'admin', family: 'write' });
   const writer = inspectArtifact(box, 'plan', 'probe2')!;
@@ -155,7 +156,7 @@ test('write даёт чтение и запись, но не управлени�
   assert.deepEqual(changed.acl, { me: 'read', family: 'write' });
 });
 
-test('владелец всегда управляет своим артефактом, даже если me=read', () => {
+test('the owner always manages their artifact, even if me=read', () => {
   const box = config();
   artifact(box, 'frozen', { 'index.md': '# Заморожен', 'index.ai.md': '# Заморожен' }, { me: 'read', family: 'read' });
   const owner = inspectArtifact(box, 'frozen', 'probe')!;
@@ -166,7 +167,7 @@ test('владелец всегда управляет своим артефак
   assert.equal(changed.acl.me, 'admin');
 });
 
-test('артефакт без ACL не существует для панели и тулов', () => {
+test('an artifact without ACL does not exist for the panel and tools', () => {
   const box = config();
   seed(path.join(root(box), 'raw'), { 'index.md': '# Без прав', 'index.ai.md': '# Без прав' });
   assert.equal(inspectArtifact(box, 'raw', 'probe'), null);
@@ -174,13 +175,13 @@ test('артефакт без ACL не существует для панели 
   assert.throws(() => readArtifact(box, 'probe', 'raw'), /не найден/);
 });
 
-test('публичная ссылка создаётся только управляющим и отзывается', () => {
+test('a public link is created only by a manager and can be revoked', () => {
   const box = config();
   artifact(box, 'plan', { 'index.md': '# План', 'index.ai.md': '# План' }, { me: 'admin', family: 'read' });
   assert.throws(() => setAcl(box, 'probe2', 'plan', { me: 'admin', family: 'read' }), /владелец или админ/);
 
-  // Публичную ссылку создаёт сервис через ensurePublicId, а не этот тест:
-  // для публичной проверки достаточно положить метаданные.
+  // The service creates the public link via ensurePublicId, not this test:
+  // for a public check it is enough to write the metadata.
   const id = 'abcdefghijklmnopqrstuvwx';
   fs.writeFileSync(path.join(dirOf(box, 'plan'), META_FILE), JSON.stringify({ version: 1, publicId: id }));
   const item = inspectArtifact(box, 'plan', 'probe')!;
@@ -191,7 +192,7 @@ test('публичная ссылка создаётся только управ
   assert.equal(publicArtifact(box, 'plan', 'x'.repeat(24)), null);
 });
 
-test('файл артефакта: вложенный ассет отдаётся по read, выход из папки — нет', () => {
+test('artifact file: a nested asset is served on read, leaving the folder is not', () => {
   const box = config();
   artifact(box, 'site', {
     'index.html': '<link rel="stylesheet" href="css/style.css">',
@@ -210,7 +211,7 @@ test('файл артефакта: вложенный ассет отдаётс�
   assert.equal(artifactFile(box, 'probe2', 'site', '.artifact.json'), null);
 });
 
-test('удаление — в корзину и только управляющим', () => {
+test('deletion goes to trash and only by a manager', () => {
   const box = config();
   artifact(box, 'plan', { 'index.md': '# План', 'index.ai.md': '# План' }, { me: 'admin', family: 'write' });
   assert.throws(() => trashArtifact(box, 'probe2', 'plan'), /владелец или админ/);
@@ -220,7 +221,7 @@ test('удаление — в корзину и только управляющ�
   assert.equal(fs.existsSync(path.join(target, 'index.md')), true);
 });
 
-test('счётчик и ссылки работают без workspace', () => {
+test('the counter and links work without a workspace', () => {
   const box = config({ url: 'https://icarus.example' });
   artifact(box, 'a', { 'index.md': '# A', 'index.ai.md': '# A' });
   artifact(box, 'b', { 'index.png': Buffer.from([0x89, 0x50]), 'index.ai.md': '# B' });
@@ -230,7 +231,7 @@ test('счётчик и ссылки работают без workspace', () => {
   assert.equal(urls.raw, 'https://icarus.example/panel/artifacts/raw/a/index.md');
 });
 
-test('YAML-frontmatter в index.ai.md не становится заголовком и описанием', () => {
+test('YAML frontmatter in index.ai.md does not become the title and description', () => {
   const box = config();
   artifact(box, 'calc', {
     'index.html': '<h1>Калькулятор</h1>',
@@ -242,7 +243,7 @@ test('YAML-frontmatter в index.ai.md не становится заголовк
   assert.doesNotMatch(item.summary, /name:/);
 });
 
-test('имя папки с переводом строки или выходом не считается артефактом', () => {
+test('a folder name with a line break or traversal is not considered an artifact', () => {
   const box = config();
   artifact(box, 'ok', { 'index.md': '# Ok', 'index.ai.md': '# Ok' });
   assert.equal(inspectArtifact(box, '..', 'probe'), null);
@@ -258,7 +259,7 @@ test('имя папки с переводом строки или выходом
   assert.equal(inspectArtifact(box, 'link', 'probe'), null);
 });
 
-test('старые артефакты из workspace переезжают в общую библиотеку', () => {
+test('old artifacts from a workspace move to the shared library', () => {
   const box = config();
   const old = path.join(userPaths(box, probe('probe')).workspaces, 'talk', 'artifacts', 'plan');
   seed(old, {

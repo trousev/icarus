@@ -1,7 +1,7 @@
-// API workspace'ов панели: список, создание, удаление.
+// API of the panel's workspaces: list, create, delete.
 //
-// Workspace — это папка, а не контейнер: создание и удаление здесь — операции над
-// каталогами и реестром. Docker о них не знает и пересоздавать ничего не должен.
+// A workspace is a folder, not a container: creation and deletion here are operations on
+// directories and the registry. Docker doesn't know about them and shouldn't recreate anything.
 import os from 'node:os';
 import path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -31,16 +31,16 @@ function json(res: ServerResponse, status: number, payload: unknown): void {
   res.end(JSON.stringify(payload));
 }
 
-/** Путь для интерфейса: домашний каталог сокращаем до `~`, как в макете. */
+/** Path for the interface: we shorten the home directory to `~`, as in the mockup. */
 export function displayPath(absolute: string): string {
   const home = os.homedir();
   return absolute.startsWith(`${home}/`) ? `~${absolute.slice(home.length)}` : absolute;
 }
 
 export type WorkspaceView = Workspace & {
-  /** Папка на диске: показываем человеку, где искать файлы. */
+  /** Folder on disk: we show the person where to look for files. */
   path: string;
-  /** Сколько диалогов живёт в этом workspace'е. */
+  /** How many conversations live in this workspace. */
   chats: number;
 };
 
@@ -90,7 +90,7 @@ export async function handleWorkspacesApi(
     const slug = decodeURIComponent(rest);
     if (req.method === 'DELETE') {
       const workspace = deleteWorkspace(ctx.config, user, slug);
-      // Диалоги возвращаются в «Разговор», папка на диске остаётся: это данные человека.
+      // The conversations return to "Conversation", the folder on disk stays: that's the person's data.
       const moved = reassignChats(ctx.config, user, workspace.slug, DEFAULT_WORKSPACE);
       json(res, 200, { ok: true, slug: workspace.slug, movedChats: moved });
       return;

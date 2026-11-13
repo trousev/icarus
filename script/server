@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# Стек Icarus под docker compose.
+# Icarus stack under docker compose.
 #
-# ./script/server собирает docker-compose.yml из config.yaml — сервис icarus и по контейнеру
-# на человека — и поднимает всё через `docker compose up`.
-# По умолчанию up идёт на переднем плане: логи в консоли, Ctrl-C гасит стек. С `-d` стек
-# уходит в фон и живёт сам. Жизненным циклом владеет docker, а не сервис:
-# `restart: unless-stopped` возвращает контейнеры и после падения, и после перезагрузки
-# машины, а смена образа, маунтов или окружения приводит к пересозданию при следующем
-# запуске. Выбывшие люди уходят вместе с исчезнувшим сервисом (--remove-orphans).
+# ./script/server builds docker-compose.yml from config.yaml — the icarus service and one container
+# per person — and brings everything up via `docker compose up`.
+# By default up runs in the foreground: logs in the console, Ctrl-C shuts the stack down. With `-d` the stack
+# goes to the background and lives on its own. The lifecycle is owned by docker, not the service:
+# `restart: unless-stopped` brings containers back both after a crash and after a machine
+# reboot, and a change of image, mounts or environment leads to recreation on the next
+# start. Departed people leave together with the disappeared service (--remove-orphans).
 #
-#   ./script/server                    собрать и поднять (логи в консоли)
-#   ./script/server -d                 то же в фоне
-#   ./script/server --build            пересобрать образы без кеша
-#   ./script/server --down             погасить стек
-#   ./script/server --config <путь>    свой config.yaml
+#   ./script/server                    build and bring up (logs in the console)
+#   ./script/server -d                 same in the background
+#   ./script/server --build            rebuild images without cache
+#   ./script/server --down             shut the stack down
+#   ./script/server --config <path>    your own config.yaml
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -65,11 +65,11 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-# --- что нужно для compose -----------------------------------------------------
+# --- what compose needs --------------------------------------------------------
 command -v docker >/dev/null 2>&1 || die 'не нашёл docker'
 docker compose version >/dev/null 2>&1 || die 'не нашёл docker compose (плагин compose v2)'
 
-# Погасить стек можно и без валидного конфига: файл уже собран прошлым запуском.
+# The stack can be shut down even without a valid config: the file was already built by the previous run.
 if [ "$DOWN" = 1 ]; then
   [ -f "$COMPOSE_FILE" ] || die "нет $COMPOSE_FILE — стек не поднят"
   say 'гашу стек'
@@ -80,11 +80,11 @@ fi
 [ -d node_modules ] || die 'нет node_modules — сначала ./script/update'
 [ -f "$CONFIG" ] || die "нет конфига $CONFIG (./script/update создаёт его из config.example.yaml)"
 
-# --- сборка docker-compose.yml ------------------------------------------------
-# Конфиг разбираем тем же загрузчиком, что и сервис: один формат — один парсер, и
-# опечатка всплывает здесь, а не посреди запуска. Заодно готовим каталоги людей,
-# чтобы маунты принадлежали человеку, а не root-у. Ключи из .env генератор читает сам,
-# а в compose попадает только путь к файлу — значения в docker-compose.yml не пишутся.
+# --- building docker-compose.yml ----------------------------------------------
+# We parse the config with the same loader as the service: one format — one parser, and
+# a typo surfaces here, not in the middle of a start. At the same time we prepare people's directories,
+# so that the mounts belong to the person, not to root. The generator reads the keys from .env itself,
+# and only the path to the file gets into compose — values are not written into docker-compose.yml.
 summary="$(mktemp)"
 trap 'rm -f "$summary"' EXIT
 
@@ -113,19 +113,19 @@ while IFS=$'\t' read -r key first second; do
   esac
 done <"$summary"
 
-# --- порт панели: либо свободен, либо наш -------------------------------------
-# Публикация порта у docker молчаливая: если порт уже занят, контейнер поднимается
-# без сети и без публикации, а браузер ходит в чужой сервис на том же порту.
-# Симптом — «Икар молчит», а причина снаружи: забытый dev-сервис из прошлой сессии
-# или чужой контейнер. Падаем здесь, пока это видно.
-# Свой проект — не помеха: compose пересоздаст контейнер и порт освободится.
+# --- panel port: either free or ours ------------------------------------------
+# Port publication in docker is silent: if the port is already taken, the container comes up
+# without network and without publication, and the browser talks to someone else's service on the same port.
+# The symptom — "Icarus is silent", and the cause is outside: a forgotten dev service from a previous session
+# or someone else's container. We fail here while it is visible.
+# Our own project is no obstacle: compose recreates the container and the port is freed.
 if (exec 3<>"/dev/tcp/$PANEL_HOST/$PANEL_PORT") 2>/dev/null; then
   exec 3<&- 3>&-
   if [ -z "$(docker ps -q --filter "label=com.docker.compose.project=$PROJECT" --filter "publish=$PANEL_PORT" 2>/dev/null)" ]; then
-    # Кто занял: контейнер виден докеру, хозяйский процесс — через ss (docker-proxy
-    # ходит от root, поэтому pid в ss достаётся только нам, и наоборот).
-    # || true — потому что пустая подсказка это норма: без неё pipefail гасит скрипт
-    # раньше диагностики (grep без совпадений возвращает 1).
+    # Who took it: the container is visible to docker, a host process — via ss (docker-proxy
+    # runs as root, so the pid in ss is only available to us, and vice versa).
+    # || true — because an empty hint is normal: without it pipefail kills the script
+    # before the diagnostics (grep without matches returns 1).
     busy="$(docker ps --filter "publish=$PANEL_PORT" --format '{{.Names}} ({{.Image}})' 2>/dev/null | tr '\n' ' ' || true)"
     busy="${busy% }"
     pid=''
@@ -137,26 +137,26 @@ if (exec 3<>"/dev/tcp/$PANEL_HOST/$PANEL_PORT") 2>/dev/null; then
   fi
 fi
 
-# --- образы: сначала собрать, потом пересоздавать -----------------------------
-# Трюк ради меньшего простоя при обновлении: самая долгая часть — сборка образов, и она
-# не должна попадать в то же окно, что пересоздание контейнеров. Собираем всё, пока старые
-# контейнеры ещё работают; compose остаётся только пересоздать изменившееся — это секунды.
+# --- images: build first, recreate later --------------------------------------
+# A trick for less downtime during an update: the longest part is building images, and it
+# must not fall into the same window as recreating containers. We build everything while the old
+# containers are still running; compose only has to recreate what changed — that is seconds.
 build_args=()
 if [ "$BUILD" = 1 ]; then build_args=(--no-cache); fi
 
 say 'собираю образы (контейнеры пока работают)'
 docker compose -f "$COMPOSE_FILE" build ${build_args[@]+"${build_args[@]}"}
 
-# Образ человека общий на всех, поэтому собирается один раз здесь, а не build-секцией
-# каждого юзер-сервиса: иначе compose собирал бы его на каждого и подменял тег.
+# The person image is common to all, so it is built once here, not by a build section
+# of each user service: otherwise compose would build it for each one and replace the tag.
 if [ -n "$USER_IMAGE" ]; then
   docker build ${build_args[@]+"${build_args[@]}"} -t "$USER_IMAGE" docker/user/
 fi
 
-# --- переезд с ручного docker run ---------------------------------------------
-# Контейнеры прошлых версий сервис создавал сам: у них нет метки проекта, и compose
-# не может занять их имена. Сносим только свои (по имени из конфига) и только один раз —
-# дальше владельцем становится compose.
+# --- migration from manual docker run -----------------------------------------
+# The service used to create previous versions' containers itself: they have no project label, and compose
+# cannot take their names. We remove only our own (by the name from the config) and only once —
+# after that compose becomes the owner.
 container_owner() {
   docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$1" 2>/dev/null || true
 }
@@ -174,13 +174,13 @@ migrate() {
 for name in "${USER_CONTAINERS[@]+"${USER_CONTAINERS[@]}"}"; do
   migrate "$name"
 done
-# Контейнер сервиса из самой первой версии compose: имя сменилось на icarus.
+# The service container from the very first compose version: the name changed to icarus.
 if docker inspect icarus-icarus-1 >/dev/null 2>&1 && [ "$(container_owner icarus-icarus-1)" = "$PROJECT" ]; then
   say 'сношу старый контейнер сервиса icarus-icarus-1 (теперь он называется icarus)'
   docker rm -f icarus-icarus-1 >/dev/null
 fi
 
-# --- запуск -------------------------------------------------------------------
+# --- launch -------------------------------------------------------------------
 echo
 echo "==> поднимаю стек"
 echo "    API:           http://$PANEL_HOST:$PANEL_PORT/v1"

@@ -1,8 +1,8 @@
-// Локальный прокси OAuth-MCP: pi больше не держит протухающий Bearer в конфиге.
+// Local OAuth-MCP proxy: pi no longer keeps an expiring Bearer in the config.
 //
-// Тест держит две вещи, которые важны в жизни: заголовок Authorization подменяется
-// на каждом запросе, а просроченный токен обновляется по refresh_token до похода
-// в настоящий MCP.
+// The test checks two things that matter in real life: the Authorization header is replaced
+// on every request, and an expired token is refreshed via refresh_token before going
+// to the real MCP.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -53,7 +53,7 @@ async function withIcarus(run: (base: string, config: ReturnType<typeof makeConf
 
 const KEY = 'p'.repeat(32);
 
-test('прокси подставляет Bearer и не пропускает клиентский Authorization', async () => {
+test('the proxy injects the Bearer and does not pass through the client Authorization', async () => {
   const seen: Seen[] = [];
   const upstream = await listen(async (req, res) => {
     seen.push({
@@ -101,7 +101,7 @@ test('прокси подставляет Bearer и не пропускает к
   }
 });
 
-test('просроченный токен обновляется по refresh_token до запроса в MCP', async () => {
+test('an expired token is refreshed via refresh_token before the request to the MCP', async () => {
   let tokenBody = '';
   const as = await listen(async (req, res) => {
     tokenBody = await bodyOf(req);
@@ -151,7 +151,7 @@ test('просроченный токен обновляется по refresh_to
   }
 });
 
-test('SSE-поток проходит через прокси как поток, а не буфером', async () => {
+test('the SSE stream passes through the proxy as a stream, not buffered', async () => {
   const upstream = await listen((req, res) => {
     if (req.method !== 'GET') {
       json(res, { ok: false }, 405);
@@ -188,7 +188,7 @@ test('SSE-поток проходит через прокси как поток,
   }
 });
 
-test('неизвестный ключ не открывает чужой MCP', async () => {
+test('an unknown key does not open someone else\'s MCP', async () => {
   await withIcarus(async (base) => {
     const response = await fetch(`${base}/mcp-proxy/${'x'.repeat(32)}`);
     assert.equal(response.status, 404);

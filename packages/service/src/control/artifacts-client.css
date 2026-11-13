@@ -1,6 +1,6 @@
-/* Раздел «Артефакты»: список в сайдбаре, просмотр справа.
-   Тёмная панель — как у остальных разделов; сам артефакт рисуется в своей рамке:
-   HTML живёт в iframe, картинка на тёмном фоне, markdown — тёмной типографикой. */
+/* "Artifacts" section: list in the sidebar, view on the right.
+   Dark panel — like the other sections; the artifact itself is drawn in its own frame:
+   HTML lives in an iframe, an image on a dark background, markdown — in dark typography. */
 
 .art-app { display: grid; grid-template-columns: 300px minmax(0, 1fr); min-height: 100vh; }
 .art-side {
@@ -73,8 +73,8 @@
 .art-icon-btn:disabled:hover { border-color: var(--line); color: var(--dim); }
 .art-icon-btn.danger { color: var(--danger); }
 .art-icon-btn.danger:hover { border-color: var(--danger); color: var(--danger); }
-/* Режим выбора элемента включён: кнопка должна читаться как включённый тумблер,
-   иначе человек не понимает, почему клики по странице больше не работают. */
+/* Element-pick mode is on: the button must read as a toggle that is on,
+   otherwise the person does not understand why clicks on the page no longer work. */
 .art-icon-btn[aria-pressed="true"] { background: rgba(122, 162, 247, .18); border-color: var(--accent); color: var(--accent); }
 .art-icon-btn.danger.armed { background: var(--danger); border-color: var(--danger); color: #0f1116; }
 .art-view { flex: 1; min-height: 0; overflow: auto; background: var(--bg); }
@@ -98,8 +98,8 @@
 .art-note { color: var(--dim); font-size: 11px; }
 .art-note.bad { color: var(--danger); }
 
-/* Рамка артефакта. HTML получает всё своё из файла, поэтому белый фон — его,
-   а не панели: страница не должна приезжать на сером. */
+/* Artifact frame. HTML gets all its own styling from the file, so the white background is its own,
+   not the panel's: the page must not arrive on a grey backdrop. */
 .art-frame {
   display: block; width: 100%; height: calc(100vh - 112px); min-height: 380px;
   border: 0; background: #fff;
@@ -110,7 +110,7 @@
   background: #fff; box-shadow: 0 18px 60px rgba(0, 0, 0, .45);
 }
 
-/* Markdown-документ: тёмная типографика панели, но с воздухом бумаги. */
+/* Markdown document: the panel's dark typography, but with the air of paper. */
 .art-doc { max-width: 780px; margin: 0 auto; padding: 42px 46px 64px; font-size: 16px; line-height: 1.7; }
 .art-doc > :first-child { margin-top: 0; }
 .art-doc h1 { font-size: 34px; line-height: 1.2; margin: 0 0 14px; letter-spacing: -.4px; }
@@ -151,9 +151,9 @@
   .art-ws { display: none; }
 }
 
-/* «Поделиться»: диалог в духе Google — три субъекта и ссылка у публичного
-   чтения. Публично писать нельзя, поэтому у публики только «нет доступа» и
-   «чтение»; включённое чтение показывает адрес, который можно скопировать. */
+/* "Share": a Google-style dialog — three subjects and a link for public
+   read access. Public writing is not allowed, so the public gets only "no access" and
+   "read"; enabled read access shows an address that can be copied. */
 .art-modal {
   position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center;
   padding: 24px; background: rgba(8, 10, 14, .68); backdrop-filter: blur(3px);
@@ -202,7 +202,7 @@
 .art-share-actions { display: flex; justify-content: flex-end; margin-top: 14px; }
 .art-share-actions .btn { padding: 7px 16px; }
 
-/* История версий — боковая панель: список слева от просмотра, клик preview. */
+/* Version history — a side panel: the list to the left of the view, a click previews. */
 .art-history-panel {
   flex: 0 0 340px; width: 340px; border-left: 1px solid var(--line); background: var(--side);
   display: flex; flex-direction: column; height: 100vh; position: sticky; top: 0;
@@ -232,17 +232,17 @@
 .art-history-item.current .art-history-text b { color: var(--accent); }
 .art-history-item.selected .art-history-text b { color: var(--text); }
 
-/* Чат правки: та же боковая панель, внутри — лента и композер. Шире истории:
-   в 340 px строка ответа складывается в столбик из двух слов.
-   Сама лента (пузыри, трассировка, .md) — из chat-messages.css, одного с
-   основным чатом: ответ ИИ тут выглядит так же, как в большой ленте. */
+/* Edit chat: the same side panel, with a feed and a composer inside. Wider than history:
+   at 340 px an answer line wraps into a column of two words.
+   The feed itself (bubbles, trace, .md) comes from chat-messages.css, the same as
+   the main chat: the AI answer here looks the same as in the big feed. */
 .art-chat-panel { flex: 0 0 400px; width: 400px; }
 .art-chat-log {
   flex: 1; min-height: 0; overflow: auto; padding: 14px 12px 10px;
   display: flex; flex-direction: column;
 }
-/* Отбивку между ходами держит .turn (margin-bottom), а не gap: те же правила,
-   что в основном чате, задают её сами. */
+/* The spacing between turns is held by .turn (margin-bottom), not gap: the same rules
+   as in the main chat set it themselves. */
 .art-chat-log .turn { margin-bottom: 14px; }
 .art-chat-log .turn:last-child { margin-bottom: 0; }
 .art-chat-divider {
@@ -252,11 +252,11 @@
 .art-chat-divider::before, .art-chat-divider::after {
   content: ''; flex: 1; border-top: 1px solid var(--line);
 }
-/* В узкой панели пузырь человека занимает всю ширину: 86% от 348 px оставляли
-   бы справа пустую полосу, которой некуда деться. */
+/* In the narrow panel the person's bubble takes the full width: 86% of 348 px would leave
+   an empty strip on the right with nowhere to go. */
 .art-chat-log .turn.user .bubble { max-width: 100%; }
-/* Пока ответа нет, «Икар думает» — пузырь, как карточка трассировки. Сам ответ
-   приезжает без пузыря, типографикой .md из основного чата. */
+/* While there is no answer, "Icarus is thinking" is a bubble, like the trace card. The answer itself
+   arrives without a bubble, with the .md typography from the main chat. */
 .art-chat-log .typing:not([hidden]) {
   display: inline-block; padding: 8px 12px; margin-top: 2px;
   background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
@@ -264,8 +264,8 @@
 .art-chat-log .trace { margin: 0 0 10px; }
 .art-chat-log .reauth-card { margin: 0 0 10px; }
 .art-chat-foot { border-top: 1px solid var(--line); padding: 9px 12px 12px; background: var(--side); flex: 0 0 auto; }
-/* Ссылка на элемент из предпросмотра: чип над композером. Пока он есть, текст
-   уедет в чат вместе с адресом; «×» снимает ссылку, не трогая набранное. */
+/* Reference to an element from the preview: a chip above the composer. While it exists, the text
+   goes to the chat together with the address; the "×" clears the reference without touching what was typed. */
 .art-chat-ref {
   display: flex; align-items: center; gap: 7px; margin: 0 0 8px; padding: 6px 8px;
   border: 1px solid rgba(122, 162, 247, .45); border-radius: 8px;

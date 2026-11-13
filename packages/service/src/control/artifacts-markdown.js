@@ -1,12 +1,12 @@
-// Markdown артефакта: без библиотек и без сборки.
+// Artifact markdown: no libraries and no build.
 //
-// Файл — обычный script: artifacts-ui.ts вставляет его в страницу раньше клиента,
-// поэтому `artifactMarkdown` видна как глобальная функция. Отдельным файлом — чтобы
-// правила разметки проверялись тестом, не поднимая браузер.
+// The file is a plain script: artifacts-ui.ts inserts it into the page before the client,
+// so `artifactMarkdown` is visible as a global function. It is a separate file so that
+// the markup rules can be tested by a test without spinning up a browser.
 //
-// Это не чат: у документа свои заголовки h1–h6, таблицы и картинки, которые лежат
-// рядом с артефактом. Сырой HTML из markdown не проходит — сначала экранируем всё,
-// потом включаем обратно только нужные конструкции.
+// This is not a chat: the document has its own h1–h6 headings, tables and images that live
+// next to the artifact. Raw HTML from markdown does not pass — first we escape everything,
+// then we turn back on only the needed constructs.
 /* exported artifactMarkdown */
 
 const artifactEscape = (value) =>
@@ -15,27 +15,27 @@ const artifactEscape = (value) =>
     (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char],
   );
 
-/** Относительный путь внутри артефакта: ссылка должна вести в тот же бандл. */
+/** Relative path inside the artifact: the link must lead into the same bundle. */
 function artifactHref(raw, base, kind) {
   const value = String(raw ?? '').trim();
   if (value === '') return value;
   if (value.startsWith('#')) return value;
   if (value.startsWith('//')) return value;
-  // Только безопасные схемы: `javascript:` из markdown-файла не должен стать
-  // ссылкой, по которой человек нажмёт. data: — только для картинок.
+  // Only safe schemes: `javascript:` from a markdown file must not become
+  // a link that a person clicks. data: — only for images.
   const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(value)?.[1]?.toLowerCase();
   if (scheme) {
     if (scheme === 'http' || scheme === 'https' || scheme === 'mailto') return value;
     if (kind === 'image' && scheme === 'data' && /^data:image\//i.test(value)) return value;
     return '#';
   }
-  // `/images/x.png` внутри артефакта — это путь от его корня, а не от корня сайта:
-  // иначе картинка уехала бы в панель и не нашлась.
+  // `/images/x.png` inside the artifact is a path from its root, not from the site root:
+  // otherwise the image would go to the panel and not be found.
   if (value.startsWith('/') && base) return base + value.replace(/^\/+/, '');
   return (base ?? '') + value.replace(/^\.\//, '');
 }
 
-/** Пунктуация и сущности не принадлежат адресу: `(см. https://x.)`. */
+/** Punctuation and entities do not belong to the address: `(see https://x.)`. */
 const ARTIFACT_TAIL = /[?!.,:*_~]/;
 const ARTIFACT_ENTITIES = ['&quot;', '&#39;', '&gt;', '&lt;'];
 
@@ -54,7 +54,7 @@ function artifactTrimUrl(raw) {
   }
 }
 
-/** Голые адреса — ссылки; готовые куски можно спрятать в слот от разметки. */
+/** Bare addresses become links; finished pieces can be hidden in a markup slot. */
 function artifactAutolink(text, hold) {
   return text.replace(/(^|[^\p{L}\p{N}_/])https?:\/\/[^\s<"\uE000]+/giu, (match, before) => {
     const raw = match.slice(before.length);
@@ -74,7 +74,7 @@ function artifactInline(raw, options = {}) {
   };
   let text = artifactEscape(raw);
 
-  // Картинки раньше ссылок: у них тот же синтаксис со скобками.
+  // Images before links: they have the same syntax with brackets.
   text = text.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+&quot;([^&]*)&quot;)?\)/g, (_, alt, src, title) =>
     hold(
       '<img src="' +
@@ -86,7 +86,7 @@ function artifactInline(raw, options = {}) {
         '>',
     ),
   );
-  // `код` — раньше ссылок: адрес в примере кода ссылкой быть не должен.
+  // `code` before links: an address inside a code sample must not become a link.
   text = text.replace(/`([^`\n]+)`/g, (_, code) => hold('<code>' + code + '</code>'));
   text = text.replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+&quot;([^&]*)&quot;)?\)/g, (_, label, href, title) =>
     hold(
@@ -113,14 +113,14 @@ function artifactEmphasize(text) {
 }
 
 /**
- * Есть ли в строке граница таблицы. `\|` — это литерал внутри ячейки, а не
- * граница: строка без настоящего `|` таблицей не считается.
+ * Whether the line contains a table boundary. `\|` is a literal inside a cell, not a
+ * boundary: a line without a real `|` is not considered a table.
  */
 function hasTablePipe(line) {
   return line.replace(/\\\|/g, '').includes('|');
 }
 
-/** Ячейки строки: `\|` возвращается в текст как обычный символ, обрамление срезаем. */
+/** Cells of a line: `\|` is returned to the text as an ordinary character, the frame is trimmed. */
 function tableCells(line) {
   let text = line.trim();
   if (text.startsWith('|')) text = text.slice(1);
@@ -149,7 +149,7 @@ function isTableDivider(line) {
   return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
 }
 
-/** Строка короче шапки добивается пустыми ячейками, длиннее — обрезается. */
+/** A row shorter than the header is padded with empty cells, a longer one is trimmed. */
 function fitCells(cells, width) {
   const result = cells.slice(0, width);
   while (result.length < width) result.push('');
@@ -157,8 +157,8 @@ function fitCells(cells, width) {
 }
 
 /**
- * Блочная разметка. Возвращает HTML документа: h1–h6, списки (с вложенностью по
- * отступу), цитаты, код, таблицы, горизонтальные линии и абзацы.
+ * Block markup. Returns the document HTML: h1–h6, lists (with nesting by
+ * indent), quotes, code, tables, horizontal rules and paragraphs.
  */
 function artifactMarkdown(text, options = {}) {
   const lines = String(text ?? '').replace(/\r\n?/g, '\n').split('\n');
@@ -200,8 +200,8 @@ function artifactMarkdown(text, options = {}) {
   };
 
   /**
-   * Дерево списка по отступу: вложенный `<ul>` обязан оказаться внутри `<li>`,
-   * а не рядом с ним — иначе браузер рисует пункты на одном уровне.
+   * List tree by indent: a nested `<ul>` must end up inside the `<li>`,
+   * not next to it — otherwise the browser draws the items on one level.
    */
   const buildList = (items) => {
     const root = { tag: items[0].tag, indent: items[0].indent, items: [] };
@@ -269,7 +269,7 @@ function artifactMarkdown(text, options = {}) {
       continue;
     }
 
-    // Таблица: строка с | и следующая за ней линия-разделитель.
+    // Table: a line with | and the divider line following it.
     if (hasTablePipe(line) && index + 1 < lines.length && isTableDivider(lines[index + 1])) {
       flushAll();
       const head = tableCells(line);
@@ -327,8 +327,8 @@ function artifactMarkdown(text, options = {}) {
     if (item) {
       flushPara();
       flushQuote();
-      // Собираем весь список целиком: так вложенность можно разложить в дерево,
-      // а не гадать по одной строке, куда закрывать предыдущий `<li>`.
+      // Collect the whole list at once: this way the nesting can be laid out into a tree,
+      // rather than guessing line by line where to close the previous `<li>`.
       const items = [item];
       let next = index + 1;
       while (next < lines.length) {

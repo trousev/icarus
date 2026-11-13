@@ -1,4 +1,4 @@
-// HTTP-сервер icarus: три маршрута и ничего лишнего.
+// icarus HTTP server: three routes and nothing extra.
 import http from 'node:http';
 import { log, redact } from '../log.ts';
 import { findUser, type IcarusConfig, type UserConfig } from '../config.ts';
@@ -18,20 +18,21 @@ export const PUBLIC_MODEL_ID = 'icarus';
 
 export type ServerOptions = {
   /**
-   * Есть ли кому написать скилл в панели. По умолчанию — да, если реестр вообще
-   * умеет разовый вопрос: локальная панель (script/panel) поднимается без
-   * контейнера с моделью и говорит об этом прямо, а не кнопкой-обманкой.
+   * Whether there is anyone to write a skill in the panel. By default — yes, if the
+   * registry can do one-off questions at all: the local panel (script/panel) comes up
+   * without a model container and says so directly, rather than with a decoy button.
    */
   draftSkills?: boolean;
   /**
-   * Роутеры поиска и извлечения страниц: в тестах сюда подставляют fetch и часы,
-   * в бою — ничего: возьмут глобальный fetch и системное время.
+   * Search and page extraction routers: in tests fetch and the clock are substituted
+   * here, in prod — nothing: the global fetch and system time are used.
    */
   search?: SearchHttpOptions;
   /**
-   * Вынести разговор из Telegram: панель зовёт при архивации Telegram-разговора,
-   * чтобы топик удалился вместе с сообщениями (см. archiveChat). Не передан —
-   * панель поднята без бота и просто двигает отметку в реестре.
+   * Take the conversation out of Telegram: the panel calls this when archiving a
+   * Telegram conversation so the topic is deleted together with the messages (see
+   * archiveChat). Not passed — the panel is up without a bot and just moves the mark
+   * in the registry.
    */
   archiveTelegram?: (user: UserConfig, chat: ChatRecord) => Promise<void>;
 };
@@ -45,8 +46,8 @@ export function createServer(
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
 
-    // OAuth-MCP: pi ходит сюда вместо настоящего сервера, а сервис подставляет
-    // свежий Bearer на каждом запросе. Ключ случаен и лежит в mcp.json.
+    // OAuth-MCP: pi goes here instead of the real server, and the service substitutes
+    // a fresh Bearer on every request. The key is random and lives in mcp.json.
     if (url.pathname.startsWith('/mcp-proxy/')) {
       try {
         await handleMcpProxy(req, res, url, config);
@@ -60,9 +61,9 @@ export function createServer(
       return;
     }
 
-    // Публичные артефакты: ссылку открывает любой, у кого она есть, поэтому
-    // маршрут стоит до панели и не требует заголовка SSO. Секрет — случайный
-    // publicId в адресе, а не кука: см. artifacts.ts.
+    // Public artifacts: anyone who has the link can open it, so the route comes
+    // before the panel and requires no SSO header. The secret is a random publicId in
+    // the address, not a cookie: see artifacts.ts.
     if (url.pathname === '/a' || url.pathname.startsWith('/a/')) {
       try {
         if (await handlePublicArtifact(req, res, url, config)) return;
@@ -76,8 +77,8 @@ export function createServer(
       }
     }
 
-    // Панель управления — то, ради чего человек вообще открывает этот порт: на проде
-    // весь домен смотрит сюда, и корень уводит в панель, а не в 404 сервиса.
+    // The control panel — the thing a person opens this port for at all: in prod the
+    // whole domain points here, and the root leads into the panel, not to the service's 404.
     if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
       res.writeHead(302, { location: '/panel' });
       res.end();
@@ -86,12 +87,12 @@ export function createServer(
 
     if (url.pathname === '/panel' || url.pathname.startsWith('/panel/')) {
       try {
-        // Реестр панели нужен для трёх вещей. Чат отправляет реплики в те же
-        // сессии pi, что и Telegram. Скилл, сохранённый в панели, должен доехать
-        // до живого разговора: сессия pi держит каталог скиллов с самого старта,
-        // поэтому панель отмечает обновление ресурсов — и следующий ход поднимает
-        // pi заново (см. bumpResources в control/index.ts). А кнопка «напиши за
-        // меня» просит модель разово — там же, где живут ключи и pi.
+        // The panel's registry is needed for three things. The chat sends replies into the
+        // same pi sessions as Telegram. A skill saved in the panel must reach a live
+        // conversation: a pi session holds the skills directory from the very start,
+        // so the panel marks resources as updated — and the next turn brings pi up again
+        // (see bumpResources in control/index.ts). And the “write it for me” button asks
+        // the model one-off — in the same place where the keys and pi live.
         const ctx = {
           config,
           registry,
@@ -123,8 +124,8 @@ export function createServer(
     }
 
     if (req.method === 'GET' && url.pathname === '/healthz') {
-      // Контейнеры — часть состояния сервиса, а не что-то за кадром: показываем их
-      // состояние и расхождения с конфигом прямо здесь.
+      // Containers are part of the service's state, not something off-screen: we show
+      // their state and discrepancies with the config right here.
       let containers: Record<string, number> = { managed: 0 };
       try {
         const managed = await listManaged(config);
@@ -144,8 +145,9 @@ export function createServer(
       res.end(
         JSON.stringify({
           ok: true,
-          // Отпечаток кода из compose: по нему видно, тот ли код работает в контейнере.
-          // Без этого «деплой зелёный, а на стенде старый код» не отличить от нормы.
+          // Code fingerprint from compose: it shows whether the same code is running in
+          // the container. Without this “deploy is green, but the stand runs old code”
+          // can't be told apart from normal.
           revision: process.env.ICARUS_REVISION ?? null,
           sessions: registry.list(),
           users: config.users.map((user) => user.id),
@@ -155,8 +157,8 @@ export function createServer(
       return;
     }
 
-    // Поисковый роутер: один вход для всех провайдеров. Ключи, карантины и выбор
-    // живого — внутри; вызывающему достаточно токена сервиса и q.
+    // Search router: one entry point for all providers. Keys, quarantines and choosing
+    // the live one are inside; the caller only needs the service token and q.
     if (url.pathname === '/search') {
       try {
         await handleSearch(req, res, url, config, options.search ?? {});
@@ -172,8 +174,8 @@ export function createServer(
       return;
     }
 
-    // Извлечение страниц: тот же вход, но свой «текущий» провайдер и свои
-    // карантины. Живёт рядом с /search, чтобы клиенту хватало одного адреса.
+    // Page extraction: the same entry point, but its own “current” provider and its own
+    // quarantines. Lives next to /search so the client needs just one address.
     if (url.pathname === '/fetch') {
       try {
         await handleFetch(req, res, url, config, options.search ?? {});

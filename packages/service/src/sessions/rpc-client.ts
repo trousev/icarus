@@ -1,5 +1,5 @@
-// RPC-мост к pi: JSONL по stdio через `docker exec -i`.
-// Протокол проверен в M0 (см. PLAN.md, раздел «Снятый контракт»).
+// RPC bridge to pi: JSONL over stdio via `docker exec -i`.
+// The protocol was verified in M0 (see PLAN.md, the "Frozen contract" section).
 import type { ChildProcess } from 'node:child_process';
 import { spawnDockerExec } from '../docker/manager.ts';
 import { log, redact } from '../log.ts';
@@ -7,7 +7,7 @@ import type { IcarusConfig } from '../config.ts';
 
 export type RpcEvent = { type: string } & Record<string, unknown>;
 type Pending = { resolve: (value: Record<string, unknown>) => void; reject: (error: Error) => void };
-/** Как запустить pi: в бою — docker exec, в тестах — любой процесс с JSONL на stdio. */
+/** How to launch pi: docker exec in production, any process with JSONL on stdio in tests. */
 export type Spawner = (
   container: string,
   args: string[],
@@ -97,7 +97,7 @@ export class RpcClient {
     return () => this.exitListeners.delete(listener);
   }
 
-  /** Отправляет команду и ждёт ответ с тем же id. */
+  /** Sends a command and waits for a response with the same id. */
   request(command: Record<string, unknown>, timeoutMs = 30_000): Promise<Record<string, unknown>> {
     if (this.closed) return Promise.reject(new Error('RPC-канал закрыт'));
     const id = `req-${this.nextId++}`;
@@ -122,7 +122,7 @@ export class RpcClient {
     });
   }
 
-  /** Команда без ожидания ответа (например, abort во время стрима). */
+  /** Command without waiting for a response (e.g. abort during a stream). */
   send(command: Record<string, unknown>): void {
     this.child.stdin?.write(JSON.stringify(command) + '\n');
   }

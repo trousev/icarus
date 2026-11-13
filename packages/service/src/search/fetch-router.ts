@@ -1,6 +1,6 @@
-// Роутер извлечения страниц. Правила те же, что у поиска, но со своими
-// особенностями: «текущий» здесь отдельный, а отказ конкретной страницы
-// (404, robots, пейволл) провайдера не банит — это свойство URL.
+// Page extraction router. The rules are the same as in search, but with its own
+// peculiarities: the "current" one here is separate, and a refusal of a specific page
+// (404, robots, paywall) does not ban the provider — it is a property of the URL.
 import type { IcarusConfig } from '../config.ts';
 import {
   FETCH_MAX_CHARS,
@@ -64,7 +64,7 @@ export type FetchRouteOptions = {
   maxChars?: number;
 };
 
-/** Провайдеры извлечения, у которых есть ключ (у Cloudflare — ещё и аккаунт). */
+/** Extraction providers that have a key (Cloudflare — also an account). */
 export function configuredFetchProviders(config: IcarusConfig): FetchProvider[] {
   return FETCH_RATING.map((id) => FETCH_PROVIDERS[id]).filter(
     (provider): provider is FetchProvider => provider !== undefined && providerReady(config, provider),
@@ -95,9 +95,9 @@ function chooseAttempt(
 }
 
 /**
- * Отказ, который бьёт по всему аккаунту, а не по одной возможности: кончились
- * кредиты (баланс общий с поиском) или ключ перестал пускать (401/403).
- * Тогда баним провайдера и в поиске — иначе поиск будет биться в ту же стену.
+ * A refusal that hits the whole account, not a single capability: credits ran out
+ * (the balance is shared with search) or the key stopped letting through (401/403).
+ * Then we ban the provider in search too — otherwise search would hit the same wall.
  */
 function sharedWithSearch(failure: SearchFailure): boolean {
   if (failure.kind === 'credits') return true;
@@ -129,9 +129,9 @@ export async function routeFetch(
   const current = scopeCurrent(state, 'fetch');
   const providers = scopeProviders(state, 'fetch');
 
-  // Cloudflare — «сверхлипкий»: пока не в карантине, fetch принудительно делает
-  // текущим именно его, даже если до этого текущим был кто-то другой. Он платит
-  // за время браузера, а не за страницы, поэтому должен расходоваться первым.
+  // Cloudflare is "super-sticky": while it is not in quarantine, fetch forcibly makes
+  // it the current one, even if someone else was current before. It pays
+  // for browser time, not for pages, so it must be spent first.
   const sticky =
     candidates.some((provider) => provider.id === 'cloudflare') &&
     !isBanned(providers.cloudflare ?? emptyProviderState(), start);
@@ -199,13 +199,13 @@ export async function routeFetch(
       if (options.signal?.aborted) break;
       const failure = asFailure(error);
       tried.push({ provider: id, reason: failureText(failure) });
-      // Страница не отдалась — не вина провайдера, идём к следующему без бана.
-      // В статистику отказ всё равно попадает: ключ tried, а страницы нет.
+      // The page did not come back — not the provider's fault, we go to the next one without a ban.
+      // The refusal still goes into the stats: tried is there, but no page.
       await recordUsage(config, 'fetch', id, false, { now });
       if (failure.kind === 'page') continue;
 
-      // Cloudflare в поиске не участвует: его дневной лимит не должен банить
-      // поисковых провайдеров. У остальных ключ и кредиты общие с поиском.
+      // Cloudflare does not participate in search: its daily limit must not ban
+      // search providers. The rest share the key and credits with search.
       const searchCandidates =
         id !== 'cloudflare' && sharedWithSearch(failure) ? configuredProviders(config) : [];
       await mutateRouterState(file, (next) => {

@@ -1,6 +1,6 @@
-// models.json: провайдера DeepInfra pi сам не знает, и без этого файла модель из
-// config.yaml в контейнере просто не найдётся. Проверяем и сам блок провайдера,
-// и то, что чужие провайдеры мы не переписываем.
+// models.json: pi itself does not know the DeepInfra provider, and without this file the model from
+// config.yaml simply won't be found in the container. We check both the provider block itself
+// and the fact that we do not rewrite others' providers.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { streamSimple } from '@earendil-works/pi-ai/api/openai-completions';
@@ -34,7 +34,7 @@ function parse(models: ModelConfig[]): { providers: Record<string, ProviderBlock
   return JSON.parse(renderModelsJson(models));
 }
 
-test('DeepInfra уезжает в models.json целиком: адрес, протокол, ключ и модели', () => {
+test('DeepInfra goes into models.json in full: address, protocol, key and models', () => {
   const { providers } = parse([
     { provider: PROVIDER, id: MODEL_ID, thinking: 'low', tier: 'fast' },
     { provider: PROVIDER, id: MODEL_ID, thinking: 'medium', tier: 'strong' },
@@ -53,7 +53,7 @@ test('DeepInfra уезжает в models.json целиком: адрес, про
   assert.equal(deepinfra.compat?.supportsDeveloperRole, false, 'роль developer DeepSeek не принимает');
 });
 
-test('уровни thinking размечены под значения reasoning_effort DeepInfra', () => {
+test('thinking levels are mapped to DeepInfra reasoning_effort values', () => {
   const { providers } = parse([{ provider: PROVIDER, id: MODEL_ID, thinking: 'low', tier: 'fast' }]);
   const model = providers[PROVIDER].models?.[0];
 
@@ -68,7 +68,7 @@ test('уровни thinking размечены под значения reasoning
   });
 });
 
-test('одна и та же модель на трёх уровнях описывается один раз', () => {
+test('the same model at three levels is described once', () => {
   const { providers } = parse([
     { provider: PROVIDER, id: MODEL_ID, thinking: 'low', tier: 'fast' },
     { provider: PROVIDER, id: MODEL_ID, thinking: 'medium', tier: 'strong' },
@@ -81,7 +81,7 @@ test('одна и та же модель на трёх уровнях описы
   );
 });
 
-test('V4.1-Flash объявлена зрячей и думающей: иначе vision и thinking не заработают', () => {
+test('V4.1-Flash is declared seeing and thinking: otherwise vision and thinking will not work', () => {
   const { providers } = parse([{ provider: PROVIDER, id: MODEL_ID, thinking: 'medium', tier: 'strong' }]);
   const model = providers[PROVIDER].models?.[0];
 
@@ -90,7 +90,7 @@ test('V4.1-Flash объявлена зрячей и думающей: иначе
   assert.ok((model?.contextWindow ?? 0) >= 100_000);
 });
 
-test('незнакомая модель DeepInfra получает осторожные умолчания, а не выдуманные цены', () => {
+test('an unfamiliar DeepInfra model gets cautious defaults, not invented prices', () => {
   const { providers } = parse([{ provider: PROVIDER, id: 'кто-то/Чужак-7B', tier: 'fast' }]);
   const model = providers[PROVIDER].models?.[0];
 
@@ -100,7 +100,7 @@ test('незнакомая модель DeepInfra получает осторо�
   assert.equal(model?.cost, undefined);
 });
 
-test('встроенные провайдеры pi не переописываем', () => {
+test('we do not rewrite pi built-in providers', () => {
   const { providers } = parse([
     { provider: 'google', id: 'gemini-flash', tier: 'fast' },
     { provider: PROVIDER, id: MODEL_ID, tier: 'fast' },
@@ -109,13 +109,13 @@ test('встроенные провайдеры pi не переописывае
   assert.deepEqual(Object.keys(providers), [PROVIDER], 'google pi знает сам');
 });
 
-test('без кастомных провайдеров файл остаётся валидным и пустым', () => {
+test('without custom providers the file stays valid and empty', () => {
   assert.deepEqual(parse([{ provider: 'google', id: 'gemini-flash' }]), { providers: {} });
 });
 
-test('pi шлёт DeepInfra reasoning_effort, а не thinking:{type}', async () => {
-  // Страховка от возврата «deepseek»-формата: он посылает thinking:{type}, которого
-  // у DeepInfra нет. Запрос перехватываем на onPayload — до сети он не доходит.
+test('pi sends DeepInfra reasoning_effort, not thinking:{type}', async () => {
+  // Guard against the return of the "deepseek" format: it sends thinking:{type}, which
+  // DeepInfra does not have. We intercept the request at onPayload — it never reaches the network.
   const { providers } = parse([{ provider: PROVIDER, id: MODEL_ID, thinking: 'low', tier: 'fast' }]);
   const model = {
     ...providers[PROVIDER].models?.[0],
@@ -131,7 +131,7 @@ test('pi шлёт DeepInfra reasoning_effort, а не thinking:{type}', async ()
       { messages: [{ role: 'user', content: 'привет', timestamp: Date.now() }] },
       {
         apiKey: 'test',
-        // pi превращает off в отсутствие уровня: проверяем именно этот путь.
+        // pi turns off into the absence of a level: we check exactly this path.
         reasoning: reasoning === 'off' ? undefined : reasoning,
         onPayload: (payload) => {
           sent.push(payload as Record<string, unknown>);
@@ -142,7 +142,7 @@ test('pi шлёт DeepInfra reasoning_effort, а не thinking:{type}', async ()
     try {
       for await (const event of stream) assert.ok(event, 'до перехвата событий быть не должно');
     } catch {
-      // onPayload обрывает запрос до сети — это и нужно.
+      // onPayload cuts the request before the network — that is what we want.
     }
   }
 

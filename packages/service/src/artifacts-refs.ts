@@ -1,24 +1,24 @@
-// Адреса элементов артефакта: `data-icarus-ref` прямо в исходнике.
+// Addresses of artifact elements: `data-icarus-ref` right in the source.
 //
-// Панель показывает HTML в песочнице, а человек хочет ткнуть в блок и сказать
-// «сделай компактнее». Ссылке из чата нельзя гнить: поэтому адрес живёт в самом
-// файле, рядом с элементом, а не только в состоянии панели. Адрес собирается из
-// id и классов — они переживают повторную генерацию лучше, чем порядковый номер.
+// The panel shows HTML in a sandbox, and a person wants to poke a block and say
+// "make it more compact". A link from the chat must not rot: therefore the address lives in the
+// file itself, next to the element, and not only in the panel state. The address is assembled from
+// id and classes — they survive regeneration better than an ordinal number.
 //
-// Модуль не знает ни про HTTP, ни про git: это чистая работа с исходником,
-// чтобы правила адресов можно было проверить тестами и не держать их в голове.
+// The module knows neither HTTP nor git: this is pure work with the source,
+// so that address rules can be checked by tests and not kept in one's head.
 import crypto from 'node:crypto';
 import { ArtifactError } from './artifacts.ts';
 
 export const REF_ATTR = 'data-icarus-ref';
 
-/** Элемент, у которого есть адрес: то, что панель может предложить человеку. */
+/** An element that has an address: something the panel can offer to a person. */
 export type ArtifactRef = {
   ref: string;
   tag: string;
-  /** Короткая цитата: по ней человек узнаёт блок, а модель — что это за место. */
+  /** A short quote: by it a person recognizes the block, and the model — what place this is. */
   quote: string;
-  /** Текст можно править прямо в предпросмотре: элемент без вложенных тегов. */
+  /** Text can be edited right in the preview: an element without nested tags. */
   editable: boolean;
 };
 
@@ -28,9 +28,9 @@ export type AnnotateResult = {
   changed: boolean;
 };
 
-// Теги, внутри которых лежит не разметка, а данные: адресовать их бессмысленно.
+// Tags inside which there is not markup but data: addressing them is pointless.
 const RAW = new Set(['script', 'style', 'textarea', 'title']);
-// Служебная обвязка: её не видно в предпросмотре, ссылки на неё не нужны.
+// Service scaffolding: it is not visible in the preview, links to it are not needed.
 const SKIP = new Set(['script', 'style', 'template', 'head', 'meta', 'link', 'title', 'noscript']);
 const VOID = new Set([
   'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
@@ -43,11 +43,11 @@ const TEXT_LIMIT = 4000;
 type Element = {
   tag: string;
   attrs: Map<string, string>;
-  /** Позиция сразу после имени тега: туда встаёт новый атрибут. */
+  /** Position right after the tag name: a new attribute goes there. */
   nameEnd: number;
-  /** Позиция после `>` открывающего тега. */
+  /** Position after the `>` of the opening tag. */
   openEnd: number;
-  /** Позиция `</tag>`; -1 — закрывающего тега не было. */
+  /** Position of `</tag>`; -1 — there was no closing tag. */
   closeStart: number;
   parent: Element | null;
   parts: Array<string | Element>;
@@ -69,9 +69,9 @@ function parseAttrs(raw: string): Map<string, string> {
 }
 
 /**
- * Разбор HTML: только то, что нужно адресам, — вложенность, атрибуты и позиции.
- * Никаких зависимостей от парсера: исходник мы обязаны вернуть байт в байт,
- * кроме вставленных атрибутов, и чужой парсер тут только мешает.
+ * HTML parsing: only what addresses need — nesting, attributes and positions.
+ * No dependency on a parser: we must return the source byte for byte,
+ * except for inserted attributes, and someone else's parser only gets in the way here.
  */
 function parse(html: string): Parsed {
   const roots: Element[] = [];
@@ -136,8 +136,8 @@ function parse(html: string): Parsed {
     const openEnd = Math.min(html.length, j + 1);
 
     if (closing) {
-      // Ищем парный тег в стеке: на битой вложенности не падаем, а закрываем
-      // ближайший такой же — исходник всё равно важнее строгости.
+      // Look for the matching tag in the stack: on broken nesting we do not fall,
+      // but close the nearest same one — the source is more important than strictness anyway.
       for (let k = stack.length - 1; k >= 0; k -= 1) {
         const candidate = stack[k];
         if (candidate && candidate.tag === tag) {
@@ -215,7 +215,7 @@ function insideSvg(node: Element): boolean {
   return false;
 }
 
-/** Адресуем то, что видно и на что можно ткнуть: тело страницы без скриптов. */
+/** We address what is visible and can be poked: the page body without scripts. */
 function annotatable(node: Element, body: Element | null): boolean {
   if (SKIP.has(node.tag) || node.tag === 'body' || node.tag === 'html') return false;
   if (node.tag === 'svg' && insideSvg(node)) return false;
@@ -237,9 +237,9 @@ function signature(node: Element): string {
 }
 
 /**
- * Сегмент пути: тег плюс id или первый класс. Дубли среди соседей получают
- * номер — это единственная часть адреса, которая зависит от порядка, поэтому
- * она появляется только когда без неё адрес неоднозначен.
+ * Path segment: tag plus id or first class. Duplicates among siblings get a
+ * number — this is the only part of the address that depends on order, therefore
+ * it appears only when without it the address is ambiguous.
  */
 function segment(node: Element, siblings: Element[]): string {
   const base = signature(node);
@@ -249,8 +249,8 @@ function segment(node: Element, siblings: Element[]): string {
 }
 
 function pathOf(node: Element, rootSiblings: Element[]): string {
-  // Ближайший предок с id делает адрес короче и переживает вставки рядом:
-  // id — самый сильный контракт, который есть в разметке.
+  // The nearest ancestor with an id makes the address shorter and survives insertions nearby:
+  // id is the strongest contract there is in markup.
   let start = node;
   for (let current: Element | null = node.parent; current; current = current.parent) {
     if (cleanId(current.attrs.get('id'))) {
@@ -283,8 +283,8 @@ function textOf(node: Element, limit = QUOTE_LIMIT): string {
       if (typeof part === 'string') {
         out += part;
       } else if (!SKIP.has(part.tag)) {
-        // Пробел между соседними блоками: без него цитата склеивает заголовок
-        // и абзац в одно слово, и человек не узнаёт элемент.
+        // A space between neighboring blocks: without it the quote glues the heading
+        // and the paragraph into one word, and the person does not recognize the element.
         out += ' ';
         walk(part);
         out += ' ';
@@ -311,20 +311,20 @@ function refsOfNodes(nodes: Element[]): ArtifactRef[] {
   return refs;
 }
 
-/** Адреса, которые уже лежат в исходнике. Порядок — как в документе. */
+/** Addresses that already lie in the source. Order — as in the document. */
 export function refsOf(html: string): ArtifactRef[] {
   const { all, body } = parse(html);
   return refsOfNodes(all.filter((node) => annotatable(node, body)));
 }
 
-/** Короткий отпечаток исходника: им панель проверяет, что элемент не устарел. */
+/** A short fingerprint of the source: the panel uses it to check that the element is not stale. */
 export function hashOf(html: string): string {
   return crypto.createHash('sha256').update(html, 'utf8').digest('hex').slice(0, 16);
 }
 
 /**
- * Проставить `data-icarus-ref` всем элементам тела. Идемпотентно: уже
- * размеченные элементы не трогаем, повторный вызов ничего не меняет.
+ * Put `data-icarus-ref` on all body elements. Idempotent: already
+ * marked elements are not touched, a repeated call changes nothing.
  */
 export function annotate(html: string): AnnotateResult {
   const { all, body, roots } = parse(html);
@@ -347,8 +347,8 @@ export function annotate(html: string): AnnotateResult {
     }
     let ref = pathOf(node, rootSiblings).slice(0, REF_LIMIT);
     if (!ref) continue;
-    // Совпадение возможно, если адрес пришёл из соседнего поддерева с тем же
-    // id: не затираем чужой контракт, а разводим новый адрес номером.
+    // A collision is possible if the address came from a neighboring subtree with the same
+    // id: we do not overwrite someone else's contract, but separate the new address with a number.
     if (used.has(ref)) {
       let index = 2;
       while (used.has(`${ref}:${index}`)) index += 1;
@@ -389,9 +389,9 @@ function escapeText(text: string): string {
 }
 
 /**
- * Заменить текст элемента по адресу. Меняем только внутренний текст листового
- * элемента: у контейнера замена снесла бы вложенную разметку, а это уже не
- * «поправить подпись», а «сломать вёрстку» — такие правки уходят в чат.
+ * Replace the text of an element by address. We change only the inner text of a leaf
+ * element: for a container, replacement would wipe out nested markup, and that is no longer
+ * "fix the caption" but "break the layout" — such edits go to the chat.
  */
 export function replaceText(
   html: string,
@@ -428,7 +428,7 @@ export function replaceText(
   const inner = html.slice(node.openEnd, node.closeStart);
   const lead = /^[ \t\r\n]*/.exec(inner)?.[0] ?? '';
   const trail = /[ \t\r\n]*$/.exec(inner)?.[0] ?? '';
-  // Отступы вокруг текста сохраняем: исходник должен остаться читаемым.
+  // We preserve the indentation around the text: the source must remain readable.
   const replacement = inner.trim() === '' ? escapeText(value) : `${lead}${escapeText(value)}${trail}`;
   const before = textOf(node);
   return {

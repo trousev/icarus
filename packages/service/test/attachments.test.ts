@@ -1,5 +1,5 @@
-// Вложения из Telegram: что понимаем, что нет и по какому пути файл находит pi.
-// Сети тут нет: Bot API — заглушка, у неё «в хранилище» лежат готовые байты.
+// Attachments from Telegram: what we understand, what we don't, and at what path pi finds the file.
+// No network here: the Bot API is a stub, with ready-made bytes sitting "in storage".
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -22,7 +22,7 @@ function tmp(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-tg-'));
 }
 
-/** Bot API с одним лишь хранилищем файлов: апдейты и отправка тут ни при чём. */
+/** A Bot API with only file storage: updates and sending are irrelevant here. */
 function fakeApi(files: Record<string, Buffer> = {}) {
   const downloaded: string[] = [];
   const api = {
@@ -45,7 +45,7 @@ function message(parts: Partial<TelegramMessage> = {}): TelegramMessage {
   return { message_id: 5, chat: { id: 1, type: 'private' }, ...parts };
 }
 
-test('фото: берём самый крупный кадр и отдаём байты модели', async () => {
+test('photo: we take the largest frame and hand the bytes to the model', async () => {
   const dir = tmp();
   const { api } = fakeApi({ big: JPEG });
 
@@ -68,7 +68,7 @@ test('фото: берём самый крупный кадр и отдаём б
   assert.deepEqual(fs.readFileSync(path.join(dir, 'telegram-1-5.jpg')), JPEG);
 });
 
-test('документ-картинка сохраняется под своим именем', async () => {
+test('an image document is saved under its own name', async () => {
   const dir = tmp();
   const { api } = fakeApi({ shot: JPEG });
 
@@ -82,7 +82,7 @@ test('документ-картинка сохраняется под своим
   assert.equal(incoming.images[0]?.file, '/workspaces/.icarus/incoming/telegram-1-5-скриншот.png');
 });
 
-test('голосовое отдаётся байтами: расшифровка — не его забота', async () => {
+test('a voice message is handed over as bytes: transcription is not its concern', async () => {
   const { api } = fakeApi({ voice: OGG });
 
   const incoming = await collectIncoming(
@@ -96,7 +96,7 @@ test('голосовое отдаётся байтами: расшифровка
   assert.equal(incoming.unsupported, null);
 });
 
-test('голосовое без mime и длительности не ломает разбор', async () => {
+test('a voice message without mime and duration does not break parsing', async () => {
   const { api } = fakeApi({ voice: OGG });
 
   const incoming = await collectIncoming(api, message({ voice: { file_id: 'voice' } }), tmp());
@@ -105,7 +105,7 @@ test('голосовое без mime и длительности не ломае
   assert.equal(incoming.voice?.duration, null);
 });
 
-test('видео, стикер и аудиофайл — не наши', async () => {
+test('video, sticker and audio file are not ours', async () => {
   assert.equal(unsupportedKind(message({ video: {} })), 'видео');
   assert.equal(unsupportedKind(message({ video_note: {} })), 'видеосообщение');
   assert.equal(unsupportedKind(message({ sticker: {} })), 'стикер');
@@ -118,7 +118,7 @@ test('видео, стикер и аудиофайл — не наши', async (
   assert.equal(incoming.voice, null);
 });
 
-test('не-картинка документом тоже не разбирается', async () => {
+test('a non-image document is not parsed either', async () => {
   const { api } = fakeApi();
 
   const incoming = await collectIncoming(
@@ -130,7 +130,7 @@ test('не-картинка документом тоже не разбирае�
   assert.equal(incoming.unsupported, 'документ');
 });
 
-test('картинка, которую модель не умеет смотреть, честно не берётся', async () => {
+test('an image the model cannot view is honestly not taken', async () => {
   const { api } = fakeApi({ heic: JPEG });
 
   const incoming = await collectIncoming(
@@ -143,7 +143,7 @@ test('картинка, которую модель не умеет смотре
   assert.deepEqual(incoming.images, []);
 });
 
-test('чужое имя файла не выводит за пределы incoming', () => {
+test('an alien file name does not escape the incoming directory', () => {
   assert.equal(safeName('../../etc/passwd'), 'etc_passwd');
   assert.equal(safeName('.hidden'), 'hidden');
   assert.equal(safeName(undefined), '');
@@ -153,13 +153,13 @@ test('чужое имя файла не выводит за пределы incom
   assert.equal(extensionFor(''), 'bin');
 });
 
-test('лестница размеров сортируется по площади, а не по порядку', () => {
+test('the size ladder is sorted by area, not by order', () => {
   const sizes = [
     { file_id: 'a', width: 100, height: 100 },
     { file_id: 'b', width: 1280, height: 960 },
     { file_id: 'c', width: 320, height: 240 },
   ];
   assert.equal(largestPhoto(sizes)?.file_id, 'b');
-  // Площади нет вовсе — решает размер файла, который Telegram всё равно назвал.
+  // There is no area at all — the file size, which Telegram reported anyway, decides.
   assert.equal(largestPhoto([{ file_id: 'x', file_size: 10 }, { file_id: 'y', file_size: 900 }])?.file_id, 'y');
 });

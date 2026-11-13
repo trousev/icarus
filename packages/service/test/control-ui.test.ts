@@ -1,11 +1,11 @@
-// Панель управления, вёрстка: что из старой страницы обязано выжить в новой.
+// Control panel, layout: what from the old page must survive in the new one.
 //
-// Смыслы, которые тут охраняются, появились не из любви к разметке:
-//  - номер строки — подсказка для глаза, а не текст: иначе копирование выделенного
-//    куска приезжает с цифрами и отступом;
-//  - правки и удаление есть только у памяти и скиллов: у остальных разделов свой рендер;
-//  - разделы рисуются из SECTIONS, а не зашиты в страницу;
-//  - в странице нет никаких пропусков: человека называет SSO-прокси.
+// The meanings guarded here did not appear out of love for markup:
+//  - the line number is a hint for the eye, not text: otherwise copying a selected
+//    fragment comes with digits and indentation;
+//  - edits and deletion exist only for memory and skills: other sections have their own render;
+//  - sections are drawn from SECTIONS, not hardcoded into the page;
+//  - there are no passes in the page at all: the person is named by the SSO proxy.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { panelHtml, type PanelSession } from '../src/control/ui.ts';
@@ -21,35 +21,35 @@ const SESSION: PanelSession = {
   model: 'icarus-core-2',
 };
 
-test('номер строки в панели не попадает в выделение и буфер обмена', () => {
+test('the line number in the panel does not get into the selection and clipboard', () => {
   const html = panelHtml(SESSION, { section: 'memory', scope: 'personal', file: 'identity.md' });
 
   const gutterRule = /(?:^|\n)\s*\.num\s*\{([^}]*)\}/.exec(html)?.[1] ?? '';
   assert.match(gutterRule, /user-select\s*:\s*none/, 'номер строки должен быть некопируемым');
   assert.match(gutterRule, /-webkit-user-select\s*:\s*none/, 'то же для webkit');
 
-  // Номер рисуется жёлобом .num рядом с текстом, а не склейкой в одну строку.
+  // The number is drawn as a .num gutter next to the text, not glued into one line.
   assert.match(html, /<span class="num">' \+ String\(entry\.line\)\.padStart\(2, '0'\)/, 'номер строки рисуется жёлобом .num');
   assert.match(html, /<span class="row-text">' \+ esc\(/, 'текст записи лежит отдельно от номера');
 });
 
-test('память правится построчно, у скиллов свой рендер', () => {
+test('memory is edited line by line, skills have their own render', () => {
   const html = panelHtml(SESSION, { section: 'memory', scope: 'personal', file: 'identity.md' });
 
-  // Области приходят из сервиса: их подписи и число файлов панель не выдумывает.
+  // Scopes come from the service: the panel does not invent their labels and file counts.
   assert.match(html, /id="count-personal"/);
   assert.match(html, /href="\/panel\/memory\?scope=shared"/);
   assert.match(html, /counts\.personal/, 'счётчики берутся у сервиса');
 
-  // Удаление записей живёт в разделе памяти и уходит своим маршрутом.
+  // Deleting entries lives in the memory section and goes through its own route.
   assert.match(html, /endpoint\('forget-many'\)/, 'пачка уходит маршрутом раздела');
   assert.match(html, /askConfirm\(fill\(cfg\.ui\.removeMemoryPrompt, \{ what \}\)/, 'удаление просит подтверждение');
 
-  // Пустая шапка файла не занимает место: без файла её нет.
+  // An empty file head takes no space: without a file there is none.
   assert.match(html, /\.file-head\[hidden\] \{ display:none; \}/);
 });
 
-test('раздел скиллов — редактор, а не список файлов с галочками', () => {
+test('the skills section is an editor, not a list of files with checkboxes', () => {
   const session: PanelSession = {
     ...SESSION,
     sections: [
@@ -63,8 +63,8 @@ test('раздел скиллов — редактор, а не список ф�
   assert.match(list, /href="\/panel\/skills"/, 'раздел стоит в сайдбаре рядом с памятью');
   assert.doesNotMatch(list, /href="\/panel\/skills\?/, 'области у скиллов нет — и параметра тоже');
   assert.match(list, /id="new-skill"/, 'новый скилл заводится кнопкой');
-  // Режим профиля вставлен между скиллами и памятью: у настроек нет списка файлов,
-  // и подставлять туда loadFiles значило бы дёргать несуществующий маршрут.
+  // The profile mode is inserted between skills and memory: settings have no file list,
+  // and substituting loadFiles there would mean hitting a nonexistent route.
   assert.match(
     list,
     /cfg\.mode === 'skills' \? loadSkills\(\) : cfg\.mode === 'profile' \? Promise\.resolve\(\) : loadFiles\(\)/,
@@ -72,15 +72,15 @@ test('раздел скиллов — редактор, а не список ф�
   );
   assert.doesNotMatch(list, /id="count-skills"[^>]*>5</, 'число у раздела приходит из сервиса');
 
-  // Пустой редактор нового скилла: раздел открывается и без файла, и это состояние
-  // живёт в адресе (`?new=1`), а не в скрытой переменной.
+  // The empty editor of a new skill: the section opens even without a file, and this state
+  // lives in the address (`?new=1`), not in a hidden variable.
   const fresh = panelHtml(session, { section: 'skills', fresh: true });
   assert.match(fresh, /id="skill-body"/, 'тело SKILL.md правится тут же');
   assert.match(fresh, /fillSkill\(null\)/, 'у нового скилла полей ещё нет — значения пустые');
   assert.match(fresh, /go\(\{ file: null, fresh: true, tab: 'notes' \}\)/, 'кнопка ведёт в пустой редактор');
 
-  // «Напиши за меня» — блок с идеей и кнопкой; есть он только там, где есть кому
-  // писать: в панели без контейнера с моделью его не рисуют вовсе.
+  // «Write it for me» is a block with an idea and a button; it exists only where there is
+  // someone to write: in a panel without a model container it is not drawn at all.
   const canWrite = panelHtml({ ...session, draftSkills: true }, { section: 'skills', fresh: true });
   assert.match(canWrite, /"draftSkills":true/);
   assert.match(canWrite, /id="skill-idea"/, 'идею спрашивают одним полем');
@@ -96,22 +96,22 @@ test('раздел скиллов — редактор, а не список ф�
   assert.match(open, /endpoint\('history'\)/, 'у скиллов история — по всему каталогу, а не по файлу');
   assert.match(open, /endpoint\('save'\)/);
   assert.match(open, /askConfirm\(fill\(cfg\.ui\.deleteSkillPrompt, \{ name: data\.name \}\)/, 'удаление спрашивает подтверждение');
-  // Отказ проверки не должен стирать черновик: сообщение уходит в строку состояния,
-  // а не вместо редактора (иначе «нет описания» уносит с собой весь написанный текст).
+  // A validation failure must not erase the draft: the message goes to the status line,
+  // not instead of the editor (otherwise «no description» takes the whole written text with it).
   assert.match(open, /skillStatus\(cfg\.ui\.saveFailedPrefix \+/, 'ошибка сохранения видна в редакторе');
 });
 
-test('шапка подписана Icarus Control Panel и рисует разделы из сервиса', () => {
+test('the header is signed Icarus Control Panel and draws sections from the service', () => {
   const html = panelHtml(SESSION, { section: 'memory', scope: 'personal' });
   assert.match(html, /<title>Icarus Control Panel<\/title>/);
   assert.match(html, /<b>Icarus<\/b>/, 'в сайдбаре — имя панели');
   assert.match(html, /document\.title = 'Icarus Control Panel · ' \+ cfg\.user/);
-  // Область в ссылке несёт только память: у скиллов своей области нет, и
-  // `?scope=personal` в их адресе — это и была та путаница с двумя входами.
+  // The scope in the link carries only memory: skills have no scope of their own, and
+  // `?scope=personal` in their address was exactly that confusion with two entries.
   assert.match(html, /href="\/panel\/memory\?scope=shared"/, 'раздел памяти — ссылкой с областью');
   assert.match(html, /icarus-core-2/, 'в подвале видно, какая модель работает');
 
-  // Следующий раздел — это ещё одна ссылка, а не переделка страницы.
+  // The next section is one more link, not a remake of the page.
   const withSessions = panelHtml(
     { ...SESSION, sections: [...SESSION.sections, { id: 'sessions', label: 'Разговоры' }] },
     { section: 'memory', scope: 'personal' },
@@ -119,13 +119,13 @@ test('шапка подписана Icarus Control Panel и рисует раз�
   assert.match(withSessions, /href="\/panel\/sessions">Разговоры</);
 });
 
-test('панель не приносит с собой никаких пропусков: вход делает прокси', () => {
+test('the panel brings no passes with it: the proxy does the entry', () => {
   const html = panelHtml(SESSION, { section: 'memory', scope: 'personal' });
   assert.doesNotMatch(html, /params\.get\('t'\)|Bearer |authorization/i, 'одноразовых токенов в странице больше нет');
   assert.match(html, /await fetch\(path, \{/, 'запросы уходят обычным fetch — с кукой SSO, а не с пропуском');
 });
 
-test('отказ доступа объясняет причину и экранирует то, что пришло извне', () => {
+test('an access denial explains the reason and escapes what came from outside', () => {
   const html = panelHtml({
     status: 403,
     message: '«<script>alert(1)</script>» не заведён в Icarus',
@@ -137,9 +137,9 @@ test('отказ доступа объясняет причину и экран�
   assert.doesNotMatch(html, /class="cols"/, 'пустой панели при отказе не показываем');
 });
 
-test('у настроек одно меню — в левой панели, без горизонтальных табов', () => {
-  // Раньше разделы открывались поверх чата: сверху горизонтальные табы, внутри —
-  // второй сайдбар. Теперь меню настроек одно и живёт в левой панели страницы.
+test('settings have a single menu — in the left panel, without horizontal tabs', () => {
+  // Previously sections opened over the chat: horizontal tabs on top, a second
+  // sidebar inside. Now the settings menu is single and lives in the left panel of the page.
   for (const section of ['memory', 'skills']) {
     const html = panelHtml(SESSION, { section });
     assert.match(html, /<aside>/, 'меню разделов живёт в левой панели');

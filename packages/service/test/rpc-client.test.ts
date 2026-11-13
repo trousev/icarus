@@ -1,4 +1,4 @@
-// RPC-мост: корреляция команд и событий на заглушке вместо pi в контейнере.
+// RPC bridge: correlation of commands and events on a stub instead of pi in a container.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -28,7 +28,7 @@ function stubSpawner(): Spawner {
   return () => spawn(process.execPath, ['-e', STUB], { stdio: ['pipe', 'pipe', 'pipe'] });
 }
 
-test('команда получает ответ с тем же id', async () => {
+test('a command gets a response with the same id', async () => {
   const client = new RpcClient({} as any, 'stub', [], stubSpawner());
   const response = await client.request({ type: 'get_state' });
   assert.equal(response.success, true);
@@ -36,7 +36,7 @@ test('команда получает ответ с тем же id', async () =>
   client.dispose();
 });
 
-test('события приходят подписчику и не мешают ответам', async () => {
+test('events reach the subscriber and do not interfere with responses', async () => {
   const client = new RpcClient({} as any, 'stub', [], stubSpawner());
   const seen: string[] = [];
   client.onEvent((event) => seen.push(event.type));
@@ -49,14 +49,14 @@ test('события приходят подписчику и не мешают 
   client.dispose();
 });
 
-test('таймаут не виснет навсегда', async () => {
+test('a timeout does not hang forever', async () => {
   const silent: Spawner = () => spawn(process.execPath, ['-e', 'process.stdin.resume();'], { stdio: ['pipe', 'pipe', 'pipe'] });
   const client = new RpcClient({} as any, 'stub', [], silent);
   await assert.rejects(() => client.request({ type: 'get_state' }, 300), /таймаут/);
   client.dispose();
 });
 
-test('после закрытия канала команды отклоняются', async () => {
+test('after the channel closes commands are rejected', async () => {
   const client = new RpcClient({} as any, 'stub', [], stubSpawner());
   client.dispose();
   await assert.rejects(() => client.request({ type: 'get_state' }), /закрыт/);

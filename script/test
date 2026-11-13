@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Тесты Icarus. Докер и модель не нужны: pi, контейнеры и сеть подменяются заглушками.
+# Icarus tests. Docker and a model are not needed: pi, containers and the network are replaced by stubs.
 #
-#   ./script/test                                  весь набор
+#   ./script/test                                  the whole set
 #   ./script/test packages/service/test/title.test.ts
-#                                                  один файл
-#   ./script/test --test-name-pattern='память'     фильтр по имени теста
+#                                                  one file
+#   ./script/test --test-name-pattern='память'     filter by test name
 #
-# Любые флаги node --test передаются насквозь и должны идти до имён файлов.
-# Сценарные тесты с живым докером включаются переменной ICARUS_E2E=1.
+# Any node --test flags are passed through and must come before the file names.
+# Scenario tests with a live docker are enabled by the ICARUS_E2E=1 variable.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -18,9 +18,9 @@ if [ ! -d node_modules ]; then
   exit 1
 fi
 
-# Если файлы не названы, берём все тесты под packages/. Именно find, а не маска
-# одного каталога: тест, положенный в новый подкаталог, не должен молча выпасть
-# из прогона — незапущенный тест хуже упавшего.
+# If no files are named, we take all tests under packages/. Exactly find, not a mask
+# of one directory: a test placed in a new subdirectory must not silently fall out
+# of the run — a test not run is worse than a failed one.
 files=()
 for arg in "$@"; do
   case "$arg" in

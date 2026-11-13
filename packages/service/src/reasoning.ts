@@ -1,8 +1,8 @@
-// Превращает события тулов pi в короткие человеческие фразы для reasoning_content,
-// чтобы в чате было видно, что Икар делает руками, а не только его ответ.
+// Turns pi tool events into short human phrases for reasoning_content,
+// so that the chat shows what Icarus does with his hands, not just his answer.
 
 const WORKSPACE = '/workspaces/';
-/** Служебный каталог: в чате его префикс только мешает, «memory/identity.md» понятнее. */
+/** Service directory: in the chat its prefix only gets in the way, "memory/identity.md" is clearer. */
 const HOME = '/workspaces/.icarus/';
 
 function shortPath(value: unknown): string {
@@ -17,7 +17,7 @@ function truncate(value: unknown, limit = 70): string {
   return text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
 }
 
-/** Фраза на начало выполнения тула. null — если про этот тул говорить нечего. */
+/** Phrase for the start of tool execution. null — if there is nothing to say about this tool. */
 export function phraseForToolStart(toolName: string, args: Record<string, unknown> = {}): string | null {
   switch (toolName) {
     case 'read':
@@ -35,7 +35,7 @@ export function phraseForToolStart(toolName: string, args: Record<string, unknow
     case 'ls':
       return 'смотрю, что в каталоге';
     case 'subagent': {
-      // Задачи уже размечены моделью: показываем, скольким она раздала работу.
+      // The tasks are already marked up by the model: we show how many it handed out work to.
       const tasks = Array.isArray(args.tasks) ? args.tasks.length : 0;
       return tasks > 0 ? `раздаю задачи субагентам: ${tasks}` : 'раздаю задачи субагентам';
     }
@@ -44,7 +44,7 @@ export function phraseForToolStart(toolName: string, args: Record<string, unknow
   }
 }
 
-/** Короткий итог выполнения тула. */
+/** A short summary of tool execution. */
 export function phraseForToolEnd(toolName: string, isError: boolean): string {
   if (isError) return `не получилось: ${truncate(toolName, 30)}`;
   switch (toolName) {
@@ -64,9 +64,9 @@ export function phraseForToolEnd(toolName: string, isError: boolean): string {
 }
 
 /**
- * Строка про субагентов для статуса: «агенты 2/5 · researcher: ищет…».
- * Детали приходят от инструмента, и мусор в них — не повод падать: не разобрали,
- * значит сказать нечего.
+ * Line about subagents for the status: "agents 2/5 · researcher: searching…".
+ * Details come from the tool, and garbage in them is no reason to crash: if we could not parse it,
+ * there is nothing to say.
  */
 export function subagentStatus(details: unknown): string | null {
   const record = details && typeof details === 'object' ? (details as Record<string, unknown>) : {};
@@ -90,7 +90,7 @@ export function subagentStatus(details: unknown): string | null {
   return `агенты ${ok}/${parsed.length} · ${truncate(now, 90)}`;
 }
 
-/** Человеческая фраза про реальные размышления модели, если они есть. */
+/** A human phrase about the model's real thinking, if there is any. */
 export function thinkingLabel(): string {
   return 'думаю';
 }

@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Стенд «прокачка персоны Икара». Все артефакты — внутри tools/persona-flywheel/.
+# The "Icarus persona bootstrapping" rig. All artifacts live inside tools/persona-flywheel/.
 set -euo pipefail
 cd "$(dirname "$0")"
 
 case "${1:-}" in
   step)
-    # step <label> <prompt.md> [доп. флаги]
+    # step <label> <prompt.md> [extra flags]
     label="${2:?label}"
     prompt="${3:?prompt.md}"
     shift 3
     exec node step.mjs --label "$label" --in "$prompt" "$@"
     ;;
   compare)
-    # compare <label> <prompt.md> [сценарии]
+    # compare <label> <prompt.md> [scenarios]
     label="${2:?label}"
     prompt="${3:?prompt.md}"
     scenarios="${4:-banter,real-grief,stress-support,provocation,sad-joke,absurd-request}"

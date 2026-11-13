@@ -1,7 +1,8 @@
-// Артефактный разговор: pi должен работать в папке артефакта, а не в workspace.
+// Artifact conversation: pi must work in the artifact folder, not in the workspace.
 //
-// Проверяем два стыка: PiSession отдаёт docker exec рабочий каталог `/artifacts/<slug>`
-// и метку режима в окружении, а реестр не пускает в чужой артефакт без права записи.
+// We check two joints: PiSession gives docker exec the working directory
+// `/artifacts/<slug>` and the mode label in the environment, while the registry
+// does not let anyone into someone else's artifact without write permission.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -26,7 +27,7 @@ function artifact(config: IcarusConfig, slug: string, acl: FolderAcl = DEFAULT_A
 
 const STUB = 'process.stdin.resume();';
 
-/** Заглушка pi: запоминает, с каким каталогом и окружением её позвали. */
+/** pi stub: remembers with which directory and environment it was called. */
 function capturingSpawner(calls: Array<{ workdir?: string; env?: Record<string, string> }>): Spawner {
   return (_container, _args, env, workdir) => {
     calls.push({ workdir, env });
@@ -34,7 +35,7 @@ function capturingSpawner(calls: Array<{ workdir?: string; env?: Record<string, 
   };
 }
 
-test('сессия артефакта запускает pi в /artifacts/<slug> и передаёт режим в промпт', () => {
+test('an artifact session starts pi in /artifacts/<slug> and passes the mode into the prompt', () => {
   const config = makeConfig();
   const calls: Array<{ workdir?: string; env?: Record<string, string> }> = [];
   const session = new PiSession(
@@ -61,7 +62,7 @@ test('сессия артефакта запускает pi в /artifacts/<slug>
   }
 });
 
-test('обычная сессия по-прежнему работает в workspace', () => {
+test('a regular session still works in the workspace', () => {
   const config = makeConfig();
   const calls: Array<{ workdir?: string; env?: Record<string, string> }> = [];
   const session = new PiSession(config, probe(), 'web-talk-1', config.models[0]!, 'stub', 0, capturingSpawner(calls), 'talk');
@@ -73,7 +74,7 @@ test('обычная сессия по-прежнему работает в work
   }
 });
 
-test('реестр передаёт артефакт в сессию и запоминает его в разговоре', async () => {
+test('the registry passes the artifact into the session and remembers it in the conversation', async () => {
   const config = makeConfig();
   artifact(config, 'plan');
   const seen: Array<unknown[]> = [];
@@ -112,7 +113,7 @@ test('реестр передаёт артефакт в сессию и запо
   }
 });
 
-test('без права записи артефактный чат не поднимается', async () => {
+test('without write permission an artifact chat does not start', async () => {
   const config = makeConfig();
   artifact(config, 'viewonly', { me: 'read', family: 'read' });
   const registry = new SessionRegistry(config, {

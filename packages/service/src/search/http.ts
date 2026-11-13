@@ -1,9 +1,9 @@
-// HTTP-вход роутера: GET/POST /search и /fetch.
+// HTTP entrance of the router: GET/POST /search and /fetch.
 //
-// Изнутри docker-сети токен не нужен: контейнер pi ходит сюда напрямую. Снаружи
-// (если порт случайно оказался наружу) — только с обычным токеном сервиса.
-// Ошибки — обычным для сервиса телом errorBody, чтобы клиент не разбирал два
-// разных формата.
+// From inside the docker network no token is needed: the pi container goes here directly. From outside
+// (if the port accidentally ended up exposed) — only with the service's usual token.
+// Errors — with the service's usual errorBody body, so the client doesn't parse two
+// different formats.
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { IcarusConfig } from '../config.ts';
 import { errorBody } from '../http/sse.ts';
@@ -18,7 +18,7 @@ export type SearchHttpOptions = {
   now?: () => number;
 };
 
-/** Пределы как у инструмента web_search: больше десяти ссылок агенту не нужно. */
+/** Limits as in the web_search tool: the agent doesn't need more than ten links. */
 const MAX_LIMIT = 10;
 const MAX_FETCH_CHARS = 50_000;
 
@@ -35,20 +35,20 @@ function bearer(req: IncomingMessage): string {
 }
 
 /**
- * Частный адрес: петля, docker-сеть или домашняя локалка.
+ * A private address: loopback, docker network, or home LAN.
  *
- * Токен для /search не нужен, пока запрос идёт изнутри — контейнер pi ходит в
- * сервис по docker-сети. Но порт сервиса может случайно оказаться наружу,
- * поэтому с публичного адреса токен всё-таки спрашиваем: тогда утечка порта
- * не превращается в бесплатный доступ к квотам поисковиков.
+ * The token for /search is not needed while the request comes from inside — the pi container goes to
+ * the service over the docker network. But the service port may accidentally end up exposed,
+ * so from a public address we still ask for the token: then a port leak
+ * doesn't turn into free access to the search engines' quotas.
  */
 export function isInternalAddress(address: string | undefined): boolean {
   if (address === undefined || address === '') return false;
-  // Node отдаёт IPv4 поверх IPv6 как ::ffff:172.18.0.2 — снимаем префикс.
+  // Node serves IPv4 over IPv6 as ::ffff:172.18.0.2 — we strip the prefix.
   const value = address.startsWith('::ffff:') ? address.slice('::ffff:'.length) : address;
   const lower = value.toLowerCase();
   if (lower === '::1') return true;
-  // fc00::/7 (unique local) и fe80::/10 (link-local).
+  // fc00::/7 (unique local) and fe80::/10 (link-local).
   if (/^f[cd][0-9a-f]{2}:/.test(lower)) return true;
   if (/^fe[89ab][0-9a-f]:/.test(lower)) return true;
 
@@ -74,7 +74,7 @@ function clampChars(raw: unknown): number {
   return Math.min(Math.max(Math.trunc(value), 1_000), MAX_FETCH_CHARS);
 }
 
-/** Вход: пусто — пускать, строка — причина отказа. */
+/** Result: empty — allow, a string — reason for denial. */
 function authorize(req: IncomingMessage, config: IcarusConfig): string | null {
   const token = bearer(req);
   if (token !== '') return token === config.apiKey ? null : 'неверный токен';
@@ -82,11 +82,11 @@ function authorize(req: IncomingMessage, config: IcarusConfig): string | null {
 }
 
 /**
- * Адрес, который нельзя отдавать провайдеру: петля, локалка, метаданные облака.
+ * An address that must not be given to a provider: loopback, LAN, cloud metadata.
  *
- * Провайдеры качают страницу у себя, поэтому до нашей сети им не достать, но
- * запрос «прочитай http://192.168.1.1» всё равно выглядит как ошибка, а не как
- * работа. Заодно это защита, если когда-нибудь появится локальный fallback.
+ * Providers download the page on their side, so they can't reach our network, but
+ * a request "read http://192.168.1.1" still looks like an error, not like
+ * work. At the same time it's protection if a local fallback ever appears.
  */
 export function isBlockedHost(hostname: string): boolean {
   const host = hostname.toLowerCase().replace(/^\[|\]$/g, '');
@@ -98,7 +98,7 @@ export function isBlockedHost(hostname: string): boolean {
   return isInternalAddress(host);
 }
 
-/** Проверить URL до похода к провайдеру: только http(s) и не внутрь сети. */
+/** Check the URL before going to the provider: only http(s) and not into the network. */
 export function targetUrl(raw: string): { url: string } | { error: string } {
   let parsed: URL;
   try {
@@ -129,11 +129,11 @@ async function readRequest(req: IncomingMessage, url: URL): Promise<{ query: str
 }
 
 /**
- * POST /search {query, limit} или GET /search?q=...&limit=...
+ * POST /search {query, limit} or GET /search?q=...&limit=...
  *
- * 200 — кто-то ответил (пустая выдача — тоже ответ);
- * 400 — нет запроса; 401 — чужой токен снаружи;
- * 502 — все настроенные провайдеры отказали; 503 — все в карантине или нет ключей.
+ * 200 — someone answered (an empty result is also an answer);
+ * 400 — no query; 401 — a foreign token from outside;
+ * 502 — all configured providers failed; 503 — all are quarantined or there are no keys.
  */
 export async function handleSearch(
   req: IncomingMessage,
@@ -147,7 +147,7 @@ export async function handleSearch(
     return;
   }
 
-  // Токен присылают снаружи; изнутри сети он не нужен вовсе (см. isInternalAddress).
+  // The token is sent from outside; from inside the network it's not needed at all (see isInternalAddress).
   const denied = authorize(req, config);
   if (denied !== null) {
     json(res, 401, errorBody(denied, 'authentication_error'));
@@ -217,10 +217,10 @@ async function readFetchRequest(req: IncomingMessage, url: URL): Promise<{ url: 
 }
 
 /**
- * POST /fetch {url, maxChars?} или GET /fetch?url=...
+ * POST /fetch {url, maxChars?} or GET /fetch?url=...
  *
- * 200 — страница пришла; 400 — не тот адрес; 401 — чужой токен снаружи;
- * 502 — все провайдеры отказали; 503 — нет ключей или все в карантине.
+ * 200 — the page arrived; 400 — wrong address; 401 — a foreign token from outside;
+ * 502 — all providers failed; 503 — no keys or all are quarantined.
  */
 export async function handleFetch(
   req: IncomingMessage,

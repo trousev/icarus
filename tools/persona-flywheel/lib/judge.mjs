@@ -1,4 +1,4 @@
-// Судья: LLM оценивает диалог по criteria.md и возвращает оси 0–10.
+// Judge: an LLM scores the dialogue against criteria.md and returns axes 0–10.
 import { chat, chatFinal, parseJson, MODELS } from "./api.mjs";
 import { transcript } from "./dialogue.mjs";
 
@@ -35,7 +35,7 @@ export async function judge({ criteria, persona, scenario, dialogue }) {
       responseFormat: { type: "json_object" },
     });
   } catch {
-    // судья иногда сжигает бюджет на размышлениях — второй заход без них
+    // the judge sometimes burns the budget on reasoning — second pass without it
     raw = await chatFinal({ model: MODELS.judge, messages, maxTokens: 700, temperature: 0.2 });
   }
   const parsed = parseJson(raw.content);

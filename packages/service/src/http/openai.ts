@@ -1,5 +1,5 @@
-// Главный маршрут: OpenAI-клиент присылает историю разговора, мы превращаем её
-// в реплику для живой сессии pi и обратно — в поток формата OpenAI.
+// The main route: the OpenAI client sends the conversation history, we turn it
+// into a turn for the live pi session and back — into an OpenAI-format stream.
 import fs from 'node:fs';
 import path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -25,18 +25,18 @@ import {
 
 const MAX_BODY_BYTES = 16 * 1024 * 1024;
 
-/** Сколько ждём дешёвую модель на заголовок; дальше отвечаем эвристикой. */
+/** How long we wait for the cheap title model; after that we answer with a heuristic. */
 const TITLE_TIMEOUT_MS = 12_000;
 
 const ZERO_USAGE: Usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
 
 /**
- * Заголовок разговора: клиент может звать модель отдельным запросом, и в живую сессию
- * pi мы его не пускаем — иначе это лишний агентский прогон и гонка с основным ходом.
+ * Conversation title: the client may call the model with a separate request, and we don't
+ * let it into the live pi session — otherwise it's a needless agent run and a race with the main turn.
  *
- * Заголовок просим у дешёвой модели разовым вопросом в контейнере человека; на любом
- * сбое (нет пользователя, таймаут, пустой ответ) молча отдаём эвристику — заголовок
- * не то, ради чего стоит задерживать или ломать ответ.
+ * We ask a cheap model for the title with a one-off question in the human's container; on any
+ * failure (no user, timeout, empty answer) we silently return the heuristic — a title
+ * isn't worth delaying or breaking the answer for.
  */
 async function respondTitle(
   req: IncomingMessage,
@@ -54,7 +54,7 @@ async function respondTitle(
   const user = findUser(ctx.config, resolveIdentity(req, body, messages).userId);
   if (user) {
     const controller = new AbortController();
-    // Клиент ушёл (в чате нажали «стоп») — незачем держать вызов модели.
+    // The client left (they pressed "stop" in the chat) — no point holding the model call.
     const onClose = () => controller.abort();
     res.on('close', onClose);
     try {
@@ -76,7 +76,7 @@ async function respondTitle(
 
   log.info('заголовок разговора', { title, source, user: user?.id ?? 'неизвестный' });
 
-  // Клиент уже ушёл — писать некуда, и это не ошибка.
+  // The client has already left — there's nowhere to write, and that's not an error.
   if (res.writableEnded || res.destroyed) return;
 
   if (body.stream === false) {
@@ -117,7 +117,7 @@ export function headerValue(req: IncomingMessage, name: string): string | undefi
   return text && text.trim() !== '' ? text.trim() : undefined;
 }
 
-/** Кто говорит и о каком разговоре: заголовки клиента, иначе фолбэки. */
+/** Who is speaking and about which conversation: client headers, otherwise fallbacks. */
 export function resolveIdentity(
   req: IncomingMessage,
   body: Record<string, unknown>,
@@ -142,7 +142,7 @@ export function resolveIdentity(
 
 export type Attachments = { text: string; files: string[]; images: Array<{ data: string; mimeType: string }> };
 
-/** Достаём текст последней реплики, раскладываем вложения в incoming/ и готовим картинки для модели. */
+/** Extract the text of the latest turn, unpack the attachments into incoming/ and prepare images for the model. */
 export function extractLatestUserMessage(
   messages: ChatMessage[],
   incomingDir: string,
@@ -167,7 +167,7 @@ export function extractLatestUserMessage(
       const match = /^data:([^;]+);base64,(.+)$/s.exec(url);
       if (!match) continue;
       const [, mime, base64] = match;
-      // Картинку отдаём модели нативно, чтобы она её видела, а не только путь к файлу.
+      // We give the image to the model natively, so it can see it, not just a path to the file.
       images.push({ data: base64, mimeType: mime });
       const extension = mime.split('/')[1]?.replace(/[^a-z0-9]/gi, '') || 'bin';
       const name = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${extension}`;
@@ -184,7 +184,7 @@ export function extractLatestUserMessage(
   return { text: texts.join('\n').trim(), files, images };
 }
 
-// Реплика собирается общим образом — им же пользуется Telegram (см. prompt.ts).
+// The turn is assembled in a shared way — Telegram uses the same (see prompt.ts).
 export { buildPrompt };
 
 function appendDivergence(config: IcarusConfig, userId: string, conversationId: string, body: string): void {
@@ -232,7 +232,7 @@ export async function handleChatCompletions(
 
   const messages = (body.messages ?? []) as ChatMessage[];
 
-  // Заголовок разговора отвечаем до всякой сессии: это не ход Икара.
+  // We answer the conversation title before any session: it's not an Icarus turn.
   if (isTitleRequest(body.model, messages)) {
     await respondTitle(req, res, body, messages, { config, registry });
     return;
@@ -247,7 +247,7 @@ export async function handleChatCompletions(
     return;
   }
 
-  // Workspace выбирает клиент; без заголовка разговор идёт в «Разговор».
+  // The client chooses the workspace; without the header the conversation goes to "Conversation".
   const requestedWorkspace =
     typeof req.headers['x-icarus-workspace'] === 'string' ? req.headers['x-icarus-workspace'].trim() : '';
   if (requestedWorkspace && !findWorkspace(config, user, requestedWorkspace)) {
@@ -285,11 +285,11 @@ export async function handleChatCompletions(
     return;
   }
 
-  // Файл сессии не различает входы: канал хода записываем сами, иначе в панели
-  // не понять, кто прислал последнюю реплику — панель, Telegram или API.
+  // The session file doesn't distinguish the inputs: we record the turn channel ourselves, otherwise
+  // the panel can't tell who sent the latest turn — the panel, Telegram or the API.
   recordTurn(config, user, conversationId, 'api');
 
-  // Сверка истории: сессия pi — истина, расхождение только логируем.
+  // History comparison: the pi session is the truth, we only log a divergence.
   try {
     const known = await session.getMessages();
     const comparison = compareHistory(messages, known as Array<{ role?: string; content?: unknown }>);
@@ -322,9 +322,9 @@ export async function handleChatCompletions(
 }
 
 /**
- * Ответ одним куском (`stream: false`). Размышления копим отдельно и отдаём в
- * `message.reasoning_content` — тем же каналом, что и в стриме: в `content`
- * должен лежать только видимый ответ.
+ * The answer in one piece (`stream: false`). We accumulate reasoning separately and return it in
+ * `message.reasoning_content` — the same channel as in the stream: `content`
+ * must hold only the visible answer.
  */
 async function runBuffered(
   res: ServerResponse,
@@ -385,23 +385,23 @@ async function runStreaming(
   let wroteAnything = false;
 
   /**
-   * Один чанк — ровно один канал: либо размышления, либо видимый текст, и никогда
-   * оба поля сразу. Смешанный `delta` типичная LangChain-обёртка клиента
-   * классифицирует как текст и уводит мысли в тело ответа.
+   * One chunk — exactly one channel: either reasoning or visible text, and never
+   * both fields at once. A client's typical LangChain wrapper classifies a mixed `delta`
+   * as text and moves the thoughts into the answer body.
    *
-   * Каналы при этом независимы и не «закрываются». `reasoning_content` остаётся
-   * размышлениям и фразам тулов в любой момент хода, `content` — только словам
-   * модели. Клиент склеивает соседние дельты одного канала и сам упорядочивает
-   * блоки, поэтому «мысль после начала ответа» — это нормальный `think` вслед за
-   * `text`, а не повод дописать её в ответ. Обратный ход (после первого текста
-   * всё в `content`) — регресс: агент почти всегда говорит первую фразу до тулов,
-   * и тогда весь дальнейший монолог модели уезжает в видимый ответ.
+   * The channels are independent and don't "close". `reasoning_content` stays
+   * reserved for reasoning and tool phrases at any point of the turn, `content` — only for the
+   * model's words. The client merges adjacent deltas of one channel and orders the
+   * blocks itself, so "a thought after the answer has started" is a normal `think` after
+   * `text`, not a reason to append it to the answer. The reverse (after the first text
+   * everything goes into `content`) is a regression: the agent almost always says the first phrase before tools,
+   * and then the model's entire subsequent monologue ends up in the visible answer.
    *
-   * Цена переключения — разрыв ответа в том месте, где модель оборвалась на тул:
-   * клиент заводит на каждое переключение новую часть и рисует её отдельным
-   * блоком. Поэтому видимый текст едет через `AnswerBuffer`: незаконченный хвост
-   * придерживается и склеивается с продолжением, а переключение попадает на
-   * границу строки или предложения.
+   * The cost of switching is a break in the answer where the model broke off at a tool:
+   * the client starts a new part at each switch and renders it as a separate
+   * block. That's why the visible text goes through `AnswerBuffer`: an unfinished tail
+   * is held back and merged with the continuation, and the switch lands on a
+   * line or sentence boundary.
    */
   type ReplyDelta = { content?: string; reasoning_content?: string };
 
@@ -415,21 +415,21 @@ async function runStreaming(
     write(chunk(id, model, delta));
   };
 
-  /** Мысль модели и активность тулов — один канал: свёрнутый блок «размышлений». */
+  /** Model thought and tool activity — one channel: a collapsed "reasoning" block. */
   const publishReasoning = (text: string) => {
     if (!text) return;
     emit({ reasoning_content: text });
   };
 
   /**
-   * Видимый текст ответа. Уходит не сразу, а законченными кусками: см.
-   * `AnswerBuffer` — иначе переключение на мысль или фразу тула разрежет ответ
-   * там, где модель оборвала его на тул.
+   * Visible answer text. It doesn't go out right away, but in finished pieces: see
+   * `AnswerBuffer` — otherwise a switch to a thought or a tool phrase would cut the answer
+   * where the model broke it off at a tool.
    */
   const answer = new AnswerBuffer((text) => emit({ content: text }));
 
-  // Первый чанк с ролью: некоторые клиенты (и парсеры вроде LangChain) без него
-  // не собирают сообщение.
+  // The first chunk with the role: some clients (and parsers like LangChain) don't
+  // assemble the message without it.
   write(chunk(id, model, { role: 'assistant', content: '' }));
 
   const unsubscribe = session.onEvent((event) => {
@@ -445,9 +445,9 @@ async function runStreaming(
           answer.push(delta.delta);
           break;
         }
-        // `thinking_end` намеренно не считаем разрывом: pi шлёт его уже после
-        // первого текста того же блока (проверено на живом потоке), и разрыв
-        // по нему вставил бы разделитель посреди фразы.
+        // `thinking_end` is deliberately not treated as a break: pi sends it already after
+        // the first text of the same block (verified on a live stream), and a break
+        // on it would insert a separator in the middle of a phrase.
         if (delta.type === 'thinking_start') {
           answer.breakText();
           break;

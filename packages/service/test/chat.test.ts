@@ -1,4 +1,4 @@
-// Чат панели: реестр разговоров, страницы списка, история и подписи шагов.
+// Panel chat: conversation registry, list pages, history and step labels.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -37,7 +37,7 @@ function fixture() {
   return { config, user };
 }
 
-/** Файл сессии pi: `<когда создан>_<id>.jsonl`, как его кладёт pi. */
+/** pi session file: `<when created>_<id>.jsonl`, as pi lays it down. */
 function putSessionFile(
   config: ReturnType<typeof makeConfig>,
   user: ReturnType<typeof probe>,
@@ -61,7 +61,7 @@ function dialog(userText: string, assistantText: string, at = '2026-11-01T10:00:
   ];
 }
 
-test('в chats.json только метаданные: id, title, createdAt, channel и conversationId', () => {
+test('in chats.json there are only metadata: id, title, createdAt, channel and conversationId', () => {
   const { config, user } = fixture();
   const chat = createChat(config, user, 'talk', new Date('2026-11-01T10:00:00.000Z'));
 
@@ -84,13 +84,13 @@ test('в chats.json только метаданные: id, title, createdAt, cha
   assert.equal(page.chats[0]?.readOnly, false);
 });
 
-test('ход веб-чата: заголовок из первой реплики, превью и время из файла сессии', () => {
+test('web chat turn: title from the first utterance, preview and time from the session file', () => {
   const { config, user } = fixture();
   const chat = createChat(config, user, 'talk', new Date('2026-11-01T10:00:00.000Z'));
   putSessionFile(config, user, chat.id, dialog('Собери план на четверг', 'Вот план: встреча в 10:00.'));
 
   finishChat(config, user, chat.id, 'Собери план на четверг');
-  finishChat(config, user, chat.id, 'Покажи кота'); // второй ход заголовок не переписывает
+  finishChat(config, user, chat.id, 'Покажи кота'); // the second turn does not rewrite the title
 
   const [found] = listChatPage(config, user, 'план').chats;
   assert.equal(found?.title, 'Собери план на четверг');
@@ -99,10 +99,10 @@ test('ход веб-чата: заголовок из первой реплик�
   assert.equal(listChatPage(config, user, 'нет-такого-слова').chats.length, 0);
 });
 
-test('finishChat закрывает ход сводкой: разговор не залипает жёлтым', () => {
-  // Ход, дошедший до записи, обязан сказать сводке `idle` — иначе сайдбар
-  // считает его идущим вечно. Дело не только в счастливом пути: сюда же
-  // приходит и `closed`, и любой ранний выход, который до catch не доходит.
+test('finishChat closes the turn with a bulletin: the conversation does not stay stuck yellow', () => {
+  // A turn that reached a record must tell the bulletin `idle` — otherwise the sidebar
+  // considers it running forever. It is not only about the happy path: here too
+  // come `closed`, and any early exit that does not reach catch.
   const { config, user } = fixture();
   const chat = createChat(config, user, 'talk', new Date('2026-11-01T10:00:00.000Z'));
 
@@ -119,9 +119,9 @@ test('finishChat закрывает ход сводкой: разговор не
   assert.equal(record?.title, 'Собери план на четверг', 'заголовок по-прежнему берётся из первой реплики');
 });
 
-test('ход без записи тоже не оставляет разговор жёлтым', () => {
-  // Разговор уже удалён или его файл недоступен: `finishChat` записи не даст,
-  // но `idle` из сводки уйти обязан — иначе нечего будет гасить.
+test('a turn without a record also does not leave the conversation yellow', () => {
+  // The conversation is already deleted or its file is unavailable: `finishChat` will give no record,
+  // but `idle` must still leave the bulletin — otherwise there is nothing to turn off.
   const { config, user } = fixture();
   const слышал: BulletinEvent[] = [];
   const отписка = watchAll((event) => слышал.push(event));
@@ -132,7 +132,7 @@ test('ход без записи тоже не оставляет разгово
   assert.equal(слышал.at(-1)?.type, 'idle', 'а сводка всё равно узнала, что ход встал');
 });
 
-test('история берётся из файла сессии: текст и трассировка, без сырых результатов', () => {
+test('history is taken from the session file: text and trace, without raw results', () => {
   const { config, user } = fixture();
   const chat = createChat(config, user, 'talk', new Date('2026-11-01T10:00:00.000Z'));
   putSessionFile(config, user, chat.id, [
@@ -178,13 +178,13 @@ test('история берётся из файла сессии: текст и 
   assert.equal(history?.chat.title, 'Построй план', 'заголовок в реестре обновился из файла');
 });
 
-test('неизвестный разговор не выдумывает историю', () => {
+test('an unknown conversation does not invent a history', () => {
   const { config, user } = fixture();
   assert.equal(readHistory(config, user, 'web-нет'), null);
   assert.equal(readHistory(config, user, 'session:нет-такой'), null);
 });
 
-test('Telegram-разговор в реестре и в списке: его можно продолжить из панели', () => {
+test('a Telegram conversation in the registry and in the list: it can be continued from the panel', () => {
   const { config, user } = fixture();
   const conversationId = 'telegram-4242';
   const { sessionId } = putSessionFile(
@@ -198,7 +198,7 @@ test('Telegram-разговор в реестре и в списке: его м�
   const [chat] = listChatPage(config, user).chats;
   assert.equal(chat?.id, conversationId);
   assert.equal(chat?.channel, 'telegram');
-  // Транспорт — труба, разговор общий: панель продолжает Telegram, а не смотрит.
+  // The transport is a pipe, the conversation is shared: the panel continues Telegram, not just watches.
   assert.equal(chat?.readOnly, false);
   assert.match(chat?.title ?? '', /отчёт/);
   assert.match(chat?.preview ?? '', /Готово/);
@@ -210,12 +210,12 @@ test('Telegram-разговор в реестре и в списке: его м�
   assert.equal(history?.messages.length, 2);
   assert.equal(history?.messages[0]?.text, 'Собери отчёт для мамы');
 
-  // Старая ссылка `session:<id>` ведёт к той же записи.
+  // The old link `session:<id>` leads to the same record.
   const legacy = readHistory(config, user, `session:${sessionId}`);
   assert.equal(legacy?.chat.id, conversationId);
 });
 
-test('список сортируется по createdAt, а не по времени файла сессии', () => {
+test('the list is sorted by createdAt, not by the session file time', () => {
   const { config, user } = fixture();
   const older = createChat(config, user, 'talk', new Date('2026-01-01T10:00:00.000Z'));
   const newer = createChat(config, user, 'talk', new Date('2026-02-01T10:00:00.000Z'));
@@ -228,7 +228,7 @@ test('список сортируется по createdAt, а не по врем�
   );
   putSessionFile(config, user, newer.id, dialog('Новый разговор', 'Новый ответ'), '2026-02-01T10-00-00-000Z');
 
-  // Файл старого чата трогали позже — на порядок это влиять не должно.
+  // The old chat's file was touched later — this must not affect the order.
   fs.utimesSync(olderFile, new Date('2026-03-01T10:00:00.000Z'), new Date('2026-03-01T10:00:00.000Z'));
 
   assert.deepEqual(
@@ -237,7 +237,7 @@ test('список сортируется по createdAt, а не по врем�
   );
 });
 
-test('список листается страницами, следующая догружается по курсору', () => {
+test('the list is paged, the next page is loaded by cursor', () => {
   const { config, user } = fixture();
   const created = [];
   for (let index = 1; index <= 5; index += 1) {
@@ -274,9 +274,9 @@ test('список листается страницами, следующая �
   assert.deepEqual(search.chats.map((chat) => chat.id), [created[2]?.id]);
 });
 
-test('разговор через API читается, но из панели не пишется', async () => {
+test('a conversation via the API is read, but not written from the panel', async () => {
   const { config, user } = fixture();
-  // API-клиент владеет историей сам: его разговор панель только смотрит.
+  // The API client owns the history itself: the panel only watches its conversation.
   const conversationId = 'api-4242';
   const { sessionId } = putSessionFile(config, user, conversationId, dialog('Покажи погоду', 'Солнечно'));
   ensureChat(config, user, conversationId, 'api');
@@ -320,7 +320,7 @@ test('разговор через API читается, но из панели �
   }
 });
 
-test('архивный разговор уходит из общего списка в свою страницу', () => {
+test('an archived conversation leaves the common list into its own page', () => {
   const { config, user } = fixture();
   const stay = createChat(config, user, 'talk', new Date('2026-11-01T10:00:00.000Z'));
   const hidden = createChat(config, user, 'talk', new Date('2026-11-02T10:00:00.000Z'));
@@ -336,17 +336,17 @@ test('архивный разговор уходит из общего спис�
   assert.equal(archive.chats[0]?.archived, true);
   assert.equal(archive.total, 1);
 
-  // История архивного разговора открывается по прямой ссылке: архив — не удаление.
+  // The history of an archived conversation opens by direct link: archive is not deletion.
   assert.equal(readHistory(config, user, hidden.id)?.chat.archived, true);
 });
 
-test('архив через API: разговор уезжает из списка, возвращается и переживает реестр', async () => {
+test('archive via the API: the conversation leaves the list, comes back and survives the registry', async () => {
   const { config, user } = fixture();
   const chat = createChat(config, user, 'talk', new Date('2026-11-01T10:00:00.000Z'));
-  // Разговор живёт в Telegram: без места панель не знает, какой топик удалять.
+  // The conversation lives in Telegram: without a place the panel does not know which topic to delete.
   setChatTelegram(config, user, chat.id, 42, 17);
-  // Архив Telegram-разговора — одно действие с ботом: панель зовёт бота вынести
-  // топик, а возврат из архива Telegram не трогает (восстанавливать нечего).
+  // Archiving a Telegram conversation is one action with the bot: the panel calls the bot to remove
+  // the topic, and restoring from the archive does not touch Telegram (there is nothing to restore).
   const removed: string[] = [];
   const server = createServer(config, {} as never, {
     archiveTelegram: async (_person, record) => void removed.push(record.id),
@@ -403,19 +403,19 @@ test('архив через API: разговор уезжает из списк
   }
 });
 
-test('шаги называют то, чем Икар занимался, а не сырое имя тула', () => {
+test('steps name what Icarus was doing, not the raw tool name', () => {
   assert.equal(traceLabel('bash', { command: 'cat /workspaces/.icarus/memory/identity.md' }), 'ПАМЯТЬ');
   assert.equal(traceLabel('bash', { command: 'ls /workspaces' }), 'ТЕРМИНАЛ');
   assert.equal(traceLabel('mcp_connect', { name: 'homeassistant' }), 'MCP');
   assert.equal(traceLabel('mcp_homeassistant_llm__GetDateTime'), 'ДОМ');
-  // Поиск и открытие страницы — разные занятия, и подписи у них разные.
+  // Search and opening a page are different occupations, and their labels are different.
   assert.equal(traceLabel('web_search', { query: 'ёжик' }), 'ПОИСК');
   assert.equal(traceLabel('web_fetch', { url: 'https://anekdotbar.ru/pro-ezhika/' }), 'СТРАНИЦА');
   assert.equal(traceDetail('mcp_connect', { name: 'homeassistant' }), 'homeassistant');
   assert.equal(traceDetail('read', { path: 'memory/preferences.md' }), 'memory/preferences.md');
 });
 
-test('картинка отдаётся из вложений и рабочих папок, и только картинка', () => {
+test('an image is served from attachments and working folders, and only an image', () => {
   const { config, user } = fixture();
   const paths = userPaths(config, user);
   const plots = path.join(paths.workspaces, 'talk', '.maple', 'plots');
@@ -429,8 +429,8 @@ test('картинка отдаётся из вложений и рабочих 
   assert.equal(incoming?.type, 'image/png');
   assert.match(incoming?.file ?? '', /kotic\.png$/);
 
-  // График из workspace: MCP кладёт файл рядом с работой человека, а путь отдаёт
-  // в markdown. Абсолютный контейнерный путь и закодированные пробелы — оба.
+  // A plot from the workspace: MCP puts the file next to the person's work, and returns the path
+  // in markdown. An absolute container path and encoded spaces — both.
   const plot = chatImageFile(config, user, '/workspaces/talk/.maple/plots/plot.gif');
   assert.equal(plot?.type, 'image/gif');
   const spaced = chatImageFile(config, user, '/workspaces/talk/.maple/plots/plot%202.gif');
@@ -442,13 +442,13 @@ test('картинка отдаётся из вложений и рабочих 
   assert.equal(chatImageFile(config, user, '/workspaces/.icarus/incoming/нет-такой.png'), null);
 });
 
-test('файл из ответа агента скачивается ссылкой, а не ищется статикой', async () => {
+test('a file from an agent reply is downloaded by link, not looked up in static', async () => {
   const { config, user } = fixture();
   const plots = path.join(userPaths(config, user).workspaces, 'talk', '.maple', 'plots');
   fs.mkdirSync(plots, { recursive: true });
   fs.writeFileSync(path.join(plots, 'смета.pdf'), Buffer.from('%PDF-1.4'));
 
-  // Прямая проверка разбора: тот же путь, что и у картинки, но файл любой.
+  // A direct check of the parsing: the same path as for an image, but the file is arbitrary.
   const found = chatAttachmentFile(config, user, '/workspaces/talk/.maple/plots/смета.pdf');
   assert.equal(found?.type, 'application/pdf');
   assert.equal(chatAttachmentFile(config, user, '/etc/passwd'), null);
@@ -472,7 +472,7 @@ test('файл из ответа агента скачивается ссылк�
   }
 });
 
-test('вложения из браузера ложатся в incoming, картинки уходят и в files, и в images', () => {
+test('attachments from the browser land in incoming, images go to both files and images', () => {
   const { config, user } = fixture();
   const incoming = userPaths(config, user).incoming;
   const uploaded = parseUploadAttachments(
@@ -498,7 +498,7 @@ test('вложения из браузера ложатся в incoming, кар�
   assert.throws(() => parseUploadAttachments([{ name: 'x', data: '' }], incoming), /пустое/);
 });
 
-test('след вложений в реплике разбирается обратно в плашки', () => {
+test('the trace of attachments in the utterance is parsed back into chips', () => {
   const parsed = splitPromptAttachments(
     'Смотри\n\n[Пользователь приложил файлы, они уже лежат на диске:\n- /workspaces/.icarus/incoming/a.png\n- /workspaces/.icarus/incoming/b.pdf]',
   );
@@ -510,7 +510,7 @@ test('след вложений в реплике разбирается обр�
 });
 
 
-test('после /clear история склеивается с разделителем, а не обнуляется', () => {
+test('after /clear the history is joined with a divider, not reset', () => {
   const { config, user } = fixture();
   const chat = createChat(config, user, 'talk', new Date('2026-11-01T10:00:00.000Z'));
   const firstId = sessionIdFor(user.id, chat.id);

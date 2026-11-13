@@ -6,8 +6,8 @@
     "moduleResolution": "nodenext",
     "types": ["node"],
 
-    // Код запускается напрямую через `node file.ts` (type stripping), поэтому импорты
-    // пишутся с расширением .ts, а сборки нет: tsc работает только как проверяльщик.
+    // Code runs directly through `node file.ts` (type stripping), so imports
+    // are written with the .ts extension, and there is no build: tsc works only as a checker.
     "allowImportingTsExtensions": true,
     "noEmit": true,
 

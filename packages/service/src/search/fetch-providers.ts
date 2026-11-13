@@ -1,10 +1,10 @@
-// Извлечение страниц: только те провайдеры, у которых есть настоящий fetch API.
+// Page extraction: only those providers that have a real fetch API.
 //
-// Brave и Serpstack не умеют, Firecrawl и SerpApi намеренно не подключены:
-// Firecrawl дорогой по кредитам, а SerpApi ест те же 250, что и поиск, и
-// соблюдает robots.txt. Умеющие: Cloudflare Browser Run, Exa, Tavily, Linkup,
-// You.com. Cloudflare дешевле всех (время браузера) и потому «сверхлипкий»:
-// пока не в бане, он всегда текущий.
+// Brave and Serpstack don't know how, Firecrawl and SerpApi are deliberately not connected:
+// Firecrawl is expensive in credits, and SerpApi eats the same 250 as search and
+// respects robots.txt. The capable ones: Cloudflare Browser Run, Exa, Tavily, Linkup,
+// You.com. Cloudflare is the cheapest of all (browser time) and therefore «sticky»:
+// as long as it's not banned, it's always current.
 import {
   SearchFailure,
   classifyFailure,
@@ -17,19 +17,19 @@ import {
 import { RATING } from './router.ts';
 import { requestJson } from './request.ts';
 
-/** Сколько знаков страницы отдаём модели: больше всё равно не влезет. */
+/** How many characters of the page we give to the model: more won't fit anyway. */
 export const FETCH_MAX_CHARS = 20_000;
 
-/** Кто из провайдеров умеет извлекать страницы (Firecrawl и SerpApi — нет). */
+/** Which providers can extract pages (Firecrawl and SerpApi cannot). */
 const FETCH_CAPABLE: readonly SearchProviderId[] = ['exa', 'tavily', 'linkup', 'you'];
 
 /**
- * Рейтинг извлечения — обратный рейтингу поиска, но Cloudflare всегда первый.
+ * Fetch rating — the reverse of the search rating, but Cloudflare is always first.
  *
- * Он платит за время браузера, а не за страницы, поэтому выгоднее всех; пока
- * не в карантине, fetch делает его текущим принудительно (см. fetch-router).
- * Дальше — обратный поисковому порядок: сначала Linkup и You.com, а Exa и
- * Tavily бережём для поиска.
+ * It pays for browser time, not for pages, so it's more profitable than all; as long as
+ * it's not quarantined, fetch makes it current by force (see fetch-router).
+ * After that comes the reverse of the search order: Linkup and You.com first, while Exa and
+ * Tavily are saved for search.
  */
 export const FETCH_RATING: readonly ProviderId[] = [
   'cloudflare',
@@ -55,8 +55,8 @@ function truncate(text: string, maxChars: number): string {
 }
 
 /**
- * Отказ страницы — это не поломка ключа: 404, robots, пейволл, «слишком большой
- * PDF». Такие ответы не банят провайдера, а просто передают ход следующему.
+ * A page failure is not a broken key: 404, robots, paywall, «PDF too large».
+ * Such responses don't ban the provider, they just pass the turn to the next one.
  */
 export function classifyFetchStatus(status: number, body: string): FailureKind {
   if (status === 400 || status === 404 || status === 410 || status === 422) return 'page';
@@ -64,8 +64,8 @@ export function classifyFetchStatus(status: number, body: string): FailureKind {
 }
 
 /**
- * Cloudflare отдаёт дневной лимит браузерного времени как 429 с таким текстом.
- * Это не «темп», а квота: до следующего UTC-дня делать нечего.
+ * Cloudflare returns the daily browser-time limit as a 429 with this text.
+ * This is not «rate», but a quota: there's nothing to do until the next UTC day.
  */
 function classifyCloudflare(status: number, body: string): FailureKind {
   if (status === 429 && /browser time limit/i.test(body)) return 'credits';
@@ -76,9 +76,9 @@ function pageFailure(detail: string): SearchFailure {
   return new SearchFailure('page', detail);
 }
 
-// --- разбор ответов ----------------------------------------------------------
+// --- parsing responses -------------------------------------------------------
 
-/** Tavily: results[].raw_content; неудачные URL лежат в failed_results. */
+/** Tavily: results[].raw_content; failed URLs are in failed_results. */
 export function parseTavilyExtract(payload: unknown, maxChars: number): FetchResult | null {
   const root = asRecord(payload);
   const first = asRecord(asList(root?.results)[0]);
@@ -91,13 +91,13 @@ export function parseTavilyExtract(payload: unknown, maxChars: number): FetchRes
   };
 }
 
-/** Причина отказа Tavily: per-URL error, а не HTTP-статус. */
+/** Tavily failure reason: a per-URL error, not the HTTP status. */
 export function tavilyFailureDetail(payload: unknown): string {
   const failed = asRecord(asList(asRecord(payload)?.failed_results)[0]);
   return asText(failed?.error) ?? 'страница не отдалась';
 }
 
-/** Exa: results[].text; статус каждой страницы — в statuses[]. */
+/** Exa: results[].text; the status of each page is in statuses[]. */
 export function parseExaContents(payload: unknown, maxChars: number): FetchResult | null {
   const root = asRecord(payload);
   const first = asRecord(asList(root?.results)[0]);
@@ -110,7 +110,7 @@ export function parseExaContents(payload: unknown, maxChars: number): FetchResul
   };
 }
 
-/** Linkup: markdown — обязательное поле ответа /v1/fetch. */
+/** Linkup: markdown is a required field of the /v1/fetch response. */
 export function parseLinkupFetch(payload: unknown, maxChars: number, requestedUrl: string): FetchResult | null {
   const root = asRecord(payload);
   const text = asText(root?.markdown);
@@ -122,7 +122,7 @@ export function parseLinkupFetch(payload: unknown, maxChars: number, requestedUr
   };
 }
 
-/** You.com: массив объектов, по одному на URL. */
+/** You.com: an array of objects, one per URL. */
 export function parseYouContents(payload: unknown, maxChars: number): FetchResult | null {
   const first = asRecord(asList(payload)[0]);
   const text = asText(first?.markdown);
@@ -134,7 +134,7 @@ export function parseYouContents(payload: unknown, maxChars: number): FetchResul
   };
 }
 
-/** Cloudflare Browser Run: { success, result } — markdown отдаётся сразу. */
+/** Cloudflare Browser Run: { success, result } — markdown is returned right away. */
 export function parseCloudflareMarkdown(
   payload: unknown,
   maxChars: number,
@@ -146,13 +146,13 @@ export function parseCloudflareMarkdown(
   return { url: requestedUrl, text: truncate(text, maxChars) };
 }
 
-/** Причина отказа Cloudflare: errors[].message, а не HTTP-статус. */
+/** Cloudflare failure reason: errors[].message, not the HTTP status. */
 export function cloudflareFailureDetail(payload: unknown): string {
   const error = asRecord(asList(asRecord(payload)?.errors)[0]);
   return asText(error?.message) ?? 'Cloudflare не отдал markdown';
 }
 
-// --- провайдеры --------------------------------------------------------------
+// --- providers ---------------------------------------------------------------
 
 const exa: FetchProvider = {
   id: 'exa',
@@ -254,8 +254,8 @@ const cloudflare: FetchProvider = {
       {
         method: 'POST',
         headers: { 'content-type': 'application/json', accept: 'application/json', authorization: `Bearer ${ctx.key}` },
-        // Без gotoOptions: дефолтная загрузка дешевле по времени браузера, а
-        // тяжёлым SPA хватает того, что страница успевает отрендериться.
+        // Without gotoOptions: default loading is cheaper in browser time, and
+        // a heavy SPA is fine with the page having time to render.
         body: JSON.stringify({ url }),
       },
       ctx,
@@ -267,5 +267,5 @@ const cloudflare: FetchProvider = {
   },
 };
 
-/** Только умеющие fetch — по рейтингу роутера. */
+/** Only those capable of fetch — by the router rating. */
 export const FETCH_PROVIDERS: Record<string, FetchProvider> = { cloudflare, exa, tavily, linkup, you };

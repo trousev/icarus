@@ -1,9 +1,9 @@
-// Очередь реплик и «прервать и отправить»: две разные операции вместо молчаливого
-// ожидания.
+// Reply queue and "interrupt and send": two different operations instead of silent
+// waiting.
 //
-// Проверяем по-настоящему: HTTP-сервер панели, реестр с заглушкой pi и NDJSON-поток
-// читаем так же, как это делает браузер. Заглушка держит ход, пока тест не отпустит
-// его, — только так можно застать «человек написал, пока Икар думал».
+// We check for real: the panel's HTTP server, a registry with a pi stub, and the NDJSON stream
+// are read the same way the browser does. The stub holds a turn until the test releases
+// it — only this way can we catch "the human wrote while Icarus was thinking".
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
@@ -26,26 +26,26 @@ import { makeConfig, PANEL_USER_HEADER, probe } from './fixtures.ts';
 
 type Listener = (event: Record<string, unknown>) => void;
 
-/** Пустые вложения: очередь должна работать и без файлов. */
+/** Empty attachments: the queue must work without files too. */
 function noFiles(text = ''): UploadedAttachments {
   return { files: [], images: [], names: [], paths: [], ...(text ? {} : {}) };
 }
 
 /**
- * Заглушка pi: каждый ход висит, пока тест его не отпустит, и объявляет конец
- * (`agent_settled`) только после этого — как настоящий pi, который дописывает ответ.
+ * pi stub: each turn hangs until the test releases it, and it announces the end
+ * (`agent_settled`) only after that — like a real pi that finishes writing the answer.
  */
 class StubSession {
   busy = false;
   alive = true;
   aborted = false;
   interrupted = false;
-  /** Что реально уехало в pi: по этому видно порядок реплик. */
+  /** What actually went to pi: this shows the order of replies. */
   prompts: string[] = [];
   private listeners = new Set<Listener>();
   private releases: Array<() => void> = [];
   readonly conversationId: string;
-  /** Поколение и папка: реестр переиспользует сессию, только если они совпали. */
+  /** Generation and folder: the registry reuses a session only if they match. */
   readonly generation: number;
   readonly workspace: string;
 
@@ -71,14 +71,14 @@ class StubSession {
   async prompt(text: string): Promise<void> {
     this.busy = true;
     this.prompts.push(text);
-    // Ответ начинается сразу: тест увидит, что частичный текст доехал до панели.
+    // The answer starts right away: the test will see that partial text reached the panel.
     this.emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: `думаю ${this.prompts.length}` } });
     await new Promise<void>((resolve) => this.releases.push(resolve));
     this.busy = false;
     this.emit({ type: 'agent_settled' });
   }
 
-  /** Отпускает текущий ход: он дописывает ответ и встаёт. */
+  /** Releases the current turn: it finishes writing the answer and stops. */
   release(): void {
     this.releases.shift()?.();
   }
@@ -121,7 +121,7 @@ function fixture() {
   return { config, user, chat, created, registry };
 }
 
-/** Читает NDJSON-поток по строкам, пока сервер его не закроет. */
+/** Reads the NDJSON stream line by line until the server closes it. */
 async function lines(response: Response): Promise<Array<Record<string, unknown>>> {
   const reader = response.body!.getReader();
   const decoder = new TextDecoder();
@@ -142,7 +142,7 @@ async function lines(response: Response): Promise<Array<Record<string, unknown>>
   return out;
 }
 
-/** Ждём события из мира заглушки: без таймаута тест мог бы висеть вечно. */
+/** We wait for events from the stub world: without a timeout the test could hang forever. */
 async function until(check: () => boolean, what = 'события', ms = 3_000): Promise<void> {
   const startedAt = Date.now();
   while (!check()) {
@@ -205,9 +205,9 @@ function openPanel(config: ReturnType<typeof makeConfig>, registry: SessionRegis
   };
 }
 
-/* ── сама очередь: порядок, лимит, снятие ──────────────────────────────────── */
+/* ── the queue itself: order, limit, removal ───────────────────────────────── */
 
-test('подпись реплики: текст, имена файлов или «вложение»', () => {
+test('reply label: text, file names, or "attachment"', () => {
   assert.equal(queueLabel('  посчитай курс  ', []), 'посчитай курс');
   assert.equal(queueLabel('', ['смета.pdf']), 'смета.pdf');
   assert.equal(queueLabel('', ['a.png', 'b.png']), 'a.png, b.png');
@@ -217,13 +217,13 @@ test('подпись реплики: текст, имена файлов или 
   assert.ok(long.endsWith('…'));
 });
 
-test('очередь — это FIFO на разговор, и её видно без вложений', () => {
+test('the queue is FIFO per conversation, and it is visible without attachments', () => {
   const user = 'u1';
   const chat = 'c1';
   clearQueue(user, chat);
   assert.equal(enqueue(user, chat, { text: 'первое', attachments: noFiles() })?.position, 1);
   assert.equal(enqueue(user, chat, { text: 'второе', attachments: noFiles() })?.position, 2);
-  // Обгон: «сейчас» ставит реплику перед уже стоящими.
+  // Jumping the line: "now" puts the reply ahead of the already waiting ones.
   assert.equal(enqueue(user, chat, { text: 'срочно', attachments: noFiles() }, true)?.position, 1);
   assert.deepEqual(
     queued(user, chat).map((item) => item.text),
@@ -237,7 +237,7 @@ test('очередь — это FIFO на разговор, и её видно �
   assert.deepEqual(queued(user, chat), []);
 });
 
-test('очередь не растёт бесконечно и умеет снимать одну реплику', () => {
+test('the queue does not grow infinitely and can remove a single reply', () => {
   const user = 'u2';
   const chat = 'c2';
   clearQueue(user, chat);
@@ -256,22 +256,22 @@ test('очередь не растёт бесконечно и умеет сни
   clearQueue(user, chat);
 });
 
-/* ── «в очередь»: ход не прерывается, реплика доезжает сама ────────────────── */
+/* ── "queue it": the turn is not interrupted, the reply arrives on its own ─── */
 
-test('реплика во время хода встаёт в очередь и стартует сама после него', async () => {
+test('a reply during a turn is queued and starts on its own after it', async () => {
   const { config, chat, created, registry } = fixture();
   const panel = openPanel(config, registry, chat.id);
   const stub = () => created.at(-1)!;
   const bulletin: Array<{ type?: string; chatId?: string; queue?: unknown[] }> = [];
   const off = watchAll((event) => bulletin.push(event));
   try {
-    // Ход идёт и висит: панель читает поток, но не закрывает его.
+    // The turn is going and hanging: the panel reads the stream but does not close it.
     const first = await panel.send({ text: 'первое' });
     assert.equal(first.status, 200);
     const firstEvents = lines(first);
     await until(() => stub().prompts.length === 1, 'первый ход начался');
 
-    // Вторая реплика не отбивается и не ждёт молча: сервер отвечает, что она в очереди.
+    // The second reply is not rejected and does not wait silently: the server responds that it is queued.
     const second = await panel.send({ text: 'второе' });
     assert.equal(second.status, 202);
     const accepted = (await second.json()) as { queued?: boolean; position?: number; queue?: Array<{ text: string }> };
@@ -279,23 +279,23 @@ test('реплика во время хода встаёт в очередь и 
     assert.equal(accepted.position, 1);
     assert.deepEqual(accepted.queue?.map((item) => item.text), ['второе']);
 
-    // Панель узнала об очереди сводкой, а не догадкой.
+    // The panel learned about the queue from a bulletin, not by guessing.
     assert.ok(
       bulletin.some((event) => event.type === 'queue' && event.chatId === chat.id && event.queue?.length === 1),
       'сводка сообщила об очереди',
     );
 
-    // F5: история отдаёт очередь вместе с сообщениями — реплика не потерялась.
+    // F5: history returns the queue along with the messages — the reply was not lost.
     assert.deepEqual((await panel.history()).queue?.map((item) => item.text), ['второе']);
 
-    // Первый ход встал — очередь берёт следующую реплику сама.
+    // The first turn stopped — the queue takes the next reply on its own.
     stub().release();
     const finished = await firstEvents;
     assert.equal(finished.at(-1)?.type, 'done', 'первый ответ дошёл целиком');
     await until(() => stub().prompts.length === 2, 'очередь начала второй ход');
     assert.deepEqual(stub().prompts, ['первое', 'второе'], 'порядок реплик сохранён');
 
-    // Ход из очереди живёт без HTTP-запроса: панель цепляется к нему потоком.
+    // A turn from the queue lives without an HTTP request: the panel attaches to it via a stream.
     const stream = await fetch(`${panel.base}/panel/api/chat/stream?id=${chat.id}`, { headers: panel.headers });
     assert.equal(stream.status, 200);
     const streamed = lines(stream);
@@ -316,9 +316,9 @@ test('реплика во время хода встаёт в очередь и 
   }
 });
 
-/* ── «сейчас»: прерывание и частичный ответ ───────────────────────────────── */
+/* ── "now": interruption and partial answer ───────────────────────────────── */
 
-test('«сейчас» прерывает ход, сохраняет частичный ответ и отправляет новую реплику', async () => {
+test('"now" interrupts the turn, keeps the partial answer and sends the new reply', async () => {
   const { config, chat, created, registry } = fixture();
   const panel = openPanel(config, registry, chat.id);
   const stub = () => created.at(-1)!;
@@ -333,8 +333,8 @@ test('«сейчас» прерывает ход, сохраняет части�
     const nextEvents = lines(now);
     await until(() => stub().interrupted, 'прежний ход прерван');
 
-    // Частичный ответ не выбрасывается: то, что pi успел сказать, доехало до
-    // панели, а ход закрылся `done`, а не ошибкой.
+    // The partial answer is not thrown away: what pi managed to say reached the
+    // panel, and the turn closed with `done`, not with an error.
     const finished = await firstEvents;
     assert.ok(finished.some((event) => event.type === 'text' && event.text === 'думаю 1'), 'частичный текст отдан');
     assert.equal(finished.at(-1)?.type, 'done');
@@ -351,10 +351,10 @@ test('«сейчас» прерывает ход, сохраняет части�
   }
 });
 
-test('«сейчас» не пускает очередь вперёд себя: два хода не идут одновременно', async () => {
-  // Гонка из жизни: человек поставил реплику в очередь, потом нажал «прервать и
-  // отправить». Очередь не должна стартовать в зазоре между прерыванием и новым
-  // ходом — иначе ответы перемешаются в одну плашку.
+test('"now" does not let the queue ahead of itself: two turns do not run at the same time', async () => {
+  // A race from real life: the human queued a reply, then pressed "interrupt and
+  // send". The queue must not start in the gap between the interruption and the new
+  // turn — otherwise the answers would mix into one block.
   const { config, chat, created, registry } = fixture();
   const panel = openPanel(config, registry, chat.id);
   const stub = () => created.at(-1)!;
@@ -371,7 +371,7 @@ test('«сейчас» не пускает очередь вперёд себя:
     await until(() => stub().prompts.length === 2, 'новый ход начался');
     assert.deepEqual(stub().prompts, ['первое', 'сейчас'], 'очередь не обогнала «сейчас»');
 
-    // Пока идёт ход «сейчас», очередь молчит.
+    // While the "now" turn is running, the queue stays silent.
     await new Promise((resolve) => setTimeout(resolve, 60));
     assert.equal(stub().prompts.length, 2, 'второй ход не запустился параллельно');
 
@@ -388,9 +388,9 @@ test('«сейчас» не пускает очередь вперёд себя:
   }
 });
 
-/* ── «стоп» и снятие из очереди ────────────────────────────────────────────── */
+/* ── "stop" and removal from the queue ─────────────────────────────────────── */
 
-test('/stop снимает и ход, и очередь: «стоп» — это «останови всё»', async () => {
+test('/stop removes both the turn and the queue: "stop" means "stop everything"', async () => {
   const { config, chat, created, registry } = fixture();
   const panel = openPanel(config, registry, chat.id);
   const stub = () => created.at(-1)!;
@@ -407,7 +407,7 @@ test('/stop снимает и ход, и очередь: «стоп» — это
     assert.deepEqual((await panel.history()).queue, [], 'очередь пуста');
     await firstEvents;
 
-    // Ничего не началось само: человек нажал «хватит».
+    // Nothing started on its own: the human pressed "enough".
     await new Promise((resolve) => setTimeout(resolve, 50));
     assert.equal(stub().prompts.length, 1);
   } finally {
@@ -416,7 +416,7 @@ test('/stop снимает и ход, и очередь: «стоп» — это
   }
 });
 
-test('кнопка «стоп» снимает очередь и говорит, сколько сняла', async () => {
+test('the "stop" button removes the queue and says how many it removed', async () => {
   const { config, chat, created, registry } = fixture();
   const panel = openPanel(config, registry, chat.id);
   const stub = () => created.at(-1)!;
@@ -446,7 +446,7 @@ test('кнопка «стоп» снимает очередь и говорит,
   }
 });
 
-test('одну реплику можно снять из очереди, пока она не отправилась', async () => {
+test('a single reply can be removed from the queue before it is sent', async () => {
   const { config, chat, created, registry } = fixture();
   const panel = openPanel(config, registry, chat.id);
   const stub = () => created.at(-1)!;
@@ -478,7 +478,7 @@ test('одну реплику можно снять из очереди, пок�
   }
 });
 
-test('в очередь не влезает больше лимита — отказ, а не бесконечная память', async () => {
+test('no more than the limit fits in the queue — a refusal, not infinite memory', async () => {
   const { config, chat, created, registry } = fixture();
   const panel = openPanel(config, registry, chat.id);
   const stub = () => created.at(-1)!;

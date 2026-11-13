@@ -1,8 +1,8 @@
-// Авто-коммиты pi: расширение, а не модель, фиксирует изменения артефакта.
+// pi auto-commits: the extension, not the model, records artifact changes.
 //
-// Проверяем настоящие хуки tool_call/tool_result/turn_end с фейковым pi: перед
-// записью появляется снимок «как было», после — коммит, а turn_end добирает
-// изменения, пришедшие не через write/edit.
+// We exercise the real tool_call/tool_result/turn_end hooks with a fake pi: before
+// a write an "as it was" snapshot appears, after it a commit, and turn_end picks up
+// changes that did not come through write/edit.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -36,7 +36,7 @@ function seed(root: string, slug = 'plan'): string {
   return dir;
 }
 
-test('write: снимок до, коммит после; turn_end добирает остальное', async () => {
+test('write: snapshot before, commit after; turn_end picks up the rest', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'artifact-git-ext-'));
   const dir = seed(root);
   const handlers = await loadExtension(root);
@@ -51,7 +51,7 @@ test('write: снимок до, коммит после; turn_end добирае
   assert.deepEqual(history.map((item) => item.subject), ['artifact: write index.md', 'artifact: snapshot before change']);
   assert.equal(fs.readFileSync(file, 'utf8'), '# После\n');
 
-  // Будто файл положил MCP или bash: turn_end должен зафиксировать.
+  // As if MCP or bash put the file there: turn_end must record it.
   fs.writeFileSync(path.join(dir, 'extra.txt'), 'добор\n');
   await handlers.get('turn_end')!({}, ctx);
   history = await artifactHistory(dir);
@@ -59,7 +59,7 @@ test('write: снимок до, коммит после; turn_end добирае
   assert.equal(fs.readFileSync(path.join(dir, 'extra.txt'), 'utf8'), 'добор\n');
 });
 
-test('ошибка инструмента не создаёт коммит', async () => {
+test('a tool error does not create a commit', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'artifact-git-ext-'));
   const dir = seed(root);
   const handlers = await loadExtension(root);
@@ -72,7 +72,7 @@ test('ошибка инструмента не создаёт коммит', asy
   assert.equal((await artifactHistory(dir)).length, before, 'снимок до записи остаётся, нового коммита нет');
 });
 
-test('artifact_new заводит .git в новой папке', async () => {
+test('artifact_new initializes .git in a new folder', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'artifact-git-ext-'));
   const dir = seed(root, 'new-one');
   const handlers = await loadExtension(root);
@@ -83,7 +83,7 @@ test('artifact_new заводит .git в новой папке', async () => {
   assert.equal(fs.existsSync(path.join(dir, '.git')), true);
 });
 
-test('чужой family read не коммитит и не трогает .git', async () => {
+test('an alien family read does not commit and does not touch .git', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'artifact-git-ext-'));
   const dir = seed(root);
   fs.writeFileSync(

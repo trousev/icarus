@@ -1,6 +1,6 @@
-// Индекс памяти для разбора: файлы показываются целиком, но весь блок обязан
-// оставаться в бюджете символов. Раньше индекс молча обрезал каждый файл на восьми
-// строках — на identity.md в 20+ фактов разбор не видел поздние и плодил дубли.
+// Memory index for extraction: files are shown in full, but the whole block must
+// stay within the character budget. Previously the index silently truncated each file to eight
+// lines — with identity.md of 20+ facts, extraction never saw the later ones and bred duplicates.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -20,7 +20,7 @@ function bullets(prefix: string, count: number): string {
   return `${Array.from({ length: count }, (_, i) => `- ${prefix} №${i + 1}`).join('\n')}\n`;
 }
 
-test('видны все факты файла, а не только первые восемь', () => {
+test('all facts of a file are visible, not just the first eight', () => {
   const root = tempMemory();
   fs.writeFileSync(path.join(root, 'identity.md'), bullets('факт', 25));
 
@@ -34,7 +34,7 @@ test('видны все факты файла, а не только первые
   );
 });
 
-test('короткие факты показываются целым файлом, а не первыми восемью', () => {
+test('short facts are shown as the whole file, not just the first eight', () => {
   const root = tempMemory();
   fs.writeFileSync(path.join(root, 'identity.md'), bullets('факт', 50));
 
@@ -46,7 +46,7 @@ test('короткие факты показываются целым файло
   );
 });
 
-test('индекс помещается в бюджет символов', () => {
+test('the index fits within the character budget', () => {
   const root = tempMemory();
   fs.writeFileSync(path.join(root, 'identity.md'), bullets('очень длинный факт про человека', 120));
   for (let i = 0; i < 10; i += 1) {
@@ -57,7 +57,7 @@ test('индекс помещается в бюджет символов', () =>
   assert.ok(index.length <= INDEX_BUDGET, `индекс разросся: ${index.length} символов`);
 });
 
-test('хвост обрезанного файла помечен, а не молчит', () => {
+test('the tail of a truncated file is marked rather than silent', () => {
   const root = tempMemory();
   fs.writeFileSync(path.join(root, 'identity.md'), bullets('длинный факт номер', 200));
 
@@ -66,7 +66,7 @@ test('хвост обрезанного файла помечен, а не мо�
   assert.ok(index.length <= INDEX_BUDGET, `индекс разросся: ${index.length} символов`);
 });
 
-test('журнал в индекс не тащим, а люди и темы — да', () => {
+test('we do not pull the journal into the index, but people and topics — yes', () => {
   const root = tempMemory();
   fs.writeFileSync(path.join(root, 'journal/2026-09.md'), '- 18.09 — секретное событие\n');
   fs.writeFileSync(path.join(root, 'people/маша.md'), '- Сестра, живёт в Порту\n');
@@ -79,7 +79,7 @@ test('журнал в индекс не тащим, а люди и темы — 
   assert.match(index, /Сестра, живёт в Порту/);
 });
 
-test('имена всех файлов видны, даже когда факты в бюджет не влезли', () => {
+test('the names of all files are visible, even when the facts did not fit the budget', () => {
   const root = tempMemory();
   fs.writeFileSync(path.join(root, 'identity.md'), bullets('очень длинный факт про человека', 300));
   fs.writeFileSync(path.join(root, 'projects/домашняя_сеть.md'), bullets('роутер', 3));
@@ -94,7 +94,7 @@ test('имена всех файлов видны, даже когда факт�
   assert.ok(index.length <= INDEX_BUDGET, `индекс разросся: ${index.length} символов`);
 });
 
-test('явные лимиты по-прежнему работают', () => {
+test('explicit limits still work', () => {
   const root = tempMemory();
   fs.writeFileSync(path.join(root, 'identity.md'), bullets('факт', 10));
   fs.writeFileSync(path.join(root, 'preferences.md'), bullets('вкус', 2));
@@ -104,12 +104,12 @@ test('явные лимиты по-прежнему работают', () => {
 
   const oneFile = memoryIndex(root, 1);
   assert.match(oneFile, /факт №1/);
-  // maxFiles ограничивает блоки с фактами, а не список имён: имена — самое дешёвое,
-  // по ним разбор и понимает, какие темы уже заняты.
+  // maxFiles limits the fact blocks, not the list of names: names are the cheapest,
+  // and extraction uses them to understand which topics are already taken.
   assert.doesNotMatch(oneFile, /вкус №1/, 'maxFiles остаётся ограничителем блоков');
   assert.match(oneFile, /Файлы памяти .*preferences\.md/, 'но имя файла видно всегда');
 });
 
-test('на пустой памяти индекс пуст', () => {
+test('on empty memory the index is empty', () => {
   assert.equal(memoryIndex(tempMemory()), '');
 });

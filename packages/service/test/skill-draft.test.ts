@@ -1,9 +1,9 @@
-// «Напиши за меня»: из идеи человека модель собирает скилл, а панель — черновик.
+// "Write it for me": from a person's idea the model assembles a skill, and the panel a draft.
 //
-// Модель тут не вызывается: тест держит то, что мы можем держать, — задание, разбор
-// ответа и то, что черновик доходит до диска живым скиллом, который видит pi. Ответы
-// модели в тестах нарочно неряшливые: забор из бэктиков, болтовня вокруг JSON,
-// заглавные буквы в имени, занятое имя, кириллица — всё это она выдаёт регулярно.
+// The model is not called here: the test holds what we can hold — the task, parsing
+// the response and the fact that the draft reaches disk as a live skill that pi sees. The model's
+// responses in the tests are deliberately sloppy: a backtick fence, chatter around the JSON,
+// capital letters in the name, a taken name, Cyrillic — it regularly produces all of this.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -24,12 +24,12 @@ function tempRoot(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-draft-'));
 }
 
-/** Ответ модели одной строкой JSON: так она отвечает, когда всё хорошо. */
+/** The model's response as a single JSON string: this is how it answers when all is well. */
 function answer(fields: Record<string, unknown>): string {
   return JSON.stringify(fields);
 }
 
-test('задание модели несёт идею человека и требует три поля', () => {
+test("the model's task carries the person's idea and requires three fields", () => {
   const prompt = skillDraftPrompt('разбирать голосовые сообщения в текст');
   assert.match(prompt, /разбирать голосовые сообщения в текст/);
   assert.match(prompt, /"name"/);
@@ -39,7 +39,7 @@ test('задание модели несёт идею человека и тре
   assert.match(prompt, /какой момент его звать/i, 'сказано, чем описание отличается от инструкции');
 });
 
-test('ответ в заборе из бэктиков и с болтовнёй вокруг разбирается', () => {
+test('a response in a backtick fence with chatter around it is parsed', () => {
   const messy = [
     'Конечно! Вот скилл:',
     '```json',
@@ -55,7 +55,7 @@ test('ответ в заборе из бэктиков и с болтовнёй 
   assert.equal(result.ok ? result.draft.note : 'нет', undefined, 'чинить было нечего — пометки нет');
 });
 
-test('синонимы полей принимаются: инструкция вместо body', () => {
+test('field synonyms are accepted: instructions instead of body', () => {
   const result = parseSkillDraft(
     answer({ title: 'voice-notes', when_to_use: 'Когда пришло голосовое.', instructions: 'Шаг один.' }),
   );
@@ -65,7 +65,7 @@ test('синонимы полей принимаются: инструкция �
   assert.equal(result.ok && result.draft.body, 'Шаг один.');
 });
 
-test('целый SKILL.md в ответе чистится до инструкции', () => {
+test('a whole SKILL.md in the response is cleaned down to the instructions', () => {
   const file = '```markdown\n---\nname: voice-notes\ndescription: Разбирает голосовые.\n---\n\n# Как\n\n1. Расшифруй.\n```';
   const result = parseSkillDraft(file);
   assert.equal(result.ok, true);
@@ -75,14 +75,14 @@ test('целый SKILL.md в ответе чистится до инструкц
   assert.doesNotMatch(body, /```/, 'забор из бэктиков тоже не остаётся');
 });
 
-test('имя приводится к правилам: регистр, пробелы, подчёркивания, диакритика', () => {
+test('the name is normalized: case, spaces, underscores, diacritics', () => {
   const result = parseSkillDraft(answer({ name: '  Voice_Notes Café!! ', description: 'ок', body: 'тело' }));
   assert.equal(result.ok, true);
   assert.equal(result.ok && result.draft.name, 'voice-notes-cafe');
   assert.equal(result.ok ? result.draft.note : '', undefined, 'привели молча: человек видит имя в поле');
 });
 
-test('кириллическое имя не теряет инструкцию: имя пустое, с пометкой', () => {
+test('a Cyrillic name does not lose the instructions: the name is empty, with a note', () => {
   const result = parseSkillDraft(answer({ name: 'разбор-голосовых', description: 'Разбирает.', body: 'Шаги.' }));
   assert.equal(result.ok, true);
   assert.equal(result.ok && result.draft.name, '', 'имя человек допишет сам');
@@ -90,7 +90,7 @@ test('кириллическое имя не теряет инструкцию: 
   assert.equal(result.ok && result.draft.body, 'Шаги.', 'ради имени инструкцию не выбрасываем');
 });
 
-test('занятое имя получает номер, а не переписывает чужой скилл', () => {
+test('a taken name gets a number rather than overwriting someone else\'s skill', () => {
   const taken = new Set(['voice-notes', 'voice-notes-2']);
   const result = parseSkillDraft(answer({ name: 'voice-notes', description: 'ок', body: 'тело' }), taken);
   assert.equal(result.ok && result.draft.name, 'voice-notes-3');
@@ -99,7 +99,7 @@ test('занятое имя получает номер, а не перепис�
   assert.equal(uniqueSkillName('свежее', new Set()), 'свежее', 'свободное имя не трогаем');
 });
 
-test('слишком длинное описание подрезается по концу фразы', () => {
+test('an overlong description is trimmed at the end of a sentence', () => {
   const sentence = 'Этот скилл разбирает голосовые сообщения и складывает расшифровку в журнал. ';
   const result = parseSkillDraft(answer({ name: 'voice-notes', description: sentence.repeat(20), body: 'тело' }));
   assert.equal(result.ok, true);
@@ -109,7 +109,7 @@ test('слишком длинное описание подрезается по
   assert.match(result.ok ? String(result.draft.note) : '', /длинновато/);
 });
 
-test('без JSON, без описания и без инструкции — отказ, а не пустой черновик', () => {
+test('no JSON, no description and no instructions is a failure, not an empty draft', () => {
   const noJson = parseSkillDraft('Извини, не могу помочь.');
   assert.equal(noJson.ok, false);
   assert.match(noJson.ok ? '' : noJson.message, /JSON/);
@@ -122,9 +122,9 @@ test('без JSON, без описания и без инструкции — о
   assert.match(noBody.ok ? '' : noBody.message, /инструкцию/);
 });
 
-test('разовый вопрос про скилл идёт без тулов, сессии и скиллов', () => {
-  // Модель, которая пишет скилл, не должна ничего уметь: она отвечает текстом, и
-  // только. Иначе «напиши за меня» превратилось бы в агента с руками по кнопке.
+test('the one-shot skill question runs without tools, session and skills', () => {
+  // The model that writes a skill must not be able to do anything: it answers with text, and
+  // that is it. Otherwise "write it for me" would turn into an agent with hands at the push of a button.
   const args = oneShotArgs({ provider: 'deepinfra', id: 'strong-model' }, 'идея', SKILL_DRAFT_SYSTEM);
   assert.ok(args.includes('--no-tools'), 'без тулов');
   assert.ok(args.includes('--no-session'), 'без сессии');
@@ -134,7 +134,7 @@ test('разовый вопрос про скилл идёт без тулов, 
   assert.ok(args.includes('deepinfra/strong-model'), 'модель выбирает вызывающий');
 });
 
-test('черновик сохраняется как обычный скилл, и его видит pi', () => {
+test('the draft is saved as an ordinary skill, and pi sees it', () => {
   const root = tempRoot();
   const result = parseSkillDraft(
     answer({
@@ -155,7 +155,7 @@ test('черновик сохраняется как обычный скилл, 
   assert.deepEqual(listSkills(root).map((skill) => skill.description), [result.draft.description]);
 });
 
-test('slugify: из чего угодно — имя по правилам', () => {
+test('slugify: from anything to a name that follows the rules', () => {
   assert.equal(slugifySkillName('Pirate Mode!'), 'pirate-mode');
   assert.equal(slugifySkillName('  --Морской--  '), '', 'кириллица остаётся без латиницы');
   assert.equal(slugifySkillName('a'.repeat(80)).length, 64, 'длина ограничена');

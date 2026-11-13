@@ -1,13 +1,13 @@
 #!/usr/bin/env node
-// Заполняет короткие описания файлов памяти для индекса.
+// Fills short descriptions of memory files for the index.
 //
 //   node tools/memory-describe.mjs --memory /path/to/memory
 //   node tools/memory-describe.mjs --memory /path/to/memory --force
 //   node tools/memory-describe.mjs --memory /path/to/memory --dry
 //
-// Описание — одна строка в frontmatter файла. Уже написанные не трогаем без --force.
-// Модель по умолчанию — deepseek-flash; ключ DEEPSEEK_API_KEY. Для DeepInfra задай
-// ICARUS_DESCRIBE_URL и ICARUS_DESCRIBE_MODEL.
+// The description is a single line in the file's frontmatter. We don't touch ones already written without --force.
+// The default model is deepseek-flash; the key is DEEPSEEK_API_KEY. For DeepInfra set
+// ICARUS_DESCRIBE_URL and ICARUS_DESCRIBE_MODEL.
 import fs from "node:fs";
 import { buildCatalog, stripFrontmatter, updateDescription } from "../packages/extensions/lib/memory-catalog.ts";
 

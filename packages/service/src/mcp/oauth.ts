@@ -1,21 +1,21 @@
-// OAuth 2.1 для пользовательских MCP — со стороны сервиса, а не pi.
+// OAuth 2.1 for user MCPs — on the service side, not pi's.
 //
-// Почему не отдать это pi-mcp-extension: pi живёт в контейнере без браузера и без
-// публичного адреса, а его интерактивная авторизация рассчитана на TUI. Здесь
-// браузер — это панель: сервис сам проходит discovery (RFC 9728 / RFC 8414),
-// регистрирует клиента (DCR, RFC 7591), делает PKCE S256 и обменивает код на
-// токен. Токен потом уезжает в mcp.json обычным `Authorization: Bearer`, поэтому
-// pi-mcp-extension ничего про OAuth не знает и работает как с любым HTTP-сервером.
+// Why not hand this to pi-mcp-extension: pi lives in a container without a browser and without
+// a public address, and its interactive authorization is designed for the TUI. Here the
+// browser is the panel: the service itself does discovery (RFC 9728 / RFC 8414),
+// registers the client (DCR, RFC 7591), does PKCE S256, and exchanges the code for a
+// token. The token then travels into mcp.json as an ordinary `Authorization: Bearer`, so
+// pi-mcp-extension knows nothing about OAuth and works with any HTTP server.
 //
-// Поддерживаются все ходы, которые встречаются у современных MCP-серверов:
-//   * готовый client_id (и секрет) — когда сервер выдаёт клиента заранее;
-//   * Dynamic Client Registration — когда сервер умеет регистрировать клиентов;
-//   * Client ID Metadata Document — когда сервер поддерживает CIMD (RFC 7591
-//     устарел, но всё ещё самый распространённый путь; CIMD идёт за ним);
-//   * ручные endpoints — когда сервер вообще ничего не рассказывает.
+// All the flows found in modern MCP servers are supported:
+//   * a ready client_id (and secret) — when the server issues the client in advance;
+//   * Dynamic Client Registration — when the server can register clients;
+//   * Client ID Metadata Document — when the server supports CIMD (RFC 7591
+//     is outdated but still the most common path; CIMD follows it);
+//   * manual endpoints — when the server tells nothing at all.
 //
-// Всё сетевое здесь принимает fetchImpl: тесты подсовывают свой, а сервис — обычный
-// fetch. Секреты не логируются: ошибки говорят «что делать», а не «какой токен».
+// Everything network here accepts a fetchImpl: tests supply their own, the service an ordinary
+// fetch. Secrets are not logged: errors say "what to do", not "which token".
 import { createHash, randomBytes } from 'node:crypto';
 import type { McpCredentials, McpOAuthCredentials, UserMcpServer } from './registry.ts';
 
@@ -24,7 +24,7 @@ export type ClientAuthMethod = 'none' | 'client_secret_post' | 'client_secret_ba
 
 const DISCOVERY_TIMEOUT_MS = 12_000;
 const TOKEN_TIMEOUT_MS = 20_000;
-/** Ссылка авторизации живёт десять минут: дольше человек уже не помнит, что начал. */
+/** The authorization link lives for ten minutes: after that the person no longer remembers what they started. */
 export const PENDING_TTL_MS = 10 * 60_000;
 const PENDING_LIMIT = 200;
 
@@ -104,7 +104,7 @@ type PendingAuthorization = {
 
 const pending = new Map<string, PendingAuthorization>();
 
-/** Только для тестов: иначе состояние одного теста утекает в следующий. */
+/** For tests only: otherwise the state of one test leaks into the next. */
 export function resetPendingForTests(): void {
   pending.clear();
 }
@@ -113,7 +113,7 @@ function prunePending(now: number): void {
   for (const [state, item] of pending) {
     if (now - item.createdAt > PENDING_TTL_MS) pending.delete(state);
   }
-  // Карта не должна расти от нажатий «подключить»: самые старые уходят первыми.
+  // The map must not grow from "connect" clicks: the oldest go first.
   while (pending.size > PENDING_LIMIT) {
     const oldest = pending.keys().next().value;
     if (oldest === undefined) break;
@@ -129,9 +129,9 @@ export type PendingAuthorizationInfo = {
 };
 
 /**
- * Кто и для чего начал вход. Нужен ручному завершению: панель проверяет, что
- * вставленный код относится к её человеку и её серверу, и только потом тратит
- * одноразовый state на обмен.
+ * Who started the login and for what. Needed for manual completion: the panel checks that
+ * the pasted code belongs to its person and its server, and only then spends
+ * the one-time state on the exchange.
  */
 export function peekAuthorization(state: string, now = Date.now()): PendingAuthorizationInfo | null {
   const item = pending.get(state);
@@ -176,7 +176,7 @@ function stringList(value: unknown): string[] | undefined {
   return list.length > 0 ? list : undefined;
 }
 
-/** Разбор `WWW-Authenticate: Bearer resource_metadata="…", scope="…"`. */
+/** Parsing `WWW-Authenticate: Bearer resource_metadata="…", scope="…"`. */
 export function parseWwwAuthenticate(header: string | null | undefined): {
   resourceMetadata?: string;
   scope?: string;
@@ -198,7 +198,7 @@ export function parseWwwAuthenticate(header: string | null | undefined): {
   return out;
 }
 
-/** Канонический адрес ресурса для RFC 8707: без хвостового слэша и фрагмента. */
+/** Canonical resource address for RFC 8707: without a trailing slash and fragment. */
 export function canonicalResource(serverUrl: string): string {
   const url = new URL(serverUrl);
   url.hash = '';
@@ -212,17 +212,17 @@ export function callbackUrl(publicUrl: string): string {
 }
 
 /**
- * Порт «мёртвого» loopback-адреса для режима мимикрии (см. UserMcpServer.mimic).
- * Слушать его никто не будет намеренно: браузер дойдёт до него, покажет ошибку
- * соединения, а адрес с кодом останется в строке — человек скопирует его в панель.
- * Число редкое, чтобы случайный dev-сервер на машине не перехватил код.
+ * The port of the "dead" loopback address for mimic mode (see UserMcpServer.mimic).
+ * No one will listen on it intentionally: the browser will reach it, show a connection
+ * error, and the address with the code will stay in the bar — the person copies it into the panel.
+ * The number is rare so that a random dev server on the machine doesn't intercept the code.
  */
 const MIMIC_CALLBACK_PORT = 47821;
 
 /**
- * Адрес, который принимают authorization servers с белым списком redirect_uri:
- * локальный callback, как у Claude Code и Codex CLI. Им же прикрывается вход на
- * серверы вроде Any.do, где наш публичный callback не прописан.
+ * The address that authorization servers with a redirect_uri whitelist accept:
+ * a local callback, like Claude Code and Codex CLI. It also covers login to
+ * servers like Any.do, where our public callback is not registered.
  */
 export function mimicCallbackUrl(): string {
   return `http://localhost:${MIMIC_CALLBACK_PORT}/callback`;
@@ -233,15 +233,15 @@ export type AuthorizationResponse = {
   state?: string;
   error?: string;
   errorDescription?: string;
-  /** Адрес целиком, если человек вставил URL: по нему видно, куда его вернуло. */
+  /** The whole address if the person pasted a URL: it shows where they were returned. */
   redirect?: string;
 };
 
 /**
- * Разбирает то, что человек вставил из строки браузера. Браузер не показывает
- * схему, поэтому принимаем и полный адрес, и `localhost:port/callback?...`, и
- * голую query-строку. Ошибку authorization server тоже разбираем: «access_denied»
- * надо показать словами, а не «в адресе нет code».
+ * Parses what the person pasted from the browser bar. The browser doesn't show the
+ * scheme, so we accept both a full address, `localhost:port/callback?...`, and
+ * a bare query string. We also parse an authorization server error: "access_denied"
+ * must be shown in words, not as "the address has no code".
  */
 export function parseAuthorizationResponse(raw: string): AuthorizationResponse {
   const text = raw.trim();
@@ -281,7 +281,7 @@ export function clientMetadataUrl(publicUrl: string): string {
   return new URL('/panel/mcp/oauth/client-metadata.json', publicUrl).toString();
 }
 
-/** Документ, который сервер авторизации скачивает по client_id-ссылке (CIMD). */
+/** The document that the authorization server downloads from the client_id link (CIMD). */
 export function clientMetadataDocument(publicUrl: string): {
   clientId: string;
   document: Record<string, unknown>;
@@ -385,9 +385,9 @@ function initializeBody(): string {
 }
 
 /**
- * Пробуем получить 401 с подсказкой, где искать токен. Это первый шаг, который
- * предписывает MCP: сервер сам говорит resource_metadata, а угадывать well-known
- * — только запасной путь.
+ * We try to get a 401 with a hint about where to look for the token. This is the first step
+ * MCP prescribes: the server itself reports resource_metadata, and guessing well-known
+ * is only the fallback path.
  */
 async function challengeOf(
   serverUrl: string,
@@ -467,7 +467,7 @@ function discoveryFromStored(server: UserMcpServer, oauth: McpOAuthCredentials):
   };
 }
 
-/** Основной путь: resource metadata → authorization server metadata. */
+/** Main path: resource metadata → authorization server metadata. */
 export async function discoverOAuth(options: {
   serverUrl: string;
   headers?: Record<string, string>;
@@ -494,8 +494,8 @@ export async function discoverOAuth(options: {
   let usedChallenge = false;
 
   if (challenge.resourceMetadata) {
-    // Адрес из заголовка — тоже внешний ввод: он обязан быть https (или
-    // loopback), иначе сервис по чужой подсказке сходит куда угодно.
+    // The address from the header is also external input: it must be https (or
+    // loopback), otherwise the service follows someone else's hint anywhere.
     const metadataUrl = assertHttpUrl(challenge.resourceMetadata, 'resource_metadata');
     const fetched = await requestJson(fetchImpl, metadataUrl, { allowNotFound: true });
     const body = asObject(fetched?.body);
@@ -533,8 +533,8 @@ export async function discoverOAuth(options: {
     (server?.issuer !== undefined ? assertHttpUrl(server.issuer, 'issuer') : undefined);
   if (!issuerRaw) throw new OAuthError('в metadata сервера нет authorization_servers — некуда идти за токеном');
   const issuerUrl = assertHttpUrl(issuerRaw, 'authorization server');
-  // Хвостовой слэш у корня — тот же issuer, но сравнивать и хранить его удобнее
-  // без него: RFC 8414 не требует слэша, а серверы отдают по-разному.
+  // A trailing slash at the root is the same issuer, but it's more convenient to compare and store
+  // it without the slash: RFC 8414 doesn't require it, and servers return it differently.
   const issuer = issuerUrl.endsWith('/') && new URL(issuerUrl).pathname === '/' ? issuerUrl.slice(0, -1) : issuerUrl;
 
   let asMetadata: AuthorizationServerMetadata | null = null;
@@ -595,8 +595,8 @@ function chooseMethod(
   hasSecret: boolean,
   preferred?: ClientAuthMethod,
 ): ClientAuthMethod {
-  // Без секрета сервер не должен получить client_secret_*: иначе запрос уйдёт
-  // без секрета, но с методом, который его требует.
+  // Without a secret the server must not get client_secret_*: otherwise the request goes
+  // without the secret but with a method that requires it.
   if (!hasSecret) return 'none';
   if (preferred) return preferred;
   if (supported?.includes('client_secret_post')) return 'client_secret_post';
@@ -655,8 +655,8 @@ async function registerClient(
     return {
       clientId,
       clientSecret,
-      // Секрет есть, а метод «none» сервер вернул по привычке — шлём секрет
-      // post-ом, иначе он молча потеряется.
+      // There is a secret, but the server returned "none" out of habit — we send the secret
+      // via post, otherwise it would be silently lost.
       tokenEndpointAuthMethod: method === 'none' ? 'client_secret_post' : method,
       source: 'dcr',
     };
@@ -673,8 +673,8 @@ function parseTokenResponse(text: string, status: number, now: number): OAuthTok
   try {
     body = asObject(JSON.parse(text) as unknown);
   } catch {
-    // Некоторые старые серверы отвечают form-urlencoded — это допустимо для
-    // token endpoint, поэтому пробуем и его.
+    // Some old servers respond with form-urlencoded — this is allowed for the
+    // token endpoint, so we try that too.
     try {
       body = Object.fromEntries(new URLSearchParams(text));
     } catch {
@@ -734,15 +734,15 @@ export type StartedAuthorization = {
   state: string;
   discovery: OAuthDiscovery;
   client: OAuthClient;
-  /** Адрес возврата, который уехал в authorize: панель показывает его человеку. */
+  /** The redirect address that went into authorize: the panel shows it to the person. */
   redirectUri: string;
-  /** Вход идёт через мёртвый loopback-адрес и требует вставить адрес вручную. */
+  /** The login goes through a dead loopback address and requires pasting the address manually. */
   mimic: boolean;
 };
 
 /**
- * Начинает авторизацию и возвращает адрес, на который надо увести браузер.
- * Всё, что нужно для обмена кода, остаётся в памяти сервиса до callback'а.
+ * Starts authorization and returns the address to which the browser must be taken.
+ * Everything needed to exchange the code stays in the service's memory until the callback.
  */
 export async function startAuthorization(options: {
   server: UserMcpServer;
@@ -793,8 +793,8 @@ export async function startAuthorization(options: {
   } else if (
     stored?.clientId &&
     stored.tokenEndpoint !== undefined &&
-    // Регистрация привязана к redirect_uri: с другим адресом authorize отвергнет
-    // client_id, поэтому при смене режима клиента регистрируем заново.
+    // Registration is tied to redirect_uri: with a different address authorize will reject
+    // the client_id, so when the client mode changes we register again.
     (stored.redirectUri ?? callbackUrl(options.publicUrl)) === redirectUri
   ) {
     const isCimd = stored.clientId === clientMetadataUrl(options.publicUrl);
@@ -820,8 +820,8 @@ export async function startAuthorization(options: {
   }
 
   if (mimic && client.source === 'cimd') {
-    // CIMD-документ у нас один и объявляет публичный callback: loopback с ним
-    // authorization server не примет, и человек получил бы непонятный отказ.
+    // Our CIMD document is single and declares a public callback: the authorization server
+    // won't accept loopback with it, and the person would get an unclear rejection.
     throw new OAuthError(
       'мимикрия требует динамической регистрации клиента, а этот сервер умеет только CIMD: ' +
         'документ объявляет публичный callback. Сними галочку или укажи client_id, ' +
@@ -841,8 +841,8 @@ export async function startAuthorization(options: {
   url.searchParams.set('state', state);
   url.searchParams.set('code_challenge', challenge);
   url.searchParams.set('code_challenge_method', 'S256');
-  // RFC 8707: токен должен быть выписан именно на этот ресурс. MCP требует
-  // присылать параметр всегда, даже если сервер его пока не понимает.
+  // RFC 8707: the token must be issued for this exact resource. MCP requires
+  // sending the parameter always, even if the server doesn't understand it yet.
   url.searchParams.set('resource', discovery.resource);
 
   prunePending(now);
@@ -873,7 +873,7 @@ export type CompletedAuthorization = {
   scope?: string;
 };
 
-/** Завершает поток: проверяет state, обменивает код и отдаёт токены. */
+/** Completes the flow: verifies state, exchanges the code, and returns the tokens. */
 export async function completeAuthorization(options: {
   state: string;
   code: string;
@@ -915,7 +915,7 @@ export async function completeAuthorization(options: {
   };
 }
 
-/** Обновление токена. Возвращает запись, которую надо слить с прежними данными. */
+/** Token refresh. Returns the record to be merged with the previous data. */
 export async function refreshAuthorization(options: {
   oauth: McpOAuthCredentials;
   fetchImpl?: FetchLike;
@@ -948,16 +948,16 @@ export async function refreshAuthorization(options: {
     refreshToken: tokens.refreshToken ?? oauth.refreshToken,
     ...(tokens.tokenType === undefined ? {} : { tokenType: tokens.tokenType }),
     ...(tokens.scope === undefined ? {} : { scope: tokens.scope }),
-    // expiresAt выставляем всегда: если новый токен пришёл без expires_in, старый
-    // срок от предыдущего токена больше не действует. Иначе свежий токен выглядел
-    // бы просроченным и не попал бы в mcp.json.
+    // We always set expiresAt: if the new token came without expires_in, the old
+    // deadline from the previous token no longer applies. Otherwise a fresh token would look
+    // expired and wouldn't make it into mcp.json.
     expiresAt: tokens.expiresAt,
     authorizedAt: new Date(now).toISOString(),
     error: undefined,
   };
 }
 
-/** Всё, что после обмена кода надо положить в credentials.json. */
+/** Everything that must be put into credentials.json after the code exchange. */
 export function credentialsFromCompleted(completed: CompletedAuthorization): McpOAuthCredentials {
   return {
     accessToken: completed.tokens.accessToken,
@@ -968,28 +968,28 @@ export function credentialsFromCompleted(completed: CompletedAuthorization): Mcp
     issuer: completed.discovery.issuer,
     authorizationEndpoint: completed.discovery.authorizationEndpoint,
     tokenEndpoint: completed.discovery.tokenEndpoint,
-    // Пустое значение здесь значит «стереть прежнее»: запись сливается с уже
-    // сохранённой, а сервер без registration_endpoint не должен унаследовать
-    // endpoint от прошлой регистрации.
+    // An empty value here means "erase the previous one": the record is merged with the
+    // already saved one, and a server without a registration_endpoint must not inherit
+    // the endpoint from a previous registration.
     registrationEndpoint: completed.discovery.registrationEndpoint,
     resource: completed.resource,
     clientId: completed.client.clientId,
-    // Секрет и ошибку задаём явно: новый client_id мог прийти без секрета, и
-    // старый не должен к нему прилипнуть.
+    // We set the secret and error explicitly: a new client_id could come without a secret, and
+    // the old one must not stick to it.
     clientSecret: completed.client.clientSecret,
     tokenEndpointAuthMethod: completed.client.tokenEndpointAuthMethod,
-    // С этим адресом клиент зарегистрирован: следующий authorize обязан повторить
-    // его же, иначе сервер отвергнет client_id.
+    // The client is registered with this address: the next authorize must repeat
+    // the same one, otherwise the server will reject the client_id.
     redirectUri: completed.redirectUri,
     error: undefined,
-    // По этому ключу pi будет ходить в локальный прокси, а сервис — подставлять
-    // свежий Bearer. В mcp.json сам токен не попадает.
+    // This key is what pi will use to reach the local proxy, and the service will substitute
+    // a fresh Bearer. The token itself doesn't go into mcp.json.
     proxyKey: base64url(randomBytes(24)),
     authorizedAt: new Date().toISOString(),
   };
 }
 
-/** Годится ли токен прямо сейчас: с запасом в полминуты, чтобы не прийти к шапке. */
+/** Whether the token is good right now: with a half-minute margin so it doesn't expire at the finish line. */
 export function tokenIsFresh(oauth: McpOAuthCredentials | undefined, now = Date.now()): boolean {
   if (!oauth?.accessToken) return false;
   return oauth.expiresAt === undefined || oauth.expiresAt > now + 30_000;

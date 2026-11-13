@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Справка по размеру промпта. Жёсткого лимита больше нет: во время прокачки он держал
-# промпт в узде, сейчас это ориентир (1–2 страницы A4 ≈ 90 непустых строк).
+# Prompt size reference. There is no hard limit anymore: during bootstrapping it kept
+# the prompt in check; now it's a guideline (1–2 A4 pages ≈ 90 non-empty lines).
 set -euo pipefail
 cd "$(dirname "$0")"
 file="${1:-persona.md}"

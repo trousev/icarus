@@ -1,6 +1,6 @@
-// Страница раздела «Ключи». Каркас — общий (shell из ui.ts), клиент — отдельными
-// файлами: в TypeScript не приходится экранировать бэктики, а тесты могут исполнить
-// тот же скрипт, что получает браузер.
+// The "Keys" section page. The frame is shared (shell from ui.ts), the client lives in
+// separate files: in TypeScript we don't have to escape backticks, and tests can execute
+// the same script the browser receives.
 import fs from 'node:fs';
 import { escapeHtml, sessionStrings, settingsAside, shell, sessionUiLanguage, type PanelSession } from './ui.ts';
 

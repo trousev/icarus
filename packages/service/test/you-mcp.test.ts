@@ -1,8 +1,8 @@
-// Бесплатный MCP You.com: транспорт, разбор ответа и отказы.
+// Free You.com MCP: transport, response parsing and refusals.
 //
-// Сеть подменяется: проверяем форму запроса (JSON-RPC, без ключа) и то, как
-// разбирается ответ — SSE с уведомлениями, обычный JSON и ошибка инструмента.
-// Ошибка квоты тут важнее прочих: она приходит не 429, а успешным ответом.
+// The network is stubbed: we check the request shape (JSON-RPC, no key) and how the
+// response is parsed — SSE with notifications, plain JSON and a tool error.
+// The quota error matters more than the others here: it arrives not as 429, but as a successful response.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -36,7 +36,7 @@ function capturing(response: () => Response): { fetch: typeof fetch; calls: Arra
   return { fetch: impl as unknown as typeof fetch, calls };
 }
 
-test('SSE: кадры через пустую строку, многострочный data склеивается', () => {
+test('SSE: frames separated by an empty line, multiline data is glued together', () => {
   const events = parseSseEvents(
     'event: message\ndata: {"a":1}\n\n' +
       ': комментарий\n\n' +
@@ -46,14 +46,14 @@ test('SSE: кадры через пустую строку, многостроч
   assert.deepEqual(events, [{ a: 1 }, { b: 2 }]);
 });
 
-test('обычный JSON вместо SSE тоже понимается', () => {
+test('plain JSON instead of SSE is understood too', () => {
   assert.deepEqual(parseMcpBody('  {"jsonrpc":"2.0","id":1,"result":{}}  '), [
     { jsonrpc: '2.0', id: 1, result: {} },
   ]);
   assert.deepEqual(parseMcpBody('event: message\ndata: {"x":1}\n\n'), [{ x: 1 }]);
 });
 
-test('ответ ищется по id, а если id не совпал — берётся единственный осмысленный', () => {
+test('the response is searched by id, and if the id did not match — the only meaningful one is taken', () => {
   const events = [
     { jsonrpc: '2.0', method: 'notifications/message', params: { level: 'info', data: 'ищу' } },
     { jsonrpc: '2.0', id: 7, result: {} },
@@ -63,7 +63,7 @@ test('ответ ищется по id, а если id не совпал — бе
   assert.equal(pickResponse([events[0]!, events[1]!, { jsonrpc: '2.0', id: 8, result: {} }], 99), null);
 });
 
-test('«Free tier limit exceeded» — это кредиты, а не поломка ключа', () => {
+test('"Free tier limit exceeded" means credits, not a broken key', () => {
   const failure = mcpError({
     jsonrpc: '2.0',
     id: 1,
@@ -74,7 +74,7 @@ test('«Free tier limit exceeded» — это кредиты, а не полом
   assert.match(failure.message, /Free tier limit exceeded/);
 });
 
-test('JSON-RPC error и обычная ошибка инструмента — пятиминутный карантин', () => {
+test('a JSON-RPC error and an ordinary tool error — a five-minute quarantine', () => {
   const rpc = mcpError({ jsonrpc: '2.0', id: 1, error: { code: -32602, message: 'Tool you-contents not found' } });
   assert.equal(rpc?.kind, 'http');
 
@@ -84,13 +84,13 @@ test('JSON-RPC error и обычная ошибка инструмента — �
   assert.equal(mcpError({ jsonrpc: '2.0', id: 1, result: { content: [] } }), null);
 });
 
-test('JSON выдачи лежит строкой в content[0].text', () => {
+test('the JSON of the output lies as a string in content[0].text', () => {
   const envelope = { jsonrpc: '2.0', id: 1, result: { content: [{ type: 'text', text: JSON.stringify(PAYLOAD) }] } };
   assert.deepEqual(mcpPayload(envelope), PAYLOAD);
   assert.equal(mcpPayload({ jsonrpc: '2.0', id: 1, result: { content: [{ type: 'text', text: 'не json' }] } }), null);
 });
 
-test('запрос: tools/call you-search, без авторизации, с профилем free', async () => {
+test('request: tools/call you-search, without authorization, with the free profile', async () => {
   const fake = capturing(() => sse({ jsonrpc: '2.0', id: 1, result: { content: [{ type: 'text', text: JSON.stringify(PAYLOAD) }] } }));
   const payload = await youFreeSearch('лиссабон', 4, { fetch: fake.fetch });
 
@@ -109,7 +109,7 @@ test('запрос: tools/call you-search, без авторизации, с п�
   assert.deepEqual(body.params.arguments, { query: 'лиссабон', count: 4 });
 });
 
-test('уведомления о ходе поиска не мешают найти результат', async () => {
+test('search progress notifications do not get in the way of finding the result', async () => {
   const fake = capturing(() =>
     sse(
       { jsonrpc: '2.0', method: 'notifications/message', params: { level: 'info', data: 'Search successful' } },
@@ -119,7 +119,7 @@ test('уведомления о ходе поиска не мешают найт
   assert.deepEqual(await youFreeSearch('q', 1, { fetch: fake.fetch }), PAYLOAD);
 });
 
-test('исчерпанная квота доезжает как отказ credits, а не как пустая выдача', async () => {
+test('an exhausted quota arrives as a credits refusal, not as an empty result', async () => {
   const fake = capturing(() =>
     sse({
       jsonrpc: '2.0',
@@ -134,12 +134,12 @@ test('исчерпанная квота доезжает как отказ credi
   });
 });
 
-test('ответ без результата — честный отказ, а не «ничего не нашлось»', async () => {
+test('a response without a result is an honest refusal, not "nothing found"', async () => {
   const fake = capturing(() => sse({ jsonrpc: '2.0', method: 'notifications/message', params: { level: 'info' } }));
   await assert.rejects(youFreeSearch('q', 1, { fetch: fake.fetch }), /не вернул ответ/);
 });
 
-test('суточная квота ждёт полуночи UTC, а не ровных суток', () => {
+test('the daily quota waits for UTC midnight, not for an exact day', () => {
   assert.equal(nextUtcMidnight(Date.parse('2026-11-07T12:00:00Z')), Date.parse('2026-11-08T00:01:00Z'));
   assert.equal(nextUtcMidnight(Date.parse('2026-11-07T23:59:30Z')), Date.parse('2026-11-08T00:01:00Z'));
 });

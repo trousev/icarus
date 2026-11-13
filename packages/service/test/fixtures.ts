@@ -1,18 +1,18 @@
-// Общий конфиг для тестов: сервис целиком завязан на него, и держать копию
-// в каждом файле — значит чинить их все при каждом новом поле.
+// Shared config for tests: the service is entirely built around it, and keeping a copy
+// in every file means fixing them all on every new field.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { IcarusConfig, UserConfig } from '../src/config.ts';
 
 export const API_KEY = 'test-token';
-/** Заголовок, которым SSO-прокси называет вошедшего: так делает Authelia за nginx. */
+/** Header by which the SSO proxy names the logged-in user: Authelia behind nginx does this. */
 export const PANEL_USER_HEADER = 'Remote-User';
-/** Провайдер и модель тестов: id содержит «/», как у любой модели DeepInfra. */
+/** Provider and model for tests: the id contains "/", like any DeepInfra model. */
 export const PROVIDER = 'deepinfra';
 export const MODEL_ID = 'deepseek-ai/DeepSeek-V4.1-Flash';
 
-/** Свежий dataDir на каждый вызов: тесты пишут в память и incoming. */
+/** A fresh dataDir on every call: tests write to memory and incoming. */
 export function makeConfig(overrides: Partial<IcarusConfig> = {}): IcarusConfig {
   return {
     host: '127.0.0.1',
@@ -28,13 +28,13 @@ export function makeConfig(overrides: Partial<IcarusConfig> = {}): IcarusConfig 
       { provider: PROVIDER, id: MODEL_ID, thinking: 'medium', tier: 'strong' },
     ],
     auth: {},
-    // Бесплатный MCP You.com в тестах выключен: сценарии не должны внезапно
-    // ходить в чужую сеть. Кому он нужен — включает его в своём конфиге.
+    // The free You.com MCP is off in tests: scenarios must not suddenly
+    // reach out to an external network. Whoever needs it enables it in their own config.
     env: { ICARUS_SEARCH_FREE: 'off' },
     mcp: {},
-    // Telegram-бот в тестах выключен: сеть и Bot API тут ни к чему.
+    // The Telegram bot is off in tests: network and Bot API are beside the point here.
     telegram: null,
-    // Распознавание голосовых тоже: тесты, которым оно нужно, задают его сами.
+    // Voice recognition too: tests that need it set it up themselves.
     speech: null,
     users: [{ id: 'probe' }],
     ...overrides,

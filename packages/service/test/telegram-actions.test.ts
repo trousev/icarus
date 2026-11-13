@@ -1,5 +1,5 @@
-// Действие Telegram вместо словесного статуса: чем бот показывает, что он занят,
-// как часто повторяет это и когда честно замолкает.
+// A Telegram action instead of a verbal status: what the bot shows that it is busy,
+// how often it repeats it and when it honestly falls silent.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { TelegramApi } from '../src/telegram/api.ts';
@@ -22,7 +22,7 @@ function fakeApi() {
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-test('каждая фаза хода переводится в действие из списка Telegram', () => {
+test('each turn phase is translated into an action from the Telegram list', () => {
   assert.equal(actionForTool('read'), 'upload_document');
   assert.equal(actionForTool('write'), 'upload_document');
   assert.equal(actionForTool('edit'), 'upload_document');
@@ -32,7 +32,7 @@ test('каждая фаза хода переводится в действие 
   assert.equal(actionForTool('невиданный-тул'), 'typing');
 });
 
-test('смена фазы видна сразу, а не на следующем тике', () => {
+test('a phase change is visible immediately, not on the next tick', () => {
   const { api, actions } = fakeApi();
   const reply = new TelegramReply(api, 42, { actionGapMs: 0, actionIntervalMs: 3_600_000 });
 
@@ -41,7 +41,7 @@ test('смена фазы видна сразу, а не на следующем
   assert.deepEqual(actions, ['upload_document']);
 });
 
-test('действие повторяется, пока ход идёт: Telegram забывает его за пять секунд', async () => {
+test('the action repeats while the turn is running: Telegram forgets it in five seconds', async () => {
   const { api, actions } = fakeApi();
   const reply = new TelegramReply(api, 42, { actionGapMs: 0, actionIntervalMs: 5 });
 
@@ -55,7 +55,7 @@ test('действие повторяется, пока ход идёт: Telegra
   );
 });
 
-test('null выключает индикатор: ход ждёт человека и ничего не делает', async () => {
+test('null turns the indicator off: the turn waits for the person and does nothing', async () => {
   const { api, actions } = fakeApi();
   const reply = new TelegramReply(api, 42, { actionGapMs: 0, actionIntervalMs: 5 });
 
@@ -68,7 +68,7 @@ test('null выключает индикатор: ход ждёт человек
   assert.equal(actions.length, sent, 'после выключения ничего не уезжает');
 });
 
-test('затянувшийся стикер становится честным «печатает»', async () => {
+test('a drawn-out sticker becomes an honest "typing"', async () => {
   const { api, actions } = fakeApi();
   let clock = 0;
   const reply = new TelegramReply(api, 42, {
@@ -86,7 +86,7 @@ test('затянувшийся стикер становится честным 
   assert.equal(actions.at(-1), 'typing', 'шутка не должна залипать на весь ход');
 });
 
-test('частая смена фаз не превращается в частокол запросов', () => {
+test('frequent phase changes do not turn into a picket fence of requests', () => {
   const { api, actions } = fakeApi();
   const reply = new TelegramReply(api, 42, { actionIntervalMs: 3_600_000 });
 

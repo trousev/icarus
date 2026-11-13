@@ -1,23 +1,23 @@
-// Перечитывание настроек без перезапуска сервиса.
+// Re-reading settings without restarting the service.
 //
-// Ключи правятся в панели и живут в двух местах: .env (рабочий файл, его же читает
-// docker compose) и keys.json (настройки панели, они сильнее и переживают деплой).
-// Сохранили ключ — сервис обязан увидеть его сейчас, а не со следующего рестарта:
-// иначе «сохранено» в панели значит «может быть, когда-нибудь».
+// Keys are edited in the panel and live in two places: .env (the working file, also read by
+// docker compose) and keys.json (panel settings, which are stronger and survive a deploy).
+// You save a key — the service must see it now, not starting from the next restart:
+// otherwise "saved" in the panel means "maybe, someday".
 //
-// Конфиг в сервисе один на всех: его держат реестр сессий, бот, HTTP-сервер и панель.
-// Поэтому перечитывание не создаёт новый объект, а подменяет содержимое старого —
-// ссылки, которые уже кто-то держит, остаются рабочими.
+// The config in the service is shared: the session registry, the bot, the HTTP server and the panel hold it.
+// So re-reading doesn't create a new object but replaces the contents of the old one —
+// references that someone already holds stay valid.
 import fs from 'node:fs';
 import { DEFAULT_CONFIG_PATH, ENV_FILE, PROVIDER_ENV, loadConfig, type IcarusConfig } from './config.ts';
 import { effectiveSecrets, fullCatalog, readEnvFile, readKeysStore, type KeysStore } from './keys.ts';
 import { log } from './log.ts';
 import { prepareUser } from './workspace.ts';
 
-/** Что .env положил в процесс в прошлый раз: чтобы убрать устаревшее, а не копить. */
+/** What .env put into the process last time: to remove stale values rather than accumulate them. */
 let fileOwned = new Map<string, string>();
 
-/** Имена, которые сервис вообще готов передать в процесс pi. */
+/** Names the service is at all willing to pass into the pi process. */
 function knownSecretNames(): Set<string> {
   const names = new Set<string>(Object.values(PROVIDER_ENV));
   for (const key of fullCatalog([])) names.add(key.name);
@@ -25,18 +25,18 @@ function knownSecretNames(): Set<string> {
 }
 
 export type RuntimeEnv = {
-  /** Окружение для loadConfig: файл + настройки панели поверх process.env. */
+  /** Environment for loadConfig: file + panel settings on top of process.env. */
   env: NodeJS.ProcessEnv;
-  /** Что уедет в процесс pi: только ключи и настройки, не весь PATH. */
+  /** What goes into the pi process: only keys and settings, not the whole PATH. */
   secrets: Record<string, string>;
   store: KeysStore;
   fileVars: Record<string, string>;
 };
 
 /**
- * Окружение по слоям: base (окружение процесса) → .env → настройки панели.
- * Отдельная функция нужна панели: перед записью ключа она проверяет, что конфиг
- * с новым значением всё ещё разбирается, и делает это на копии, а не на живом env.
+ * Environment by layers: base (process environment) → .env → panel settings.
+ * A separate function is needed by the panel: before writing a key it checks that the config
+ * with the new value still parses, and does it on a copy rather than on the live env.
  */
 export function envWithStore(
   base: NodeJS.ProcessEnv,
@@ -56,12 +56,12 @@ export function envWithStore(
 }
 
 /**
- * Собрать окружение из трёх слоёв.
+ * Assemble the environment from three layers.
  *
- * process.env сильнее .env — ровно как docker compose с env_file и как ждёт
- * loadEnvFile: пустая переменная из CI не должна затирать рабочее значение файла.
- * А настройки панели сильнее обоих — иначе сохранённый в панели ключ не пережил бы
- * первый же деплой, который вливает секреты GitHub обратно в .env.
+ * process.env is stronger than .env — just like docker compose with env_file and as
+ * loadEnvFile expects: an empty variable from CI shouldn't overwrite the file's working value.
+ * And panel settings are stronger than both — otherwise a key saved in the panel wouldn't
+ * survive the first deploy that pours GitHub secrets back into .env.
  */
 export function loadRuntimeEnv(
   options: { envFile?: string; keysFile?: string; base?: NodeJS.ProcessEnv } = {},
@@ -69,8 +69,8 @@ export function loadRuntimeEnv(
   const envFile = options.envFile ?? ENV_FILE;
   const base = options.base ?? process.env;
 
-  // Прошлый .env больше не хозяин своих значений: убираем то, что он положил,
-  // если человек (или панель) с тех пор ничего не переопределил.
+  // The previous .env is no longer the owner of its values: remove what it put there,
+  // if the person (or the panel) hasn't overridden anything since.
   for (const [name, value] of fileOwned) {
     if (base[name] === value) delete base[name];
   }
@@ -90,9 +90,9 @@ export function loadRuntimeEnv(
   const env = envWithStore(base, fileVars, store);
   fileOwned = new Map(Object.entries(fileVars));
 
-  // Сервис читает process.env и напрямую (имя контейнера MCP-прокси, DOCKER_HOST).
-  // Поэтому, когда собираем боевое окружение, приводим процесс к тому же виду:
-  // иначе ключ, заданный в панели, видел бы только loadConfig, а не остальной код.
+  // The service also reads process.env directly (the MCP proxy container name, DOCKER_HOST).
+  // So when we assemble the production environment, we bring the process to the same shape:
+  // otherwise a key set in the panel would be seen only by loadConfig, not by the rest of the code.
   const sync = options.base === undefined || options.base === process.env;
   if (sync) {
     for (const name of Object.keys(process.env)) {
@@ -104,12 +104,12 @@ export function loadRuntimeEnv(
   }
 
   const secrets = effectiveSecrets(fileVars, store);
-  // Убранный ключ нужно именно погасить в процессе pi: окружение контейнера всё
-  // ещё помнит старое значение из .env, и без явной пустой переменной расширение
-  // продолжило бы им пользоваться.
+  // A removed key must be explicitly blanked in the pi process: the container environment still
+  // remembers the old value from .env, and without an explicit empty variable the extension
+  // would keep using it.
   for (const name of store.removed) secrets[name] = '';
-  // Ключ, экспортированный в окружение (локальный запуск без .env), тоже должен
-  // доехать до pi: иначе сервис видит его, а контейнер — нет.
+  // A key exported into the environment (local run without .env) must also
+  // reach pi: otherwise the service sees it but the container doesn't.
   const known = knownSecretNames();
   for (const [name, value] of Object.entries(env)) {
     if (!known.has(name) || value === undefined || value.trim() === '') continue;
@@ -120,7 +120,7 @@ export function loadRuntimeEnv(
   return { env, secrets, store, fileVars };
 }
 
-/** Подменить содержимое конфига целиком: ссылки на объект остаются валидными. */
+/** Replace the config contents entirely: references to the object stay valid. */
 export function replaceConfig(target: IcarusConfig, source: IcarusConfig): void {
   const record = target as unknown as Record<string, unknown>;
   for (const key of Object.keys(record)) {
@@ -130,9 +130,9 @@ export function replaceConfig(target: IcarusConfig, source: IcarusConfig): void 
 }
 
 /**
- * Окружение, каким оно станет после записи: панель проверяет конфиг на этой копии
- * и только потом пишет файл. Прошлые значения .env при этом вычитаются — ровно как
- * в loadRuntimeEnv, иначе валидация видела бы не то, что увидит сервис.
+ * The environment as it will be after writing: the panel validates the config on this copy
+ * and only then writes the file. Previous .env values are subtracted here — just like
+ * in loadRuntimeEnv, otherwise validation would see something different from what the service sees.
  */
 export function previewEnv(
   store: KeysStore,
@@ -149,25 +149,25 @@ export function previewEnv(
 export type ReloadResult = {
   users: number;
   keys: number;
-  /** Люди, чьё окружение не переписалось: ключ сохранён, но до человека не доехал. */
+  /** People whose environment didn't get rewritten: the key is saved but didn't reach the person. */
   warnings: string[];
 };
 
 /**
- * Перечитать .env, keys.json и config.yaml и разложить новое по людям.
+ * Re-read .env, keys.json and config.yaml and distribute the new values across people.
  *
- * pi читает auth.json и mcp.json при старте сессии, поэтому после перезаписи
- * файлов реестр сессий должен пометить ресурсы обновлёнными (это делает вызывающий:
- * у runtime нет реестра). Здесь — только файлы и живой конфиг.
+ * pi reads auth.json and mcp.json when a session starts, so after rewriting the
+ * files the session registry must mark the resources as updated (the caller does this:
+ * runtime has no registry). Here — only files and the live config.
  */
 export function reloadRuntime(config: IcarusConfig): ReloadResult {
   const state = loadRuntimeEnv({ envFile: config.envFile, keysFile: config.keysFile });
   const path = config.configPath ?? DEFAULT_CONFIG_PATH;
   const fresh = loadConfig(path, state.env);
   fresh.secretEnv = state.secrets;
-  // Пути настроек не приходят из YAML: их задаёт вызывающий (или умолчания), и
-  // терять их при перечитывании нельзя — иначе следующий saveKey промахнётся мимо
-  // временного файла теста.
+  // Settings paths don't come from YAML: the caller sets them (or the defaults), and
+  // they must not be lost on re-reading — otherwise the next saveKey would miss the
+  // test's temporary file.
   if (config.envFile !== undefined) fresh.envFile = config.envFile;
   if (config.keysFile !== undefined) fresh.keysFile = config.keysFile;
   replaceConfig(config, fresh);
@@ -193,7 +193,7 @@ export function reloadRuntime(config: IcarusConfig): ReloadResult {
   return { users: config.users.length, keys: Object.keys(state.secrets).length, warnings };
 }
 
-/** Есть ли .env: панель показывает это, чтобы человек понимал, откуда взялись ключи. */
+/** Whether .env exists: the panel shows this so a person understands where the keys came from. */
 export function envFileExists(file: string = ENV_FILE): boolean {
   try {
     return fs.existsSync(file);

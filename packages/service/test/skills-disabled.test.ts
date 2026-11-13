@@ -1,8 +1,8 @@
-// Выключенный скилл: он есть в панели и под git, но pi его не видит.
+// A disabled skill: it is present in the panel and under git, but pi does not see it.
 //
-// Проверяем именно стык с pi: «выключен» — это не галочка в нашем JSON, а файл,
-// которого нет в каталоге, который читает pi. Поэтому тест снова кормит результат
-// загрузчику pi и смотрит, что имя пропало и вернулось.
+// We check exactly the junction with pi: "disabled" is not a checkbox in our JSON, but a file
+// that is absent from the directory pi reads. That is why the test feeds the result into the pi
+// loader again and watches the name disappear and come back.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -25,7 +25,7 @@ function piSees(root: string): string[] {
   return loadSkillsFromDir({ dir: root, source: 'user' }).skills.map((skill) => skill.name);
 }
 
-test('выключение убирает скилл из каталога pi и возвращает его обратно', () => {
+test('disabling removes the skill from the pi directory and brings it back', () => {
   const root = tempRoot();
   writeSkill(root, { name: 'pirate-mode', description: 'ок', body: 'тело' });
   assert.deepEqual(piSees(root), ['pirate-mode']);
@@ -45,7 +45,7 @@ test('выключение убирает скилл из каталога pi и
   assert.deepEqual(piSees(root), ['pirate-mode'], 'включение вернуло скилл pi');
 });
 
-test('панель видит выключенный скилл с тем же id и статусом', () => {
+test('the panel sees a disabled skill with the same id and status', () => {
   const root = tempRoot();
   writeSkill(root, { name: 'pirate-mode', description: 'ок', body: 'тело' });
   setSkillEnabled(root, 'pirate-mode/SKILL.md', false);
@@ -61,7 +61,7 @@ test('панель видит выключенный скилл с тем же i
   assert.deepEqual(detail?.bundle.map((file) => file.path), ['pirate-mode/SKILL.md']);
 });
 
-test('бандл переезжает вместе с выключенным скиллом', () => {
+test('the bundle moves along with the disabled skill', () => {
   const root = tempRoot();
   writeSkill(root, { name: 'pirate-mode', description: 'ок', body: 'тело' });
   fs.mkdirSync(path.join(root, 'pirate-mode', 'scripts'), { recursive: true });
@@ -79,7 +79,7 @@ test('бандл переезжает вместе с выключенным с�
   assert.equal(skill.files, 2);
 });
 
-test('переименование выключенного скилла не включает его обратно', () => {
+test('renaming a disabled skill does not enable it back', () => {
   const root = tempRoot();
   writeSkill(root, { name: 'pirate-mode', description: 'ок', body: 'тело' });
   setSkillEnabled(root, 'pirate-mode/SKILL.md', false);
@@ -96,7 +96,7 @@ test('переименование выключенного скилла не в
   assert.deepEqual(piSees(root), []);
 });
 
-test('переименование корневого SKILL.md не уносит весь каталог скиллов', () => {
+test('renaming the root SKILL.md does not carry away the whole skills directory', () => {
   const root = tempRoot();
   fs.writeFileSync(
     path.join(root, 'SKILL.md'),
@@ -116,11 +116,11 @@ test('переименование корневого SKILL.md не уносит
   assert.equal(fs.existsSync(path.join(root, 'sailor-talk', 'SKILL.md')), true, 'сосед не уехал');
 });
 
-test('включение занятого имени отказывает, а не затирает соседа', () => {
+test('enabling an occupied name refuses instead of overwriting a neighbour', () => {
   const root = tempRoot();
   writeSkill(root, { name: 'pirate-mode', description: 'ок', body: 'тело' });
   setSkillEnabled(root, 'pirate-mode/SKILL.md', false);
-  // В корне появился другой скилл с тем же путём: включать поверх него нельзя.
+  // Another skill with the same path appeared at the root: we must not enable over it.
   fs.mkdirSync(path.join(root, 'pirate-mode'), { recursive: true });
   fs.writeFileSync(path.join(root, 'pirate-mode', 'SKILL.md'), '---\nname: pirate-mode\ndescription: чужой\n---\n');
 

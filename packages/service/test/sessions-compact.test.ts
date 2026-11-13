@@ -1,6 +1,6 @@
-// Жизненный цикл сессий: час тишины — это «разговор закончен», значит сжимаем и
-// закрываем; занятые сессии не трогаем. Докер и модель тут не нужны: и сессии, и
-// поднятие контейнера — заглушки (см. RegistryDeps).
+// Session lifecycle: an hour of silence means "the conversation is over", so we compact and
+// close; busy sessions are left alone. Neither docker nor the model is needed here: both sessions and
+// container startup are stubs (see RegistryDeps).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { SessionRegistry } from '../src/sessions/registry.ts';
@@ -8,7 +8,7 @@ import { makeConfig, probe } from './fixtures.ts';
 
 type CompactResult = { status: 'compacted'; tokensBefore: number; tokensAfter: number } | { status: 'nothing' };
 
-/** Сессия-заглушка: реестру от неё нужны занятость, время и сжатие. */
+/** Stub session: the registry needs busy state, time and compaction from it. */
 function fakeSession(overrides: Partial<Record<string, unknown>> = {}) {
   const session = {
     key: 'probe:conv',
@@ -50,17 +50,17 @@ function fakeSession(overrides: Partial<Record<string, unknown>> = {}) {
 function makeRegistry(session: ReturnType<typeof fakeSession>) {
   return new SessionRegistry(makeConfig(), {
     ensureContainer: async () => 'stub',
-    // Заглушка вместо PiSession: тест про решения реестра, а не про RPC.
+    // A stub instead of PiSession: the test is about registry decisions, not RPC.
     createSession: () => session as never,
   });
 }
 
-/** Сессия, к которой не обращались дольше часа. */
+/** A session not touched for more than an hour. */
 function gone(session: ReturnType<typeof fakeSession>, minutes = 61): void {
   session.lastUsed = Date.now() - minutes * 60_000;
 }
 
-test('затихшую сессию сжимаем и закрываем, а не просто гасим', async () => {
+test('a quieted session is compacted and closed, not just shut down', async () => {
   const session = fakeSession();
   const registry = makeRegistry(session);
   try {
@@ -76,7 +76,7 @@ test('затихшую сессию сжимаем и закрываем, а н�
   }
 });
 
-test('пока человек говорит, сжатия нет', async () => {
+test('while the person is talking there is no compaction', async () => {
   const session = fakeSession({ busy: true });
   const registry = makeRegistry(session);
   try {
@@ -91,7 +91,7 @@ test('пока человек говорит, сжатия нет', async () => 
   }
 });
 
-test('свежую сессию уборка не трогает', async () => {
+test('the sweep does not touch a fresh session', async () => {
   const session = fakeSession();
   const registry = makeRegistry(session);
   try {
@@ -103,7 +103,7 @@ test('свежую сессию уборка не трогает', async () => {
   }
 });
 
-test('сбой сжатия не оставляет затихшую сессию висеть', async () => {
+test('a compaction failure does not leave a quieted session hanging', async () => {
   const session = fakeSession({ failure: new Error('модель не ответила за 600000 мс') });
   const registry = makeRegistry(session);
   try {
@@ -134,11 +134,11 @@ test('/compact сжимает живую сессию и рассказывае�
   }
 });
 
-test('/compact поднимает затихший разговор, но не лезет в занятый', async () => {
+test('/compact raises a quieted chat but does not touch a busy one', async () => {
   const session = fakeSession();
   const registry = makeRegistry(session);
   try {
-    // Процесса нет — но история на диске: /compact поднимает сессию и сжимает её.
+    // There is no process — but the history is on disk: /compact raises the session and compacts it.
     assert.deepEqual(await registry.compact(probe(), 'conv'), {
       status: 'compacted',
       tokensBefore: 1200,
@@ -154,7 +154,7 @@ test('/compact поднимает затихший разговор, но не �
   }
 });
 
-test('/compact рассказывает про сбой, а не молчит', async () => {
+test('/compact reports a failure rather than staying silent', async () => {
   const session = fakeSession({ failure: new Error('pi отказался сжимать: нет ключа') });
   const registry = makeRegistry(session);
   try {
@@ -167,7 +167,7 @@ test('/compact рассказывает про сбой, а не молчит', 
   }
 });
 
-test('ход во время сжатия ждёт и получает уже новую сессию, а не ту, что гасят', async () => {
+test('a turn during compaction waits and gets the new session, not the one being shut down', async () => {
   const session = fakeSession();
   const fresh = fakeSession();
   let created = 0;

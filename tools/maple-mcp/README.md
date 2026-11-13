@@ -1,116 +1,116 @@
 # maple-mcp
 
-MCP-сервер (stdio + Streamable HTTP), который даёт LLM работать с **локально
-установленным Maple**. Без внешних зависимостей — только Node.js.
+MCP server (stdio + Streamable HTTP) that lets an LLM work with a **locally
+installed Maple**. No external dependencies — just Node.js.
 
-Проверено на **Maple 18.00** (`X86 64 LINUX, Feb 10 2014, Build ID 922027`),
+Tested on **Maple 18.00** (`X86 64 LINUX, Feb 10 2014, Build ID 922027`),
 CLI `/opt/maple18/bin/maple`.
 
-## Инструменты (14)
+## Tools (14)
 
-| Инструмент | Назначение |
+| Tool | Purpose |
 |---|---|
-| `maple_health` | версия, платформа, задержка, каталог сессий |
-| `maple_evaluate_code` | выполнить код Maple в сессии; состояние и журнал — см. ниже |
-| `maple_check_code` | проверить синтаксис, **не выполняя** (`maple -P`) |
-| `maple_to_latex` | выражение → LaTeX (`latex(..., output=string)`; им агент обязан переводить формулы в ответе) |
-| `maple_plot` | график → изображение (gif / jpeg / bmp) + файл на диске |
-| `maple_session_list` | живые сессии и сохранённые журналы (в т.ч. из прошлых чатов) |
-| `maple_session_resume` | поднять сессию из журнала (обычно не нужно — см. авто-восстановление) |
-| `maple_session_history` | что именно считалось в сессии, по шагам |
-| `maple_session_reset` | перезапустить ядро, **сохранив** журнал |
-| `maple_session_forget` | стереть сессию и журнал совсем |
-| `maple_worksheet_read` | прочитать `.mw`: группы, метки, секции, ввод, признак вывода |
-| `maple_worksheet_create` | создать `.mw` из массива ячеек (и проверить его Maple) |
-| `maple_worksheet_edit_cell` | заменить ввод одной группы |
-| `maple_worksheet_run_cell` | выполнить одну группу из `.mw` |
+| `maple_health` | version, platform, latency, session directory |
+| `maple_evaluate_code` | run Maple code in a session; state and journal — see below |
+| `maple_check_code` | check syntax **without executing** (`maple -P`) |
+| `maple_to_latex` | expression → LaTeX (`latex(..., output=string)`; the agent is obliged to put formulas in the answer through it) |
+| `maple_plot` | plot → image (gif / jpeg / bmp) + a file on disk |
+| `maple_session_list` | live sessions and saved journals (including from past chats) |
+| `maple_session_resume` | bring a session up from a journal (usually not needed — see auto-recovery) |
+| `maple_session_history` | what exactly was computed in the session, step by step |
+| `maple_session_reset` | restart the kernel, **keeping** the journal |
+| `maple_session_forget` | erase the session and journal entirely |
+| `maple_worksheet_read` | read a `.mw`: groups, labels, sections, input, the output flag |
+| `maple_worksheet_create` | create a `.mw` from an array of cells (and check it with Maple) |
+| `maple_worksheet_edit_cell` | replace the input of one group |
+| `maple_worksheet_run_cell` | execute one group from a `.mw` |
 
-## Долгие расчёты и сессии между чатами
+## Long computations and sessions between chats
 
-Мост pi → MCP поднимает этот процесс на время чата и убивает в конце. Поэтому
-состояние сессии живёт **не в памяти, а в журнале**:
+The pi → MCP bridge starts this process for the duration of a chat and kills it at the end. That's why
+session state lives **not in memory but in the journal**:
 
-- своего хранилища у сервера нет: журналы и графики лежат в рабочей папке
-  разговора, в скрытом `.maple/` (pi запускает сервер с cwd = workspace);
-- всё, что успешно выполнилось, дописывается в `.maple/<сессия>.jsonl`;
-- при первом обращении к сессии в новом процессе журнал проигрывается в свежее
-  ядро — переменные, функции и `assume` возвращаются (в ответе будет пометка
-  `[сессия «…» восстановлена из журнала: N шагов]`);
-- `restart` в коде очищает журнал — как и положено;
-- когда ядро не трогают **5 минут** (`MAPLE_IDLE_SECONDS`), оно убивается, журнал
-  остаётся; следующий вызов поднимает его и восстанавливает состояние.
+- the server has no storage of its own: journals and plots live in the working folder
+  of the conversation, in a hidden `.maple/` (pi starts the server with cwd = workspace);
+- everything that ran successfully is appended to `.maple/<session>.jsonl`;
+- on the first access to a session in a new process, the journal is replayed into a fresh
+  kernel — variables, functions and `assume` come back (the response will have the marker
+  `[session "…" restored from journal: N steps]`);
+- `restart` in the code clears the journal — as it should;
+- when the kernel isn't touched for **5 minutes** (`MAPLE_IDLE_SECONDS`), it's killed, the journal
+  remains; the next call brings it up and restores the state.
 
-Типичный сценарий: в одном чате вводим данные и решаем дифур, в другом —
-«продолжим» и агент просто продолжает с тем же именем сессии.
+Typical scenario: in one chat we enter data and solve a diff eq, in another —
+"let's continue" and the agent simply continues with the same session name.
 
 ```text
-чат 1:  maple_evaluate_code(session="osc", code="m:=2: k:=3: ic:={y(0)=1, D(y)(0)=0}:")
+chat 1:  maple_evaluate_code(session="osc", code="m:=2: k:=3: ic:={y(0)=1, D(y)(0)=0}:")
         maple_evaluate_code(session="osc", code="sol:=dsolve(...);")
-        → MCP-процесс умирает вместе с чатом, журнал на диске
+        → the MCP process dies with the chat, the journal is on disk
 
-чат 2:  maple_evaluate_code(session="osc", code="eval(rhs(sol), x=1);")
-        → [сессия «osc» восстановлена из журнала: 3 шагов]
+chat 2:  maple_evaluate_code(session="osc", code="eval(rhs(sol), x=1);")
+        → [session "osc" restored from journal: 3 steps]
           cos(3)
 ```
 
-Имена сессий лучше давать по смыслу (`osc`, `statmech`, `optics`) — тогда разные
-расчёты не перемешиваются.
+Session names are best given by meaning (`osc`, `statmech`, `optics`) — then different
+computations don't get mixed up.
 
-## Быстрый старт
+## Quick start
 
 ```bash
 node tools/maple-mcp/server.mjs              # stdio
-node tools/maple-mcp/server.mjs --http 8770  # Streamable HTTP на /mcp
-node tools/maple-mcp/test.mjs                # 27 проверок базовых возможностей
-node tools/maple-mcp/test-sessions.mjs       # 25 проверок журнала, простоев и утечки процессов
+node tools/maple-mcp/server.mjs --http 8770  # Streamable HTTP on /mcp
+node tools/maple-mcp/test.mjs                # 27 checks of basic capabilities
+node tools/maple-mcp/test-sessions.mjs       # 25 checks of the journal, idling and process leaks
 ```
 
-## Настройки (переменные окружения)
+## Settings (environment variables)
 
-| Переменная | По умолчанию | Смысл |
+| Variable | Default | Meaning |
 |---|---|---|
-| `MAPLE_BIN` | `/opt/maple18/bin/maple` | путь к CLI Maple |
-| `MAPLE_ARGS` | — | доп. аргументы (добавляются к `-q -s -t`) |
-| `MAPLE_TIMEOUT_SECONDS` | `60` | таймаут одного вычисления, сек |
-| `MAPLE_IDLE_SECONDS` | `300` | простой, после которого ядро гасится |
-| `MAPLE_MAX_SESSIONS` | `4` | максимум одновременных ядер |
-| `MAPLE_SESSION_DIR` | `<рабочая папка>/.maple` | журналы сессий |
-| `MAPLE_PLOT_DIR` | `<SESSION_DIR>/plots` | куда складывать графики |
-| `MAPLE_JOURNAL_MAX_BYTES` | `524288` | предел журнала (дальше старые записи отбрасываются) |
-| `MAPLE_WORKSPACE_ROOT` | текущий каталог | база для относительных путей `.mw` |
-| `MAPLE_HTTP_PORT` / `MAPLE_HTTP_HOST` | `8770` / `0.0.0.0` | адрес HTTP-режима |
-| `MAPLE_MCP_DEBUG` | — | `1` — отладочные сообщения в stderr |
+| `MAPLE_BIN` | `/opt/maple18/bin/maple` | path to the Maple CLI |
+| `MAPLE_ARGS` | — | extra arguments (added to `-q -s -t`) |
+| `MAPLE_TIMEOUT_SECONDS` | `60` | timeout of a single computation, sec |
+| `MAPLE_IDLE_SECONDS` | `300` | idle time after which the kernel is shut down |
+| `MAPLE_MAX_SESSIONS` | `4` | maximum number of simultaneous kernels |
+| `MAPLE_SESSION_DIR` | `<working folder>/.maple` | session journals |
+| `MAPLE_PLOT_DIR` | `<SESSION_DIR>/plots` | where to store plots |
+| `MAPLE_JOURNAL_MAX_BYTES` | `524288` | journal limit (older entries beyond it are dropped) |
+| `MAPLE_WORKSPACE_ROOT` | current directory | base for relative `.mw` paths |
+| `MAPLE_HTTP_PORT` / `MAPLE_HTTP_HOST` | `8770` / `0.0.0.0` | HTTP mode address |
+| `MAPLE_MCP_DEBUG` | — | `1` — debug messages to stderr |
 
-## Как это устроено
+## How it works
 
-- Долгоживущий консольный Maple (`maple -q -s -t`): без prompt'а и «bytes used»,
-  `prettyprint=0`, вывод флашится сразу, старт ~50 мс, RSS ядра ~5 МБ.
-- Код пишем в stdin, читаем stdout до sentinel-маркера
+- A long-lived console Maple (`maple -q -s -t`): no prompt and no "bytes used",
+  `prettyprint=0`, output flushed immediately, startup ~50 ms, kernel RSS ~5 MB.
+- We write code to stdin, read stdout up to a sentinel marker
   (`printf("__MAPLE_MCP_<random>\n")`).
-- **Синтаксис проверяем отдельным процессом** (`maple -P`): сырая синтаксическая
-  ошибка в живом REPL вешает разбор потока, а так сессия остаётся целой.
-- Runtime-ошибки видны по `Error,` и возвращаются как `isError`.
-- `quit`/`done`/`stop` на верхнем уровне блокируются — иначе сессия умрёт.
-- Таймаут убивает ядро; журнал остаётся, состояние вернётся.
-- **Maple — это два процесса**: обёртка `cmaple` (её pid возвращает `spawn`) и ядро
-  `mserver`, которое обёртка порождает сама. Гасим поэтому не процесс, а **группу
-  процессов**: Maple стартует с `detached: true` (это `setsid`), а остановка шлёт
-  сигнал всей группе. Иначе ядро переживает обёртку, осиротеет, а в контейнере
-  человека (PID 1 — `sleep infinity`, сирот он не подбирает) навсегда останется
-  зомби `[mserver] <defunct>` — таких за разговор копились сотни. На выходе сервер
-  добивает остатки групп, а контейнерам людей дополнительно включён `init: true`.
-- HTTP-транспорт — стандартный MCP Streamable HTTP (POST `/mcp`, ответ JSON или
-  SSE по `Accept`, заголовок `Mcp-Session-Id`). Проверен официальным
-  `@modelcontextprotocol/sdk` — тем же, что использует `pi-mcp-extension`.
+- **Syntax is checked by a separate process** (`maple -P`): a raw syntax
+  error in a live REPL hangs the stream parsing, whereas this way the session stays intact.
+- Runtime errors are visible by `Error,` and are returned as `isError`.
+- `quit`/`done`/`stop` at the top level are blocked — otherwise the session would die.
+- A timeout kills the kernel; the journal remains, the state will come back.
+- **Maple is two processes**: the wrapper `cmaple` (its pid is returned by `spawn`) and the kernel
+  `mserver`, which the wrapper spawns itself. That's why we shut down not a process but a **process
+  group**: Maple starts with `detached: true` (that's `setsid`), and stopping sends the
+  signal to the whole group. Otherwise the kernel outlives the wrapper, gets orphaned, and in the person's
+  container (PID 1 is `sleep infinity`, it doesn't adopt orphans) a zombie `[mserver] <defunct>` remains
+  forever — hundreds of them accumulated per conversation. On exit the server
+  finishes off the leftover groups, and people's containers additionally have `init: true` enabled.
+- The HTTP transport is the standard MCP Streamable HTTP (POST `/mcp`, response is JSON or
+  SSE depending on `Accept`, header `Mcp-Session-Id`). Verified with the official
+  `@modelcontextprotocol/sdk` — the same one `pi-mcp-extension` uses.
 
-## Подключение к Икару
+## Connecting to Icarus
 
-Отдельный compose-сервис и systemd не нужны: **Maple 18 работает прямо внутри
-контейнера агента** — проверено, лицензия не привязана к железу
-(`HOSTID=INTERNET=*.*.*.*`). Маунты сервис делает сам: включает `mcp.maple` —
-и монтирует `${MAPLE_DIR}` (тем же путём, что на хосте) и каталог
-`tools/maple-mcp` репозитория в `/opt/icarus/tools/maple-mcp`. В конфиге
-остаётся только сам сервер:
+A separate compose service and systemd aren't needed: **Maple 18 works right inside the
+agent container** — verified, the license isn't tied to hardware
+(`HOSTID=INTERNET=*.*.*.*`). The service does the mounts itself: enabling `mcp.maple` —
+and it mounts `${MAPLE_DIR}` (at the same path as on the host) and the `tools/maple-mcp`
+directory of the repository into `/opt/icarus/tools/maple-mcp`. Only the server itself
+remains in the config:
 
 ```yaml
 mcp:
@@ -122,70 +122,70 @@ mcp:
       MAPLE_BIN: ${MAPLE_DIR}/bin/maple
       MAPLE_TIMEOUT_SECONDS: "25"
     lifecycle: eager
-    hidden: true      # встроенное умение: в панели его нет, выключить нельзя
+    hidden: true      # built-in capability: it's not in the panel, can't be turned off
 ```
 
-Своего каталога в `dataDir` у сервера нет: журналы и графики он держит в рабочей
-папке разговора (`.maple/`). Поэтому ни `MAPLE_SESSION_DIR`, ни `MAPLE_PLOT_DIR`
-в конфиге Икара прописывать не надо — умолчания уже правильные.
+The server has no directory of its own in `dataDir`: it keeps journals and plots in the working
+folder of the conversation (`.maple/`). That's why neither `MAPLE_SESSION_DIR` nor `MAPLE_PLOT_DIR`
+needs to be written in Icarus's config — the defaults are already correct.
 
-`MAPLE_DIR=/opt/maple18` живёт в `.env` (см. `.env.example`); на проде то же
-значение приезжает из `vars.MAPLE_DIR` через `script/redeploy`, а незаданная
-переменная — это дефолт `/opt/maple18`, а не пустой путь. Обе стороны
-маунта обязаны совпадать: launcher Maple ищет библиотеки по тому пути, который
-записан внутри него самого.
+`MAPLE_DIR=/opt/maple18` lives in `.env` (see `.env.example`); in production the same
+value arrives from `vars.MAPLE_DIR` via `script/redeploy`, and an unset
+variable means the default `/opt/maple18`, not an empty path. Both sides of the
+mount must match: the Maple launcher looks for libraries at the path recorded
+inside itself.
 
-Без `MAPLE_SESSION_DIR`/`MAPLE_PLOT_DIR` сервер пишет в `<текущий каталог>/.maple`.
-В Икаре это и есть рабочая папка разговора: она смонтирована с хоста, поэтому
-журнал переживает и конец чата, и пересборку контейнера.
+Without `MAPLE_SESSION_DIR`/`MAPLE_PLOT_DIR` the server writes to `<current directory>/.maple`.
+In Icarus that's exactly the working folder of the conversation: it's mounted from the host, so the
+journal survives both the end of the chat and a rebuild of the container.
 
-Дальше `./script/server -d`. Проверка в живом контейнере:
+Then `./script/server -d`. Verification in a live container:
 
 ```bash
 docker exec -u node icarus-user-probe node /opt/icarus/tools/maple-mcp/test.mjs
 ```
 
-Инструкции для агента живут в самом сервере: короткое правило — в `instructions`
-MCP-хендшейка, подробности — в описаниях инструментов (`maple_evaluate_code`
-говорит, что считать в голове нельзя и как выглядит честный отказ, `maple_to_latex`
-— что формулы человеку всегда в LaTeX, `maple_plot` — что markdown-строку надо
-вставить дословно). Отдельного файла-инструкции в репозитории больше нет: сколько
-его ни пиши, модель читает его только если кто-то напомнит, а описания инструментов
-она видит в каждом разговоре.
+The instructions for the agent live in the server itself: a short rule — in the `instructions`
+of the MCP handshake, the details — in the tool descriptions (`maple_evaluate_code`
+says that you can't compute in your head and what an honest refusal looks like, `maple_to_latex`
+— that formulas for the human are always in LaTeX, `maple_plot` — that the markdown line must
+be inserted verbatim). There's no separate instruction file in the repository anymore: no matter how much
+you write it, the model reads it only if someone reminds it, whereas the tool descriptions
+it sees in every conversation.
 
-## Ограничения и грабли (проверено на Maple 18)
+## Limitations and gotchas (verified on Maple 18)
 
-- **Если `dsolve`/`pdsolve` падают с `external library libmodLA.so could not be
-  found/used`** — это не сервер, а старые библиотеки Maple: `libatlas.so` и
-  `libmsp.so` из 2014 года требуют исполняемого стека, а glibc 2.41+ (Ubuntu
-  26.04) такие `dlopen` отвергает. Лечится снятием флага:
+- **If `dsolve`/`pdsolve` fail with `external library libmodLA.so could not be
+  found/used`** — that's not the server but old Maple libraries: `libatlas.so` and
+  `libmsp.so` from 2014 require an executable stack, and glibc 2.41+ (Ubuntu
+  26.04) rejects such `dlopen`. It's fixed by clearing the flag:
 
   ```bash
-  python3 tools/maple-mcp/fix-execstack.py                 # предпросмотр
-  sudo python3 tools/maple-mcp/fix-execstack.py --apply    # бэкапы *.bak-execstack
+  python3 tools/maple-mcp/fix-execstack.py                 # preview
+  sudo python3 tools/maple-mcp/fix-execstack.py --apply    # backups *.bak-execstack
   ```
 
-  После этого работают `dsolve`, `pdsolve`, численные ОДУ. Откат — `--restore`.
-- **Картинки.** `pi-mcp-extension` заменяет image-контент на текст
-  `[Image: image/gif, base64 encoded]`, поэтому сам image-блок до человека не
-  доходит. Решение: MCP кладёт график в `.maple/plots` рабочей папки и возвращает
-  markdown-ссылку `![график](/workspaces/<workspace>/.maple/plots/<16hex>.gif)`.
-  Икар отдаёт такие файлы маршрутом `GET /panel/api/chat/image?path=…`: он пускает
-  картинки из вложений и рабочих папок человека. Агент обязан вставить эту строку
-  в ответ дословно — так написано в описании `maple_plot`.
-- **Графику** отдаём через `plottools:-exportplot`: `gif`, `jpeg`, `bmp`;
-  **`png` и `tiff` Maple 18 не умеет**.
-- `DocumentTools:-ContentToString`, `Tabulate` и
-  `Worksheet:-WorksheetToMapleText` в Maple 18 **отсутствуют** — `.mw`
-  генерируется своим XML-кодом, 2-D ввод читается через атрибут `input-equation`.
-- **`-c` через launcher использовать нельзя**: скрипт `/opt/maple18/bin/maple`
-  делает `eval` аргументов. Внутри сервера всё идёт через stdin или файл.
-- **Таймаут клиента.** Икар генерирует `requestTimeoutMs: 30000`
-  (`packages/service/src/workspace.ts`), это значение зашито. Поэтому
+  After that `dsolve`, `pdsolve`, numerical ODEs work. Rollback — `--restore`.
+- **Images.** `pi-mcp-extension` replaces image content with the text
+  `[Image: image/gif, base64 encoded]`, so the image block itself doesn't reach the human.
+  The fix: the MCP puts the plot in `.maple/plots` of the working folder and returns a
+  markdown link `![plot](/workspaces/<workspace>/.maple/plots/<16hex>.gif)`.
+  Icarus serves such files via the route `GET /panel/api/chat/image?path=…`: it lets through
+  images from attachments and people's working folders. The agent must insert this line
+  into the answer verbatim — that's what the `maple_plot` description says.
+- **Graphics** are served via `plottools:-exportplot`: `gif`, `jpeg`, `bmp`;
+  **Maple 18 can't do `png` and `tiff`**.
+- `DocumentTools:-ContentToString`, `Tabulate` and
+  `Worksheet:-WorksheetToMapleText` are **absent** in Maple 18 — `.mw`
+  is generated by its own XML code, 2-D input is read via the `input-equation` attribute.
+- **`-c` can't be used via the launcher**: the script `/opt/maple18/bin/maple`
+  does `eval` of the arguments. Inside the server everything goes via stdin or a file.
+- **Client timeout.** Icarus generates `requestTimeoutMs: 30000`
+  (`packages/service/src/workspace.ts`), this value is hardcoded. That's why
   `MAPLE_TIMEOUT_SECONDS=25`.
-- **Безопасность.** Код Maple может читать/писать файлы и вызывать `system()`.
-  Граница — контейнер/пользователь ОС. При необходимости добавьте в `MAPLE_ARGS`
-  `-z` и `--secure-*` (с сервером не тестировалось).
-- Журнал — это **повтор выполненных команд**, а не снимок памяти: если шаг был
-  долгим, восстановление займёт столько же времени. Для тяжёлых расчётов лучше
-  сохранять результаты в файл и продолжать с файла.
+- **Security.** Maple code can read/write files and call `system()`.
+  The boundary is the container/OS user. If necessary, add `-z` and `--secure-*`
+  to `MAPLE_ARGS` (not tested with the server).
+- A journal is a **replay of executed commands**, not a memory snapshot: if a step was
+  long, recovery takes just as long. For heavy computations it's better to
+  save results to a file and continue from the file.

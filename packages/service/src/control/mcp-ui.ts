@@ -1,6 +1,6 @@
-// Страница раздела MCP. Каркас и стили — как у остальных разделов панели, а
-// клиентский скрипт лежит отдельным файлом: в TypeScript не приходится экранировать
-// бэктики и скобки, а браузер получает тот же JS и локально, и на проде.
+// MCP section page. The skeleton and styles are like the other panel sections, and
+// the client script lives in a separate file: in TypeScript you don't have to escape
+// backticks and braces, and the browser gets the same JS both locally and in prod.
 import fs from 'node:fs';
 import { mimicCallbackUrl } from '../mcp/oauth.ts';
 import { escapeHtml, sessionStrings, sessionUiLanguage, settingsAside, shell, type PanelSession } from './ui.ts';
@@ -10,9 +10,9 @@ const CLIENT_JS = fs.readFileSync(new URL('./mcp-client.js', import.meta.url), '
 
 export function mcpPage(session: PanelSession): string {
   const ui = sessionStrings(session);
-  // Адрес мимикрии рисует сервер: порт живёт в одном месте, а не в двух файлах.
+  // The mimicry URL is rendered by the server: the port lives in one place, not in two files.
   const config = { user: session.user, section: 'mcp', mimicCallback: mimicCallbackUrl(), ui };
-  // JSON уезжает в <script>: «<» экранируем, иначе значение с </script> закроет тег.
+  // JSON goes into <script>: escape "<", otherwise a value with </script> would close the tag.
   const json = JSON.stringify(config).replaceAll('<', '\\u003c');
 
   return shell(`<style>${CLIENT_CSS}</style>

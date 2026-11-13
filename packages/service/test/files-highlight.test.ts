@@ -1,6 +1,6 @@
-// Подсветка кода в предпросмотре файлов: клиентский файл без сборки, поэтому
-// берём исходник как есть и достаём функцию — тест проверяет ровно тот код,
-// который уедет в браузер.
+// Code highlighting in the file preview: a client-side file without a build step, so
+// we take the source as is and extract the function — the test checks exactly the code
+// that will ship to the browser.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -11,7 +11,7 @@ type Highlighter = { highlightCode: (text: string, type: string) => string | nul
 
 const { highlightCode } = new Function(`${SOURCE}\nreturn { highlightCode };`)() as Highlighter;
 
-test('ключевые слова, строки и числа получают свои классы', () => {
+test('keywords, strings and numbers get their classes', () => {
   const html = highlightCode('const answer = 42; // смысл', 'TS') ?? '';
   assert.match(html, /<span class="tok-keyword">const<\/span>/);
   assert.match(html, /<span class="tok-number">42<\/span>/);
@@ -21,25 +21,25 @@ test('ключевые слова, строки и числа получают �
   assert.match(strings, /<span class="tok-string">&quot;Икар&quot;<\/span>/);
 });
 
-test('HTML из файла не проходит: всё, что не токен, экранируется', () => {
+test('HTML from a file does not pass through: everything that is not a token is escaped', () => {
   const html = highlightCode('const x = "<img src=x onerror=alert(1)>";', 'JS') ?? '';
   assert.ok(!html.includes('<img'), 'тег из файла не стал разметкой');
   assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
 });
 
-test('строка важнее комментария: // внутри адреса — не комментарий', () => {
+test('a string wins over a comment: // inside an address is not a comment', () => {
   const html = highlightCode('const url = "https://example.com";', 'JS') ?? '';
   assert.doesNotMatch(html, /tok-comment/);
   assert.match(html, /tok-string/);
 });
 
-test('CSS: `#fff` — цвет, а не комментарий; свойства подсвечиваются', () => {
+test('CSS: `#fff` is a color, not a comment; properties are highlighted', () => {
   const html = highlightCode('.x { color: #fff; }', 'CSS') ?? '';
   assert.doesNotMatch(html, /tok-comment/);
   assert.match(html, /<span class="tok-key">color<\/span>/);
 });
 
-test('json, python, yaml и shell узнаются по типу из дерева', () => {
+test('json, python, yaml and shell are recognized by the type from the tree', () => {
   const json = highlightCode('{"on": true, "n": null}', 'JSON') ?? '';
   assert.match(json, /tok-keyword">true</);
 
@@ -54,7 +54,7 @@ test('json, python, yaml и shell узнаются по типу из дерев
   assert.match(shell, /tok-keyword">if</);
 });
 
-test('незнакомый язык — null: панель покажет текст как есть', () => {
+test('an unknown language is null: the panel shows the text as is', () => {
   assert.equal(highlightCode('hello', 'FILE'), null);
   assert.equal(highlightCode('hello', ''), null);
   assert.equal(highlightCode('', 'TS'), '', 'знакомый язык с пустым файлом — пустая подсветка');

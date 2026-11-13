@@ -1,14 +1,14 @@
-// Раздел панели «Ключи»: админ правит секреты инсталляции, сервис их перечитывает.
+// Panel section "Keys": the admin edits installation secrets, the service re-reads them.
 //
-// Здесь нет ни одного маршрута, который отдал бы значение секрета браузеру: панель
-// показывает «задан» и хвост из четырёх знаков, а обратно принимает новое значение.
-// Это не паранойя, а единственный способ не разнести ключи по кэшу браузера, логам
-// прокси и случайным скриншотам.
+// There is not a single route here that would give a secret value to the browser: the panel
+// shows "set" and the last four characters, and accepts a new value back.
+// This is not paranoia but the only way not to scatter keys across the browser cache, proxy
+// logs and random screenshots.
 //
-// Сохранение не «положило в файл и забыло»: сервис перечитывает .env и config.yaml
-// (см. runtime.ts), переписывает auth.json и mcp.json людям и помечает следующую
-// сессию pi как новую. Поэтому ключ, сохранённый в панели, работает со следующего
-// разговора, а не со следующего деплоя.
+// Saving is not "put it in a file and forget it": the service re-reads .env and config.yaml
+// (see runtime.ts), rewrites auth.json and mcp.json for users and marks the next pi
+// session as new. That is why a key saved in the panel works from the next
+// conversation, not from the next deploy.
 import fs from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { findUser, isAdmin, loadConfig, ENV_FILE, PROVIDER_ENV, type IcarusConfig } from '../config.ts';
@@ -46,15 +46,15 @@ import {
 
 export type KeysContext = {
   config: IcarusConfig;
-  /** Кто сохраняет: подпись в keys.json и проверка права. */
+  /** Who saves: the label in keys.json and the permission check. */
   userId: string;
-  /** Отметить, что ресурсы человека обновились: следующая сессия pi возьмёт новый ключ. */
+  /** Mark that the person's resources have been updated: the next pi session will take the new key. */
   bump?: (userId: string) => void;
 };
 
 type KeyRow = KeyInfo & {
   present: boolean;
-  /** Откуда взялось: настройки панели сильнее, .env — рабочий файл. */
+  /** Where it came from: panel settings are stronger, .env is the working file. */
   source: 'settings' | 'env' | 'removed' | 'none';
   hint: string;
 };
@@ -64,16 +64,16 @@ function json(res: ServerResponse, status: number, payload: unknown): void {
   res.end(JSON.stringify(payload));
 }
 
-/** Секреты для показа: значения не уходят, только подсказка и происхождение. */
+/** Secrets for display: values do not leave, only the hint and the origin. */
 function keysView(config: IcarusConfig, userId: string) {
   const envFile = config.envFile ?? ENV_FILE;
   const fileVars = readEnvFile(envFile);
   const store = readKeysStore(config.keysFile);
   const secrets = effectiveSecrets(fileVars, store);
   const names = new Set([...Object.keys(fileVars), ...Object.keys(store.values), ...store.removed]);
-  // Ключи провайдеров, которых нет ни в одной модели, не показываем списком на
-  // сорок строк: они всё равно никуда не уедут. Задать такой можно вручную —
-  // формой «Добавить ключ», и тогда он появится здесь.
+  // Provider keys that are in no model are not shown as a list of
+  // forty lines: they will not go anywhere anyway. You can set one manually with
+  // the "Add key" form, and then it will appear here.
   const used = new Set([...config.models.map((model) => model.provider), ...(config.speech ? [config.speech.provider] : [])]);
   const providerOf = new Map(Object.entries(PROVIDER_ENV).map(([provider, name]) => [name, provider]));
   const keys: KeyRow[] = fullCatalog(names)
@@ -102,14 +102,14 @@ function keysView(config: IcarusConfig, userId: string) {
     groups: Object.entries(GROUP_LABELS).map(([id, label]) => ({ id: id as KeyGroup, label })),
     keys,
     secrets: Object.keys(secrets).length,
-    // Поисковый роутер: кто текущий, кто в карантине и у кого «ключ сломан».
-    // Страница показывает это над списком ключей, чтобы человек сразу видел,
-    // что именно проверять.
+    // Search router: who is current, who is quarantined and who has a "broken key".
+    // The page shows this above the list of keys so that a person immediately sees
+    // what exactly to check.
     search: searchStatus(config),
   };
 }
 
-/** Значение из тела запроса: одна строка, без переводов строк. */
+/** Value from the request body: a single line, without line breaks. */
 function parseValue(raw: unknown): { ok: true; value: string | null } | { ok: false; message: string } {
   if (raw === null || raw === undefined) return { ok: true, value: null };
   if (typeof raw !== 'string') return { ok: false, message: 'значение ключа — строка' };
@@ -120,13 +120,13 @@ function parseValue(raw: unknown): { ok: true; value: string | null } | { ok: fa
 }
 
 /**
- * Записать настройки и перечитать сервис.
+ * Write the settings and re-read the service.
  *
- * Сначала — проверка на копии окружения: битый ключ не должен оставить сервис
- * с конфигом, который не разбирается. Затем — два файла и перечитывание. .env
- * пишется для docker compose: следующая пересборка стека возьмёт то же значение,
- * а не прежнее. Ошибка записи .env не отменяет сохранённую настройку: работать
- * сервису это не мешает (значение всё равно уедет в pi из keys.json).
+ * First comes a check on a copy of the environment: a broken key must not leave the service
+ * with a config that does not parse. Then the two files and a re-read. .env
+ * is written for docker compose: the next rebuild of the stack will take the same value,
+ * not the previous one. An error writing .env does not cancel the saved setting: it does
+ * not prevent the service from working (the value will go to pi from keys.json anyway).
  */
 async function saveKey(
   res: ServerResponse,
@@ -151,7 +151,7 @@ async function saveKey(
     next.values[name] = value;
   }
 
-  // Копия .env для предварительной проверки: именно такой файл будет записан.
+  // A copy of .env for a preliminary check: this is exactly the file that will be written.
   const fileVars = readEnvFile(config.envFile);
   const candidateFile = { ...fileVars };
   if (value === null) delete candidateFile[name];
@@ -192,8 +192,8 @@ async function saveKey(
   try {
     reloaded = reloadRuntime(config);
   } catch (error) {
-    // Настройка уже записана — откатывать её нечем и незачем: сообщаем, что для
-    // полного применения нужен перезапуск.
+    // The setting is already written — there is nothing to roll it back with and no reason to:
+    // we report that a restart is needed for it to fully apply.
     log.error('ключ сохранён, но сервис не перечитал конфиг', { key: name, error: String(error) });
     json(res, 500, {
       ...errorBody(
@@ -206,8 +206,8 @@ async function saveKey(
   }
 
   applyToUsers(ctx);
-  // Сменили ключ поисковика — старые карантины к нему больше не относятся:
-  // человек мог починить именно то, из-за чего роутер его выключил.
+  // A search key was changed — old quarantines no longer apply to it:
+  // the person may have fixed exactly the thing for which the router disabled it.
   const provider = providerForKey(name);
   if (provider !== null) {
     try {
@@ -225,8 +225,8 @@ async function saveKey(
 }
 
 /**
- * Следующая реплика в каждом разговоре поднимет pi заново: auth.json и mcp.json
- * уже новые, а старый процесс держит прежние ключи в памяти.
+ * The next turn in each conversation will start pi anew: auth.json and mcp.json
+ * are already new, and the old process keeps the previous keys in memory.
  */
 function applyToUsers(ctx: KeysContext): void {
   for (const user of ctx.config.users) {
@@ -278,21 +278,21 @@ export async function handleKeysApi(
     return;
   }
 
-  // «Проверить»: настоящий поиск через выбранного провайдера. Успех снимает
-  // карантин и флаг «ключ сломан», отказ — ставит заново. Это единственный
-  // способ проверить ключ, не дожидаясь, пока роутер сам до него дойдёт.
+  // "Check": a real search through the selected provider. Success lifts
+  // the quarantine and the "broken key" flag, a refusal sets them again. This is the only
+  // way to check a key without waiting for the router to reach it on its own.
   if (action === 'check') {
     const provider = asProviderId(typeof body.provider === 'string' ? body.provider : '');
     if (provider === null) {
       json(res, 400, errorBody(`неизвестный провайдер «${String(body.provider)}»`, 'invalid_request_error'));
       return;
     }
-    // У Cloudflare подпись только в fetch-карте, у остальных — в поисковой.
+    // For Cloudflare the label is only in the fetch map, for the rest it is in the search one.
     const label =
       FETCH_PROVIDERS[provider]?.label ??
       (provider in PROVIDERS ? PROVIDERS[provider as SearchProviderId].label : provider);
 
-    // capability=fetch проверяет извлечение страницы, иначе — обычный поиск.
+    // capability=fetch checks page extraction, otherwise it is a regular search.
     if (body.capability === 'fetch') {
       const check = await checkFetchProvider(ctx.config, provider);
       json(res, 200, {
@@ -316,8 +316,8 @@ export async function handleKeysApi(
     return;
   }
 
-  // «Перечитать»: .env мог поправить человек руками или деплой. Ничего не пишем,
-  // только заново собираем окружение и раскладываем его людям.
+  // "Re-read": .env could have been edited by a person by hand or by a deploy. We write nothing,
+  // we only rebuild the environment and distribute it to users.
   if (action === 'reload') {    try {
       const reloaded = reloadRuntime(ctx.config);
       applyToUsers(ctx);
@@ -347,7 +347,7 @@ export async function handleKeysApi(
     json(res, 400, errorBody(parsed.message, 'invalid_request_error'));
     return;
   }
-  // Явное действие «убрать» сильнее случайного пустого поля в форме.
+  // An explicit "remove" action is stronger than an accidental empty field in the form.
   const remove = action === 'remove' || (action === undefined && body.value === null);
   await saveKey(res, ctx, name, remove ? null : parsed.value);
 }

@@ -1,5 +1,5 @@
-// Веб-чат: если MCP отказал по авторизации, в ленту приезжает карточка со
-// ссылкой на панель, а не только красный шаг в трассировке.
+// Web chat: if MCP refused on authorization, a card with a link to the panel
+// arrives in the feed, not just a red step in the trace.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
@@ -8,7 +8,7 @@ import { createChat } from '../src/control/chat.ts';
 import { createServer as createMcp } from '../src/mcp/registry.ts';
 import { makeConfig, PANEL_USER_HEADER, probe } from './fixtures.ts';
 
-test('ошибка авторизации MCP приезжает событием reauth со ссылкой', async () => {
+test('MCP authorization error arrives as a reauth event with a link', async () => {
   const config = makeConfig({
     users: [probe('probe')],
     url: 'https://chat.trousev.pro',

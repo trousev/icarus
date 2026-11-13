@@ -1,27 +1,27 @@
-// Заголовок разговора — расширение поверх OpenAI: клиент просит его отдельным
-// запросом, и этот запрос несёт ту же идентичность разговора, что и обычный ход.
-// Так устроен заголовок LibreChat, которым мы пользовались раньше; контракт
-// оставлен, чтобы такие запросы не попадали в живую сессию pi.
+// Conversation title — an extension on top of OpenAI: the client requests it with a separate
+// request, and this request carries the same conversation identity as a normal turn.
+// This is how the title in LibreChat, which we used before, works; the contract
+// is kept so that such requests don't get into a live pi session.
 //
-// Пускать его в живую сессию pi нельзя: получится либо 409 (ход уже идёт —
-// клиент может отправить заголовок параллельно основному ходу), либо
-// лишний полный агентский прогон с мусором в истории и в памяти. Поэтому
-// такой запрос узнаётся по метке в промпте (плюс отдельная модель)
-// и обслуживается здесь же, локально и без сессии.
+// We can't let it into a live pi session: it would produce either a 409 (a turn is already
+// running — the client may send the title in parallel with the main turn), or
+// an extra full agent run with garbage in the history and in memory. That's why
+// such a request is recognized by a sentinel in the prompt (plus a separate model)
+// and handled right here, locally and without a session.
 import { log, redact } from '../log.ts';
 import { normalizeContent, type IncomingMessage } from '../sessions/divergence.ts';
 
-/** Модель, которой клиент может пометить запрос заголовка: соглашение от LibreChat. */
+/** The model with which the client may tag a title request: a convention from LibreChat. */
 export const TITLE_MODEL_ID = 'icarus-title';
 
-/** Метка в начале `titlePrompt`: по ней запрос узнаётся, даже если модель не сменилась. */
+/** The sentinel at the start of `titlePrompt`: it identifies the request even if the model didn't change. */
 export const TITLE_SENTINEL = '[[ICARUS_TITLE]]';
 
 const MAX_WORDS = 6;
 const MAX_CHARS = 48;
 const FALLBACK = 'Новый разговор';
 
-/** Слова, которые сами по себе заголовком не являются: приветствия и обращения. */
+/** Words that aren't a title by themselves: greetings and forms of address. */
 const EMPTY_WORDS = new Set([
   'привет',
   'приветствую',
@@ -49,22 +49,22 @@ const EMPTY_WORDS = new Set([
   'эй',
 ]);
 
-/** Текст последней реплики пользователя — в запросе заголовка это и есть промпт. */
+/** The text of the user's last message — in the title request this is the prompt. */
 function lastUserText(messages: Array<IncomingMessage | undefined>): string {
   const lastUser = [...(messages ?? [])].reverse().find((message) => message?.role === 'user');
   return normalizeContent(lastUser?.content).trim();
 }
 
-/** Запрос на заголовок или обычный ход? */
+/** A title request or a normal turn? */
 export function isTitleRequest(model: unknown, messages: Array<IncomingMessage | undefined>): boolean {
   if (model === TITLE_MODEL_ID) return true;
   return lastUserText(messages).includes(TITLE_SENTINEL);
 }
 
 /**
- * Достаём первую реплику пользователя из промпта заголовка.
- * Клиент подставляет `{convo}` по шаблону `User: {input}\nAI: {output}`,
- * поэтому берём всё между первым `User: ` и последним `\nAI:`.
+ * We extract the user's first message from the title prompt.
+ * The client substitutes `{convo}` using the template `User: {input}\nAI: {output}`,
+ * so we take everything between the first `User: ` and the last `\nAI:`.
  */
 export function conversationFromTitlePrompt(prompt: string): string {
   const start = prompt.indexOf('User: ');
@@ -109,8 +109,8 @@ function upFirst(text: string): string {
 }
 
 /**
- * Заголовок из первой реплики: первая фраза, в которой есть о чём говорить.
- * «Привет, Икар! Помоги разобраться, как настроить память» → «Разобраться, как настроить память».
+ * A title from the first message: the first phrase that has something to talk about.
+ * "Hello, Icarus! Help me figure out how to set up memory" → "Figure out how to set up memory".
  */
 export function titleFromText(text: string): string {
   const clean = text.replace(/\s+/g, ' ').trim();
@@ -127,18 +127,18 @@ export function titleFromText(text: string): string {
   return upFirst(cap(clean)) || FALLBACK;
 }
 
-/** Заголовок из промпта клиента: берём разговор и сжимаем его до заголовка. */
+/** A title from the client's prompt: take the conversation and compress it to a title. */
 export function titleFromPrompt(prompt: string): string {
   return titleFromText(conversationFromTitlePrompt(prompt));
 }
 
-/** Модели можно дать чуть больше свободы, чем эвристике: она умеет сжимать смысл. */
+/** The model can be given a bit more freedom than the heuristic: it knows how to compress meaning. */
 const MODEL_MAX_WORDS = 8;
 const MODEL_MAX_CHARS = 64;
 
 /**
- * Что спрашиваем у дешёвой модели. Свой промпт, а не промпт клиента: там разговор
- * обёрнут в служебную рамку и обрывается на «AI: » — модели это мешает.
+ * What we ask the cheap model. Our own prompt, not the client's prompt: there the conversation
+ * is wrapped in a service frame and cut off at "AI: " — that hinders the model.
  */
 export function buildTitlePrompt(conversation: string): string {
   return `Придумай короткий заголовок этого разговора: 3–6 слов, на языке разговора, без кавычек и без точки в конце. Верни только заголовок.
@@ -150,9 +150,9 @@ ${conversation}
 }
 
 /**
- * Ответ модели как заголовок: одна строка без размышлений, кавычек, Markdown
- * и служебных подписей вроде «Заголовок:». Пустая строка — сигнал, что ответ
- * бесполезен и вызывающему стоит взять эвристику.
+ * The model's answer as a title: one line without reasoning, quotes, Markdown
+ * and service prefixes like "Title:". An empty string is a signal that the answer
+ * is useless and the caller should use the heuristic.
  */
 export function cleanModelTitle(raw: string): string {
   const withoutThinking = String(raw ?? '').replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '\n');
@@ -172,25 +172,25 @@ export function cleanModelTitle(raw: string): string {
   return upFirst(cap(cleaned, MODEL_MAX_WORDS, MODEL_MAX_CHARS).replace(/[.,;:!?]+$/, '').trim());
 }
 
-/** Кто дал разговору имя: модель по смыслу или эвристика из первой фразы. */
+/** Who named the conversation: the model by meaning or the heuristic from the first phrase. */
 export type TitleSource = 'model' | 'heuristic';
 
 export type ModelTitleOptions = {
-  /** Чем спросить модель: разовый вызов дешёвой модели мимо живой сессии. */
+  /** What to ask the model with: a one-off call to a cheap model outside the live session. */
   ask: (prompt: string) => Promise<string>;
-  /** Разговор, который увидит модель. */
+  /** The conversation the model will see. */
   conversation: string;
-  /** Имя, если модель не справилась: эвристика из первой реплики. */
+  /** The name if the model failed: the heuristic from the first message. */
   fallback: string;
-  /** Клиент ушёл — незачем держать вызов модели. */
+  /** The client left — no point holding the model call. */
   signal?: AbortSignal;
 };
 
 /**
- * Заголовок от дешёвой модели с откатом на эвристику. Заголовок — украшение:
- * таймаут, пустой ответ и мусор в ответе не повод задерживать или ломать ход,
- * поэтому любой сбой молча уходит в фолбэк. Отмену зовущего логируем отдельно:
- * «стоп» — не поломка.
+ * A title from the cheap model with a fallback to the heuristic. A title is decoration:
+ * a timeout, an empty answer and garbage in the answer are no reason to delay or break the turn,
+ * so any failure silently falls back. We log the caller's cancellation separately:
+ * "stop" is not a breakdown.
  */
 export async function askModelTitle(
   options: ModelTitleOptions,

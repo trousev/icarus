@@ -1,26 +1,26 @@
-// Распознавание речи: голосовые из Telegram модель не слышит, поэтому их сначала
-// перекладывают в текст. Это обычный вызов OpenAI-совместимого API провайдера —
-// метод /audio/transcriptions (у DeepInfra это Whisper), — тем же ключом, что уехал
-// в контейнер для моделей. Ни ffmpeg, ни отдельного сервиса для этого не нужно:
-// Telegram отдаёт голосовые готовым OGG/Opus, а провайдер принимает их как есть.
+// Speech recognition: the model can't hear Telegram voice messages, so they are first
+// converted to text. This is a regular call to the provider's OpenAI-compatible API —
+// the /audio/transcriptions method (Whisper on DeepInfra) — with the same key that was shipped
+// into the container for the models. Neither ffmpeg nor a separate service is needed for this:
+// Telegram delivers voice messages as ready OGG/Opus, and the provider accepts them as is.
 import type { IcarusConfig, SpeechConfig } from './config.ts';
 import { redact } from './log.ts';
 
-/** Сколько ждём расшифровку: голосовое в минуту Whisper разбирает за секунды. */
+/** How long we wait for transcription: Whisper handles a minute of voice in seconds. */
 export const TRANSCRIBE_TIMEOUT_MS = 120_000;
 
-/** Чем расшифровывают голосовое: голосовые байты на входе, текст на выходе. */
+/** What transcribes a voice message: voice bytes in, text out. */
 export type Transcriber = (audio: Uint8Array, mimeType: string) => Promise<string>;
 
 export type TranscribeOptions = {
-  /** Подменяется в тестах: сеть там ни к чему. */
+  /** Overridden in tests: no need for the network there. */
   fetch?: typeof fetch;
   timeoutMs?: number;
 };
 
 /**
- * Расшифровщик по конфигу: распознавание не настроено (нет ключа провайдера или
- * `speech: none`) — null, и бот честно скажет, что голосовых не понимает.
+ * Transcriber from the config: recognition isn't set up (no provider key or
+ * `speech: none`) — null, and the bot honestly says it doesn't understand voice messages.
  */
 export function speechTranscriber(config: IcarusConfig, options: TranscribeOptions = {}): Transcriber | null {
   const speech = config.speech;
@@ -28,7 +28,7 @@ export function speechTranscriber(config: IcarusConfig, options: TranscribeOptio
   return (audio, mimeType) => transcribe(speech, audio, mimeType, options);
 }
 
-/** Голосовое целиком — в текст. Пустая строка значит «речи не разобрал». */
+/** A voice message as a whole — to text. An empty string means "couldn't make out the speech". */
 export async function transcribe(
   speech: SpeechConfig,
   audio: Uint8Array,
@@ -39,12 +39,12 @@ export async function transcribe(
   const timeoutMs = options.timeoutMs ?? TRANSCRIBE_TIMEOUT_MS;
 
   const form = new FormData();
-  // Тип части ставим явно: провайдер смотрит и на него, и на расширение имени.
-  // Копия байтов — потому что Blob берёт только память с обычным ArrayBuffer,
-  // а Buffer приходит с любым (голосовые маленькие, копия дешевле спора с типами).
+  // We set the part type explicitly: the provider looks at both it and the filename extension.
+  // A copy of the bytes — because Blob only takes memory with a regular ArrayBuffer,
+  // while Buffer comes with any (voice messages are small, the copy is cheaper than fighting the types).
   form.append('file', new Blob([new Uint8Array(audio)], { type: mimeType }), audioName(mimeType));
   form.append('model', speech.model);
-  // Просим json: у него в ответе есть поле text, а не только голая строка.
+  // We ask for json: its response has a text field, not just a bare string.
   form.append('response_format', 'json');
   if (speech.language) form.append('language', speech.language);
 
@@ -57,8 +57,8 @@ export async function transcribe(
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
-    // Сообщение отсюда увидит человек в чате, поэтому «fetch failed» от undici
-    // объясняем по-русски: сеть не дошла или провайдер не ответил вовремя.
+    // The message from here will be seen by the human in the chat, so we explain undici's
+    // "fetch failed" in Russian: the network didn't reach or the provider didn't respond in time.
     throw new Error(transportReason(error, timeoutMs), { cause: error });
   }
 
@@ -67,8 +67,8 @@ export async function transcribe(
     throw new Error(`распознавание не удалось (код ${response.status}): ${shorten(body)}`);
   }
 
-  // Ответ не разобрался как JSON — значит, провайдер ответил текстом, как умеет
-  // response_format=text. Это не ошибка: расшифровка и есть этот текст.
+  // The response didn't parse as JSON — so the provider responded with text, as it can
+  // with response_format=text. This isn't an error: the transcription is that text.
   try {
     return transcriptFrom(JSON.parse(body));
   } catch {
@@ -76,7 +76,7 @@ export async function transcribe(
   }
 }
 
-/** Почему запрос не дошёл: таймаут называем своим словом, остальное — причиной сети. */
+/** Why the request didn't get through: we name the timeout by its own word, the rest is the network cause. */
 function transportReason(error: unknown, timeoutMs: number): string {
   const name = (error as { name?: string } | null)?.name;
   if (name === 'TimeoutError' || name === 'AbortError') {
@@ -87,7 +87,7 @@ function transportReason(error: unknown, timeoutMs: number): string {
   return `до провайдера не дошло: ${detail}`;
 }
 
-/** Ответ провайдера: у OpenAI-совместимого это `{ text }`, но бывает и строка. */
+/** Provider response: for OpenAI-compatible it's `{ text }`, but it can also be a string. */
 export function transcriptFrom(payload: unknown): string {
   if (typeof payload === 'string') return payload.trim();
   const text = (payload as { text?: unknown } | null)?.text;
@@ -95,8 +95,8 @@ export function transcriptFrom(payload: unknown): string {
 }
 
 /**
- * Имя файла в multipart: по расширению провайдер понимает формат. Telegram шлёт
- * голосовые в OGG/Opus, поэтому незнакомый mime считаем за него.
+ * Filename in multipart: the provider infers the format from the extension. Telegram sends
+ * voice messages as OGG/Opus, so an unfamiliar mime is treated as that.
  */
 const AUDIO_EXTENSIONS: Record<string, string> = {
   'audio/ogg': 'ogg',
@@ -113,7 +113,7 @@ export function audioName(mimeType: string): string {
   return `voice.${AUDIO_EXTENSIONS[mimeType.toLowerCase()] ?? 'ogg'}`;
 }
 
-/** Тело ошибки провайдера — в одну строку и без секретов. */
+/** Provider error body — on one line and without secrets. */
 function shorten(body: string): string {
   const text = redact(body).replace(/\s+/g, ' ').trim().slice(0, 200);
   return text === '' ? 'пустой ответ' : text;

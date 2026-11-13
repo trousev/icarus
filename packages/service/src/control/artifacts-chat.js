@@ -1,12 +1,12 @@
-// Чат правки артефакта в боковой панели раздела «Артефакты».
+// Artifact editing chat in the side panel of the "Artifacts" section.
 //
-// Это тот же разговор, что и в обычном чате: сообщения уходят в /panel/api/chat/send,
-// ответ приходит NDJSON-потоком. Отличие одно — сервер помечает разговор артефактом,
-// и pi работает в папке /artifacts/<slug>, а не в workspace.
+// It is the same conversation as in the regular chat: messages go to /panel/api/chat/send,
+// the reply comes as an NDJSON stream. The only difference is that the server tags the
+// conversation with an artifact, and pi works in the /artifacts/<slug> folder, not in the workspace.
 //
-// Команды с косой черты общие с основным чатом: сначала спрашиваем сервер
-// (/panel/api/chat/command), и только его отказ отправляет строку в pi. Иначе
-// /clear уезжал модели как текст и она бодро врала, что контекст очищен.
+// Slash commands are shared with the main chat: first we ask the server
+// (/panel/api/chat/command), and only its refusal sends the line to pi. Otherwise
+// /clear would go to the model as text and it would cheerfully lie that the context was cleared.
 /* global artifactMarkdown, artEl, artApi, artEsc, artStamp, artState, artSetStatus, artHideHistory, artLoadList, artRefresh */
 
 const artChatState = {
@@ -16,7 +16,7 @@ const artChatState = {
   controller: null,
   historyToken: 0,
   liveBox: null,
-  // Ссылка на элемент из предпросмотра: уезжает в сообщение вместе с текстом.
+  // Reference to an element from the preview: it goes into the message along with the text.
   ref: null,
 };
 
@@ -57,13 +57,13 @@ function artChatMarkdown(text) {
     try {
       return artifactMarkdown(source, base ? { fileBase: base } : {});
     } catch {
-      /* разметка не должна ронять чат */
+      /* markup must not crash the chat */
     }
   }
   return '<p>' + artEsc(source).replace(/\n/g, '<br>') + '</p>';
 }
 
-/** Реплика человека: тот же пузырь, что в основном чате, без подписи «ты». */
+/** Human turn: the same bubble as in the main chat, without a "you" label. */
 function artChatUser(text) {
   const turn = document.createElement('div');
   turn.className = 'turn user';
@@ -77,9 +77,9 @@ function artChatUser(text) {
 }
 
 /**
- * Ход ИИ. Разметка — как у addAssistant в chat-client.js: аватар, подпись,
- * карточка трассировки, ответ в .md (без пузыря) и строка «думает».
- * Пустого пузыря ответа тут нет: .md — обычный текстовый блок.
+ * AI turn. The markup is like addAssistant in chat-client.js: avatar, label,
+ * trace card, reply in .md (no bubble) and a "thinking" line.
+ * There is no empty reply bubble here: .md is a regular text block.
  */
 function artChatAssistant(iso) {
   const turn = document.createElement('div');
@@ -107,7 +107,7 @@ function artChatAssistant(iso) {
   };
 }
 
-/** Ссылка на элемент: её ставит предпросмотр, а человек уже дописывает задачу. */
+/** Element reference: the preview sets it, and the human then adds the task. */
 function artChatSetRef(selection) {
   if (!selection || !selection.ref) return;
   artChatState.ref = {
@@ -122,7 +122,7 @@ function artChatSetRef(selection) {
   artEl('art-chat-input').placeholder = 'Что сделать с этим элементом?';
 }
 
-/** «Убрать из ссылки»: набранный текст остаётся, адрес из сообщения уходит. */
+/** "Remove from reference": the typed text stays, the address leaves the message. */
 function artChatClearRef() {
   artChatState.ref = null;
   const chip = artEl('art-chat-ref');
@@ -132,9 +132,9 @@ function artChatClearRef() {
 }
 
 /**
- * Текст сообщения со ссылкой: цитата в blockquote, адрес в `code`. Модель
- * видит, что это `data-icarus-ref` в исходнике, и правит именно этот блок,
- * а не похожий соседний.
+ * Message text with a reference: quote in a blockquote, address in `code`. The model
+ * sees that this is `data-icarus-ref` in the source and edits exactly this block,
+ * not a similar neighboring one.
  */
 function artChatCompose(text, ref) {
   const message = String(text || '').trim();
@@ -146,27 +146,27 @@ function artChatCompose(text, ref) {
   return line + '\n\n' + message;
 }
 
-/** Клик по элементу: показать ссылку в чате и открыть его, если закрыт. */
+/** Click on an element: show the reference in the chat and open it if closed. */
 async function artChatAttachRef(selection) {
   artChatSetRef(selection);
   if (artEl('art-chat-panel').hidden) await artChatOpen();
   else artEl('art-chat-input').focus();
 }
 
-// Скрипт — классический: функции и так глобальные. Явные имена нужны клиенту
-// раздела (он грузится раньше) и тестам: это единственный вход ссылки в чат.
+// The script is a classic one: the functions are global anyway. Explicit names are needed
+// by the section client (it loads earlier) and by tests: this is the only entry point of the reference into the chat.
 window.artChatCompose = artChatCompose;
 window.artChatAttachRef = artChatAttachRef;
 
-/** Заглушка «Скажи, что поправить» уходит, как только в ленте появился ход. */
+/** The "Tell me what to fix" placeholder goes away as soon as a turn appears in the feed. */
 function artChatDropEmpty() {
   const empty = artChatLog().querySelector('.art-empty');
   if (empty) empty.remove();
 }
 
 /**
- * Ответ команды — плашка с её именем, как в основном чате. В историю он не
- * попадает: это не ответ модели, и после перезагрузки его не будет.
+ * Command result is a card with its name, like in the main chat. It does not go
+ * into history: it is not a model reply, and it will not be there after a reload.
  */
 function artChatCommandResult(command, text, failed = false) {
   artChatDropEmpty();
@@ -186,7 +186,7 @@ function artChatCommandResult(command, text, failed = false) {
   artChatScroll(true);
 }
 
-/** Граница контекста: /clear начинает новую сессию, но старую ленту не прячет. */
+/** Context boundary: /clear starts a new session but does not hide the old feed. */
 function artChatDivider(text) {
   artChatDropEmpty();
   const mark = document.createElement('div');
@@ -204,14 +204,14 @@ function artChatStepWord(count) {
   return 'шагов';
 }
 
-/** Трассировка — карточка-пузырь, как в основном чате: шаги видны сразу. */
+/** Trace is a card bubble, like in the main chat: the steps are visible right away. */
 function artChatSteps(box) {
   if (!box.steps.length) {
     box.slot.innerHTML = '';
     return;
   }
-  // Перерисовка не должна схлопывать карточку, которую человек уже раскрыл
-  // или свернул: каждый дельта-текст приходит сюда заново.
+  // A redraw must not collapse the card that a person has already expanded
+  // or collapsed: every delta text arrives here anew.
   const opened = box.slot.querySelector('details.trace');
   const open = opened ? opened.open : true;
   box.slot.innerHTML =
@@ -349,7 +349,7 @@ async function artChatReadStream(response, box) {
         try {
           artChatEvent(box, JSON.parse(line));
         } catch {
-          /* одна битая строка не рвёт ответ */
+          /* one broken line does not break the reply */
         }
       }
       cut = buffer.indexOf('\n');
@@ -485,21 +485,21 @@ function artChatToggle() {
   else artChatClose();
 }
 
-/** Имя команды так, как его разбирает сервер: до пробела и без «/». */
+/** Command name as the server parses it: up to the space and without "/". */
 function artChatCommandName(text) {
   const match = /^\/([a-zA-Z0-9_]+)/.exec(String(text || '').trim());
   return match ? match[1].toLowerCase() : '';
 }
 
 /**
- * Строка с косой черты: сначала спрашиваем сервер, его ли это команда.
- * `/clear`, `/compact`, `/stats` — команды чата, у них свой маршрут; `/skill:имя`
- * и шаблоны pi сервер не берёт, и они уходят обычной репликой. false значит
- * «отправляй в разговор как текст».
+ * A slash line: first we ask the server whether it is its command.
+ * `/clear`, `/compact`, `/stats` are chat commands and have their own route; `/skill:name`
+ * and pi templates are not handled by the server and go as a regular turn. false means
+ * "send to the conversation as text".
  */
 async function artChatRunCommand(text) {
   if (!artChatState.chatId) return false;
-  // Вторую команду поверх первой не запускаем: ответ придёт не тому ходу.
+  // We do not start a second command on top of the first: the reply would go to the wrong turn.
   if (artChatState.commandBusy) {
     artChatNote('предыдущая команда ещё выполняется');
     return true;
@@ -512,8 +512,8 @@ async function artChatRunCommand(text) {
       method: 'POST',
       body: JSON.stringify({ chatId, text }),
     });
-    // Пока команда шла, панель могли закрыть или открыть другой артефакт:
-    // ответ не должен упасть в чужую ленту.
+    // While the command was running, the panel could be closed or another artifact opened:
+    // the reply must not land in the wrong feed.
     if (!result || !result.handled || artChatState.chatId !== chatId) {
       artChatNote('');
       return Boolean(result && result.handled);
@@ -546,8 +546,8 @@ async function artChatSend() {
     return;
   }
 
-  // Команду разбираем до проверки занятости: /stop и /stats нужны и во время
-  // хода. Сервер сам скажет, его ли это команда; чужие уедут в pi текстом.
+  // We parse the command before the busy check: /stop and /stats are needed even during
+  // a turn. The server itself will say whether it is its command; others will go to pi as text.
   if (artChatCommandName(text)) {
     const handled = await artChatRunCommand(text);
     if (handled) {
@@ -567,8 +567,8 @@ async function artChatSend() {
   input.style.height = 'auto';
   artChatDropEmpty();
   artChatUser(message);
-  // Ссылка одноразовая: ушла с сообщением — чип убираем, иначе следующая
-  // реплика незаметно уедет про тот же элемент.
+  // The reference is one-time: once it has gone with the message, we remove the chip, otherwise
+  // the next turn would silently go about the same element.
   artChatClearRef();
   const box = artChatAssistant();
   artChatState.liveBox = box;
@@ -587,8 +587,8 @@ async function artChatSend() {
     if (!response.ok) {
       const type = response.headers.get('content-type') || '';
       const data = type.includes('application/json') ? await response.json().catch(() => ({})) : {};
-      // Ход уже идёт (вкладку перезагрузили или тот же чат открыт дважды):
-      // это не ошибка, а повод прицепиться к живому потоку.
+      // A turn is already running (the tab was reloaded or the same chat is open twice):
+      // this is not an error but a reason to attach to the live stream.
       if (data.live) {
         artChatDrop(box);
         artChatState.busy = false;
@@ -628,7 +628,7 @@ async function artChatStop() {
   }
 }
 
-/** После правки перечитываем и список, и открытый артефакт: файлы уже другие. */
+/** After an edit we re-read both the list and the open artifact: the files are different now. */
 async function artChatRefreshArtifact() {
   const name = artState.artifact;
   if (!name) return;

@@ -1,9 +1,9 @@
-/* Клиент раздела «Задачи»: список расписаний, создание, включение и удаление.
-   Всё состояние — на сервере (scheduled-tasks.json): страницу можно перезагрузить,
-   и задачи останутся. Здесь только форма и отрисовка.
+/* Client for the «Tasks» section: list of schedules, creation, enabling and deletion.
+   All state lives on the server (scheduled-tasks.json): the page can be reloaded and
+   the tasks stay. Here there's only the form and rendering.
 
-   Подписи считаются тут, а не на сервере: сервер присылает момент в ISO и часовой
-   пояс, а «сегодня», «завтра» и названия дней зависят от языка интерфейса. */
+   Labels are computed here, not on the server: the server sends the moment in ISO and
+   the time zone, while «today», «tomorrow» and day names depend on the interface language. */
 'use strict';
 
 (function () {
@@ -21,7 +21,7 @@
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
   }
-  /** «{when}» → значение: шаблоны строк живут в словаре панели. */
+  /** «{when}» → value: the string templates live in the panel dictionary. */
   function fill(template, values) {
     return String(template == null ? '' : template).replace(/\{(\w+)\}/g, (whole, key) =>
       key in values ? values[key] : whole,
@@ -38,7 +38,7 @@
     try {
       data = await response.json();
     } catch {
-      /* пустое тело — тоже ответ */
+      /* an empty body is also a response */
     }
     if (!response.ok) {
       const error = data && data.error ? data.error.message : 'HTTP ' + response.status;
@@ -54,10 +54,10 @@
     box.hidden = !text;
   }
 
-  // ── даты в поясе человека ───────────────────────────────────────────────────
-  // Пояс приходит с сервера: браузер может стоять в другом. «Сегодня» и «завтра»
-  // сравниваем по календарным дням в этом поясе, а не по разнице часов: в день
-  // перевода часов сутки бывают 23 и 25 часов.
+  // ── dates in the person's time zone ───────────────────────────────────────────
+  // The time zone comes from the server: the browser may be in another one. «Today» and
+  // «tomorrow» are compared by calendar days in this zone, not by the hour difference:
+  // on a daylight-saving day a day can be 23 or 25 hours.
   const clockFmt = new Intl.DateTimeFormat(locale, {
     timeZone: state.timeZone,
     hour: '2-digit',
@@ -88,7 +88,7 @@
     const parts = key.split('-').map(Number);
     return new Date(Date.UTC(parts[0], parts[1] - 1, parts[2] + days)).toISOString().slice(0, 10);
   }
-  /** «сегодня, 08:00» / «завтра, 09:30» / «сб, 15 нояб., 09:00». */
+  /** «today, 08:00» / «tomorrow, 09:30» / «Sat, 15 Nov, 09:00». */
   function runLabel(iso) {
     if (!iso) return ui.tasksNoMoreRuns || '';
     const at = new Date(iso);
@@ -108,7 +108,7 @@
     return weekdayFmt.format(new Date(Date.UTC(2024, 0, 7 + Number(day))));
   }
 
-  /** Расписание словами: «каждый день в 08:00», «по пн, ср в 09:30». */
+  /** Schedule in words: «every day at 08:00», «on Mon, Wed at 09:30». */
   function repeatLabel(task) {
     const repeat = task.repeat || {};
     const time = repeat.time || '';
@@ -276,8 +276,8 @@
   }
 
   async function remove(id, button) {
-    // Удаление в два нажатия: промпт — это текст, который человек писал, и терять
-    // его от одного случайного клика не хочется.
+    // Deletion in two presses: the prompt is text the person wrote, and losing it
+    // from one accidental click is a shame.
     if (button.dataset.armed !== '1') {
       button.dataset.armed = '1';
       button.textContent = ui.tasksDeleteArmed;

@@ -1,10 +1,10 @@
-// Пользовательские MCP: кто видит сервер, кому он включён и чьи ключи куда едут.
+// User MCP: who sees a server, who has it enabled and whose keys go where.
 //
-// Главные обещания раздела:
-//  - чужой приватный сервер не виден никак;
-//  - расшаренный приезжает выключенным и до включения не попадает в mcp.json;
-//  - выключенный не попадает и в AGENTS.md — иначе модель звала бы сервер, которого нет;
-//  - ключи не шарятся: у каждого человека они свои.
+// The main promises of this section:
+//  - someone else's private server is not visible in any way;
+//  - a shared one arrives disabled and does not get into mcp.json until enabled;
+//  - a disabled one also does not get into AGENTS.md — otherwise the model would call a server that doesn't exist;
+//  - keys are not shared: each person has their own.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -43,7 +43,7 @@ function mcpJson(config: ReturnType<typeof makeConfig>): { mcpServers: Record<st
   };
 }
 
-test('приватный сервер видит только владелец', () => {
+test('a private server is visible only to its owner', () => {
   const config = configWith();
   const server = createServer(config, 'probe', {
     name: 'Мои задачи',
@@ -63,7 +63,7 @@ test('приватный сервер видит только владелец',
   assert.deepEqual(Object.keys(effective), [], 'и в окружение не попадает');
 });
 
-test('расшаренный сервер приезжает выключенным и включается только вручную', () => {
+test('a shared server arrives disabled and is enabled only manually', () => {
   const config = configWith();
   const server = createServer(config, 'probe', {
     name: 'Todoist',
@@ -85,7 +85,7 @@ test('расшаренный сервер приезжает выключенн�
   assert.equal(ready.servers[server.id]?.lifecycle, 'lazy', 'пользовательские MCP не лезут в промпт заранее');
 });
 
-test('ключи не шарятся: у второго человека нужен свой', () => {
+test('keys are not shared: the second person needs their own', () => {
   const config = configWith();
   const server = createServer(config, 'probe', {
     name: 'Todoist',
@@ -97,7 +97,7 @@ test('ключи не шарятся: у второго человека нуж�
   setShared(config, 'probe', server.id, true);
   setEnabled(config, 'probe2', server.id, true);
 
-  // Владелец готов, второй — нет: ключа у него ещё нет, и в mcp.json ему нечего класть.
+  // The owner is ready, the second person is not: they don't have the key yet, and there's nothing to put into their mcp.json.
   assert.deepEqual(Object.keys(effectiveServers(config, readStore(config), 'probe').servers), [server.id]);
   assert.deepEqual(Object.keys(effectiveServers(config, readStore(config), 'probe2').servers), []);
 
@@ -111,7 +111,7 @@ test('ключи не шарятся: у второго человека нуж�
   assert.equal(ownerJson.mcpServers[server.id]?.headers?.Authorization, 'Bearer owner-secret', 'чужой ключ владельцу не подменили');
 });
 
-test('OAuth-токен уезжает в mcp.json заголовком, а не конфигом pi', () => {
+test('the OAuth token goes into mcp.json as a header, not as pi config', () => {
   const config = configWith();
   const server = createServer(config, 'probe', {
     name: 'Задачи',
@@ -134,7 +134,7 @@ test('OAuth-токен уезжает в mcp.json заголовком, а не 
   assert.equal('auth' in (effective ?? {}), false, 'pi получает обычные заголовки: свой OAuth ему не нужен');
 });
 
-test('старым OAuth-записям достраивается ключ прокси, и токен уходит из mcp.json', () => {
+test('old OAuth records get a proxy key added, and the token leaves mcp.json', () => {
   const config = configWith();
   const server = createServer(config, 'probe', {
     name: 'Старый OAuth',
@@ -163,7 +163,7 @@ test('старым OAuth-записям достраивается ключ пр
   assert.equal(json.mcpServers[server.id]?.headers?.Authorization, undefined);
 });
 
-test('протухший OAuth с ключом прокси остаётся в mcp.json: прокси обновит или даст ссылку', () => {
+test('an expired OAuth with a proxy key stays in mcp.json: the proxy will refresh it or give a link', () => {
   const config = configWith();
   const server = createServer(config, 'probe', {
     name: 'Протухший',
@@ -190,7 +190,7 @@ test('протухший OAuth с ключом прокси остаётся в 
   assert.match(json.mcpServers[server.id]?.url ?? '', /\/mcp-proxy\//);
 });
 
-test('смена адреса сбрасывает чужие ключи: они относятся к другому серверу', () => {
+test('changing the address resets someone else\'s keys: they belong to a different server', () => {
   const config = configWith();
   const server = createServer(config, 'probe', {
     name: 'Сервер',
@@ -210,7 +210,7 @@ test('смена адреса сбрасывает чужие ключи: они
   assert.equal(readStore(config).credentials.probe?.[server.id], undefined);
 });
 
-test('удаление убирает сервер у всех, а не только из своего списка', () => {
+test('deletion removes the server for everyone, not just from one\'s own list', () => {
   const config = configWith();
   const server = createServer(config, 'probe', {
     name: 'Общий',
@@ -226,7 +226,7 @@ test('удаление убирает сервер у всех, а не толь
   assert.equal(readStore(config).servers[server.id], undefined);
 });
 
-test('сервер из config.yaml можно выключить себе и не трогать общий конфиг', () => {
+test('a server from config.yaml can be disabled for oneself without touching the shared config', () => {
   const config = configWith({ mcp: { echo: { command: 'node', args: ['/opt/echo.mjs'], lifecycle: 'eager' } } });
   assert.deepEqual(Object.keys(effectiveServers(config, readStore(config), 'probe').servers), ['echo']);
 
@@ -236,7 +236,7 @@ test('сервер из config.yaml можно выключить себе и н
   assert.ok(config.mcp.echo, 'config.yaml остался как был');
 });
 
-test('служебный сервер (hidden) не виден в панели и всегда включён', () => {
+test('a service server (hidden) is not visible in the panel and is always enabled', () => {
   const config = configWith({
     mcp: { maple: { command: 'node', args: ['/opt/maple.mjs'], lifecycle: 'eager', hidden: true } },
   });
@@ -252,7 +252,7 @@ test('служебный сервер (hidden) не виден в панели �
   assert.equal(json.mcpServers.maple?.hidden, undefined, 'служебная пометка в pi не уезжает');
 });
 
-test('старая инструкция MAPLE.md убирается при сборке окружения', () => {
+test('the old MAPLE.md instruction is removed during environment assembly', () => {
   const config = configWith();
   const paths = userPaths(config, probe('probe'));
   fs.mkdirSync(paths.icarus, { recursive: true });
@@ -263,7 +263,7 @@ test('старая инструкция MAPLE.md убирается при сб�
   assert.equal(fs.existsSync(path.join(paths.icarus, 'MAPLE.md')), false, 'правила живут в описаниях инструментов');
 });
 
-test('mcp.json и AGENTS.md собираются под человека: выключенное не просачивается', () => {
+test('mcp.json and AGENTS.md are assembled per person: disabled things do not leak through', () => {
   const config = configWith();
   const server = createServer(config, 'probe', {
     name: 'Todoist',
@@ -285,7 +285,7 @@ test('mcp.json и AGENTS.md собираются под человека: вык
   assert.doesNotMatch(agents, /Todoist/, 'и в подсказке модели его тоже нет');
 });
 
-test('id сервера — латинский слаг, даже если имя русское', () => {
+test('the server id is a Latin slug, even if the name is Russian', () => {
   const config = configWith();
   const server = createServer(config, 'probe', {
     name: 'Списки задач',
@@ -305,7 +305,7 @@ test('id сервера — латинский слаг, даже если им�
   assert.notEqual(conflict.id, server.id, 'одинаковые имена не затирают друг друга');
 });
 
-test('id удалённого общего сервера начинается с чистого листа, а не со старого выключателя', () => {
+test('the id of a deleted shared server starts from a clean slate, not from the old toggle', () => {
   const first = configWith({ mcp: { echo: { command: 'node' } } });
   setEnabled(first, 'probe', 'echo', false);
   const second = makeConfig({ dataDir: first.dataDir, users: USERS, mcp: {} });
@@ -320,7 +320,7 @@ test('id удалённого общего сервера начинается �
   assert.equal(mine[0]?.enabled, true, 'свой новый сервер включён, старый выключатель не пережил удаление');
 });
 
-test('сервер не может занять имя общего из config.yaml', () => {
+test('a server cannot take the name of a shared one from config.yaml', () => {
   const config = configWith({ mcp: { echo: { command: 'node' } } });
   const server = createServer(config, 'probe', {
     name: 'Echo',

@@ -1,6 +1,6 @@
-// Извлечение страниц: свой текущий, отказы страниц, общие с поиском кредиты.
+// Page extraction: its own current, page failures, credits shared with search.
 //
-// Сеть и часы подменяются: пятиминутный карантин проверяется мгновенно.
+// Network and clock are substituted: the five-minute quarantine is checked instantly.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -49,7 +49,7 @@ function configWith(keys: Record<string, string>): IcarusConfig {
   return makeConfig({ secretEnv });
 }
 
-/** Cloudflare без account id не готов — добавляем его отдельно. */
+/** Cloudflare is not ready without an account id — we add it separately. */
 function configWithCloudflare(extra: Record<string, string> = {}): IcarusConfig {
   const config = configWith({ cloudflare: 'cf-token', ...extra });
   config.secretEnv = { ...(config.secretEnv ?? {}), CLOUDFLARE_ACCOUNT_ID: 'acc-1' };
@@ -101,9 +101,9 @@ function clockAt(start = Date.parse('2026-11-07T12:00:00Z')) {
   };
 }
 
-// --- разбор ответов ----------------------------------------------------------
+// --- response parsing ----------------------------------------------------------
 
-test('каждый fetch-адаптер разбирает свой ответ', () => {
+test('each fetch adapter parses its own response', () => {
   assert.deepEqual(parseExaContents(PAGES.exa, 100), {
     url: 'https://example.com',
     title: 'Пример',
@@ -130,14 +130,14 @@ test('каждый fetch-адаптер разбирает свой ответ',
   assert.equal(parseCloudflareMarkdown({ success: false, errors: [] }, 100, 'https://example.com'), null);
 });
 
-test('длинная страница обрезается по maxChars', () => {
+test('a long page is truncated by maxChars', () => {
   const long = 'x'.repeat(500);
   const result = parseExaContents({ results: [{ url: 'https://e.dev', text: long }] }, 100);
   assert.ok(result?.text.startsWith('x'.repeat(100)));
   assert.match(result?.text ?? '', /обрезано/);
 });
 
-test('отказ страницы не путается с отказом ключа', () => {
+test('a page failure is not confused with a key failure', () => {
   assert.equal(classifyFetchStatus(404, 'not found'), 'page');
   assert.equal(classifyFetchStatus(400, 'bad url'), 'page');
   assert.equal(classifyFetchStatus(402, 'payment'), 'credits');
@@ -145,21 +145,21 @@ test('отказ страницы не путается с отказом клю
   assert.equal(classifyFetchStatus(500, 'boom'), 'http');
 });
 
-// --- роутер ------------------------------------------------------------------
+// --- router ------------------------------------------------------------------
 
-test('рейтинг извлечения: Cloudflare первым, дальше обратный поисковому', () => {
+test('fetch rating: Cloudflare first, then the reverse of the search one', () => {
   assert.deepEqual(FETCH_RATING, ['cloudflare', 'linkup', 'you', 'tavily', 'exa']);
-  // Обратность остальных выводится из поискового рейтинга, а не задана списком.
+  // The reverse order of the rest is derived from the search rating, not given as a list.
   assert.deepEqual([...FETCH_RATING.slice(1)].reverse(), ['exa', 'tavily', 'you', 'linkup']);
 });
 
-test('без ключей — no-keys, а не поход в сеть', async () => {
+test('without keys — no-keys, not a trip to the network', async () => {
   const config = configWith({});
   const result = await routeFetch(config, 'https://example.com', { fetch: fakeFetch({}) });
   assert.deepEqual(result, { ok: false, reason: 'no-keys', tried: [], current: null, retryAt: null });
 });
 
-test('текущий у извлечения свой и не трогает поисковый', async () => {
+test('fetch has its own current and does not touch the search one', async () => {
   const config = configWith({ linkup: 'l', exa: 'e' });
   const clock = clockAt();
   await mutateRouterState(stateFile(config), (state) => {
@@ -175,7 +175,7 @@ test('текущий у извлечения свой и не трогает п�
   assert.equal(state.fetch?.current, 'linkup', 'у извлечения свой текущий');
 });
 
-test('Cloudflare сверхлипкий: пока не в бане, он всегда становится текущим', async () => {
+test('Cloudflare is super-sticky: until banned, it always becomes the current one', async () => {
   const config = configWithCloudflare({ exa: 'e' });
   const clock = clockAt();
   await mutateRouterState(stateFile(config), (state) => {
@@ -187,7 +187,7 @@ test('Cloudflare сверхлипкий: пока не в бане, он все�
   assert.equal(readRouterState(stateFile(config)).fetch?.current, 'cloudflare', 'перетёр текущего');
 });
 
-test('в карантине Cloudflare уступает, а после разбана снова становится текущим', async () => {
+test('in quarantine Cloudflare yields, and after unban becomes current again', async () => {
   const config = configWithCloudflare({ exa: 'e' });
   const clock = clockAt();
   await mutateRouterState(stateFile(config), (state) => {
@@ -216,7 +216,7 @@ test('в карантине Cloudflare уступает, а после разб�
   assert.equal(readRouterState(stateFile(config)).fetch?.current, 'cloudflare');
 });
 
-test('без account id Cloudflare не считается настроенным и не банится', async () => {
+test('without an account id Cloudflare is not considered configured and is not banned', async () => {
   const config = configWith({ cloudflare: 'cf-token', exa: 'e' });
   const clock = clockAt();
   const fetch = fakeFetch({ exa: () => json(PAGES.exa) });
@@ -227,7 +227,7 @@ test('без account id Cloudflare не считается настроенны�
   assert.equal(state.fetch?.providers.cloudflare, undefined, 'провайдер просто пропущен');
 });
 
-test('дневной лимит Browser Run — сутки карантина, а не пять минут', async () => {
+test('the Browser Run daily limit is a day of quarantine, not five minutes', async () => {
   const config = configWithCloudflare({ exa: 'e' });
   const clock = clockAt();
   const fetch = fakeFetch({
@@ -245,14 +245,14 @@ test('дневной лимит Browser Run — сутки карантина, �
   assert.equal(state.providers.cloudflare, undefined, 'поисковых провайдеров это не касается');
 });
 
-test('правка любого секрета Cloudflare находит провайдера', () => {
+test('editing any Cloudflare secret finds the provider', () => {
   assert.equal(providerForKey('CLOUDFLARE_API_TOKEN'), 'cloudflare');
   assert.equal(providerForKey('CLOUDFLARE_ACCOUNT_ID'), 'cloudflare');
   assert.equal(providerForKey('YOU_API_KEY'), 'you');
   assert.equal(providerForKey('НЕТ_ТАКОГО'), null);
 });
 
-test('отказ провайдера — пять минут карантина и переход к следующему', async () => {
+test('a provider failure — five minutes of quarantine and a move to the next one', async () => {
   const config = configWith({ linkup: 'l', exa: 'e' });
   const clock = clockAt();
   const fetch = fakeFetch({
@@ -268,7 +268,7 @@ test('отказ провайдера — пять минут карантина
   assert.equal(state.fetch?.current, 'exa');
 });
 
-test('404 страницы не банит провайдера: это свойство URL, а не ключа', async () => {
+test('a page 404 does not ban the provider: it is a property of the URL, not the key', async () => {
   const config = configWith({ linkup: 'l', exa: 'e' });
   const clock = clockAt();
   const fetch = fakeFetch({
@@ -282,7 +282,7 @@ test('404 страницы не банит провайдера: это свой
   assert.equal(state.fetch?.providers.linkup, undefined, 'у Linkup не появилось отказов');
 });
 
-test('402 банит и извлечение, и поиск: кредиты общие', async () => {
+test('402 bans both fetch and search: credits are shared', async () => {
   const config = configWith({ linkup: 'l', exa: 'e' });
   const clock = clockAt();
   const fetch = fakeFetch({
@@ -297,7 +297,7 @@ test('402 банит и извлечение, и поиск: кредиты об
   assert.equal(state.providers.linkup?.banReason, 'credits', 'поиск тоже не должен биться в тот же ключ');
 });
 
-test('файл v1 сбрасывает старый fetch.current, но оставляет карантины', () => {
+test('the v1 file resets the old fetch.current but keeps quarantines', () => {
   const config = configWith({});
   const file = stateFile(config);
   fs.writeFileSync(
@@ -330,7 +330,7 @@ test('файл v1 сбрасывает старый fetch.current, но оста
   assert.equal(state.fetch?.providers.exa?.fails, 2, 'история отказов осталась');
 });
 
-test('все в карантине — all-banned с ближайшим разбаном', async () => {
+test('all in quarantine — all-banned with the nearest unban', async () => {
   const config = configWith({ linkup: 'l' });
   const clock = clockAt();
   const fetch = fakeFetch({ linkup: () => json({}, 500) });
@@ -342,7 +342,7 @@ test('все в карантине — all-banned с ближайшим разб
   assert.ok(!second.ok && second.retryAt);
 });
 
-test('поиск и извлечение могут жить на разных провайдерах одновременно', async () => {
+test('search and fetch can live on different providers at the same time', async () => {
   const config = configWith({ serpapi: 's', linkup: 'l' });
   const clock = clockAt();
   const fetch = fakeFetch({
@@ -360,9 +360,9 @@ test('поиск и извлечение могут жить на разных �
   assert.equal(state.fetch?.current, 'linkup');
 });
 
-// --- панель ------------------------------------------------------------------
+// --- panel ------------------------------------------------------------------
 
-test('панель показывает извлечение отдельным блоком', async () => {
+test('the panel shows fetch as a separate block', async () => {
   const config = configWith({ exa: 'e' });
   const clock = clockAt();
   const fetch = fakeFetch({ exa: () => json({}, 500) });
@@ -379,7 +379,7 @@ test('панель показывает извлечение отдельным 
   assert.equal(status.providers.some((provider) => provider.id === 'firecrawl'), true, 'поиск не потерял свои восемь');
 });
 
-test('проверка извлечения из панели снимает карантин', async () => {
+test('checking fetch from the panel lifts the quarantine', async () => {
   const config = configWith({ exa: 'e' });
   const clock = clockAt();
   const failing = fakeFetch({ exa: () => json({}, 500) });
@@ -408,7 +408,7 @@ function startServer(config: IcarusConfig, fetchImpl: typeof fetch) {
   });
 }
 
-test('GET /fetch изнутри сети отдаёт текст и провайдера', async () => {
+test('GET /fetch from inside the network returns the text and the provider', async () => {
   const config = configWith({ exa: 'e' });
   const box = await startServer(config, okAll());
   try {
@@ -428,7 +428,7 @@ test('GET /fetch изнутри сети отдаёт текст и провай
   }
 });
 
-test('POST /fetch понимает url и не пускает внутрь сети', async () => {
+test('POST /fetch understands url and does not let you inside the network', async () => {
   const config = configWith({ exa: 'e' });
   const box = await startServer(config, okAll());
   try {

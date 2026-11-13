@@ -1,16 +1,16 @@
-// Фоновый разбор разговора в память.
+// Background extraction of a conversation into memory.
 //
-// Логика: разговор затихает → расширение зовёт дешёвую модель отдельным одноразовым
-// процессом pi (без тулов и без контекста проекта) → полученные факты раскладываются
-// по полкам, журнал дописывается, всё коммитится в git.
+// Logic: the conversation goes quiet → the extension calls a cheap model as a separate one-shot
+// pi process (no tools and no project context) → the extracted facts are filed onto the shelves,
+// the journal is appended, everything is committed to git.
 //
-// Память строится только из слов человека. Реплики Икара идут в промпт как контекст
-// (чтобы понять короткие «да» и «верно»), но факт о человеке — это лишь то, что он сказал
-// или подтвердил сам. Его собственные советы и рассуждения в память не попадают: без
-// дословной цитаты из реплики пользователя запись отбрасывается (см. applyExtraction).
+// Memory is built only from the person's words. Icarus's replies go into the prompt as context
+// (to make sense of short "yes" and "right"), but a fact about the person is only what he said
+// or confirmed himself. His own advice and reasoning do not get into memory: without a verbatim
+// quote from the user's message the entry is discarded (see applyExtraction).
 //
-// В семейную память расширение не пишет никогда: туда только по явной просьбе, и это
-// делает сам агент своими тулами.
+// The extension never writes to family memory: that is only on an explicit request, and the
+// agent does it itself with its own tools.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import fs from "node:fs";
 import path from "node:path";
@@ -32,7 +32,7 @@ function log(message: string): void {
   process.stderr.write(`[memory-extractor] ${message}\n`);
 }
 
-/** Разрешаем писать только в известные полки и только внутрь памяти. */
+/** We allow writing only to known shelves and only inside memory. */
 export function isAllowedTarget(file: string): boolean {
   const normalized = file.replace(/^\.\//, "").trim();
   if (normalized.includes("..") || normalized.startsWith("/")) return false;
@@ -44,19 +44,19 @@ function normalizeLine(line: string): string {
   return line.replace(/^\s*[-*]\s*/, "").replace(/\s+/g, " ").trim().toLowerCase();
 }
 
-/** Пробелы и переводы строк — в один пробел: цитату сверяем по словам, не по вёрстке. */
+/** Spaces and line breaks — into one space: we compare a quote by words, not by layout. */
 export function squash(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
-/** Дословная ли цитата: свидетельство обязано встретиться в реплике пользователя. */
+/** Is the quote verbatim: the evidence must occur in a user message. */
 export function isEvidenceOf(evidence: string, entries: TranscriptEntry[]): boolean {
   const needle = squash(evidence);
   if (needle.length === 0) return false;
   return entries.some((entry) => entry.role === 'user' && squash(entry.text).includes(needle));
 }
 
-/** Дословная ли цитата: в одной реплике человека целиком или в его словах по порядку. */
+/** Is the quote verbatim: wholly in one person's message or in his words in order. */
 export function evidenceInUserWords(
   evidence: string,
   entries: TranscriptEntry[],
@@ -65,13 +65,13 @@ export function evidenceInUserWords(
   const needle = squash(evidence);
   if (needle.length === 0) return false;
   if (isEvidenceOf(needle, entries)) return true;
-  // Иногда человек говорит одно и то же двумя репликами подряд: кусок, собранный из них,
-  // дословно в одной реплике не лежит. Но только из реплик человека — слова Икара сюда
-  // не подмешиваются, иначе его же совет сойдёт за свидетельство.
+  // Sometimes the person says the same thing in two messages in a row: a piece assembled from
+  // them is not verbatim in a single message. But only from the person's messages — Icarus's words
+  // do not mix in here, otherwise his own advice would pass for evidence.
   return squash(userWords).includes(needle);
 }
 
-/** Достаём JSON из ответа модели: она любит обернуть его в пояснения или ```json. */
+/** Extract JSON from the model response: it likes to wrap it in explanations or ```json. */
 export function parseExtraction(raw: string): Extraction | null {
   const match = /\{[\s\S]*\}/.exec(raw);
   if (!match) return null;
@@ -95,8 +95,8 @@ export function parseExtraction(raw: string): Extraction | null {
       if (typeof file !== "string" || typeof append !== "string") continue;
       const text = append.trim();
       if (!text) continue;
-      // У записи обязана быть цитата из слов пользователя: без неё неизвестно, чей это
-      // факт, и в память легко уедет совет самого Икара.
+      // An entry must have a quote from the user's words: without it, it is unknown whose it is,
+      // and Icarus's own advice easily gets into memory.
       if (typeof evidence !== "string" || squash(evidence).length === 0) continue;
       notes.push({ file, append: text, evidence: squash(evidence) });
     }
@@ -107,21 +107,22 @@ export function parseExtraction(raw: string): Extraction | null {
 }
 
 /**
- * Бюджет индекса в символах. Индекс — обзор памяти для разбора, а не её второй
- * экземпляр: файлы показываем целиком, пока влезают, и хвост бюджета не раздуваем.
+ * Index budget in characters. The index is an overview of memory for extraction, not its second
+ * copy: files are shown in full while they fit, and the tail of the budget is not inflated.
  */
 export const INDEX_BUDGET = 4000;
 
 /**
- * Индекс уже записанного: без него разбор плодит дубликаты и файлы-близнецы.
+ * Index of what is already recorded: without it extraction breeds duplicates and twin files.
  *
- * Потолок строк на файл по умолчанию снят: раньше восьми строк хватало, чтобы на
- * identity.md в 20+ фактов разбор не видел поздние и заводил дубли. Теперь файл
- * показывается целиком, пока влезает в бюджет, — а бюджет и есть ограничитель.
- * Явный maxLines остаётся для вызывающих, которым нужен свой потолок.
+ * The per-file line cap is removed by default: eight lines used to be enough that on an
+ * identity.md with 20+ facts the extraction did not see the later ones and created duplicates.
+ * Now the file is shown in full while it fits the budget — and the budget is the limiter.
+ * An explicit maxLines remains for callers that need their own cap.
  *
- * Первой строкой идут имена ВСЕХ файлов: они дешевле фактов, а без них разбор не
- * знал, что тема уже занята, и заводил projects/сеть.md рядом с projects/домашняя_сеть.md.
+ * The first line holds the names of ALL files: they are cheaper than facts, and without them the
+ * extraction did not know the topic was already taken and created projects/сеть.md next to
+ * projects/домашняя_сеть.md.
  */
 export function memoryIndex(root: string, maxFiles = 25, maxLines = Infinity): string {
   const blocks: string[] = [];
@@ -138,7 +139,7 @@ export function memoryIndex(root: string, maxFiles = 25, maxLines = Infinity): s
       if (entry.name.startsWith('.')) continue;
       const rel = `${prefix}${entry.name}`;
       if (entry.isDirectory()) {
-        if (entry.name === 'journal') continue; // журнал не полка разбора
+        if (entry.name === 'journal') continue; // the journal is not a shelf for extraction
         collectNames(path.join(dir, entry.name), `${rel}/`);
         continue;
       }
@@ -148,7 +149,7 @@ export function memoryIndex(root: string, maxFiles = 25, maxLines = Infinity): s
   collectNames(root);
 
   const list = names.join(', ');
-  // Список имён не должен съесть индекс целиком: в худшем случае показываем половину.
+  // The list of names must not eat the whole index: in the worst case we show half.
   const clipped = list.length > INDEX_BUDGET / 2 ? `${list.slice(0, INDEX_BUDGET / 2).trimEnd()}…` : list;
   const header = names.length === 0 ? '' : `Файлы памяти (пиши в существующий, близнецов не заводи): ${clipped}`;
   let used = header ? header.length + 1 : 0;
@@ -187,9 +188,9 @@ export function memoryIndex(root: string, maxFiles = 25, maxLines = Infinity): s
         continue;
       }
 
-      // Файл целиком уже не влезает: добираем столько строк, сколько осталось, и прямо
-      // помечаем хвост. Молчаливая обрезка — ровно то, из-за чего разбор не видел
-      // поздние факты и заводил дубли.
+      // The file no longer fits in full: we take as many lines as are left and explicitly mark
+      // the tail. Silent truncation is exactly what made the extraction not see the later facts
+      // and create duplicates.
       const fits: string[] = [];
       for (const line of rendered) {
         const hidden = bullets.length - fits.length - 1;
@@ -202,7 +203,7 @@ export function memoryIndex(root: string, maxFiles = 25, maxLines = Infinity): s
       const hidden = bullets.length - fits.length;
       const marker = hidden > 0 ? `\n    … ещё ${hidden} пункт(ов): файл целиком по пути` : '';
       blocks.push(`${header}\n${fits.join('\n')}${marker}`);
-      return; // бюджет исчерпан — остальные файлы в него уже не влезут
+      return; // the budget is exhausted — the remaining files will not fit anyway
     }
   };
 
@@ -220,7 +221,7 @@ function tokens(text: string): Set<string> {
   );
 }
 
-/** Похоже ли новое утверждение на уже записанное (защита от перефразированных дублей). */
+/** Does the new statement resemble one already recorded (protection against rephrased duplicates). */
 export function isDuplicate(existing: string[], candidate: string, threshold = 0.7): boolean {
   const fresh = tokens(candidate);
   if (fresh.size === 0) return true;
@@ -234,7 +235,7 @@ export function isDuplicate(existing: string[], candidate: string, threshold = 0
   return false;
 }
 
-/** Разговор глазами разбора: слова пользователя — источник, реплики Икара — только контекст. */
+/** The conversation through the eyes of extraction: the user's words are the source, Icarus's replies are only context. */
 export function formatTranscript(entries: TranscriptEntry[], limit = MAX_TRANSCRIPT): string {
   const lines = entries
     .filter((entry) => entry.text.trim().length > 0)
@@ -249,8 +250,8 @@ export function buildExtractionPrompt(
   transcript: string | TranscriptEntry[],
   today = new Date(),
   index = '',
-  // Дата — по поясу человека, а не по UTC: иначе вечерний разговор в Дублине
-  // уезжает во вчера, и «недавно» датируется не тем днём.
+  // The date is by the person's zone, not UTC: otherwise an evening conversation in Dublin
+  // slips into yesterday, and "recently" is dated to the wrong day.
   zone: string = resolveZone(),
 ): string {
   const date = localDate(today, zone);
@@ -313,7 +314,7 @@ ${indexBlock}
 ${lines}`;
 }
 
-/** Раскладывает факты по полкам, не плодя дубликатов. */
+/** Files facts onto the shelves without breeding duplicates. */
 export function applyExtraction(
   root: string,
   extraction: Extraction,
@@ -325,8 +326,8 @@ export function applyExtraction(
   const skipped: string[] = [];
   const rejected: string[] = [];
 
-  // Свидетельство сверяем только со словами человека: реплики Икара в эту проверку не
-  // попадают, иначе его же совет вернулся бы в память как факт о собеседнике.
+  // We check the evidence only against the person's words: Icarus's replies do not enter this
+  // check, otherwise his own advice would come back into memory as a fact about the interlocutor.
   const userWords = userEntries
     .filter((entry) => entry.role === 'user')
     .map((entry) => entry.text)
@@ -355,8 +356,8 @@ export function applyExtraction(
       skipped.push(note.file);
       continue;
     }
-    // Рядом с фактом оставляем его источник — фразу человека. Это не украшение:
-    // по ней потом видно, откуда запись взялась, и её не спишут на выдумку Икара.
+    // Next to the fact we leave its source — the person's phrase. This is not decoration:
+    // it shows later where the entry came from, and it will not be put down to Icarus's invention.
     const quote = note.evidence ? ` (его слова: «${note.evidence.replace(/[»\n\r]/g, " ")}»)` : "";
     const separator = existing.length === 0 ? "" : existing.endsWith("\n") ? "" : "\n";
     fs.writeFileSync(target, `${existing}${separator}${line}${quote}\n`);
@@ -397,7 +398,7 @@ function git(root: string, args: string[]): Promise<{ code: number; stdout: stri
   });
 }
 
-/** Память — git-репозиторий: инициализируем и настраиваем локальную личность. */
+/** Memory is a git repository: we initialize it and set up a local identity. */
 export async function ensureRepo(root: string): Promise<void> {
   if (!fs.existsSync(path.join(root, ".git"))) {
     await git(root, ["init", "-q"]);
@@ -419,7 +420,7 @@ export async function commitMemory(root: string, message: string): Promise<boole
   return true;
 }
 
-/** Одноразовый вызов дешёвой модели: без тулов, без сессии, без нашего же расширения. */
+/** One-shot call of the cheap model: no tools, no session, no extension of our own. */
 export function runOneShot(prompt: string, timeoutMs = 120_000): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn(
@@ -436,8 +437,8 @@ export function runOneShot(prompt: string, timeoutMs = 120_000): Promise<string>
         "--no-skills",
         "--no-prompt-templates",
       ],
-      // Рабочий каталог — служебный: относительные пути одноразового прогона
-      // не должны оказаться в свободном месте человека.
+      // The working directory is the service one: the relative paths of a one-shot run
+      // must not end up in the person's free space.
       { cwd: ICARUS, stdio: ["ignore", "pipe", "pipe"] },
     );
 
@@ -487,8 +488,8 @@ export default function (pi: ExtensionAPI) {
     running = true;
     const entries = pending;
     pending = [];
-    // Реплики храним с ролями до самого промпта: разбор должен видеть, кто что сказал,
-    // иначе совет Икара легко уезжает в память как факт о человеке.
+    // We keep the replies with their roles all the way to the prompt: the extraction must see
+    // who said what, otherwise Icarus's advice easily gets into memory as a fact about the person.
     try {
       const raw = await runOneShot(
         buildExtractionPrompt(entries, new Date(), memoryIndex(MEMORY)),

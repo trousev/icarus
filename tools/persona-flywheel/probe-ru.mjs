@@ -1,10 +1,10 @@
-// probe-ru.mjs — точечная проверка русского: один сценарий, разные модели и правки промпта.
-// Живёт рядом со стендом, но не часть flywheel: гонять руками, когда жалоба на «машинный» русский.
+// probe-ru.mjs — a pointed check of Russian: one scenario, different models and prompt tweaks.
+// Lives next to the rig, but isn't part of the flywheel: run it by hand when there's a complaint about "machine" Russian.
 //
-//   node probe-ru.mjs            # все варианты
-//   node probe-ru.mjs flash      # только варианты на flash
+//   node probe-ru.mjs            # all variants
+//   node probe-ru.mjs flash      # only the flash variants
 //
-// Пишет logs/ru-probe-<метка>/samples.md — реплики целиком, чтобы читать глазами.
+// Writes logs/ru-probe-<label>/samples.md — full replies, to read with your eyes.
 
 import { writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -14,7 +14,7 @@ const PERSONA = readFileSync(join(ROOT, "../../icarus.md"), "utf8")
   .replace(/<!--[\s\S]*?-->/g, "")
   .trim();
 
-// Правка-гипотеза: персоне не хватает прямого требования к русскому.
+// Hypothesis patch: the persona lacks a direct requirement about Russian.
 const RU_CLAUSE = `
 # Русский
 - Думаешь по-русски, а не переводишь с английского. Оборот, который звучит как подстрочник, — брак: переписываешь.
@@ -26,7 +26,7 @@ const QUESTION = `Слушай, иду в консульство голосов�
 показать телефон, пролистать телегу? Как себя вести?`;
 
 const VARIANTS = [
-  // боевой режим: fast-тир Икара — V4.1-Flash с выключенным мышлением
+  // production mode: Icarus's fast tier — V4.1-Flash with thinking disabled
   { id: "flash-off-base", model: "deepseek-ai/DeepSeek-V4.1-Flash", temperature: 1, thinking: "disabled", persona: PERSONA },
   { id: "flash-off-t13", model: "deepseek-ai/DeepSeek-V4.1-Flash", temperature: 1.3, thinking: "disabled", persona: PERSONA },
   { id: "flash-off-ru", model: "deepseek-ai/DeepSeek-V4.1-Flash", temperature: 1, thinking: "disabled", persona: PERSONA + RU_CLAUSE },

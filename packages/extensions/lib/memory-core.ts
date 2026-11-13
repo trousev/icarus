@@ -1,13 +1,13 @@
-// Ядро памяти: то, что Икар знает про человека сразу, без похода в файлы.
-// В ядре только «кто он» и «как с ним говорить». Люди и проекты сюда не входят:
-// сначала `memory_index` отдаёт файлы с описаниями, потом модель читает выбранное.
-// Иначе факты в промпте становятся поводом сменить тему — ровно то, на что жаловались.
+// Memory core: what Icarus knows about the person right away, without going into files.
+// The core holds only "who they are" and "how to talk to them". People and projects don't go here:
+// first `memory_index` returns files with descriptions, then the model reads what it selected.
+// Otherwise facts in the prompt become a reason to change the subject — exactly what people complained about.
 //
-// Каждый пункт несёт метку месяца, когда он появился в памяти: `- [2026-03] текст`
-// из git blame по времени автора строки. По метке видно, что устарело, а что свежее.
-// Метка не меняется, пока не изменится сама память, поэтому промпт стабилен для кэша
-// модели. git нет, память не репозиторий, строка не закоммичена — тихо отдаём текст
-// без метки: ядро памяти важнее украшения.
+// Each item carries a month tag for when it appeared in memory: `- [2026-03] text`
+// from git blame by line author time. The tag shows what's outdated and what's fresh.
+// The tag doesn't change until memory itself changes, so the prompt is stable for the model's
+// cache. No git, memory isn't a repository, the line isn't committed — we quietly return the text
+// without the tag: the memory core is more important than the decoration.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -19,16 +19,16 @@ const MEMORY = process.env.ICARUS_MEMORY_DIR ?? `${ICARUS}/memory`;
 const LIMIT_PER_FILE = 1200;
 const LIMIT_TOTAL = 6000;
 
-/** Кэш возрастов по mtime и размеру файла: иначе git звался бы каждый ход. */
+/** Cache of ages by mtime and file size: otherwise git would be called every turn. */
 type AgeEntry = { key: string; ages: Map<number, string> };
 const AGE_CACHE = new Map<string, AgeEntry>();
 
-/** Месяц из времени автора строки: `2026-03`. */
+/** Month from the line author time: `2026-03`. */
 function monthOf(epochSeconds: number): string {
   return new Date(epochSeconds * 1000).toISOString().slice(0, 7);
 }
 
-/** Разбор `git blame --line-porcelain`: номер строки файла → месяц её изменения. */
+/** Parses `git blame --line-porcelain`: file line number → month it was changed. */
 function parseBlame(output: string): Map<number, string> {
   const ages = new Map<number, string>();
   let sha = '';
@@ -48,13 +48,13 @@ function parseBlame(output: string): Map<number, string> {
       continue;
     }
     if (!row.startsWith('\t')) continue;
-    // Нулевой sha — строка ещё не закоммичена: даты у неё нет, метку не выдумываем.
+    // Zero sha — the line isn't committed yet: it has no date, we don't invent a tag.
     if (authorTime !== null && !/^0+$/.test(sha)) ages.set(lineNumber - 1, monthOf(authorTime));
   }
   return ages;
 }
 
-/** Спрашивает git о строках файла. Нет git, нет репозитория — пусто и без шума. */
+/** Asks git about the file's lines. No git, no repository — empty and quiet. */
 function blameAges(file: string): Map<number, string> {
   const result = spawnSync(
     'git',
@@ -66,9 +66,9 @@ function blameAges(file: string): Map<number, string> {
 }
 
 /**
- * Возрасты строк файла с кэшем по mtime и размеру. Пустой результат не кэшируем:
- * строки могли закоммитить уже после первого чтения, а mtime файла при коммите
- * не меняется — иначе метка не появилась бы никогда.
+ * Line ages with a cache by mtime and size. We don't cache an empty result:
+ * lines could have been committed after the first read, and the file's mtime doesn't
+ * change on commit — otherwise the tag would never appear.
  */
 export function memoryAges(file: string): Map<number, string> {
   let stat: ReturnType<typeof fs.statSync>;
@@ -87,12 +87,12 @@ export function memoryAges(file: string): Map<number, string> {
   return ages;
 }
 
-/** Сбрасывает кэш возрастов: нужен тестам, чтобы не зависеть от порядка прогонов. */
+/** Resets the age cache: needed by tests so they don't depend on run order. */
 export function clearMemoryAges(): void {
   AGE_CACHE.clear();
 }
 
-/** Проставляет `- [2026-03] текст`. Сам текст пункта не меняем. */
+/** Inserts `- [2026-03] text`. We don't change the item text itself. */
 export function annotateAges(file: string, text: string): string {
   const ages = memoryAges(file);
   if (ages.size === 0) return text;
@@ -115,7 +115,7 @@ function readAnnotated(file: string): string {
   } catch {
     return '';
   }
-  // Описание файла — метаданные для индекса, а не факт о человеке: в ядро не едет.
+  // The file description is metadata for the index, not a fact about the person: it doesn't go into the core.
   return stripFrontmatter(annotateAges(file, raw)).trim();
 }
 
@@ -125,9 +125,9 @@ function clip(text: string, limit = LIMIT_PER_FILE): string {
 }
 
 /**
- * Ядро — только «кто он» и «как с ним говорить». Люди и проекты сюда не входят:
- * сначала `memory_index` отдаёт файлы с описаниями, потом модель читает выбранное.
- * Иначе факты в промпте становятся поводом сменить тему — на это и жаловались.
+ * The core — only "who they are" and "how to talk to them". People and projects don't go here:
+ * first `memory_index` returns files with descriptions, then the model reads what it selected.
+ * Otherwise facts in the prompt become a reason to change the subject — that's what people complained about.
  */
 export function buildMemoryCore(root = MEMORY): string {
   const parts: string[] = [];
@@ -143,9 +143,9 @@ export function buildMemoryCore(root = MEMORY): string {
 }
 
 /**
- * Блок «Ядро памяти» для системного промпта. Живёт рядом с самими фактами, потому
- * что соблазн начинается именно здесь: модель принимает «я это знаю» за повод
- * сменить разговор («кстати, …»). Память — для ответа на его тему, не для выбора темы.
+ * The "Memory core" block for the system prompt. It lives next to the facts themselves because
+ * the temptation starts right here: the model takes "I know this" as a reason to
+ * change the conversation ("by the way, …"). Memory is for answering their topic, not for choosing a topic.
  */
 export function memoryPrompt(core: string): string {
   if (!core) return '';
@@ -158,8 +158,8 @@ export function memoryPrompt(core: string): string {
     core,
     '',
     `Полная память лежит в ${MEMORY}/, семейная — в ${ICARUS}/shared-memory/.`,
-    // Правило — последним: оно закрывает блок, чтобы факты не читались как приглашение
-    // сменить разговор, но и не запрещало искать память для ответа.
+    // The rule goes last: it closes the block so the facts aren't read as an invitation
+    // to change the conversation, but also doesn't forbid searching memory to answer.
     'Память отвечает, а не начинает: не делай её темой, вопросом, шуткой или утешением. Для ответа — ищи и используй.',
   ].join('\n');
 }

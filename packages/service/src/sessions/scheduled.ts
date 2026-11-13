@@ -1,20 +1,20 @@
-// Запланированные задачи человека: «каждый день в 8» — запустить агента с этим промптом.
+// A person's scheduled tasks: "every day at 8" — start the agent with this prompt.
 //
-// Задача — это расписание и промпт. По наступлении времени сервис заводит НОВЫЙ
-// разговор и отправляет промпт туда: агент работает как в обычном чате, а результат
-// человек читает в списке разговоров. Никаких «напоминаний» в чужой чат тут нет —
-// сообщение агента всегда живёт в своём разговоре.
+// A task is a schedule and a prompt. When the time comes, the service starts a NEW
+// conversation and sends the prompt there: the agent works as in a regular chat, and the result
+// the person reads in the conversation list. There are no "reminders" into someone else's chat here —
+// the agent's message always lives in its own conversation.
 //
-// Что здесь решено и почему:
-//   - хранятся настенные правила (schedule.ts), а момент считает сервис в поясе
-//     человека — иначе «в 8 утра» уезжало бы на час при переводе часов;
-//   - пропущенный запуск ДОГОНЯЕМ, но один раз: после долгого простоя агент отработает
-//     один раз, а не двадцать. Следующий запуск считается от текущего момента, а не
-//     от пропущенного;
-//   - занятость: если у человека уже идёт ход, запуск не отменяется — ждём до
-//     BUSY_GRACE_MS, а потом честно пишем в задачу «пропущен»;
-//   - запуск записывается в файл ДО старта агента: упавший посреди запуска сервис не
-//     отработает тот же запуск ещё раз.
+// What was decided here and why:
+//   - wall-clock rules are stored (schedule.ts), and the moment is computed by the service in the person's
+//     time zone — otherwise "at 8 in the morning" would shift by an hour on a DST change;
+//   - a missed run IS CAUGHT UP, but once: after a long downtime the agent runs
+//     once, not twenty times. The next run is counted from the current moment, not
+//     from the missed one;
+//   - busy: if the person already has a turn in progress, the run isn't cancelled — we wait up to
+//     BUSY_GRACE_MS, and then honestly write "skipped" into the task;
+//   - the run is recorded to the file BEFORE the agent starts: a service that crashes mid-run won't
+//     run the same run again.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -25,38 +25,38 @@ import { nextRunAt, parseRepeat, taskTimeZone, type TaskRepeat } from './schedul
 export type ScheduledTask = {
   id: string;
   /**
-   * Человеческое имя задачи: по нему подписана ветка дерева «Задачи» и заголовок
-   * её разговоров. Необязательное: у старых задач его нет, и тогда имя выводится
-   * из первой строки промпта (см. taskName).
+   * The task's human name: the "Tasks" tree branch and its conversations' titles are
+   * labeled by it. Optional: old tasks don't have it, and then the name is derived
+   * from the first line of the prompt (see taskName).
    */
   name?: string;
-  /** Что делает агент в новом разговоре. Без промпта задачи не бывает. */
+  /** What the agent does in the new conversation. There is no task without a prompt. */
   prompt: string;
   repeat: TaskRepeat;
-  /** Рабочая папка нового разговора; нет — workspace по умолчанию. */
+  /** The new conversation's working folder; absent — the default workspace. */
   workspace?: string;
   enabled: boolean;
   createdAt: string;
-  /** Следующий запуск; null — запусков больше не будет (одноразовая отработала). */
+  /** Next run; null — there will be no more runs (a one-off has fired). */
   nextRunAt: string | null;
   lastRunAt?: string;
-  /** Разговор, который завёл прошлый запуск: из списка на него есть ссылка. */
+  /** The conversation the previous run started: the list has a link to it. */
   lastChatId?: string;
-  /** Чего не вышло в прошлый запуск: честная запись вместо тишины. */
+  /** What failed on the previous run: an honest record instead of silence. */
   lastError?: string;
 };
 
-/** Задача глазами панели: то же плюс «пора запускать». */
+/** A task as the panel sees it: the same plus "time to run". */
 export type TaskView = ScheduledTask & {
-  /** Время пришло, а запуска не было: панель подсвечивает, если тик не сработал. */
+  /** The time has come but no run happened: the panel highlights this if the tick didn't fire. */
   due: boolean;
 };
 
-/** Потолок задач на человека: это расписания, а не очередь заданий. */
+/** Cap on tasks per person: these are schedules, not a job queue. */
 export const TASK_LIMIT = 100;
-/** Промпт — это реплика человека: длиннее не пишут, а хранить полотно незачем. */
+/** The prompt is a person's reply: nobody writes longer, and there's no reason to store a canvas. */
 const PROMPT_LIMIT = 4000;
-/** Имя — подпись ветки, а не абзац: длиннее в меню всё равно не прочитать. */
+/** The name is a branch label, not a paragraph: anything longer wouldn't be readable in the menu anyway. */
 const NAME_LIMIT = 80;
 
 export type TaskInput = {
@@ -67,9 +67,9 @@ export type TaskInput = {
 };
 
 /**
- * Имя задачи для человека и панели. Своё имя хранится в задаче; у старых задач
- * его нет — берём первую строку промпта и аккуратно режем, чтобы подпись ветки
- * влезала в строку меню.
+ * The task name for a person and the panel. An own name is stored in the task; old tasks
+ * don't have one — we take the first line of the prompt and carefully trim it so the branch
+ * label fits into a menu line.
  */
 export function taskName(task: Pick<ScheduledTask, 'name' | 'prompt'>): string {
   const own = (task.name ?? '').replace(/\s+/g, ' ').trim();
@@ -88,7 +88,7 @@ function normalize(value: unknown): ScheduledTask | null {
   if (typeof item.id !== 'string' || !item.id) return null;
   const repeat = parseRepeat(item.repeat);
   if (!repeat) return null;
-  // Задача без промпта ничего не запускает: такой записи в файле нечего делать.
+  // A task without a prompt starts nothing: such a record has no business in the file.
   if (typeof item.prompt !== 'string' || !item.prompt.trim()) return null;
   return {
     id: item.id,
@@ -118,7 +118,7 @@ export function readTasks(config: IcarusConfig, user: UserConfig): ScheduledTask
   }
 }
 
-/** Пишем через временный файл: падение посреди записи не должно съесть все задачи. */
+/** We write via a temporary file: a crash mid-write shouldn't eat all the tasks. */
 export function writeTasks(config: IcarusConfig, user: UserConfig, tasks: ScheduledTask[]): void {
   const file = tasksFile(config, user);
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -128,22 +128,22 @@ export function writeTasks(config: IcarusConfig, user: UserConfig, tasks: Schedu
   fs.renameSync(tmp, file);
 }
 
-/** Проверка создания: мусор не должен заводить задачу «когда-нибудь». */
+/** Creation check: garbage shouldn't create a "someday" task. */
 export function parseTaskInput(value: unknown, timeZone: string, now = new Date()): TaskInput {
   const raw = (value ?? {}) as Record<string, unknown>;
   const prompt = String(raw.prompt ?? '')
     .trim()
     .slice(0, PROMPT_LIMIT);
   if (!prompt) throw new Error('напиши, что должен сделать агент: задача без промпта — это не задача');
-  // Имя необязательно: пустое поле — это «назови по промпту», а не ошибка.
+  // The name is optional: an empty field means "name it from the prompt", not an error.
   const name = String(raw.name ?? '')
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, NAME_LIMIT);
   const repeat = parseRepeat(raw.repeat);
   if (!repeat) throw new Error('расписание не разобрал: нужен день, время или правило повтора');
-  // Одноразовое «запусти вчера» — это не задача, а недоразумение: следующий запуск
-  // уже не наступит, и человек ждал бы тишины.
+  // A one-off "run it yesterday" is not a task but a misunderstanding: the next run
+  // would never come, and the person would be waiting in silence.
   if (nextRunAt(repeat, now, timeZone) === null) {
     throw new Error(
       repeat.kind === 'once'
@@ -180,9 +180,9 @@ export function createTask(
 }
 
 /**
- * Включение и выключение. Включая, пересчитываем запуск от текущего момента: пока
- * задача лежала выключенной, её время могло пройти, и «догон» выстрелил бы агентом
- * сразу после нажатия кнопки.
+ * Enabling and disabling. When enabling, we recompute the run from the current moment: while
+ * the task lay disabled, its time could have passed, and the "catch-up" would fire the agent
+ * right after the button is pressed.
  */
 export function setTaskEnabled(
   config: IcarusConfig,
@@ -212,38 +212,38 @@ export function deleteTask(config: IcarusConfig, user: UserConfig, id: string): 
   return true;
 }
 
-/** Задача для панели: считается ли, что время уже пришло. */
+/** A task for the panel: whether the time is considered to have come. */
 export function taskView(task: ScheduledTask, now = new Date()): TaskView {
   const next = task.nextRunAt ? new Date(task.nextRunAt) : null;
   return { ...task, due: Boolean(task.enabled && next && next.getTime() <= now.getTime()) };
 }
 
-/** Чем кончился запуск: id нового разговора и ошибка, если агент не поднялся. */
+/** How the run ended: the new conversation's id and the error if the agent didn't come up. */
 export type LaunchOutcome = { chatId: string; error?: string };
 
 /**
- * Как задача запускает агента. Отдельный тип, чтобы планировщик не знал ни про
- * реестр сессий, ни про реестр разговоров: в тестах это заглушка, в бою — task-launch.ts.
+ * How a task launches the agent. A separate type so the scheduler knows about neither the session
+ * registry nor the conversation registry: in tests it's a stub, in prod it's task-launch.ts.
  */
 export type TaskLauncher = {
-  /** Занят ли человек: у него уже идёт ход или сжатие. */
+  /** Is the person busy: they already have a turn or a compaction in progress. */
   busy(user: UserConfig): boolean;
-  /** Заводит новый разговор и отправляет в него промпт. Возвращает chatId даже при ошибке. */
+  /** Starts a new conversation and sends the prompt into it. Returns chatId even on error. */
   launch(user: UserConfig, task: ScheduledTask): Promise<LaunchOutcome>;
 };
 
 export type ScheduledTasksDeps = {
   launch: TaskLauncher;
-  /** Часы: в тестах подменяются, чтобы не ждать среды. */
+  /** Clock: overridden in tests so they don't wait for Wednesday. */
   now?: () => Date;
   tickMs?: number;
-  /** Сколько ждать, пока человек освободится, прежде чем пометить запуск пропущенным. */
+  /** How long to wait for the person to free up before marking the run as skipped. */
   graceMs?: number;
 };
 
-/** Как часто проверяем: запуск «через минуту» не должен ждать пяти. */
+/** How often we check: a run "in a minute" shouldn't wait five. */
 const TICK_MS = 20_000;
-/** Сколько ждём занятого человека: дольше — уже не «подождать», а пропустить. */
+/** How long we wait for a busy person: longer is no longer "waiting" but skipping. */
 const BUSY_GRACE_MS = 10 * 60_000;
 
 export type TickOutcome = { fired: number; started: number; failed: number; skipped: number };
@@ -251,8 +251,8 @@ export type TickOutcome = { fired: number; started: number; failed: number; skip
 const NOTHING: TickOutcome = { fired: 0, started: 0, failed: 0, skipped: 0 };
 
 /**
- * Планировщик. Тикает по таймеру, но всю работу делает `tick()` — его же зовут
- * тесты и панель, поэтому проверять поведение можно без ожидания реального времени.
+ * The scheduler. It ticks on a timer, but all the work is done by `tick()` — tests and the panel
+ * call it too, so behavior can be checked without waiting for real time.
  */
 export class ScheduledTasks {
   private config: IcarusConfig;
@@ -270,7 +270,7 @@ export class ScheduledTasks {
   start(): void {
     if (this.timer) return;
     this.timer = setInterval(() => void this.tick(), this.deps.tickMs ?? TICK_MS);
-    // Таймер не должен держать процесс живым: сервис живёт сам по себе.
+    // The timer shouldn't keep the process alive: the service lives on its own.
     this.timer.unref?.();
     void this.tick();
   }
@@ -281,11 +281,11 @@ export class ScheduledTasks {
   }
 
   /**
-   * Один проход по всем людям. Возвращает счётчики — по ним видно, что тик не
-   * просто «покрутился»: столько-то задач запустило агента, столько-то нет.
+   * One pass over all people. Returns counters — from them you can see that the tick didn't
+   * just "spin": so many tasks started the agent, so many didn't.
    */
   async tick(): Promise<TickOutcome> {
-    // Два тика не должны запустить одну задачу дважды.
+    // Two ticks must not launch one task twice.
     if (this.ticking) return NOTHING;
     this.ticking = true;
     const outcome: TickOutcome = { ...NOTHING };
@@ -319,8 +319,8 @@ export class ScheduledTasks {
       const dueAt = new Date(task.nextRunAt).getTime();
       if (!Number.isFinite(dueAt) || dueAt > now.getTime()) continue;
 
-      // Человек занят: не теряем запуск, а ждём следующего тика. Ждать бесконечно
-      // нельзя — иначе «собери сводку» тихо не случится никогда; тогда пропускаем.
+      // The person is busy: we don't lose the run but wait for the next tick. Waiting forever
+      // is not allowed — otherwise "gather the summary" would silently never happen; then we skip.
       if (this.deps.launch.busy(user)) {
         if (now.getTime() - dueAt < (this.deps.graceMs ?? BUSY_GRACE_MS)) continue;
         task.lastRunAt = now.toISOString();
@@ -334,8 +334,8 @@ export class ScheduledTasks {
       result.fired += 1;
       task.lastRunAt = now.toISOString();
       delete task.lastError;
-      // Запуск фиксируем до старта агента: если сервис упадёт посреди запуска, тот же
-      // запуск не повторится на следующем тике.
+      // We record the run before the agent starts: if the service crashes mid-run, the same
+      // run won't repeat on the next tick.
       this.advance(task, now, timeZone);
       writeTasks(this.config, user, tasks);
       try {
@@ -359,9 +359,9 @@ export class ScheduledTasks {
   }
 
   /**
-   * Следующий запуск — от «сейчас», а не от пропущенного: если сервис стоял сутки,
-   * агент отработает один раз и следующее срабатывание будет в своё время, а не
-   * пачкой догоняющих за каждый пропущенный день.
+   * The next run is counted from "now", not from the missed one: if the service was down for a day,
+   * the agent runs once and the next firing will be at its own time, not
+   * a batch of catch-ups for every missed day.
    */
   private advance(task: ScheduledTask, now: Date, timeZone: string): void {
     const next = nextRunAt(task.repeat, now, timeZone);

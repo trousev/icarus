@@ -1,7 +1,7 @@
-// Субагенты в панели: подпись шага, живой список детей в потоке и он же в истории.
+// Subagents in the panel: the step label, the live list of children in the stream and the same in history.
 //
-// Поток проверяем по-настоящему: поднимаем HTTP-сервер с заглушкой реестра и читаем
-// NDJSON ровно так, как это делает браузер.
+// We test the stream for real: we start an HTTP server with a stub registry and read
+// NDJSON exactly as the browser does.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -23,14 +23,14 @@ const TASKS = [
   { agent: 'researcher', task: 'посмотри цены на amazon.ie' },
 ];
 
-test('шаг субагентов подписан по-человечески: сколько задач и каких агентов', () => {
+test('the subagent step is labeled in a human way: how many tasks and which agents', () => {
   assert.equal(traceLabel('subagent', { tasks: TASKS }), 'СУБАГЕНТЫ');
   assert.equal(traceDetail('subagent', { tasks: TASKS }), '2 задачи · scout, researcher');
   assert.equal(traceDetail('subagent', { tasks: [] }), 'задачи не переданы');
   assert.equal(traceDetail('subagent', { tasks: [...TASKS, TASKS[0]] }).startsWith('3 задачи'), true);
 });
 
-test('в трассировке видно, какой провайдер ответил на поиск', () => {
+test('the trace shows which provider answered the search', () => {
   assert.equal(traceUpstream('курс евро', 'brave'), 'курс евро · brave');
   assert.equal(traceUpstream('', 'brave'), 'brave');
   assert.equal(traceUpstream('курс евро', ''), 'курс евро');
@@ -38,7 +38,7 @@ test('в трассировке видно, какой провайдер отв
   assert.equal(traceUpstream('x'.repeat(200), 'exa'), `${'x'.repeat(200)} · exa`.slice(0, 139) + '…');
 });
 
-test('детали субагентов разбираются аккуратно: мусор отбрасывается, поля обрезаются', () => {
+test('subagent details are parsed carefully: garbage is discarded, fields are truncated', () => {
   const states = subagentsOf([
     { index: 0, agent: 'scout', task: 'x'.repeat(400), status: 'ok', ms: 1200 },
     {
@@ -63,7 +63,7 @@ test('детали субагентов разбираются аккуратн�
   assert.deepEqual(subagentsOf({ subagents: [] }), []);
 });
 
-test('история помнит, чем кончил каждый субагент, если pi сохранил детали', () => {
+test('history remembers how each subagent ended, if pi saved the details', () => {
   const { config, user } = fixture();
   const chat = createChat(config, user, new Date('2026-11-01T10:00:00.000Z'));
   finishChat(config, user, chat.id, 'Разошли задачи');
@@ -123,7 +123,7 @@ test('история помнит, чем кончил каждый субаге
   assert.equal(step?.subagents?.[1]?.error, 'таймаут');
 });
 
-test('в истории без деталей список детей не выдумывается', () => {
+test('in history without details the list of children is not invented', () => {
   const { config, user } = fixture();
   const chat = createChat(config, user, new Date('2026-11-01T10:00:00.000Z'));
   finishChat(config, user, chat.id, 'Разошли задачи');
@@ -162,7 +162,7 @@ test('в истории без деталей список детей не вы�
   assert.equal(step?.subagents, undefined, 'без деталей дети остаются «в очереди» — это враньё');
 });
 
-test('живой поток: прогресс детей приезжает обновлениями шага, финал — в done', async () => {
+test('live stream: the progress of children comes as step updates, the finale — in done', async () => {
   const { config, user } = fixture();
   const chat = createChat(config, user, new Date('2026-11-01T10:00:00.000Z'));
 

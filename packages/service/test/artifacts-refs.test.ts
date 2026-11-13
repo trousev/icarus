@@ -1,8 +1,8 @@
-// Адреса элементов артефакта: разметка исходника, стабильность и правка текста.
+// Artifact element refs: source annotation, stability and text edits.
 //
-// Здесь проверяется то, на чём держится ссылка из чата: адрес лежит в файле,
-// не меняется от повторной разметки, переживает правку текста и отказывает,
-// если элемент уже другой или адрес пришёл из чужого артефакта.
+// This checks what a chat link rests on: the ref lives in the file,
+// does not change on re-annotation, survives a text edit and fails
+// if the element is already different or the ref came from another artifact.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ArtifactError } from '../src/artifacts.ts';
@@ -31,11 +31,11 @@ function annotated(): { html: string; refs: ReturnType<typeof annotate>['refs'] 
   return result;
 }
 
-test('разметка: у элементов появляются адреса из id и классов', () => {
+test('annotation: elements get refs from id and classes', () => {
   const { html, refs } = annotated();
   assert.match(html, /<h1 data-icarus-ref="main\.page\/section\.hero\/h1\.title" class="title">/);
   assert.match(html, /data-icarus-ref="main\.page\/section\.cards\/div\.card\[2\]\/h3\.card-title"/);
-  // Служебная обвязка в head — не элемент предпросмотра: её не размечаем.
+  // Service scaffolding in head is not a preview element: we do not annotate it.
   assert.doesNotMatch(html, /<title data-icarus-ref/);
 
   const title = refs.find((item) => item.ref === 'main.page/section.hero/h1.title');
@@ -49,7 +49,7 @@ test('разметка: у элементов появляются адреса 
   assert.equal(container.editable, false, 'у контейнера править текст нельзя');
 });
 
-test('разметка идемпотентна: второй прогон не меняет файл и адреса', () => {
+test('annotation is idempotent: a second pass does not change the file or refs', () => {
   const first = annotate(PAGE);
   const second = annotate(first.html);
   assert.equal(second.changed, false);
@@ -58,7 +58,7 @@ test('разметка идемпотентна: второй прогон не 
   assert.deepEqual(refsOf(first.html), first.refs);
 });
 
-test('адрес переживает правку текста и новый блок рядом', () => {
+test('a ref survives a text edit and a new block next to it', () => {
   const first = annotate(PAGE);
   const edited = first.html
     .replace('Атлас', 'Атлас 2')
@@ -74,7 +74,7 @@ test('адрес переживает правку текста и новый б
   );
 });
 
-test('правка текста: меняется только содержимое, атрибуты и разметка на месте', () => {
+test('text edit: only the content changes, attributes and annotation stay', () => {
   const { html } = annotated();
   const result = replaceText(html, 'main.page/section.hero/h1.title', 'Атлас <новая версия>');
   assert.equal(result.before, 'Атлас');
@@ -85,7 +85,7 @@ test('правка текста: меняется только содержим�
   assert.equal(hashOf(result.html) === hashOf(html), false, 'исходник действительно другой');
 });
 
-test('правка сохраняет отступы вокруг текста в многострочном исходнике', () => {
+test('an edit preserves indentation around text in a multiline source', () => {
   const source = annotate(
     '<html><body><div class="box">\n  <p class="line">Старый текст</p>\n</div></body></html>',
   );
@@ -93,7 +93,7 @@ test('правка сохраняет отступы вокруг текста �
   assert.match(result.html, /<p data-icarus-ref="div\.box\/p\.line" class="line">Новый текст<\/p>/);
 });
 
-test('чужой или устаревший адрес — отказ, а не правка соседнего блока', () => {
+test('a foreign or stale ref is a failure, not an edit of a neighboring block', () => {
   const { html } = annotated();
   assert.throws(
     () => replaceText(html, 'main.page/section.hero/h2.title', 'Что-то'),
@@ -106,11 +106,11 @@ test('чужой или устаревший адрес — отказ, а не 
     () => replaceText(html, 'body/div#from-another-artifact/p', 'Что-то'),
     (error: unknown) => error instanceof ArtifactError && error.status === 409,
   );
-  // Исходник не переписан: неудачная попытка ничего не меняет.
+  // The source is not rewritten: a failed attempt changes nothing.
   assert.match(html, /Атлас/);
 });
 
-test('неоднозначный адрес и контейнер — тоже отказ', () => {
+test('an ambiguous ref and a container are also failures', () => {
   const duplicate =
     '<html><body><p data-icarus-ref="p.one">Раз</p><p data-icarus-ref="p.one">Два</p></body></html>';
   assert.throws(
@@ -129,7 +129,7 @@ test('неоднозначный адрес и контейнер — тоже �
   );
 });
 
-test('отпечаток исходника меняется только вместе с файлом', () => {
+test('the source hash changes only together with the file', () => {
   const first = annotate(PAGE);
   const again = annotate(first.html);
   assert.equal(hashOf(first.html), hashOf(again.html), 'отпечаток стабилен');

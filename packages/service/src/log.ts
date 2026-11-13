@@ -1,4 +1,4 @@
-// Логгер: человекочитаемые строки в stderr, без внешних зависимостей.
+// Logger: human-readable lines to stderr, no external dependencies.
 type Level = 'debug' | 'info' | 'warn' | 'error';
 
 const LEVELS: Record<Level, number> = { debug: 10, info: 20, warn: 30, error: 40 };
@@ -18,7 +18,7 @@ export const log = {
   error: (message: string, extra?: Record<string, unknown>) => emit('error', message, extra),
 };
 
-/** Секреты не должны попадать в логи — вырезаем всё похожее на ключ. */
+/** Secrets must not get into logs — we cut out anything that looks like a key. */
 export function redact(value: string): string {
   return value.replace(/(sk-|Bearer\s+)[A-Za-z0-9._-]{8,}/g, '$1***');
 }

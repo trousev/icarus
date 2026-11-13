@@ -1,4 +1,4 @@
-// Критик: смотрит на слабые диалоги и предлагает следующую версию промпта.
+// Critic: looks at the weak dialogues and proposes the next prompt version.
 import { chat, parseJson, MODELS } from "./api.mjs";
 import { AXES } from "./judge.mjs";
 import { transcript } from "./dialogue.mjs";
@@ -45,7 +45,7 @@ export async function critique({ persona, criteria, results, history }) {
   });
   let parsed = parseJson(raw.content);
   if (!parsed?.persona) {
-    // второй заход: длинный JSON иногда обрывается, просим короче
+    // second pass: long JSON sometimes gets truncated, we ask for a shorter one
     const retry = await chat({
       model: MODELS.critic,
       messages: [...messages, { role: "assistant", content: raw.content.slice(0, 2000) }, { role: "user", content: "JSON обрезался. Верни снова только JSON, но без повторов и лишних пояснений: persona целиком, changes, expected." }],

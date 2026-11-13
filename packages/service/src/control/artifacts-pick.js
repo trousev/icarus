@@ -1,12 +1,12 @@
-// Выбор элемента в предпросмотре артефакта.
+// Element picking in the artifact preview.
 //
-// Сервер вставляет этот скрипт в HTML-артефакт при `?pick=1` — только в
-// предпросмотре панели, файл на диске не меняется. Скрипт живёт в песочнице
-// iframe (без allow-same-origin) и разговаривает с панелью через postMessage:
-// клик по элементу отправляет адрес и цитату, правка текста — новый текст.
+// The server injects this script into an HTML artifact at `?pick=1` — only in the
+// panel preview; the file on disk does not change. The script lives in the iframe
+// sandbox (no allow-same-origin) and talks to the panel via postMessage:
+// a click on an element sends the address and quote, text editing — the new text.
 //
-// Адреса уже лежат в разметке (`data-icarus-ref`), поэтому здесь их не считаем:
-// один источник правды — исходник.
+// Addresses already live in the markup (`data-icarus-ref`), so we don't compute them
+// here: a single source of truth — the source.
 (() => {
   const ATTR = 'data-icarus-ref';
   const SOURCE = 'icarus-artifacts-pick';
@@ -91,7 +91,7 @@
     try {
       window.parent.postMessage({ source: SOURCE, ...payload }, '*');
     } catch {
-      /* родитель исчез — показывать это человеку незачем */
+      /* the parent is gone — there's no point showing this to a human */
     }
   }
 
@@ -246,7 +246,7 @@
       (event) => {
         if (toolbar.contains(event.target)) return;
         const element = closest(event.target);
-        // В режиме выбора ссылки не должны уводить со страницы: клик — это выбор.
+        // In pick mode links must not navigate away from the page: a click is a selection.
         event.preventDefault();
         event.stopPropagation();
         if (!element) {

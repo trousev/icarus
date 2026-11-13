@@ -1,26 +1,26 @@
-// Персона Икара: заменяет дефолтный системный промпт pi (это промпт кодинг-ассистента)
-// на наш icarus.md, добавляет ядро памяти и подгруженные контекстные файлы вроде AGENTS.md.
+// Icarus persona: replaces the default pi system prompt (which is a coding-assistant prompt)
+// with our icarus.md, adds the memory core and loaded context files such as AGENTS.md.
 //
-// Важно: этот обработчик ЗАМЕНЯЕТ промпт целиком, поэтому всё, что должно в нём оказаться,
-// собирается здесь же. Отдельное расширение, дописывающее что-то в before_agent_start,
-// будет затёрто, если загрузится раньше (расширения применяются по очереди).
+// Important: this handler REPLACES the prompt entirely, so everything that must appear in it
+// is assembled right here. A separate extension that appends something in before_agent_start
+// will be overwritten if it loads earlier (extensions are applied in order).
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import fs from "node:fs";
 import { buildMemoryCore, memoryPrompt } from "./lib/memory-core.ts";
 import { formatSkillsBlock, type SkillEntry } from "./lib/skills-core.ts";
 import { TIME_INSTRUCTION } from "./lib/time-core.ts";
 
-// Служебный каталог Икара: память, вложения, сессии и промпты. Лежит рядом с
-// рабочими папками, но ни в одну из них не входит — и в этом весь смысл.
+// Icarus service directory: memory, attachments, sessions and prompts. It lies next to the
+// working folders but is not inside any of them — and that is the whole point.
 const ICARUS = process.env.ICARUS_HOME ?? "/workspaces/.icarus";
 const PERSONA = `${ICARUS}/icarus.md`;
 const AGENTS = `${ICARUS}/AGENTS.md`;
 const DUMP = `${ICARUS}/.prompt-dump.txt`;
 
 /**
- * Промпт режима «правка артефакта». Сервис запускает pi прямо в папке артефакта,
- * поэтому вместо блока про workspace модель получает границы этой одной папки и
- * правила, которые иначе пришлось бы повторять человеку в каждом сообщении.
+ * Prompt of the "edit artifact" mode. The service launches pi right in the artifact folder,
+ * so instead of the workspace block the model gets the boundaries of this one folder and
+ * the rules that would otherwise have to be repeated to the person in every message.
  */
 function artifactBlock(): string {
   const slug = (process.env.ICARUS_ARTIFACT ?? "").trim();
@@ -74,8 +74,8 @@ function artifactBlock(): string {
 }
 
 function stripComments(markdown: string): string {
-  // вырезаем все блоки комментариев в цикле: внутри комментария может встретиться
-  // последовательность закрытия, и один нежадный проход оборвётся на ней
+  // cut out all comment blocks in a loop: the closing sequence may occur inside a comment,
+  // and a single non-greedy pass would stop at it
   let result = markdown;
   for (;;) {
     const next = result.replace(/<!--[\s\S]*?-->/g, "");
@@ -91,12 +91,12 @@ export default function (pi: ExtensionAPI) {
     try {
       persona = stripComments(fs.readFileSync(PERSONA, "utf8"));
     } catch {
-      /* оставляем заглушку */
+      /* leave the stub */
     }
 
-    // Карту окружения читаем сами: pi ищет AGENTS.md только вверх от рабочего
-    // каталога, а наш файл лежит вне рабочих папок. AGENTS.md самого workspace'а
-    // приезжает из pi как контекстный файл и встаёт следом.
+    // We read the environment map ourselves: pi looks for AGENTS.md only upward from the working
+    // directory, and our file lies outside the working folders. The workspace's own AGENTS.md
+    // arrives from pi as a context file and is placed right after.
     const ownContext = (event.systemPromptOptions?.contextFiles ?? []).filter(
       (file: { path: string }) => file.path !== AGENTS,
     );
@@ -104,31 +104,33 @@ export default function (pi: ExtensionAPI) {
     try {
       map = fs.readFileSync(AGENTS, "utf8").trim();
     } catch {
-      /* нет карты — работаем без неё, персона всё равно есть */
+      /* no map — we work without it, the persona is there anyway */
     }
     const contextFiles = [...(map ? [{ path: AGENTS, content: map }] : []), ...ownContext]
       .map((file: { path: string; content: string }) => `# Контекст: ${file.path}\n\n${file.content}`)
       .join("\n\n---\n\n");
 
-    // Блок памяти собирается в memory-core: и здесь, и во втором обработчике он
-    // должен звучать одинаково, иначе правила разъедутся с фактами.
+    // The memory block is assembled in memory-core: both here and in the second handler it
+    // must sound the same, otherwise the rules will drift apart from the facts.
     const memoryBlock = memoryPrompt(buildMemoryCore());
 
-    // Скиллы pi добавляет в свой сборщик промпта, а мы промпт заменяем целиком — значит,
-    // каталог собираем сами, иначе модель о скиллах просто не узнает. В каталоге только
-    // имя, описание и путь; тело скилла читается через read по совпадению с описанием.
+    // pi adds skills in its own prompt builder, and we replace the prompt entirely — so we
+    // build the catalog ourselves, otherwise the model simply will not know about skills. The
+    // catalog holds only the name, description and path; the skill body is read via read when
+    // it matches the description.
     const options = (event.systemPromptOptions ?? {}) as {
       skills?: SkillEntry[];
       selectedTools?: string[];
     };
     const skillsBlock = formatSkillsBlock(options.skills ?? [], options.selectedTools ?? []);
 
-    // Где именно идёт разговор: workspace приезжает переменной от сервиса. Без
-    // этой строки модель видела бы только «где-то есть папки» и работала бы не в той.
+    // Where exactly the conversation takes place: the workspace arrives as a variable from the
+    // service. Without this line the model would see only "there are folders somewhere" and
+    // would work in the wrong one.
     const workspace = process.env.ICARUS_WORKSPACE ?? "talk";
     const isPrivate = process.env.ICARUS_PRIVATE === "1";
-    // Артефактный разговор живёт не в workspace: блок про папку артефакта заменяет
-    // обычный, иначе модель искала бы файлы в /workspaces/<slug>.
+    // An artifact conversation does not live in a workspace: the artifact folder block replaces
+    // the ordinary one, otherwise the model would look for files in /workspaces/<slug>.
     const artifact = artifactBlock();
     const workspaceBlock = artifact || [
       '# Твой workspace',
@@ -152,9 +154,9 @@ export default function (pi: ExtensionAPI) {
         : []),
     ].join('\n');
 
-    // Канал приезжает из сервиса переменной ICARUS_CHANNEL. Учим только тот канал,
-    // где ссылка правда что-то показывает: в панели это картинка и скачивание, в
-    // Telegram — настоящее вложение. В OpenAI-совместимом API рендерить её некому.
+    // The channel arrives from the service as the ICARUS_CHANNEL variable. We teach only the
+    // channel where a link really shows something: in the panel it is an image and a download,
+    // in Telegram a real attachment. In an OpenAI-compatible API there is no one to render it.
     const channelBlock =
       process.env.ICARUS_CHANNEL === 'web'
         ? [
@@ -174,8 +176,9 @@ export default function (pi: ExtensionAPI) {
             ].join('\n')
           : '';
 
-    // TIME_INSTRUCTION — текст постоянный: сама дата в промпт не едет, иначе он менялся
-    // бы от смены даты и рвал кэш. Свежее время приезжает меткой к реплике (см. clock.ts).
+    // TIME_INSTRUCTION is a constant text: the date itself does not go into the prompt, otherwise
+    // it would change with the date and break the cache. Fresh time arrives as a label on the
+    // message (see clock.ts).
     const systemPrompt = [
       persona,
       workspaceBlock,
@@ -191,13 +194,13 @@ export default function (pi: ExtensionAPI) {
     return { systemPrompt };
   });
 
-  // Диагностика: пишем промпт на старте хода — тут он уже собран всеми расширениями
-  // (persona, memory-core и остальными), а не только нами.
+  // Diagnostics: we write the prompt at the start of a turn — here it is already assembled by
+  // all extensions (persona, memory-core and the rest), not just by us.
   pi.on("agent_start", async (_event, ctx) => {
     try {
       fs.writeFileSync(DUMP, String(ctx.getSystemPrompt?.() ?? ""));
     } catch {
-      /* диагностика не должна ломать ход */
+      /* diagnostics must not break the turn */
     }
   });
 }

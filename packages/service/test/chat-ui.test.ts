@@ -1,4 +1,4 @@
-// Страница чата: главный экран панели — диалоги, пустое состояние и композер.
+// Chat page: the panel's main screen — dialogs, empty state and composer.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { chatPage } from '../src/control/chat-ui.ts';
@@ -15,10 +15,10 @@ const SESSION: PanelSession = {
   storage: 'git · local',
 };
 
-test('стили сообщений едут общим файлом — их же берёт чат правки артефакта', () => {
+test('message styles ship as a shared file — the artifact edit chat uses the same one', () => {
   const html = chatPage(SESSION, { enabled: true });
-  // Лента, пузырь, трассировка и .md переехали в chat-messages.css: один файл
-  // на два места. Если он отвалится, ответ ИИ в боковой панели разъедется с чатом.
+  // The feed, bubble, trace and .md moved into chat-messages.css: one file
+  // for two places. If it breaks, the AI reply in the side panel drifts from the chat.
   assert.match(html, /\.turn \{ display: flex; gap: 10px; margin-bottom: 20px; \}/);
   assert.match(html, /\.turn\.user \.bubble/);
   assert.match(html, /\.md \{ font-size: 14px; line-height: 1\.65; word-break: break-word; \}/);
@@ -26,9 +26,9 @@ test('стили сообщений едут общим файлом — их ж
   assert.match(html, /@keyframes pulse/);
 });
 
-test('шапка разговора подписана каналом последней реплики', () => {
-  // Одна сессия на панель и Telegram: по файлу истории не видно, кто говорил
-  // последним, поэтому канал запоминает сервис, а панель показывает его в шапке.
+test('the conversation header is labeled with the channel of the last message', () => {
+  // One session per panel and Telegram: the history file doesn't show who spoke
+  // last, so the service remembers the channel and the panel shows it in the header.
   const html = chatPage(SESSION, { chatId: 'telegram-42', enabled: true });
   assert.match(html, /id="chat-via"/);
   assert.match(html, /\.chat-via \{/, 'стиль метки едет в страницу');
@@ -36,7 +36,7 @@ test('шапка разговора подписана каналом после
   assert.match(html, /Разговор общий с Telegram/, 'панель честно говорит, что ответ не уедет в Telegram');
 });
 
-test('чат — это лента с композером и диалогами, а не таблица настроек', () => {
+test('the chat is a feed with a composer and dialogs, not a settings table', () => {
   const html = chatPage(SESSION, { chatId: 'web-1', enabled: true });
 
   assert.match(html, /id="new-chat"/);
@@ -53,7 +53,7 @@ test('чат — это лента с композером и диалогами
   assert.doesNotMatch(html, /settings-pane|settings-tabs|settings-frame/, 'настроек поверх чата с табами больше нет');
   assert.match(html, /\/panel\/api\/chat\/image/, 'локальные картинки отдаёт сервер');
   assert.match(html, /md-image/, 'markdown-картинки рисуются');
-  // Разметка подключается раньше клиента: `markdown` — обычная глобальная функция.
+  // The renderer is wired in before the client: `markdown` is a plain global function.
   const rendererAt = html.indexOf('function imageSrc');
   const clientAt = html.indexOf('function assistantHtml');
   assert.ok(rendererAt > 0 && rendererAt < clientAt, 'markdown едет в страницу до чата');
@@ -63,10 +63,10 @@ test('чат — это лента с композером и диалогами
   assert.doesNotMatch(html, /демо-режим/i, 'чат настоящий, без имитации');
 });
 
-test('архив — секция того же сайдбара, а не отдельная страница', () => {
+test('the archive is a section of the same sidebar, not a separate page', () => {
   const html = chatPage(SESSION, { enabled: true });
-  // Разговор убирают с глаз, но не теряют: секция свёрнута, внутри тот же список,
-  // а счётчик виден и в свёрнутом виде.
+  // The conversation is hidden from view but not lost: the section is collapsed, the same list is inside,
+  // and the counter is visible even when collapsed.
   assert.match(html, /id="archive-toggle"/);
   assert.match(html, /id="archive-list"[^>]*hidden/, 'по умолчанию архив свёрнут');
   assert.match(html, /id="archive-count"[^>]*hidden/, 'счётчик появляется только когда есть что считать');
@@ -74,9 +74,9 @@ test('архив — секция того же сайдбара, а не отд
   assert.match(html, /id="chat-archived-tag"[^>]*hidden/, 'метка «в архиве» скрыта у обычного разговора');
 });
 
-test('в сайдбаре чата «Артефакты» и «Настройки» — на одном уровне', () => {
+test('in the chat sidebar "Artifacts" and "Settings" are on the same level', () => {
   const html = chatPage(SESSION, { enabled: true });
-  // Разделы настроек живут на своей странице; в чате — две двери одного уровня.
+  // Settings sections live on their own page; the chat has two doors on the same level.
   const links = [...html.matchAll(/class="side-link"[^>]*>/g)];
   assert.equal(links.length, 2, 'артефакты и настройки, без списка разделов');
   assert.match(html, /href="\/panel\/artifacts"[^>]*><span>Артефакты<\/span>/);
@@ -84,18 +84,18 @@ test('в сайдбаре чата «Артефакты» и «Настройк�
   assert.doesNotMatch(html, /<p class="side-title">/, 'заголовков групп нет');
 });
 
-test('клик по пустому месту сайдбара не сворачивает колонку диалогов', () => {
+test('clicking an empty spot in the sidebar does not collapse the dialogs column', () => {
   const html = chatPage(SESSION, { enabled: true });
-  // Отступы вокруг «ДИАЛОГИ» — просто фон: панель сворачивает только крестик,
-  // иначе любая мимоходная клика по сайдбару закрывает его.
+  // The padding around "ДИАЛОГИ" is just background: the panel only collapses on the cross,
+  // otherwise any passing click on the sidebar closes it.
   assert.doesNotMatch(html, /el\('chat-side'\)\.addEventListener/, 'сайдбар не ловит клики фоном');
   assert.match(html, /el\('close-side'\)\.onclick = closeMenu/, 'крестик по-прежнему закрывает меню');
 });
 
-test('свернуть панель можно только на мелких экранах', () => {
+test('the panel can be collapsed only on small screens', () => {
   const html = chatPage(SESSION, { enabled: true });
-  // На широком экране колонка диалогов всегда на месте: ни ☰, ни ×, ни режима
-  // «свёрнуто», иначе панель безвозвратно пропадает.
+  // On a wide screen the dialogs column is always there: neither ☰, nor ×, nor a
+  // "collapsed" mode, otherwise the panel disappears for good.
   assert.doesNotMatch(html, /side-collapsed/, 'на широком экране нет сворачивания');
   assert.match(html, /\.side-close \{ display: none;/, 'крестик скрыт по умолчанию');
   assert.match(
@@ -105,20 +105,20 @@ test('свернуть панель можно только на мелких э
   );
 });
 
-test('скролл в списке диалогов — тонкий и в стык с правой границей', () => {
+test('the scrollbar in the dialog list is thin and flush with the right edge', () => {
   const html = chatPage(SESSION, { enabled: true });
-  // Список выезжает в padding панели: полоса касается её границы, а не висит
-  // в воздухе, поэтому и толщину можно позволить вдвое меньше.
+  // The list overflows into the panel padding: the bar touches its edge instead of hanging
+  // in the air, so the thickness can be half as much.
   assert.match(html, /\.chat-list \{[\s\S]*?margin-right: -12px/, 'полоса прижата к границе панели');
   assert.match(html, /\.chat-list \{[\s\S]*?scrollbar-gutter: stable/, 'место под полосу не прыгает');
   assert.match(html, /\.chat-list::-webkit-scrollbar \{ width: 4px; \}/, 'в списке полоса 4px, а не 8px');
   assert.match(html, /\.chat-scroll::-webkit-scrollbar \{ width: 8px; \}/, 'ленту не трогаем');
 });
 
-test('скролл в поле ввода — тонкий и в стык с правой границей', () => {
+test('the scrollbar in the input field is thin and flush with the right edge', () => {
   const html = chatPage(SESSION, { enabled: true });
-  // Поле выезжает в padding рамки, как список диалогов: полоса касается границы,
-  // а не висит посреди поля рядом с кнопкой. Кнопки поэтому стоят поверх поля.
+  // The field overflows into the frame padding, like the dialog list: the bar touches the edge
+  // instead of hanging in the middle of the field next to the button. That's why the buttons sit on top of the field.
   assert.match(html, /\.composer-box textarea \{[\s\S]*?margin-right: -9px/, 'полоса прижата к границе рамки');
   assert.match(html, /\.composer-box textarea \{[\s\S]*?scrollbar-gutter: stable/, 'место под полосу не прыгает');
   assert.match(html, /\.composer-box textarea::-webkit-scrollbar \{ width: 4px; \}/, 'в поле полоса 4px');
@@ -130,18 +130,18 @@ test('скролл в поле ввода — тонкий и в стык с п�
   assert.match(html, /\.composer-box \{[\s\S]*?position: relative/, 'рамка держит кнопки внутри себя');
 });
 
-test('ширина сайдбара тянется и запоминается', () => {
+test('the sidebar width is draggable and remembered', () => {
   const html = chatPage(SESSION, { enabled: true });
-  // Ручка на правой границе: колонка следует за --side-w, на узком экране ручки нет.
+  // A handle on the right edge: the column follows --side-w, on a narrow screen there is no handle.
   assert.match(html, /id="side-resizer"/, 'у границы есть ручка');
   assert.match(html, /grid-template-columns: var\(--side-w\) minmax\(0, 1fr\)/, 'колонка следует за шириной');
   assert.match(html, /localStorage\.setItem\(SIDE_WIDTH_KEY/, 'ширина переживает перезагрузку');
   assert.match(html, /\.side-resizer \{ display: none; \}/, 'на узком экране ручки нет');
 });
 
-test('справа у чата — панель файлов рабочей папки', () => {
+test('to the right of the chat is the workspace files panel', () => {
   const html = chatPage(SESSION, { enabled: true });
-  // Панель — третья колонка сетки: дерево, предпросмотр и ручки ширины/высоты.
+  // The panel is the third grid column: tree, preview and width/height handles.
   assert.match(html, /id="files-panel"/, 'панель есть в разметке');
   assert.match(html, /id="toggle-files"/, 'кнопка в шапке открывает её');
   assert.match(html, /id="files-tree"/, 'дерево файлов');
@@ -177,8 +177,8 @@ test('справа у чата — панель файлов рабочей па
   assert.match(html, /const FILES_WIDTH_MAX = 1440/, 'потолок вдвое выше: панель можно растянуть на полэкрана');
   assert.match(html, /aria-valuemax="1440"/, 'ручка знает новый потолок');
   assert.match(html, /@media \(max-width: 1100px\)/, 'на среднем экране панель выдвигается поверх чата');
-  // Поиск и подсветка — вторая половина идеи «просмотр workspace»: файл ищут
-  // по куску текста, не зная папки, а код в предпросмотре читают глазами.
+  // Search and highlighting are the other half of the "workspace browsing" idea: a file is found
+  // by a chunk of text without knowing the folder, and the code in the preview is read visually.
   assert.match(html, /id="files-search"/, 'в панели есть поиск по файлам');
   assert.match(html, /function runFilesSearch/, 'поиск ходит в свой маршрут');
   assert.match(html, /class="srow/, 'находки рисуются строками результата');
@@ -191,10 +191,10 @@ test('справа у чата — панель файлов рабочей па
   assert.ok(highlightAt > 0 && highlightAt < clientAt, 'подсветка едет в страницу до клиента');
 });
 
-test('новый чат — черновик: workspace выбирается прямо в нём', () => {
+test('a new chat is a draft: the workspace is chosen right in it', () => {
   const html = chatPage(SESSION, { enabled: true });
-  // Кнопка сразу открывает новый чат, а выбор workspace'а живёт в его пустом
-  // состоянии: папку можно менять до первого сообщения, не теряя черновик.
+  // The button opens a new chat right away, and the workspace choice lives in its empty
+  // state: the folder can be changed before the first message without losing the draft.
   assert.match(html, /id="draft-wrap" hidden/, 'черновик спрятан до клика');
   assert.match(html, /id="draft-item"/, 'у черновика своя строка в списке');
   assert.match(html, /el\('new-chat'\)\.onclick = \(\) => startDraft\(\)/, 'клик по кнопке сразу открывает новый чат');
@@ -209,68 +209,68 @@ test('новый чат — черновик: workspace выбирается п�
   );
   assert.match(html, /async function createChat/, 'создание вынесено в отдельную функцию');
   assert.doesNotMatch(html, /newChat\(/, 'мгновенного создания больше нет');
-  // Кнопка и черновик — одна и та же высота строки, иначе список прыгает.
+  // The button and the draft are the same row height, otherwise the list jumps.
   assert.match(html, /--side-row: 58px/, 'высота строки задана один раз');
   assert.match(html, /\.new-chat \{[\s\S]*?height: var\(--side-row\)/, 'кнопка высотой со строку списка');
   assert.match(html, /\.draft-wrap \.chat-item \{[^}]*height: var\(--side-row\)/, 'черновик той же высоты');
 });
 
-test('экран выбора workspace выровнен по заголовку и без лишней подписи', () => {
+test('the workspace chooser screen is aligned to the heading and has no extra label', () => {
   const html = chatPage(SESSION, { enabled: true });
-  // «WORKSPACES» дублировала заголовок, а общее центрирование абзацев пустого
-  // чата сдвигало пояснение вправо от «Выберите workspace».
+  // "WORKSPACES" duplicated the heading, and the shared paragraph centering of the empty
+  // chat pushed the explanation to the right of "Выберите workspace".
   assert.doesNotMatch(html, /ws-kicker/, 'подпись WORKSPACES убрана');
   assert.doesNotMatch(html, /\.chat-empty p \{/, 'общее правило абзацев не задевает выбор workspace');
   assert.match(html, /\.chat-empty > p \{/, 'центрируется только текст пустого чата');
 });
 
-test('над списком диалогов нет лишнего заголовка', () => {
+test('there is no extra heading above the dialog list', () => {
   const html = chatPage(SESSION, { enabled: true });
-  // «Новый чат» и сразу разговоры: подпись «ДИАЛОГИ» дублировала очевидное.
+  // "New chat" and conversations right away: the "ДИАЛОГИ" label duplicated the obvious.
   assert.doesNotMatch(html, /dialogs-head/, 'заголовок убран, список начинается сразу');
   assert.doesNotMatch(html, /chat-count/, 'счётчика тоже нет');
 });
 
-test('клиентский скрипт чата компилируется', () => {
+test('the chat client script compiles', () => {
   const html = chatPage(SESSION, { enabled: true });
   const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1] ?? '');
   assert.ok(scripts.length >= 2);
   for (const script of scripts) assert.doesNotThrow(() => new Function(script));
 });
 
-test('без pi композер честно выключен', () => {
+test('without pi the composer is honestly disabled', () => {
   const html = chatPage(SESSION, { enabled: false });
   assert.match(html, /id="chat-input"[^>]*disabled/);
   assert.match(html, /чат недоступен/);
   assert.match(html, /"enabled":false/);
 });
 
-test('страница чата не тянет внешних файлов и не приносит пропусков', () => {
+test('the chat page pulls no external files and brings no gaps', () => {
   const html = chatPage(SESSION, { enabled: true });
   assert.doesNotMatch(html, /<script[^>]+src=/i);
   assert.doesNotMatch(html, /<link[^>]+stylesheet/i);
   assert.doesNotMatch(html, /Bearer |authorization/i, 'доступ решает SSO-прокси');
 });
 
-test('ответ можно остановить на середине: кнопка «стоп» на месте «отправить»', () => {
+test('a reply can be stopped midway: the "stop" button in place of "send"', () => {
   const html = chatPage(SESSION, { chatId: 'web-1', enabled: true });
   assert.match(html, /id="chat-stop"/, 'в композере есть кнопка остановки');
   assert.match(html, /\/panel\/api\/chat\/abort/, 'она ходит в abort, а не просто прячется');
   assert.match(html, /function setLive/, 'показ кнопки переключается вместе с живым потоком');
 });
 
-test('ход в чужом разговоре не запирает панель', () => {
+test('a run in someone else\'s conversation does not lock the panel', () => {
   const html = chatPage(SESSION, { chatId: 'web-1', enabled: true });
-  // Замок снят: переключение разговоров и новый чат больше не зависят от того,
-  // идёт ли где-то ход. Раньше тут стояли `if (streaming) return` в четырёх местах.
+  // The lock is gone: switching conversations and starting a new chat no longer depend on
+  // whether a run is going somewhere. There used to be `if (streaming) return` in four places.
   assert.doesNotMatch(html, /if \(!id \|\| streaming\) return/, 'открыть другой разговор можно всегда');
   assert.doesNotMatch(html, /function startDraft[^]*?if \(streaming\) return/, 'новый чат заводится при чужом ходе');
   assert.doesNotMatch(html, /async function openWorkspace[^]*?if \(streaming\) return/, 'папка тоже переключается');
-  // Занятость по-прежнему останавливает отправку — но только в СВОЁМ разговоре.
+  // Busyness still blocks sending — but only in YOUR OWN conversation.
   assert.match(html, /busyChats\.has\(currentId\)/, 'в занятый разговор не пишем');
 });
 
-test('сводка рассказывает про чужие ходы: старт, финал и снимок состояния', () => {
+test('the bulletin reports on other people\'s runs: start, finish and a state snapshot', () => {
   const html = chatPage(SESSION, { enabled: true });
   assert.match(html, /\/panel\/api\/chat\/events/, 'панель подписана на сводку');
   assert.match(html, /\/panel\/api\/chat\/status/, 'и сверяется снимком после переподключения');
@@ -279,7 +279,7 @@ test('сводка рассказывает про чужие ходы: стар
   assert.match(html, /event\.type !== 'idle'/, 'финал её снимает');
 });
 
-test('в сайдбаре видно, где идёт ход и где есть непрочитанное', () => {
+test('the sidebar shows where a run is going and where there is something unread', () => {
   const html = chatPage(SESSION, { enabled: true });
   assert.match(html, /class="chat-dot/, 'точка рисуется строкой списка');
   assert.match(html, /\.chat-dot\.busy/, 'жёлтая — ход идёт');
@@ -290,15 +290,15 @@ test('в сайдбаре видно, где идёт ход и где есть 
   assert.match(html, /function pruneUnread/, 'удалённые разговоры не оставляют вечную точку');
 });
 
-test('уход из разговора не бросает ход, а отписывается от потока', () => {
+test('leaving a conversation does not abandon the run, it unsubscribes from the stream', () => {
   const html = chatPage(SESSION, { enabled: true });
   assert.match(html, /function detachLive/, 'подписка снимается отдельно от остановки');
   assert.match(html, /liveAbort\.abort\(\)/, 'чтение потока рвётся, чтобы не читать в пустоту');
-  // Остановка хода — это по-прежнему явный `stopStream` с походом в abort.
+  // Stopping a run is still an explicit `stopStream` with a call to abort.
   assert.match(html, /async function stopStream/, 'стоп остался отдельной кнопкой');
 });
 
-test('субагенты в чате видны живым списком, а не одной строкой', () => {
+test('subagents in the chat are shown as a live list, not a single line', () => {
   const html = chatPage(SESSION, { enabled: true });
   assert.match(html, /function subagentsHtml/, 'список детей рисуется отдельно');
   assert.match(html, /step-update/, 'клиент понимает обновления шага');
@@ -308,18 +308,18 @@ test('субагенты в чате видны живым списком, а н
   assert.match(html, /последние /, 'если шагов больше, чем влезло, подпись честная');
 });
 
-test('поиск и открытие страницы различаются в трассировке', () => {
+test('search and page fetching are distinguished in the trace', () => {
   const html = chatPage(SESSION, { enabled: true });
-  // Класс шага строится из инструмента: по нему CSS красит «СТРАНИЦУ» иначе.
+  // The step class is built from the tool: CSS paints the "PAGE" differently based on it.
   assert.match(html, /tool-' \+/, 'шаг знает свой инструмент');
   assert.match(html, /\.trace-step\.tool-web_fetch \.trace-label/, 'у извлечения свой цвет подписи');
 });
 
-test('под полем ввода нет второго экрана прогресса: он и так в трассировке', () => {
+test('there is no second progress screen under the input field: the trace already has it', () => {
   const html = chatPage(SESSION, { enabled: true });
-  // Строка под композером осталась для отказов и подтверждений («не больше 8
-  // вложений», «остановил — можно писать дальше»). Что Икар делает прямо сейчас,
-  // она больше не пересказывает: шаги, команды и субагенты видны в трассировке.
+  // The line under the composer remains for refusals and confirmations ("no more than 8
+  // attachments", "stopped — you can keep writing"). What Icarus is doing right now,
+  // it no longer narrates: steps, commands and subagents are visible in the trace.
   assert.match(html, /id="chat-note"/, 'место для отказа под полем ввода есть');
   assert.doesNotMatch(html, /chat-working/, 'строки «что сейчас происходит» больше нет');
   assert.doesNotMatch(html, /setNote\(\(event\.step\.label/, 'шаг не переписывается под композером');
@@ -328,30 +328,30 @@ test('под полем ввода нет второго экрана прогр
   assert.match(html, /не больше ' \+ MAX_FILES/, 'отказ по вложениям по-прежнему виден');
 });
 
-/* ── клиент чата по-настоящему ───────────────────────────────────────────────
-   Разметку и имена функций проверять мало: ошибка вроде `if (streaming)` вместо
-   `if (streaming())` в разметке не видна, а панель ломает. Поэтому исполняем
-   скрипт в DOM — с заглушками сети и EventSource — и смотрим, что он делает. */
+/* ── the chat client for real ────────────────────────────────────────────────
+   Checking markup and function names is not enough: an error like `if (streaming)` instead of
+   `if (streaming())` is invisible in the markup but breaks the panel. So we execute the
+   script in the DOM — with network and EventSource stubs — and watch what it does. */
 import { parseHTML } from 'linkedom';
 
 /**
- * Ответ маршрута, который надо отдать не JSON-ом, а потоком: `text`/`done` —
- * ровно так, как их шлёт сервер в NDJSON. Без этого конец стриминга не проверить.
+ * A route response that must be returned as a stream rather than JSON: `text`/`done` —
+ * exactly as the server sends them in NDJSON. Without this the end of streaming cannot be checked.
  */
 function streamReply(...lines: string[]) {
   return { stream: lines };
 }
 
-/** Ответ маршрута, который должен провалиться (например, ход уже кончился). */
+/** A route response that must fail (e.g. the run already finished). */
 function failedReply(status = 404, body: unknown = {}) {
   return { failure: { status, body } };
 }
 
-/** Стенд: страница чата, заглушка fetch и перехваченная сводка. */
+/** Harness: the chat page, a fetch stub and an intercepted bulletin. */
 async function driveChat(
   options: {
     chatId?: string;
-    /** Что отвечать на маршруты; ключ — подстрока пути, значение получает адрес и init. */
+    /** What to answer for routes; key is a path substring, value receives the url and init. */
     routes?: Record<string, (url: string, init?: RequestInit) => unknown>;
   } = {},
 ) {
@@ -362,14 +362,14 @@ async function driveChat(
   const calls: string[] = [];
   const requests: { method: string; url: string }[] = [];
   const store = new Map<string, string>();
-  /** Что панель положила в буфер обмена: кнопка копирования проверяется отсюда. */
+  /** What the panel put on the clipboard: the copy button is checked from here. */
   const clipboard: string[] = [];
   const globals = window as unknown as Record<string, unknown>;
   window.URL.createObjectURL = () => 'blob:x';
   window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
-  // В linkedom нет scrollIntoView, а панель подкручивает список к полю новой папки.
+  // linkedom lacks scrollIntoView, and the panel scrolls the list to the new folder's field.
   (window.Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {};
-  // Скрипт чата — обычный браузерный: он читает `window.location`, а не аргумент.
+  // The chat script is a plain browser one: it reads `window.location`, not an argument.
   globals.location = { href: 'http://panel/panel/chat', search: '', pathname: '/panel/chat' };
   globals.history = { replaceState() {} };
   globals.localStorage = {
@@ -420,7 +420,7 @@ async function driveChat(
     };
   };
 
-  /** Сводка: то, что панель слушает, — храним последний экземпляр. */
+  /** Bulletin: what the panel listens to — we keep the last instance. */
   let bulletin: { onopen?: () => void; onmessage?: (message: { data: string }) => void } | null = null;
   class FakeEventSource {
     onopen: (() => void) | null = null;
@@ -457,7 +457,7 @@ async function driveChat(
     globals.localStorage,
     browserClipboard,
   );
-  // Скрипт асинхронный: даём микрозадачам и таймерам пройти.
+  // The script is async: we let microtasks and timers run.
   await new Promise((resolve) => setTimeout(resolve, 40));
 
   return {
@@ -467,17 +467,17 @@ async function driveChat(
     requests,
     store,
     clipboard,
-    /** Проиграть событие сводки, как это сделал бы сервер. */
+    /** Play a bulletin event the way the server would. */
     event: (payload: Record<string, unknown>) => bulletin?.onmessage?.({ data: JSON.stringify(payload) }),
     sidebar: () => document.getElementById('chat-list')?.innerHTML ?? '',
-    /** Тела ответа в ленте: столько плашек, сколько видит человек. */
+    /** Reply bodies in the feed: as many cards as a person sees. */
     bodies: () => document.querySelectorAll('.turn.assistant').length,
-    /** Кусок разговора ищем прямо в ленте. */
+    /** We look for a piece of the conversation right in the feed. */
     messages: () => document.getElementById('chat-messages')?.innerHTML ?? '',
   };
 }
 
-test('панель открывается с занятым чужим разговором и никуда не падает', async () => {
+test('the panel opens with someone else\'s conversation busy and does not fall over', async () => {
   const app = await driveChat({
     chatId: 'web-1',
     routes: {
@@ -491,13 +491,13 @@ test('панель открывается с занятым чужим разг�
     },
   });
 
-  // Разговор web-2 в работе: он один и помечен, остальные — нет.
+  // Conversation web-2 is running: only it is marked, the rest are not.
   assert.match(app.sidebar(), /chat-dot busy/, 'занятый разговор помечен жёлтой точкой');
   const dots = [...app.sidebar().matchAll(/chat-dot (\w+)/g)].map((match) => match[1]);
   assert.deepEqual(dots, ['busy'], 'единственная точка — на работающем разговоре');
 });
 
-test('ответ в неоткрытый разговор ставит зелёную точку, открытие её гасит', async () => {
+test('a reply in an unopened conversation sets a green dot, opening it clears it', async () => {
   const app = await driveChat({
     chatId: 'web-1',
     routes: {
@@ -511,7 +511,7 @@ test('ответ в неоткрытый разговор ставит зелё�
     },
   });
 
-  // Ход в web-2 встал, пока человек смотрел web-1.
+  // The run in web-2 finished while the person was looking at web-1.
   app.event({ userId: 'probe', chatId: 'web-2', type: 'idle', chat: { id: 'web-2', title: 'Долгий таск' } });
   await new Promise((resolve) => setTimeout(resolve, 10));
 
@@ -520,7 +520,7 @@ test('ответ в неоткрытый разговор ставит зелё�
   assert.ok(stored.includes('web-2'), 'непрочитанное переживёт перезагрузку: оно в localStorage');
 });
 
-test('сводка поднимает и снимает жёлтую точку на чужом разговоре', async () => {
+test('the bulletin raises and clears the yellow dot on someone else\'s conversation', async () => {
   const app = await driveChat({
     chatId: 'web-1',
     routes: {
@@ -544,7 +544,7 @@ test('сводка поднимает и снимает жёлтую точку 
   assert.doesNotMatch(app.sidebar(), /chat-dot busy/, 'жёлтой больше нет');
 });
 
-test('панель подписана на сводку и сверяется снимком состояния', async () => {
+test('the panel subscribes to the bulletin and checks against a state snapshot', async () => {
   const app = await driveChat({
     chatId: 'web-1',
     routes: {
@@ -561,10 +561,10 @@ test('панель подписана на сводку и сверяется с
   assert.ok(app.calls.some((call) => call.includes('/panel/api/chat/status')), 'снимок занятости спрошен при входе');
 });
 
-test('возврат в идущий ход не удваивает ответ в ленте', async () => {
-  // Настоящий возврат: история открылась, живой поток подхватился, человек ушёл
-  // и вернулся. Раньше каждая подписка добавляла своё тело — и один и тот же
-  // ответ висел в ленте столько раз, сколько раз туда заходили.
+test('returning to a running run does not duplicate the reply in the feed', async () => {
+  // A real return: the history opened, the live stream was picked up, the person left
+  // and came back. Previously each subscription added its own body — and the same
+  // reply hung in the feed as many times as you entered it.
   const app = await driveChat({
     chatId: 'web-1',
     routes: {
@@ -579,22 +579,22 @@ test('возврат в идущий ход не удваивает ответ �
   });
   assert.equal(app.bodies(), 1, 'идущий ход рисует ровно одно тело');
 
-  // Человек ушёл в другой разговор — плашка остаётся в ленте на своём месте,
-  // а не выбрасывается, и подписка снята.
+  // The person left for another conversation — the card stays in the feed in its place,
+  // not thrown out, and the subscription is removed.
   app.document.querySelector('[data-id="web-1"]').onclick?.();
   await new Promise((resolve) => setTimeout(resolve, 10));
 
-  // Вернулся — тот же самый ход, а не второй ответ.
+  // Came back — the same run, not a second reply.
   app.document.querySelector('[data-id="web-1"]').onclick?.();
   await new Promise((resolve) => setTimeout(resolve, 40));
   assert.equal(app.bodies(), 1, 'второй вход в тот же ход подхватывает то же тело');
 });
 
-test('idle из сводки не стирает уже показанный ответ', async () => {
-  // Тот самый рецидив: `idle` идёт по сводке, `done` — по потоку разговора, это
-  // разные соединения, и сводка успевает первой. Раньше `idle` выбрасывал живую
-  // плашку из ленты в расчёте, что «запись разговора заменит её», но запись
-  // никто не перерисовывал — ответ исчезал до перезагрузки страницы.
+test('idle from the bulletin does not erase an already shown reply', async () => {
+  // The same old recurrence: `idle` comes over the bulletin, `done` over the conversation stream, these
+  // are different connections, and the bulletin arrives first. Previously `idle` threw the live
+  // card out of the feed on the assumption that "the conversation record would replace it", but the record
+  // was never redrawn — the reply disappeared until the page reloaded.
   const app = await driveChat({
     chatId: 'web-1',
     routes: {
@@ -618,7 +618,7 @@ test('idle из сводки не стирает уже показанный о�
   assert.match(app.messages(), /ответ, который нельзя терять/, 'ответ остался в ленте после idle');
 });
 
-test('конец стриминга оставляет ответ в ленте, а не прячет до перезагрузки', async () => {
+test('the end of streaming leaves the reply in the feed instead of hiding it until reload', async () => {
   const app = await driveChat({
     chatId: 'web-1',
     routes: {
@@ -647,9 +647,9 @@ test('конец стриминга оставляет ответ в ленте,
   assert.equal(app.bodies(), 1, 'одно тело ответа, без дублей');
 });
 
-test('ход кончился между историей и подпиской — лента перечитывается сама', async () => {
-  // Гонка: история сказала `live`, а `/chat/stream` уже 404 — ход только что
-  // записан. Без перечитывания ленты ответа не видно до перезагрузки.
+test('the run ended between history and subscription — the feed re-reads itself', async () => {
+  // A race: history said `live`, but `/chat/stream` already 404s — the run was just
+  // recorded. Without re-reading the feed the reply is invisible until reload.
   let historyCalls = 0;
   const app = await driveChat({
     chatId: 'web-1',
@@ -677,11 +677,11 @@ test('ход кончился между историей и подпиской 
   assert.equal(app.bodies(), 1, 'пустая плашка-пустышка выброшена, остался только ответ');
 });
 
-test('панель файлов: дерево, раскрытие папки и markdown-предпросмотр', async () => {
+test('files panel: tree, folder expansion and markdown preview', async () => {
   const app = await driveChat({
     chatId: 'web-1',
     routes: {
-      // Длинный маршрут идёт первым: короткий ключ иначе перехватил бы и его.
+      // The long route comes first: otherwise the short key would intercept it too.
       '/panel/api/workspace-files/read': () => ({
         file: {
           name: 'AGENTS.md',
@@ -772,7 +772,7 @@ test('панель файлов: дерево, раскрытие папки и 
     'предпросмотр занимает нижнюю половину панели',
   );
 
-  // «В чат» — вставка, а не отправка: набранное остаётся, путь дописывается.
+  // "To chat" is insertion, not sending: what's typed stays, the path is appended.
   const composer = app.document.getElementById('chat-input');
   composer.value = 'Проверь ';
   app.document.querySelector('.files-send')?.dispatchEvent(new app.window.Event('click', { bubbles: true }));
@@ -784,7 +784,7 @@ test('панель файлов: дерево, раскрытие папки и 
     'повторная вставка не переписывает прошлое',
   );
 
-  // Повторный клик по выбранному файлу возвращает дереву всю высоту панели.
+  // Clicking the selected file again gives the tree back the full panel height.
   app.document
     .querySelector('.frow[data-path="projects/AGENTS.md"]')
     ?.dispatchEvent(new app.window.Event('click', { bubbles: true }));
@@ -796,7 +796,7 @@ test('панель файлов: дерево, раскрытие папки и 
   assert.equal(app.store.get('icarus.files-open'), '0', 'закрытие тоже запоминается');
 });
 
-test('копирование содержимого — у текста, но не у картинки', async () => {
+test('content copying is available for text but not for an image', async () => {
   const markdown = '# Проект\n\nТекст файла.';
   const app = await driveChat({
     chatId: 'web-1',
@@ -848,7 +848,7 @@ test('копирование содержимого — у текста, но н
 
   preview.querySelector('.files-copy')?.dispatchEvent(new app.window.Event('click', { bubbles: true }));
   await new Promise((resolve) => setTimeout(resolve, 20));
-  // В буфер едет исходный markdown: отрисованный html при вставке в редактор бесполезен.
+  // The raw markdown goes to the clipboard: rendered html is useless when pasting into an editor.
   assert.equal(app.clipboard.at(-1), markdown, 'скопирован исходный текст, а не html');
   assert.ok(
     preview.querySelector('.files-copy')?.classList.contains('copied'),
@@ -863,7 +863,7 @@ test('копирование содержимого — у текста, но н
   assert.ok(preview.querySelector('.files-dl'), 'скачивание у картинки осталось');
 });
 
-test('таблицы в репликах и предпросмотре — со своими стилями и прокруткой', () => {
+test('tables in messages and preview have their own styles and scrolling', () => {
   const html = chatPage(SESSION, { enabled: true });
   assert.match(html, /function isTableDivider/, 'markdown чата умеет таблицы');
   assert.match(html, /class="md-table"/, 'таблица оборачивается в блок с прокруткой');
@@ -872,7 +872,7 @@ test('таблицы в репликах и предпросмотре — со 
   assert.match(html, /\.md \.md-table th, \.md \.md-table td/, 'ячейки подписаны');
 });
 
-test('удаление: файл спрашивает, пустая папка — нет, непустая — да', async () => {
+test('deletion: a file asks, an empty folder does not, a non-empty one does', async () => {
   const wait = (ms = 50) => new Promise((resolve) => setTimeout(resolve, ms));
   const deleted = new Set<string>();
   const top = [
@@ -901,7 +901,7 @@ test('удаление: файл спрашивает, пустая папка �
         const parsed = new URL(String(url), 'http://panel');
         const at = parsed.searchParams.get('path') || '';
         if (init?.method === 'DELETE') {
-          // Непустая папка без force отказывает ровно так, как это делает сервер.
+          // A non-empty folder without force refuses exactly the way the server does.
           if (at === 'projects' && parsed.searchParams.get('force') !== '1') {
             return { failure: { status: 409, body: { error: { message: 'папка не пуста' } } } };
           }
@@ -935,7 +935,7 @@ test('удаление: файл спрашивает, пустая папка �
   app.document.getElementById('toggle-files').onclick?.();
   await wait();
 
-  // Корневой AGENTS.md — инструкции workspace: корзины у него нет вовсе.
+  // The root AGENTS.md holds workspace instructions: it has no trash can at all.
   assert.ok(app.document.querySelector('.frow[data-path="AGENTS.md"]'), 'AGENTS.md виден в дереве');
   assert.equal(
     app.document.querySelector('.frow[data-path="AGENTS.md"] .fdel'),
@@ -944,7 +944,7 @@ test('удаление: файл спрашивает, пустая папка �
   );
   assert.ok(app.document.querySelector('.frow[data-path="plan.txt"] .fdel'), 'у обычного файла корзина есть');
 
-  // Файл всегда спрашивает. Отмена — ни одного запроса.
+  // A file always asks. Cancelling means not a single request.
   clickDelete('plan.txt');
   await wait(20);
   let modal = app.document.querySelector('.ws-modal');
@@ -955,7 +955,7 @@ test('удаление: файл спрашивает, пустая папка �
   assert.equal(app.document.querySelector('.ws-modal'), null, 'окно закрылось');
   assert.equal(deletes().length, 0, 'отмена ничего не удаляет');
 
-  // Подтвердили — файл исчез из дерева и запрос ушёл без force.
+  // Confirmed — the file disappeared from the tree and the request went out without force.
   clickDelete('plan.txt');
   await wait(20);
   modal = app.document.querySelector('.ws-modal');
@@ -964,7 +964,7 @@ test('удаление: файл спрашивает, пустая папка �
   assert.ok(deletes().some((request) => request.url.includes('path=plan.txt')));
   assert.equal(app.document.querySelector('.frow[data-path="plan.txt"]'), null, 'строка файла пропала');
 
-  // Пустая папка удаляется сразу: окна нет, запрос есть.
+  // An empty folder is deleted immediately: no dialog, but a request.
   const beforeEmpty = deletes().length;
   clickDelete('empty');
   await wait(80);
@@ -972,7 +972,7 @@ test('удаление: файл спрашивает, пустая папка �
   assert.ok(deletes().length > beforeEmpty, 'запрос на удаление пустой папки ушёл');
   assert.equal(app.document.querySelector('.frow[data-path="empty"]'), null, 'пустая папка пропала');
 
-  // Непустая папка: сервер отвечает 409, панель спрашивает, потом повторяет с force.
+  // A non-empty folder: the server answers 409, the panel asks, then repeats with force.
   clickDelete('projects');
   await wait(80);
   modal = app.document.querySelector('.ws-modal');
@@ -1002,12 +1002,12 @@ test('удаление: файл спрашивает, пустая папка �
   assert.equal(app.document.querySelector('.frow[data-path="projects"]'), null, 'непустая папка удалена');
 });
 
-/* ── команды в веб-чате ──────────────────────────────────────────────────────
-   Раньше команды разбирал только Telegram, а «/stats» из панели уезжал в pi
-   обычной репликой. Здесь проверяем, что палитра показывает и свои команды,
-   и команды pi, а выполнение не превращается в ход модели. */
+/* ── commands in the web chat ────────────────────────────────────────────────
+   Previously only Telegram parsed commands, and "/stats" from the panel went to pi
+   as a regular message. Here we check that the palette shows both its own commands
+   and pi's commands, and that execution does not turn into a model run. */
 
-/** Синтетическое нажатие: linkedom не умеет KeyboardEvent, а `key` нужен. */
+/** Synthetic keypress: linkedom does not support KeyboardEvent, and `key` is needed. */
 function pressKey(app: Awaited<ReturnType<typeof driveChat>>, input: unknown, key: string) {
   const event = app.document.createEvent('Event');
   event.initEvent('keydown', true, true);
@@ -1015,7 +1015,7 @@ function pressKey(app: Awaited<ReturnType<typeof driveChat>>, input: unknown, ke
   (input as { dispatchEvent(event: unknown): boolean }).dispatchEvent(event);
 }
 
-test('палитра показывает свои команды сразу, а команды pi — после get_commands', async () => {
+test('the palette shows its own commands right away, and pi commands after get_commands', async () => {
   const app = await driveChat({
     chatId: 'web-1',
     routes: {
@@ -1044,7 +1044,7 @@ test('палитра показывает свои команды сразу, а
   assert.match(palette.innerHTML, /\/skill:demo/, 'команда pi приехала из get_commands');
   assert.match(palette.innerHTML, /скилл/, 'источник команды подписан');
 
-  // Стрелка вниз и Enter дописывают команду, но не отправляют её.
+  // Arrow down and Enter complete the command but do not send it.
   pressKey(app, input, 'ArrowDown');
   pressKey(app, input, 'Enter');
   assert.equal(input.value, '/compact ');
@@ -1052,7 +1052,7 @@ test('палитра показывает свои команды сразу, а
   assert.ok(!app.calls.some((url) => url.includes('/chat/send')), 'отправки не было');
 });
 
-test('команда чата выполняется сервером и отвечает плашкой, а не ходом модели', async () => {
+test('a chat command is executed by the server and answers with a card, not a model run', async () => {
   const commands: Array<Record<string, unknown>> = [];
   const app = await driveChat({
     chatId: 'web-1',
@@ -1088,7 +1088,7 @@ test('команда чата выполняется сервером и отв�
   assert.equal(input.value, '', 'поле очищено после выполнения');
 });
 
-test('команда pi не перехватывается: уезжает в разговор обычной репликой', async () => {
+test('a pi command is not intercepted: it goes to the conversation as a regular message', async () => {
   const commands: Array<Record<string, unknown>> = [];
   const sent: Array<Record<string, unknown>> = [];
   const app = await driveChat({
@@ -1126,7 +1126,7 @@ test('команда pi не перехватывается: уезжает в �
   assert.match(app.messages(), /скилл сработал/);
 });
 
-test('/clear оставляет старую ленту и рисует границу контекста', async () => {
+test('/clear keeps the old feed and draws a context boundary', async () => {
   let historyCalls = 0;
   const app = await driveChat({
     chatId: 'web-1',
@@ -1163,7 +1163,7 @@ test('/clear оставляет старую ленту и рисует гран
   assert.match(app.messages(), /Контекст очищен/);
 });
 
-test('/rename обновляет шапку и сайдбар без перезагрузки ленты', async () => {
+test('/rename updates the header and sidebar without reloading the feed', async () => {
   const app = await driveChat({
     chatId: 'web-1',
     routes: {
@@ -1196,7 +1196,7 @@ test('/rename обновляет шапку и сайдбар без перез�
   assert.match(app.messages(), /старая реплика/, 'лента не перечитывалась');
 });
 
-test('папки в меню: группировка, перенос из меню и свёрнутость', async () => {
+test('folders in the menu: grouping, moving from the menu and collapsed state', async () => {
   const posted: string[] = [];
   const folder = { id: 'f-work', name: 'Работа', createdAt: '2026-11-01T10:00:00.000Z', collapsed: false };
   const app = await driveChat({
@@ -1218,7 +1218,7 @@ test('папки в меню: группировка, перенос из мен
         const method = init?.method || 'GET';
         if (method === 'GET') return { folders: [folder] };
         posted.push(method + ' ' + url + ' ' + String(init?.body ?? ''));
-        // Создание отдаёт новую папку, правка — ту же, с новым состоянием.
+        // Create returns a new folder, edit returns the same one with a new state.
         if (method === 'POST') return { folder: { ...folder, id: 'f-home', name: 'Дом' } };
         return { folder: { ...folder, collapsed: true } };
       },
@@ -1229,12 +1229,12 @@ test('папки в меню: группировка, перенос из мен
     },
   });
 
-  // Две полки: папка с разговором и «Входящие» для всех остальных.
+  // Two shelves: a folder with a conversation and "Inbox" for all the rest.
   assert.match(app.sidebar(), /folder-name">Работа/);
   assert.match(app.sidebar(), /folder-name">Входящие/);
   assert.match(app.sidebar(), /chat-item-title">Разговор/);
 
-  // «⋯» на разговоре открывает меню: папки и «Входящие» — тот же перенос, но без мыши.
+  // "⋯" on a conversation opens the menu: folders and "Inbox" are the same move, but without a mouse.
   app.document.querySelector('.chat-more[data-id="web-1"]')?.click();
   const menu = app.document.getElementById('chat-menu');
   assert.ok(menu, 'кнопка «⋯» открывает меню переноса');
@@ -1247,7 +1247,7 @@ test('папки в меню: группировка, перенос из мен
   );
   assert.equal(app.document.getElementById('chat-menu'), null, 'меню закрылось после выбора');
 
-  // Клик по заголовку сворачивает папку: состояние помнит сервер, а не браузер.
+  // Clicking the heading collapses the folder: the server remembers the state, not the browser.
   (app.document.querySelector('.folder-head[data-folder="f-work"]') as unknown as { click: () => void }).click();
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.ok(
@@ -1256,7 +1256,7 @@ test('папки в меню: группировка, перенос из мен
   );
   assert.match(app.sidebar(), /folder-head collapsed/);
 
-  // Новая папка заводится строкой в списке, без модалки.
+  // A new folder is created as a row in the list, without a modal.
   app.document.getElementById('new-folder')?.click();
   const input = app.document.getElementById('folder-new-name');
   assert.ok(input, 'по «+ Папка» появляется поле имени');
@@ -1271,7 +1271,7 @@ test('папки в меню: группировка, перенос из мен
   assert.match(app.sidebar(), /folder-name">Дом/);
 });
 
-test('поиск показывает совпадения и в свёрнутой папке', async () => {
+test('search shows matches even in a collapsed folder', async () => {
   const app = await driveChat({
     chatId: 'web-1',
     routes: {
@@ -1281,7 +1281,7 @@ test('поиск показывает совпадения и в свёрнут�
         messages: [],
         live: false,
       }),
-      // Сервер ищет по заголовку, панель только рисует ответ: здесь он всегда один.
+      // The server searches by title, the panel just draws the response: here it is always one.
       '/panel/api/chats': () => ({
         chats: [{ id: 'web-1', title: 'Сводка по «Атласу»', folder: 'f-work' }],
       }),
@@ -1291,8 +1291,8 @@ test('поиск показывает совпадения и в свёрнут�
     },
   });
 
-  // Свёрнутая папка не должна прятать найденное: иначе «ничего не найдено» —
-  // ложь, совпадение просто лежит в закрытой полке.
+  // A collapsed folder must not hide what was found: otherwise "nothing found" is
+  // a lie, the match simply lies on a closed shelf.
   assert.doesNotMatch(app.sidebar(), /chat-item-title">Сводка/, 'до поиска папка свёрнута');
   const search = app.document.getElementById('chat-search') as unknown as {
     value: string;
@@ -1305,12 +1305,12 @@ test('поиск показывает совпадения и в свёрнут�
   assert.match(app.sidebar(), /chat-item-title">Сводка по «Атласу»/, 'найденное видно и в свёрнутой папке');
 });
 
-/* ── архив ───────────────────────────────────────────────────────────────────
-   Архив — это не удаление: разговор уходит из ежедневного списка, но история
-   остаётся, и вернуть его можно оттуда же. Проверяем на живом клиенте. */
+/* ── archive ─────────────────────────────────────────────────────────────────
+   The archive is not deletion: the conversation leaves the daily list, but the history
+   stays, and you can bring it back from there too. We check on the live client. */
 type FakeChat = { id: string; title: string; workspace: string; preview: string };
 
-/** Заглушка сервера чата: список и история делят один набор архивных отметок. */
+/** Chat server stub: the list and the history share one set of archive flags. */
 function archiveRoutes(all: FakeChat[], archived: Set<string>) {
   return {
     '/panel/api/chat/status': () => ({ busy: [] }),
@@ -1337,7 +1337,7 @@ function archiveRoutes(all: FakeChat[], archived: Set<string>) {
 const архиве = (app: Awaited<ReturnType<typeof driveChat>>, id: string) =>
   app.document.getElementById(id);
 
-test('«В архив» убирает разговор из списка, а не удаляет его', async () => {
+test('"To archive" removes the conversation from the list instead of deleting it', async () => {
   const archived = new Set<string>();
   const all: FakeChat[] = [
     { id: 'web-1', title: 'Налоги', workspace: 'talk', preview: 'Разбери документы' },
@@ -1363,7 +1363,7 @@ test('«В архив» убирает разговор из списка, а н
   assert.match(архиве(app, 'archive-list').innerHTML, /data-restore/, 'и его можно вернуть');
 });
 
-test('архивный разговор открывается из архива и возвращается в ежедневный список', async () => {
+test('an archived conversation opens from the archive and returns to the daily list', async () => {
   const archived = new Set(['web-old']);
   const all: FakeChat[] = [
     { id: 'web-1', title: 'Новый', workspace: 'talk', preview: 'привет' },
@@ -1390,7 +1390,7 @@ test('архивный разговор открывается из архива
   assert.equal(архиве(app, 'chat-archived-tag').hidden, true, 'метка в шапке снята');
 });
 
-test('имя разговора из списка правится карандашом и Enter', async () => {
+test('the conversation name in the list is edited with a pencil and Enter', async () => {
   const app = await driveChat({
     chatId: 'web-1',
     routes: {
@@ -1416,7 +1416,7 @@ test('имя разговора из списка правится каранд�
     },
   });
 
-  // Карандаш живёт на строке списка: двойной клик по имени делает то же самое.
+  // The pencil lives on the list row: double-clicking the name does the same thing.
   const pencil = app.document.querySelector('.chat-rename') as unknown as {
     onclick: (event: { stopPropagation(): void }) => void;
   };
@@ -1439,7 +1439,7 @@ test('имя разговора из списка правится каранд�
   assert.doesNotMatch(app.sidebar(), /chat-item-input/, 'поле закрылось');
 });
 
-test('имя, придуманное моделью, приезжает сводкой и меняет шапку на лету', async () => {
+test('a name invented by the model arrives via the bulletin and changes the header on the fly', async () => {
   const app = await driveChat({
     chatId: 'web-1',
     routes: {

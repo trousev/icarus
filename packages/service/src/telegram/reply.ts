@@ -1,19 +1,19 @@
-// Живой ответ в Telegram: одно сообщение, которое дописывается правками.
+// A live reply in Telegram: a single message that is appended to by edits.
 //
-// Правки дозированы: Telegram не любит, когда сообщение меняют чаще раза в секунду
-// (429), а модель отдаёт ответ кусками по паре знаков. Поэтому текст копится, а
-// сообщение обновляется не чаще `intervalMs`; финальная правка — всегда.
+// Edits are dosed: Telegram doesn't like a message being changed more than once a second
+// (429), while the model streams the answer in small chunks. So the text accumulates, and the
+// message is updated no more often than `intervalMs`; the final edit always happens.
 //
-// Предел Telegram в 4096 знаков обходим, разрезая ответ на несколько сообщений:
-// активное доводим до границы и заводим следующее. Так длинный ответ доезжает
-// целиком, а не обрывается на полуслове.
+// We get around Telegram's 4096-character limit by cutting the answer into several messages:
+// we bring the active one up to the boundary and start the next. Thus a long answer arrives
+// whole instead of being cut off mid-word.
 //
-// Сообщения-заготовки с многоточием нет: пока ответа ещё нет, в чате пусто, а
-// занятость показывает действие Telegram (см. chat-action.ts). Сообщение заводит
-// первая же порция текста — и дальше правится, пока ответ не кончится.
+// There's no placeholder message with an ellipsis: while the answer isn't there yet, the chat is empty, and
+// busyness is shown by the Telegram action (see chat-action.ts). The message is started by
+// the very first portion of text — and then edited until the answer ends.
 //
-// Что ход делает прямо сейчас, словами в сообщении не пишем: это был лишний текст,
-// который человек читает вместо ответа.
+// We don't write in words in the message what the turn is doing right now: that was extra text
+// that the person reads instead of the answer.
 import { log } from '../log.ts';
 import {
   ACTION_GAP_MS,
@@ -25,15 +25,15 @@ import {
 import { describeTelegramError, TelegramError, type SendOptions, type TelegramApi } from './api.ts';
 import { htmlToPlain, renderHtml } from './format.ts';
 
-/** Предел одного сообщения Telegram. */
+/** The limit of a single Telegram message. */
 export const MESSAGE_LIMIT = 4096;
-/** Режем раньше предела: запас на разметку вокруг текста. */
+/** We cut earlier than the limit: a margin for the markup around the text. */
 export const SAFE_LIMIT = 3800;
 
 /**
- * Где разрезать длинный текст: по пустой строке, потом по строке, потом по пробелу.
- * Граница ищется только во второй половине куска — иначе короткий абзац в начале
- * отрезал бы почти всё сообщение.
+ * Where to cut long text: at an empty line, then at a line, then at a space.
+ * The boundary is looked for only in the second half of the chunk — otherwise a short paragraph at the start
+ * would cut off almost the whole message.
  */
 export function splitPoint(text: string, limit: number): number {
   const window = text.slice(0, limit);
@@ -45,22 +45,22 @@ export function splitPoint(text: string, limit: number): number {
 }
 
 export type ReplyOptions = {
-  /** Минимум между правками одного сообщения. */
+  /** Minimum between edits of one message. */
   intervalMs?: number;
-  /** Минимум между действиями Telegram; в тестах схлопывают в ноль. */
+  /** Minimum between Telegram actions; in tests it's collapsed to zero. */
   actionGapMs?: number;
-  /** Через сколько повторять действие, пока ход идёт. */
+  /** After how long to repeat the action while the turn is running. */
   actionIntervalMs?: number;
-  /** Часы: в тестах подменяются, чтобы не ждать throttle. */
+  /** Clock: in tests it's swapped out so we don't wait for the throttle. */
   now?: () => number;
   /**
-   * Топик, в котором идёт разговор: новые сообщения и «печатает…» уезжают туда.
-   * Правка сообщения номера топика не требует — он уже в самом сообщении.
+   * The topic in which the conversation goes: new messages and "typing…" go there.
+   * Editing a message doesn't require the topic number — it's already in the message itself.
    */
   threadId?: number | null;
   /**
-   * Сообщение человека внутри того же топика: ответом на него Telegram кладёт ответ
-   * в топик, даже если `message_thread_id` отобьёт (см. TelegramApi.sendMessage).
+   * The person's message inside the same topic: by replying to it Telegram puts the reply
+   * in the topic even if `message_thread_id` is rejected (see TelegramApi.sendMessage).
    */
   anchorMessageId?: number;
 };
@@ -73,13 +73,13 @@ export class TelegramReply {
   private threadId: number | null;
   private anchorMessageId: number | undefined;
 
-  /** Текст активного сообщения; всё, что не влезло раньше, уже разослано. */
+  /** Text of the active message; everything that didn't fit earlier has already been sent. */
   private tail = '';
-  /** Чем показываем занятость; null — «ничего не делаем», индикатор гаснет сам. */
+  /** What we show busyness with; null — "doing nothing", the indicator goes out by itself. */
   private action: ChatAction | null = null;
-  /** Когда поставили текущее действие: по этому времени стикер-шутка перестаёт врать. */
+  /** When the current action was set: by this time the sticker joke stops lying. */
   private actionAt = 0;
-  /** Когда действие уехало в Telegram: между отправками держим паузу. */
+  /** When the action went to Telegram: we keep a pause between sends. */
   private actionSentAt = 0;
   private actionGapMs: number;
   private actionIntervalMs: number;
@@ -87,10 +87,10 @@ export class TelegramReply {
   private lastEdit = 0;
   private timer: NodeJS.Timeout | null = null;
   private actionTimer: NodeJS.Timeout | null = null;
-  /** Правки идут по очереди: две одновременные правки одного сообщения дерутся. */
+  /** Edits go one at a time: two simultaneous edits of one message fight each other. */
   private chain: Promise<void> = Promise.resolve();
   private finished = false;
-  /** Последняя отправка не удалась: ответ человеку не доехал (см. failed). */
+  /** The last send failed: the answer didn't reach the person (see failed). */
   private failure: Error | null = null;
 
   constructor(api: TelegramApi, chatId: number, options: ReplyOptions = {}) {
@@ -105,33 +105,33 @@ export class TelegramReply {
   }
 
   /**
-   * Ответ не доехал: последняя отправка сорвалась. По этому флагу бот говорит
-   * человеку в корне чата — в топике он ждал бы молча.
+   * The answer didn't arrive: the last send failed. By this flag the bot tells the person
+   * in the chat root — in the topic they would have waited in silence.
    */
   get failed(): Error | null {
     return this.failure;
   }
 
   /**
-   * Ход начался. Сообщение не заводим: человек увидит ответ, когда тот появится,
-   * а до тех пор занятость показывает действие. Оно задаётся на входе — расшифровка
-   * голосового начинается раньше, чем в ход вступит модель, и обещать мысль в этот
-   * момент нечестно.
+   * The turn started. We don't start a message: the person will see the answer when it appears,
+   * and until then busyness is shown by the action. It's set at the entrance — voice
+   * transcription starts before the model enters the turn, and promising thought at that
+   * moment would be dishonest.
    */
   start(action: ChatAction = THINKING_ACTION): void {
     this.setAction(action);
   }
 
-  /** Кусок видимого ответа модели. */
+  /** A piece of the model's visible answer. */
   push(delta: string): void {
     this.tail += delta;
     this.schedule();
   }
 
   /**
-   * Преобразует ещё не показанный хвост ответа. Так бот убирает из текста ссылки
-   * на файлы: сами файлы он отправляет вложением, а путь в сообщении человеку
-   * не нужен. Уже разосланные куски не трогаем — их не переписать.
+   * Transforms the not-yet-shown tail of the answer. Thus the bot removes links to files
+   * from the text: it sends the files themselves as attachments, and the person doesn't
+   * need the path in the message. We don't touch already-sent pieces — they can't be rewritten.
    */
   mapTail(transform: (tail: string) => string): void {
     this.tail = transform(this.tail);
@@ -139,9 +139,9 @@ export class TelegramReply {
   }
 
   /**
-   * Чем показывать занятость прямо сейчас. null — ход ничего не делает: ждёт
-   * человека (вопрос, вход в MCP, разрешение), и молчащий индикатор тут честнее
-   * любого действия — оно погаснет само через несколько секунд.
+   * What to show busyness with right now. null — the turn is doing nothing: waiting for
+   * the person (a question, MCP login, permission), and a silent indicator here is more honest
+   * than any action — it will go out by itself in a few seconds.
    */
   setAction(action: ChatAction | null): void {
     if (this.finished || action === this.action) return;
@@ -151,16 +151,16 @@ export class TelegramReply {
       this.stopAction();
       return;
     }
-    // Отправляем сразу, не дожидаясь тика: иначе человек ещё несколько секунд
-    // видит действие прошлой фазы, которое уже неправда.
+    // We send immediately without waiting for the tick: otherwise the person sees for a few more seconds
+    // the action of the previous phase, which is no longer true.
     this.keepAction();
     this.sendActionIfDue();
   }
 
   /**
-   * Ход закончился: индикатору больше нечего повторять, доводим текст до конца.
-   * Пустой ответ (одни тулы без слов) закрываем коротким `fallback` — иначе
-   * человек остался бы с висящим многоточием.
+   * The turn ended: the indicator has nothing more to repeat, we bring the text to the end.
+   * An empty answer (only tools without words) we close with a short `fallback` — otherwise
+   * the person would be left with a hanging ellipsis.
    */
   async finish(fallback = 'Готово.'): Promise<void> {
     this.finished = true;
@@ -178,9 +178,9 @@ export class TelegramReply {
   }
 
   /**
-   * Приводит сообщения в соответствие с тем, что уже накопилось. Пока хвост не
-   * влезает в одно сообщение, режем его: активное дописываем до границы, остаток
-   * уезжает следующим сообщением, и дальше правим уже его.
+   * Brings the messages in line with what has already accumulated. While the tail doesn't
+   * fit into one message, we cut it: we append the active one up to the boundary, the remainder
+   * goes as the next message, and then we edit that one.
    */
   private async refresh(): Promise<void> {
     while (this.tail.length > SAFE_LIMIT) {
@@ -189,7 +189,7 @@ export class TelegramReply {
       const head = this.tail.slice(0, cut);
       this.tail = this.tail.slice(cut);
       await this.write(this.messageId, head);
-      // Активное сообщение стало законченным: следующая запись заведёт новое.
+      // The active message has become finished: the next write will start a new one.
       this.messageId = null;
     }
 
@@ -199,10 +199,10 @@ export class TelegramReply {
   }
 
   /**
-   * Пишет текст в активное сообщение, а если его ещё нет — заводит новое.
+   * Writes text into the active message, and if there isn't one yet — starts a new one.
    *
-   * Модель отвечает markdown, а Telegram без `parse_mode` показывает его как есть:
-   * звёздочки, решётки, обратные кавычки. Разметку собираем сами (см. format.ts).
+   * The model answers in markdown, and Telegram without `parse_mode` shows it as is:
+   * asterisks, hashes, backticks. We build the markup ourselves (see format.ts).
    */
   private async write(messageId: number | null, text: string): Promise<void> {
     if (!text) return;
@@ -210,18 +210,18 @@ export class TelegramReply {
     try {
       await this.deliver(messageId, html, { parseMode: 'HTML' });
     } catch (error) {
-      // Разметка не понравилась Telegram: ответ важнее курсива, поэтому повторяем
-      // тем же текстом без тегов — такой принимается всегда.
+      // Telegram didn't like the markup: the answer is more important than italics, so we retry
+      // with the same text without tags — that is always accepted.
       if (!isMarkupRejected(error)) throw error;
       log.warn('телеграм: разметка не принята — отправляю без неё', { error: describeTelegramError(error) });
       await this.deliver(messageId, htmlToPlain(html), {});
     }
     this.lastEdit = this.now();
-    // Доехало: прошлые сбои больше не в счёт — человек видит ответ.
+    // It arrived: past failures no longer count — the person sees the answer.
     this.failure = null;
   }
 
-  /** Отправка или правка — ровно один вызов Bot API. */
+  /** Send or edit — exactly one Bot API call. */
   private async deliver(messageId: number | null, text: string, options: SendOptions): Promise<void> {
     if (messageId === null) {
       const sent = await this.api.sendMessage(this.chatId, text, this.threadId, this.anchorMessageId, options);
@@ -246,10 +246,10 @@ export class TelegramReply {
     this.timer = null;
   }
 
-  /** Очередь правок: следующая начинается после предыдущей, сбои не рвут цепочку. */
+  /** Edit queue: the next starts after the previous, failures don't break the chain. */
   private enqueue(task: () => Promise<void>): Promise<void> {
     this.chain = this.chain.then(task).catch((error) => {
-      // Сбой запоминаем: по нему бот скажет человеку в корне, что ответ не доехал.
+      // We remember the failure: by it the bot will tell the person in the root that the answer didn't arrive.
       this.failure = error instanceof Error ? error : new Error(String(error));
       log.warn('телеграм: ответ не обновился', { error: describeTelegramError(error) });
     });
@@ -257,9 +257,9 @@ export class TelegramReply {
   }
 
   /**
-   * Держит действие живым: клиент забывает его через пять секунд, а ход может
-   * идти минутами. Действие читается из поля на каждом тике, поэтому смена фазы —
-   * просто новое значение, а не перезапуск цикла.
+   * Keeps the action alive: the client forgets it after five seconds, while a turn can
+   * go on for minutes. The action is read from the field on every tick, so a phase change is
+   * just a new value, not a restart of the loop.
    */
   private keepAction(): void {
     if (this.actionTimer) return;
@@ -273,7 +273,7 @@ export class TelegramReply {
     this.actionTimer = null;
   }
 
-  /** Слишком частые смены фаз схлопываем: успевшее действие и так свежее. */
+  /** We collapse too-frequent phase changes: the action that got through is fresh enough anyway. */
   private sendActionIfDue(): void {
     if (this.now() - this.actionSentAt < this.actionGapMs) return;
     this.sendAction();
@@ -288,7 +288,7 @@ export class TelegramReply {
     });
   }
 
-  /** Затянувшаяся шутка перестаёт быть шуткой: стикер заменяем на честное «печатает». */
+  /** A drawn-out joke stops being a joke: we replace the sticker with an honest "typing". */
   private currentAction(): ChatAction | null {
     if (this.action !== THINKING_ACTION) return this.action;
     return this.now() - this.actionAt >= STICKER_LIE_MS ? 'typing' : this.action;
@@ -296,8 +296,8 @@ export class TelegramReply {
 }
 
 /**
- * Telegram отверг разметку, а не сообщение: 400 и «can't parse entities» с
- * вариантами. Так выглядит любой наш промах в HTML — лечится повтором без тегов.
+ * Telegram rejected the markup, not the message: 400 and "can't parse entities" with
+ * variants. That's what any of our HTML slip-ups looks like — it's cured by a retry without tags.
  */
 function isMarkupRejected(error: unknown): boolean {
   if (!(error instanceof TelegramError)) return false;

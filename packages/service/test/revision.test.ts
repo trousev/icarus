@@ -1,5 +1,5 @@
-// Отпечаток кода сервиса: compose по нему понимает, что исходники в bind-mount'е сменились,
-// и пересоздаёт контейнер. Без него деплой зелёный, а работает старый код из памяти node.
+// Service code fingerprint: compose uses it to tell that the sources in the bind-mount changed,
+// and recreates the container. Without it the deploy is green but old code from node memory runs.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -9,7 +9,7 @@ import { sourceRevision } from '../src/docker/revision.ts';
 
 const ENTRIES = ['packages/service/src', 'packages/extensions', 'package.json'];
 
-/** Раскладывает файлы по временному «репозиторию» и возвращает его корень. */
+/** Lays out files in a temporary "repository" and returns its root. */
 function sandbox(files: Record<string, string>): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-rev-'));
   write(root, files);
@@ -24,7 +24,7 @@ function write(root: string, files: Record<string, string>): void {
   }
 }
 
-test('отпечаток детерминирован: тот же код — тот же отпечаток', () => {
+test('the fingerprint is deterministic: same code — same fingerprint', () => {
   const files = { 'packages/service/src/index.ts': 'код', 'package.json': '{}' };
   const first = sourceRevision(sandbox(files), ENTRIES);
   const second = sourceRevision(sandbox(files), ENTRIES);
@@ -33,14 +33,14 @@ test('отпечаток детерминирован: тот же код — т
   assert.equal(first, second);
 });
 
-test('правка байта в коде меняет отпечаток', () => {
+test('editing a byte in the code changes the fingerprint', () => {
   const before = sourceRevision(sandbox({ 'packages/service/src/index.ts': 'const a = 1;' }), ENTRIES);
   const after = sourceRevision(sandbox({ 'packages/service/src/index.ts': 'const a = 2;' }), ENTRIES);
 
   assert.notEqual(before, after, 'смена кода должна пересоздавать контейнер');
 });
 
-test('новый файл и удаление файла меняют отпечаток', () => {
+test('a new file and deleting a file change the fingerprint', () => {
   const root = sandbox({ 'packages/service/src/index.ts': 'код' });
   const base = sourceRevision(root, ENTRIES);
 
@@ -52,14 +52,14 @@ test('новый файл и удаление файла меняют отпеч
   assert.equal(sourceRevision(root, ENTRIES), base, 'вернули файл — вернулся отпечаток');
 });
 
-test('расширения входят в отпечаток: их правка тоже пересоздаёт сервис', () => {
+test('extensions are part of the fingerprint: editing them also recreates the service', () => {
   const base = sourceRevision(sandbox({ 'packages/extensions/control-panel.ts': 'версия 1' }), ENTRIES);
   const changed = sourceRevision(sandbox({ 'packages/extensions/control-panel.ts': 'версия 2' }), ENTRIES);
 
   assert.notEqual(base, changed, 'расширения копируются людям при старте сервиса — их смена важна');
 });
 
-test('node_modules и скрытые каталоги на отпечаток не влияют', () => {
+test('node_modules and hidden directories do not affect the fingerprint', () => {
   const root = sandbox({ 'packages/service/src/index.ts': 'код' });
   const base = sourceRevision(root, ENTRIES);
 
@@ -70,7 +70,7 @@ test('node_modules и скрытые каталоги на отпечаток н
   assert.equal(sourceRevision(root, ENTRIES), base);
 });
 
-test('отсутствующие пути не роняют отпечаток, а lockfile входит в дефолтный набор', () => {
+test('missing paths do not break the fingerprint, and the lockfile is in the default set', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-rev-'));
   assert.match(sourceRevision(root, ENTRIES), /^[0-9a-f]{16}$/, 'пустой репозиторий — не ошибка');
 

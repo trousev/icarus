@@ -1,8 +1,8 @@
-// skill_writer: скилл создаётся каталогом, а не одиноким SKILL.md где попало.
+// skill_writer: a skill is created as a directory, not a lone SKILL.md anywhere.
 //
-// Ядро проверяем отдельно от pi: оно чистое и решает, что считать именем, полкой
-// и файлом бандла. Расширение — только выбор корня (личный или проектный) и
-// отказ в приватном режиме.
+// We check the core separately from pi: it is pure and decides what counts as a name,
+// a shelf and a bundle file. The extension only chooses the root (personal or
+// project) and refuses in private mode.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -44,7 +44,7 @@ function loadTool(): ToolDefinition {
   return tool;
 }
 
-test('скилл ложится каноническим каталогом и виден загрузчику pi', () => {
+test('a skill lands as a canonical directory and is visible to the pi loader', () => {
   const root = tempRoot();
   const result = writeSkill(root, {
     name: 'pirate-mode',
@@ -63,7 +63,7 @@ test('скилл ложится каноническим каталогом и �
   assert.deepEqual(seen.diagnostics, []);
 });
 
-test('полка кладёт скилл внутрь, не вынимая его наверх', () => {
+test('a shelf places the skill inside, without pulling it to the top', () => {
   const root = tempRoot();
   const result = writeSkill(root, {
     name: 'sea-wolf',
@@ -75,7 +75,7 @@ test('полка кладёт скилл внутрь, не вынимая ег�
   assert.equal(fs.existsSync(path.join(root, 'sea', 'sea-wolf', 'SKILL.md')), true);
 });
 
-test('имя, описание и пути проверяются до записи', () => {
+test('name, description and paths are validated before writing', () => {
   const root = tempRoot();
   assert.equal(writeSkill(root, { name: 'Pirate Mode', description: 'ок', body: 'x' }).ok, false);
   assert.equal(writeSkill(root, { name: 'pirate-mode', description: '  ', body: 'x' }).ok, false);
@@ -96,7 +96,7 @@ test('имя, описание и пути проверяются до запи�
   assert.deepEqual(fs.readdirSync(root), [], 'после отказов ничего не создано');
 });
 
-test('существующий скилл не переписывается без overwrite', () => {
+test('an existing skill is not overwritten without overwrite', () => {
   const root = tempRoot();
   writeSkill(root, { name: 'pirate-mode', description: 'старое', body: 'старое' });
   const refused = writeSkill(root, { name: 'pirate-mode', description: 'новое', body: 'новое' });
@@ -113,7 +113,7 @@ test('существующий скилл не переписывается бе
   assert.match(fs.readFileSync(path.join(root, 'pirate-mode', 'SKILL.md'), 'utf8'), /новое/);
 });
 
-test('выключенный скилл с тем же именем — тоже занятое имя', () => {
+test('a disabled skill with the same name also counts as a taken name', () => {
   const root = tempRoot();
   fs.mkdirSync(path.join(root, '.disabled', 'pirate-mode'), { recursive: true });
   fs.writeFileSync(
@@ -126,7 +126,7 @@ test('выключенный скилл с тем же именем — тоже
   assert.match(result.ok ? '' : result.error, /выключен/);
 });
 
-test('полки и файлы бандла не выходят за каталог', () => {
+test('shelves and bundle files do not escape the directory', () => {
   assert.equal(normalizeFolder(undefined), '');
   assert.equal(normalizeFolder('sea/north'), 'sea/north');
   assert.equal(normalizeFolder('../evil'), null);
@@ -138,7 +138,7 @@ test('полки и файлы бандла не выходят за катал�
   assert.equal(safeBundlePath('SKILL.md'), null);
 });
 
-test('окружение подсказывает личный и проектный корни', () => {
+test('the environment suggests the personal and project roots', () => {
   assert.equal(personalSkillsRoot({ HOME: '/home/x' }), '/home/x/.pi/agent/skills');
   assert.equal(
     personalSkillsRoot({ HOME: '/home/x', ICARUS_SKILLS_DIR: '/custom/skills' }),
@@ -147,7 +147,7 @@ test('окружение подсказывает личный и проектн
   assert.equal(workspaceSkillsRoot('/workspaces/talk'), '/workspaces/talk/.pi/skills');
 });
 
-test('инструмент пишет в личный каталог и говорит, где скилл', async () => {
+test('the tool writes to the personal directory and says where the skill is', async () => {
   const root = tempRoot('icarus-skill-writer-tool-');
   const previous = process.env.ICARUS_SKILLS_DIR;
   process.env.ICARUS_SKILLS_DIR = root;
@@ -169,7 +169,7 @@ test('инструмент пишет в личный каталог и гово
   }
 });
 
-test('workspace кладёт скилл в .pi/skills текущей папки', async () => {
+test('workspace puts the skill into .pi/skills of the current folder', async () => {
   const cwd = tempRoot('icarus-skill-writer-ws-');
   const tool = loadTool();
   const result = await tool.execute(
@@ -183,7 +183,7 @@ test('workspace кладёт скилл в .pi/skills текущей папки'
   assert.equal(fs.existsSync(path.join(cwd, '.pi', 'skills', 'local-helper', 'SKILL.md')), true);
 });
 
-test('в приватном режиме скиллы не создаются', async () => {
+test('in private mode skills are not created', async () => {
   const root = tempRoot('icarus-skill-writer-private-');
   const previous = process.env.ICARUS_PRIVATE;
   process.env.ICARUS_PRIVATE = '1';

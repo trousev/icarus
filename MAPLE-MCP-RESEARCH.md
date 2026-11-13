@@ -1,582 +1,601 @@
-# Maple → MCP: исследование (черновик)
+# Maple → MCP: research (draft)
 
-Цель: понять, как «привинтить» локально установленный Maple 2018/2022 к Икару
-(и вообще к LLM) через собственный MCP-сервер. Вопросы: как создавать,
-инспектировать и редактировать `.mw`-воркшиты, как выполнить одну ячейку, как
-запустить процесс Maple и управлять им снаружи.
+Goal: figure out how to "bolt" a locally installed Maple 2018/2022 onto Icarus
+(and onto an LLM in general) via our own MCP server. Questions: how to create,
+inspect and edit `.mw` worksheets, how to execute a single cell, how to start a
+Maple process and control it from outside.
 
-Статус: **черновик, почти готов**. Ключевые разделы подтверждены
-первоисточниками (ссылки по тексту); детальные отчёты — в `research/01-*.md` …
-`research/07-*.md`. Пункты, которые нельзя закрыть без живой установки Maple,
-собраны в §9 («smoke-тесты»).
+Status: **draft, almost ready**. Key sections are confirmed by primary sources
+(links throughout the text); detailed reports are in `research/01-*.md` …
+`research/07-*.md`. Items that cannot be closed without a live Maple installation
+are collected in §9 ("smoke tests").
 
-Дата: 2026-09-21. Целевые версии: Maple 2018 и Maple 2022 (тонкий прод).
+Date: 2026-09-21. Target versions: Maple 2018 and Maple 2022 (thin prod).
 
 ---
 
-## 1. Главное, что нужно знать сразу
+## 1. The essentials you need to know right away
 
-1. **У Maplesoft есть официальный Maple MCP** — но это продукт 2025/2026,
-   который поставляется *внутри актуального Maple* для подписчиков Elite
-   Maintenance Program, либо как отдельный enterprise-деплой. Он не рассчитан
-   на Maple 2018/2022.
+1. **Maplesoft has an official Maple MCP** — but it is a 2025/2026 product,
+   shipped *inside the current Maple* for Elite Maintenance Program subscribers,
+   or as a separate enterprise deployment. It is not meant for Maple 2018/2022.
    → [Maple MCP (EN)](https://www.maplesoft.com/products/maplemcp/index.aspx)
-2. **У Maple есть 4 официальных внешних API (OpenMaple): C, Java, Python, VB6.**
-   Python-API построен поверх C-API. Требуется установленный Maple и лицензия;
-   условия — в `extern/OpenMapleLicensing.txt` в поставке.
+2. **Maple has 4 official external APIs (OpenMaple): C, Java, Python, VB6.**
+   The Python API is built on top of the C API. An installed Maple and a license
+   are required; the terms are in `extern/OpenMapleLicensing.txt` in the
+   distribution.
    → [OpenMaple: Overview](https://www.maplesoft.com/support/help/maple/view.aspx?path=OpenMaple)
-3. **`.mw` — это XML-формат** (появился в Maple 9, заменил классический `.mws`).
-   Maple умеет отдавать воркшит как XML-документ через пакет `Worksheet`
-   (`ReadFile`, `ToString`, `Convert`, `WriteFile`, `WorksheetToJupyter`,
-   `WorksheetToMapleText`, …), а хранилищный формат официально
-   **не документирован и может меняться** — правильно ходить через XML-слой,
-   а не парсить байты руками.
+3. **`.mw` is an XML format** (introduced in Maple 9, replaced the classic
+   `.mws`). Maple can hand out a worksheet as an XML document via the `Worksheet`
+   package (`ReadFile`, `ToString`, `Convert`, `WriteFile`, `WorksheetToJupyter`,
+   `WorksheetToMapleText`, …), while the storage format is officially
+   **not documented and subject to change** — the right thing is to go through
+   the XML layer, not to parse bytes by hand.
    → [Formats/MW](https://www.maplesoft.com/support/help/maple/view.aspx?path=Formats/MW),
    [Worksheet](https://www.maplesoft.com/support/help/maple/view.aspx?path=Worksheet)
-4. **В Икаре уже есть слот под MCP**: серверы описываются в `config.yaml`
-   (`mcp:`), транспорты `stdio` / `streamable-http` / `sse`, их читает
-   `pi-mcp-extension`. Пример своего сервера — `docker/user/mcp/echo-server.mjs`.
-   То есть Maple-MCP подключается **без правки ядра**.
-   → `README.md`, `PLAN.md` (раздел «Итог M3»), `packages/service/src/config.ts`
+4. **Icarus already has a slot for MCP**: servers are described in `config.yaml`
+   (`mcp:`), transports `stdio` / `streamable-http` / `sse`, read by
+   `pi-mcp-extension`. An example of a custom server is `docker/user/mcp/echo-server.mjs`.
+   So Maple-MCP hooks in **without touching the core**.
+   → `README.md`, `PLAN.md` (the "M3 summary" section), `packages/service/src/config.ts`
 
-### 1.1 Ответы на исходные вопросы (коротко)
+### 1.1 Answers to the original questions (briefly)
 
-**Можно ли привинтить доступ к локальному Maple 2018/2022?** Да. Официальный
-облачный Maple MCP нам не подходит, но у Maple есть всё нужное локально:
-консольный CLI, OpenMaple и (в 2022) Jupyter-ядро. Сообщества-MCP для Maple не
-существует — это будет первый, но опираться есть на что (Wolfram/Matlab
-MCP-серверы как образец формы).
+**Can access to a local Maple 2018/2022 be bolted on?** Yes. The official
+cloud Maple MCP is no good for us, but Maple has everything we need locally:
+the console CLI, OpenMaple and (in 2022) the Jupyter kernel. There is no
+community MCP for Maple — this will be the first, but there is something to lean
+on (Wolfram/Matlab MCP servers as a model of the form).
 
-| Вопрос | Ответ |
+| Question | Answer |
 |---|---|
-| **Как кодом создать `.mw`?** | `.mw` — обычный plain-text XML; генерируем сами, только 1-D: `<Group><Input><Text-field style="Maple Input">код</Text-field></Input></Group>`. Сторонних библиотек-писателей нет ни в npm, ни в PyPI, ни в Pandoc. **Официальный headless-путь:** конструкторы `DocumentTools:-Layout:-*` / `Components:-*` → `DocumentTools:-ContentToString` (возвращает XML-строку воркшита) → `FileTools:-Text:-WriteFile`. Плюс `printf`-спецификатор `%Zm` печатает XML воркшита. |
-| **Как его inspect?** | Тем же XML (парсить защитно: формат официально «subject to change»), либо `Worksheet:-ReadFile` (XML-дерево), `Worksheet:-WorksheetToMapleText` (весь воркшит в 1-D текст), `DocumentTools:-Retrieve(file, L6)` (выражение по метке). **2-D вход снаружи нечитаем** (~34% реальных входов) — только через линеаризацию самим Maple. |
-| **Как редактировать?** | Правка XML + запись файла. Ориентируемся на **уровень документа**, а не «ячейка за ячейкой» (так делают Wolfram и MathCAD). Внутри Maple — `DocumentTools:-InsertContent`/`SetProperty` (проверить headless). |
-| **Как выполнить одну ячейку?** | Документированного API нет. Практически: достать текст группы из XML и отдать ядру; семантически честно — выполнять **префикс 1…k** (группы рассчитаны на общее состояние и порядок). Весь воркшит целиком — `DocumentTools:-RunWorksheet` (headless, новое ядро, ранний выход через `return`). |
-| **Как запустить процесс и управлять снаружи?** | `<maple>/bin/maple -q -s -t` — это REPL; держим stdin открытым, читаем до маркера (`#-->` в режиме `-t` или свой `printf`-сентинел), при необходимости через pty. `errorbreak=0`, `quit` вырезать, убивать группу процессов. Надёжнее — **OpenMaple** (C или своя ctypes-обёртка по MIT-коду Maplesoft); на Maple 2022 есть **Jupyter-ядро**. |
+| **How to create a `.mw` in code?** | `.mw` is ordinary plain-text XML; we generate it ourselves, only 1-D: `<Group><Input><Text-field style="Maple Input">code</Text-field></Input></Group>`. There are no third-party writer libraries in npm, PyPI, or Pandoc. **The official headless path:** the `DocumentTools:-Layout:-*` / `Components:-*` constructors → `DocumentTools:-ContentToString` (returns the worksheet XML string) → `FileTools:-Text:-WriteFile`. Plus the `printf` specifier `%Zm` prints the worksheet XML. |
+| **How to inspect it?** | The same XML (parse defensively: the format is officially "subject to change"), or `Worksheet:-ReadFile` (XML tree), `Worksheet:-WorksheetToMapleText` (the whole worksheet into 1-D text), `DocumentTools:-Retrieve(file, L6)` (expression by label). **2-D input is unreadable from outside** (~34% of real inputs) — only via linearization by Maple itself. |
+| **How to edit?** | Edit the XML + write the file. We aim at the **document level**, not "cell by cell" (that is how Wolfram and MathCAD do it). Inside Maple — `DocumentTools:-InsertContent`/`SetProperty` (verify headless). |
+| **How to execute a single cell?** | There is no documented API. In practice: extract the text of a group from the XML and feed it to the kernel; the semantically honest thing is to execute the **prefix 1…k** (groups rely on shared state and order). The whole worksheet — `DocumentTools:-RunWorksheet` (headless, fresh kernel, early exit via `return`). |
+| **How to start the process and control it from outside?** | `<maple>/bin/maple -q -s -t` is a REPL; keep stdin open, read until a marker (`#-->` in `-t` mode or our own `printf` sentinel), through a pty if needed. `errorbreak=0`, strip `quit`, kill the process group. More robust — **OpenMaple** (C or our own ctypes wrapper around Maplesoft's MIT code); on Maple 2022 there is the **Jupyter kernel**. |
 
-**Вердикт:** реализуемо и без официального MCP. Разумный минимум — MCP-сервер
-(stdio) на машине с Maple: ядро через CLI-процесс (fallback — процесс на запрос),
-воркшиты — своим XML-кодом, `-e2`/`errorbreak=0`, лимиты `-T`, статус результата
-честный. Java и .NET не нужны.
+**Verdict:** feasible even without the official MCP. A sensible minimum is an
+MCP server (stdio) on the machine with Maple: the kernel via a CLI process
+(fallback — a process per request), worksheets via our own XML code,
+`-e2`/`errorbreak=0`, `-T` limits, honest result status. Java and .NET are not
+needed.
 
 ---
 
-## 2. Официальный Maple MCP (что копируем, что недоступно)
+## 2. The official Maple MCP (what we copy, what is unavailable)
 
-Подтверждено страницей продукта ([EN](https://www.maplesoft.com/products/maplemcp/index.aspx),
-[CN](https://www.maplesoft.com.cn/products/MapleMCP/)) и разбором PDF-инструкции
-(см. `research/06-mcp-prior-art.md`):
+Confirmed by the product page ([EN](https://www.maplesoft.com/products/maplemcp/index.aspx),
+[CN](https://www.maplesoft.com.cn/products/MapleMCP/)) and by a breakdown of the
+PDF instructions (see `research/06-mcp-prior-art.md`):
 
-- Это MCP-сервер, дающий LLM доступ к «Maple Math Engine» (точный
-  символьный/численный счёт вместо вероятностного угадывания).
-- **Это облачный сервис, а не локальный сервер.** Вербатим из PDF «Setting up
-  Maple MCP for Copilot Studio»: endpoint
+- It is an MCP server that gives an LLM access to the "Maple Math Engine" (exact
+  symbolic/numeric computation instead of probabilistic guessing).
+- **It is a cloud service, not a local server.** Verbatim from the PDF "Setting up
+  Maple MCP for Copilot Studio": endpoint
   `https://cloud-api.maplenet.cloud/api/v2/mcp`.
-  Живая проба: AWS API Gateway/Lambda за CloudFront, MCP Streamable HTTP,
+  Live probe: AWS API Gateway/Lambda behind CloudFront, MCP Streamable HTTP,
   `protocolVersion 2025-06-18`, `serverInfo = {name:"Maplesoft",
   title:"Maple Server", version:"2026.1"}`, capabilities — tools+resources
-  (без prompts), серверная инструкция — «Use Maple for all math calculations».
-- **Аутентификация — API-ключ в query-параметре `auth`** (в Copilot Studio:
-  Authentication = API key, Type = Query, Label = `auth`). Ключ выдаётся только
-  из ленты «My Maple» внутри Maple и требует активной подписки **Elite
-  Maintenance Program**; Maple MCP заявлен как новая льгота EMP в Maple 2026.
-- Список инструментов официального сервера **публично недоступен**:
-  `tools/list` без ключа отдаёт HTTP 401; в реестрах MCP записи нет. Значит
-  нельзя опираться на «официальные» имена инструментов — их просто нет в
-  открытом доступе.
-- Лучший публичный референс формы — официальный **Wolfram MCP**
-  (`https://agenttools.wolfram.com/mcp`): ровно 3 инструмента —
+  (no prompts), server instruction — "Use Maple for all math calculations".
+- **Authentication is an API key in the `auth` query parameter** (in Copilot
+  Studio: Authentication = API key, Type = Query, Label = `auth`). The key is
+  issued only from the "My Maple" feed inside Maple and requires an active
+  **Elite Maintenance Program** subscription; Maple MCP is advertised as a new
+  EMP benefit in Maple 2026.
+- The list of tools of the official server is **not publicly available**:
+  `tools/list` without a key returns HTTP 401; there is no entry in the MCP
+  registries. So we cannot rely on the "official" tool names — they simply are
+  not in the open.
+- The best public reference for the form is the official **Wolfram MCP**
+  (`https://agenttools.wolfram.com/mcp`): exactly 3 tools —
   `WolframContext{context}`, `WolframLanguageEvaluator{code, timeConstraint=60s}`,
-  `WolframAlpha{query}`. Важная деталь описания: «This is a stateless kernel,
-  so you cannot reuse definitions from previous evaluations» — то есть про
-  состояние сессии надо честно писать в описании инструмента.
+  `WolframAlpha{query}`. An important detail of the description: "This is a
+  stateless kernel, so you cannot reuse definitions from previous evaluations" —
+  that is, the session state must be honestly stated in the tool description.
 
-**Вывод для нас:** официальный сервер (а) облачный, (б) требует Maple 2026 +
-EMP, (в) не имеет режима совместимости с 2018/2022. Сообщества-MCP для Maple
-CAS не существует (поиск по GitHub даёт только MapleStory/Maple Finance) —
-мы делаем первый. Ориентир по форме инструментов берём у Wolfram MCP.
+**Takeaway for us:** the official server is (a) cloud, (b) requires Maple 2026 +
+EMP, (c) has no compatibility mode with 2018/2022. There is no community MCP for
+Maple CAS (a GitHub search returns only MapleStory/Maple Finance) — we are making
+the first. We take the Wolfram MCP as the guide for tool form.
 
 ---
 
-## 3. Форматы файлов: как создавать / читать / править воркшиты
+## 3. File formats: how to create / read / edit worksheets
 
-Подтверждено ([Formats/MW](https://www.maplesoft.com/support/help/maple/view.aspx?path=Formats/MW)):
+Confirmed ([Formats/MW](https://www.maplesoft.com/support/help/maple/view.aspx?path=Formats/MW)):
 
-- `MW` (Maple Worksheet, `.mw`) — родной формат документов/воркшитов,
-  **XML-based**, введён в Maple 9, заменил `MWS` (классический воркшит).
-- У Maple есть встроенный экспорт в другие форматы
+- `MW` (Maple Worksheet, `.mw`) is the native document/worksheet format,
+  **XML-based**, introduced in Maple 9, replaced `MWS` (the classic worksheet).
+- Maple has built-in export to other formats
   ([Exporting Worksheets to Other Formats](https://www.maplesoft.com/support/help/maple/view.aspx?path=worksheet%2fmanaging%2fexport)).
-- «The `DocumentTools` package has several utilities for interacting with MW
-  files» — в примере на странице показано извлечение выражения из воркшита
-  **по метке**:
+- "The `DocumentTools` package has several utilities for interacting with MW
+  files" — the example on the page shows extracting an expression from a
+  worksheet **by label**:
   ```maple
   MWFile := FileTools:-JoinPath("example/BesselsEquation.mw", base=datadir):
   DocumentTools:-Retrieve(MWFile, L6);
   ```
 
-Пакет `Worksheet` ([обзор](https://www.maplesoft.com/support/help/maple/view.aspx?path=Worksheet)):
+The `Worksheet` package ([overview](https://www.maplesoft.com/support/help/maple/view.aspx?path=Worksheet)):
 
-- Назначение: «infrastructure for generating and manipulating Maple worksheets
-  using the Maple language», программистский тулкит.
-- Доступ к воркшиту — **через его XML-представление** средствами
-  `XMLTools`; «The storage format for Maple worksheets is not documented, and
-  is subject to change» — прямое предупреждение не парсить хранилище вручную.
-- Команды (актуальная версия): `Comparator`, `Convert`, `Display`,
+- Purpose: "infrastructure for generating and manipulating Maple worksheets
+  using the Maple language", a programmer's toolkit.
+- Access to a worksheet is **through its XML representation** using
+  `XMLTools`; "The storage format for Maple worksheets is not documented, and
+  is subject to change" — a direct warning not to parse the storage by hand.
+- Commands (current version): `Comparator`, `Convert`, `Display`,
   `DisplayFile`, `FromString`, `ReadFile`, `RemoveSection`, `TableOfContents`,
   `ToString`, `WorksheetToJupyter`, `WorksheetToMapleText`, `WriteFile`.
-- Есть опубликованные [Worksheet/DTD](https://www.maplesoft.com/support/help/maple/view.aspx?path=Worksheet%2fDTD)
-  и [Worksheet/Schema](https://www.maplesoft.com/support/help/maple/view.aspx?path=Worksheet%2fSchema).
+- There are published [Worksheet/DTD](https://www.maplesoft.com/support/help/maple/view.aspx?path=Worksheet%2fDTD)
+  and [Worksheet/Schema](https://www.maplesoft.com/support/help/maple/view.aspx?path=Worksheet%2fSchema).
 
-Из [примера WorksheetPackage](https://www.maplesoft.com/support/help/maple/view.aspx?path=examples/WorksheetPackage):
+From the [WorksheetPackage example](https://www.maplesoft.com/support/help/maple/view.aspx?path=examples/WorksheetPackage):
 
 ```maple
 with(Worksheet);
 wname := FileTools:-JoinPath([kernelopts(mapledir), "examplesclassic","WorksheetPackage.mws"]):
-doc  := ReadFile(wname);                      # XML-документ, format="mw" по умолчанию
+doc  := ReadFile(wname);                      # XML document, format="mw" by default
 doc2 := ReadFile(wname, format = "maple8_xml");
 doc3 := Convert(doc, format="maple8_xml");
-str  := ToString(doc, format = "mws");        # назад в классический .mws
+str  := ToString(doc, format = "mws");        # back to classic .mws
 ```
 
-В XML воркшита видны атрибуты версии, например
+In the worksheet XML you can see version attributes, e.g.
 `_XML_Element(_XML_ElementType("Version"), ... major=12, minor=0 ...)` —
-то есть у формата есть номер версии (`major`/`minor`), и его надо учитывать
-при генерации файлов «снаружи».
+that is, the format has a version number (`major`/`minor`), and it must be taken
+into account when generating files "from outside".
 
-**Статус:** формат разобран на живых файлах (см. §3.1). Открытым остаётся один
-пункт — работает ли пакет `Worksheet` в headless-режиме (см. §9, smoke-тест 2).
+**Status:** the format has been worked out on live files (see §3.1). One item
+remains open — whether the `Worksheet` package works in headless mode (see §9,
+smoke test 2).
 
-### 3.1 Что реально внутри `.mw` (проверено на живых файлах)
+### 3.1 What is actually inside a `.mw` (verified on live files)
 
-- `.mw` для 2018/2022 — **один plain-text UTF-8 XML-файл**. Это **не** ZIP/OPC:
-  `unzip -l` падает, `zipfile.is_zipfile()` → `False`, нет `maple.xml`,
-  `_rels/.rels`, `[Content_Types].xml`. Начало файла:
+- A `.mw` for 2018/2022 is **a single plain-text UTF-8 XML file**. It is **not**
+  ZIP/OPC: `unzip -l` fails, `zipfile.is_zipfile()` → `False`, there is no
+  `maple.xml`, `_rels/.rels`, `[Content_Types].xml`. The beginning of the file:
   ```xml
   <?xml version="1.0" encoding="UTF-8"?>
   <Worksheet>
   ```
-  Держится и на 258-КБ воркшитах со 124 формулами и графиками.
-- Корень `<Worksheet>` без атрибутов/namespace; первые три ребёнка всегда
-  `Version`, `Label-Scheme`, `View-Properties`.
-  `<Version major="2022" minor="2"/>` — major = релиз (2018/2022), minor = точка.
-  Стабильно от Maple 13 до 2024 (26 просэмплированных файлов).
-- Ячейки: `<Group>`; вход —
-  `<Group><Input><Text-field style="Maple Input">1-D код как plain text</Text-field>`;
-  выход — `<Output>` с `<Equation>` (base64 в атрибуте `display` + base64-тело)
-  и `<Plot>` (base64-тело); секции — `<Section><Title>`.
-- **2-D математика и графики — непрозрачный base64 внутреннего формата Maple.**
-  Снаружи их можно сохранить/перенести, но не синтезировать. Значит генерировать
-  надо только 1-D `<Text-field style="Maple Input">`.
-- **Измеренное ограничение (26 реальных воркшитов):** 2-D (типографский) ввод —
-  это пустой `Text-field` + `<Equation>` с приватной вложенной base64.
-  **190 из 566 непустых входных областей (~34%) — только-2-D и снаружи
-  нечитаемы**; бывают воркшиты, где 100% ввода — 2-D. Чтобы всё-таки прочитать,
-  надо дать самому Maple линеаризовать воркшит:
-  `Worksheet:-WorksheetToMapleText` (2017+, есть в обеих наших версиях).
-- Важные инварианты: `major` в `<Version>` — это **год релиза**
-  (`major="2018"`, `major="2022"`), при этом Maple 18 (2014) пишет `major="18"` —
-  не спутать.
-- **Экосистемы нет.** Единственный подтверждённый сторонний читатель `.mw` —
-  `davidovitch/maple-to-python` (`mw2txt.py`, мёртв с 2015, GPL-3.0/LGPL);
-  агент прогнал его без правок на реальном файле 2022.2 — 1-D ввод извлёк
-  корректно. **Ни одного пакета-писателя `.mw`, ни парсера `.mws`; в npm и PyPI
-  пакетов для Maple-воркшитов нет; у Pandoc нет ни reader, ни writer.**
-  Вывод: обработку формата MCP-сервер реализует сам.
-- Открытый вопрос: `.mwz` (возможный сжатый вариант) — UNVERIFIED; совместимость
-  `.mw` 2018 ↔ 2022 (вперёд/назад) не проверена на живых версиях.
-- Опубликованные `Worksheet/DTD` и `Worksheet/Schema` описывают **НЕ `.mw`**,
-  а legacy-словарь Maple 8 (`maple8_xml`: `worksheet/version/section/exchange/
-  para/text/mapletext`, всё в нижнем регистре). `.mw` против этой схемы **не
-  валидируется**. Официальная позиция: storage format не документирован и может
-  меняться.
-- `.mws` — текстовый формат в фигурных скобках:
+  Holds even on 258-KB worksheets with 124 formulas and plots.
+- The root `<Worksheet>` has no attributes/namespace; the first three children
+  are always `Version`, `Label-Scheme`, `View-Properties`.
+  `<Version major="2022" minor="2"/>` — major = release (2018/2022), minor = point.
+  Stable from Maple 13 to 2024 (26 sampled files).
+- Cells: `<Group>`; input —
+  `<Group><Input><Text-field style="Maple Input">1-D code as plain text</Text-field>`;
+  output — `<Output>` with `<Equation>` (base64 in the `display` attribute +
+  base64 body) and `<Plot>` (base64 body); sections — `<Section><Title>`.
+- **2-D math and plots are opaque base64 of Maple's internal format.** From
+  outside they can be saved/moved but not synthesized. So we only need to
+  generate 1-D `<Text-field style="Maple Input">`.
+- **Measured constraint (26 real worksheets):** 2-D (typeset) input is an empty
+  `Text-field` + `<Equation>` with private nested base64.
+  **190 of 566 non-empty input regions (~34%) are 2-D-only and unreadable from
+  outside**; there are worksheets where 100% of the input is 2-D. To read them
+  anyway, you have to let Maple itself linearize the worksheet:
+  `Worksheet:-WorksheetToMapleText` (2017+, present in both of our versions).
+- Important invariants: `major` in `<Version>` is the **release year**
+  (`major="2018"`, `major="2022"`), while Maple 18 (2014) writes `major="18"` —
+  don't confuse them.
+- **There is no ecosystem.** The only confirmed third-party reader of `.mw` is
+  `davidovitch/maple-to-python` (`mw2txt.py`, dead since 2015, GPL-3.0/LGPL);
+  the agent ran it unmodified against a real 2022.2 file — it extracted 1-D
+  input correctly. **Not a single `.mw` writer package, nor an `.mws` parser;
+  there are no packages for Maple worksheets in npm or PyPI; Pandoc has neither
+  a reader nor a writer.** Conclusion: the MCP server implements format handling
+  itself.
+- Open question: `.mwz` (a possible compressed variant) — UNVERIFIED; `.mw`
+  2018 ↔ 2022 compatibility (forward/backward) has not been tested on live
+  versions.
+- The published `Worksheet/DTD` and `Worksheet/Schema` describe **NOT `.mw`**,
+  but the legacy Maple 8 vocabulary (`maple8_xml`: `worksheet/version/section/exchange/
+  para/text/mapletext`, all lowercase). `.mw` does **not validate** against this
+  schema. The official position: the storage format is not documented and may
+  change.
+- `.mws` is a text format in curly braces:
   `{VERSION 6 0 "IBM INTEL LINUX" "6.0" }…{SECT 0 {EXCHG {PARA 0 "> " 0 "" {MPLTEXT …}}}}`.
-  Maple 2018 ещё умеет Classic Worksheet (открыть/сохранить `.mws`),
-  в Maple 2022 классического интерфейса **уже нет** — только миграция `.mws`→`.mw`.
-- Пакет `Worksheet` по версиям. **2018:** `Comparator`, `Convert`,
+  Maple 2018 can still do Classic Worksheet (open/save `.mws`),
+  in Maple 2022 the classic interface is **already gone** — only migration
+  `.mws`→`.mw`.
+- The `Worksheet` package by version. **2018:** `Comparator`, `Convert`,
   `Display`/`DisplayFile`, `FromString`, `ReadFile`, `ToString`,
-  `WorksheetToMapleText` (2017+), `WriteFile`. **2022 добавляет**
-  `RemoveSection` и `TableOfContents` (обе — 2020+) и `WorksheetToJupyter`
-  (2022+). У `Convert` аргумент `outputfilename` — только 2025+ (в 2018/2022
-  его нет).
-- **Что headless, а что нет.** Явный запрет для командной строки есть только у
-  `Display`/`DisplayFile` («cannot be used in the Command-line version of
-  Maple»); `Comparator` поднимает Maplet (GUI), а
-  `TableOfContents`/`RemoveSection` открывают GUI, **если не передан
-  `destination=`**. У `ReadFile`/`WriteFile`/`FromString`/`ToString`/`Convert`/
-  `WorksheetToMapleText` GUI-оговорки нет — это чистая работа с файлами и XML,
-  но что пакет вообще грузится в CLI, Maplesoft не пишет → smoke-тест §9.
-- Подписи: `ReadFile(filename, format="mw"|"maple8_xml")`;
-  `WriteFile(fileName, xmlTree, …)` — **обратите внимание на порядок
-  аргументов**; `FromString(str, …)`; `ToString(tree, …)`;
+  `WorksheetToMapleText` (2017+), `WriteFile`. **2022 adds**
+  `RemoveSection` and `TableOfContents` (both 2020+) and `WorksheetToJupyter`
+  (2022+). In `Convert`, the `outputfilename` argument is 2025+ only (not present
+  in 2018/2022).
+- **What is headless and what is not.** The only explicit prohibition for the
+  command line is for `Display`/`DisplayFile` ("cannot be used in the Command-line
+  version of Maple"); `Comparator` launches a Maplet (GUI), and
+  `TableOfContents`/`RemoveSection` open the GUI, **unless `destination=` is
+  passed**. `ReadFile`/`WriteFile`/`FromString`/`ToString`/`Convert`/
+  `WorksheetToMapleText` have no GUI caveat — they are pure file and XML work,
+  but Maplesoft does not state that the package loads in the CLI at all →
+  smoke test §9.
+- Signatures: `ReadFile(filename, format="mw"|"maple8_xml")`;
+  `WriteFile(fileName, xmlTree, …)` — **note the argument order**;
+  `FromString(str, …)`; `ToString(tree, …)`;
   `Convert(worksheet, [outputfilename], format=…)`;
   `WorksheetToMapleText(ws[, includeoutput])`;
   `WorksheetToJupyter(ws, outputfile=…)`;
   `RemoveSection`/`TableOfContents(target[, destination])`.
-- **`DocumentTools` в 2018 и 2022 есть:** `InsertContent`, `GetProperty`,
+- **`DocumentTools` exists in 2018 and 2022:** `InsertContent`, `GetProperty`,
   `SetProperty`, `Do`, `Tabulate`, `Components`, `Layout`, `ContentToString`,
   `Retrieve`, `RunWorksheet`. `GetDocumentProperty(attr, mwfile)` — 2017+;
-  `SetDocumentProperty(…, mwfile, outfile)` — 2021+ (то есть только 2022).
-  **`GetContent` не существует** (страница справки 404, нет в списках).
-  Headless: `ContentToString`, конструкторы `Layout:-*`/`Components:-*`,
+  `SetDocumentProperty(…, mwfile, outfile)` — 2021+ (i.e. only 2022).
+  **`GetContent` does not exist** (the help page 404s, not in the lists).
+  Headless: `ContentToString`, the `Layout:-*`/`Components:-*` constructors,
   `GetDocumentProperty`, `SetDocumentProperty` (2022), `Tabulate(…, output=XML)`;
-  а `InsertContent`/`Tabulate`/`GetProperty`/`SetProperty`/`Do` требуют
-  **открытого документа** (PG2018 §13.2 буквально: «the Do command must query
-  the GUI»).
-- Экспорт «As…» в 2018 и 2022 одинаков: HTML(+MathML), LaTeX, Maple input,
+  while `InsertContent`/`Tabulate`/`GetProperty`/`SetProperty`/`Do` require an
+  **open document** (PG2018 §13.2 verbatim: "the Do command must query
+  the GUI").
+- "Export As…" in 2018 and 2022 is the same: HTML(+MathML), LaTeX, Maple input,
   Maplet, Maple text, plain text, PDF, RTF.
-- Прочее: `.maple` (Maple Workbook) — SQLite-база, не воркшит; `.mla` — бинарный
-  репозиторий; `.lib`+`.ind` — старая пара; `.m` — внутренний бинарный; `.mpl` —
-  plain text.
-- Единственный подтверждённый сторонний читатель `.mw` —
-  `davidovitch/maple-to-python` (`mw2txt.py`, lxml, GPL-3.0/LGPL-заголовок,
-  заброшен с 2015): читает `Text-field` со `style=="Maple Input"`.
+- Misc: `.maple` (Maple Workbook) is an SQLite database, not a worksheet; `.mla`
+  is a binary repository; `.lib`+`.ind` is the old pair; `.m` is internal binary;
+  `.mpl` is plain text.
+- The only confirmed third-party reader of `.mw` is
+  `davidovitch/maple-to-python` (`mw2txt.py`, lxml, GPL-3.0/LGPL header,
+  abandoned since 2015): it reads `Text-field` with `style=="Maple Input"`.
 
-**Главный невыясненный пункт:** действительно ли пакет `Worksheet`
-(`ReadFile`/`WriteFile`/`ToString`/`Convert`/`WorksheetToMapleText`) работает
-под командным `maple`/`cmaple` в 2018/2022 — по документации GUI-only только
-`Display`, но нужен smoke-тест на реальной установке.
+**The main unresolved point:** whether the `Worksheet` package
+(`ReadFile`/`WriteFile`/`ToString`/`Convert`/`WorksheetToMapleText`) really works
+under the command-line `maple`/`cmaple` in 2018/2022 — according to the docs only
+`Display` is GUI-only, but a smoke test on a real installation is needed.
 
 ---
 
-## 4. Внешние API: OpenMaple
+## 4. External APIs: OpenMaple
 
-Подтверждено ([OpenMaple: Overview](https://www.maplesoft.com/support/help/maple/view.aspx?path=OpenMaple),
-детали — `research/02-openmaple-c.md`):
+Confirmed ([OpenMaple: Overview](https://www.maplesoft.com/support/help/maple/view.aspx?path=OpenMaple),
+details — `research/02-openmaple-c.md`):
 
-- OpenMaple — **in-process embedding API**: наш процесс сам становится ядром
-  Maple, отдельного процесса `maple` нет. Заголовок — **`maplec.h`** в
-  `$MAPLE/extern/include` (не `maple.h`!). Библиотеки лежат в
+- OpenMaple is an **in-process embedding API**: our process itself becomes the
+  Maple kernel; there is no separate `maple` process. The header is **`maplec.h`**
+  in `$MAPLE/extern/include` (not `maple.h`!). The libraries are in
   `$MAPLE/bin.<SYS>` (`bin.X86_64_LINUX` / `bin.APPLE_UNIVERSAL_OSX` /
-  `bin.X86_64_WINDOWS`), а **не** в `extern/lib`:
+  `bin.X86_64_WINDOWS`), and **not** in `extern/lib`:
   Linux `libmaplec.so` (+`libmaple.so`, `libhf.so`), macOS `libmaplec.dylib`,
   Windows `maplec.dll`/`maplec.lib`.
 - Java: `$MAPLE/java/{jopenmaple.jar,externalcall.jar}`;
-  C#/.NET: `$MAPLE/extern/include/maple.cs` (`MapleEngine`); VB6 тоже есть.
-- Runtime: `MAPLE=<install root>` + `LD_LIBRARY_PATH`/`DYLD_LIBRARY_PATH` с
-  bin-каталогом (Windows: `PATH`). Официальный бутстрап:
+  C#/.NET: `$MAPLE/extern/include/maple.cs` (`MapleEngine`); VB6 exists too.
+- Runtime: `MAPLE=<install root>` + `LD_LIBRARY_PATH`/`DYLD_LIBRARY_PATH` with
+  the bin directory (Windows: `PATH`). The official bootstrap:
   `export MAPLE=...; . $MAPLE/bin/maple -norun`.
-  Неверный `MAPLE` ⇒ `StartMaple` возвращает NULL с «license.dat does not exist».
-- Точки входа:
+  A wrong `MAPLE` ⇒ `StartMaple` returns NULL with "license.dat does not exist".
+- Entry points:
   `StartMaple(argc,argv,&cb,user_data,info,err)` → `EvalMapleStatement(kv,str)`
-  → `MapleToString(kv,algeb)` → `StopMaple(kv)`; для дешёвого сброса —
-  `RestartMaple(kv,err)`. Функции `MapleOpenMaple` не существует. `argv[0]`
-  должен быть `"maple"`, буфер `err` ≥ 2048 байт, `info` = NULL,
-  `StopMaple` необратим (повторный `StartMaple` в том же процессе нельзя).
-- Результаты: текстовый колбэк (результат приходит **фрагментами**, один
-  результат ≠ один вызов) и структурированные `ALGEB` (`MapleToString`,
+  → `MapleToString(kv,algeb)` → `StopMaple(kv)`; for a cheap reset —
+  `RestartMaple(kv,err)`. The function `MapleOpenMaple` does not exist. `argv[0]`
+  must be `"maple"`, the `err` buffer ≥ 2048 bytes, `info` = NULL,
+  `StopMaple` is irreversible (you cannot call `StartMaple` again in the same
+  process).
+- Results: a text callback (the result arrives **in fragments**, one result ≠ one
+  call) and structured `ALGEB` (`MapleToString`,
   `MapleToInteger64`, `IsMaple*`).
-- **Threading:** API можно звать только из потока, вызвавшего `StartMaple`;
-  одно ядро на поток ⇒ один OS-процесс на сессию.
-- Лимиты — это просто флаги CLI в `argv`: `-T cpu,data,stack,core`,
+- **Threading:** the API can only be called from the thread that called
+  `StartMaple`; one kernel per thread ⇒ one OS process per session.
+- Limits are just CLI flags in `argv`: `-T cpu,data,stack,core`,
   `--init-reserve-mem`, `--init-commit-mem`.
-- Лицензия: нужна полноценная локально установленная лицензированная Maple;
-  отдельного бесплатного рантайма нет; доп. условия —
-  `$MAPLE/extern/OpenMapleLicensing.txt` (содержимое онлайн не опубликовано →
+- License: a full locally installed licensed Maple is required; there is no
+  separate free runtime; additional terms are in
+  `$MAPLE/extern/OpenMapleLicensing.txt` (the content is not published online →
   UNVERIFIED).
-- **Стабильность:** глава про OpenMaple текстуально совпадает в официальных
-  Programming Guide для 2018, 2021 и 2023 — C API стабилен, ABI-изменений и
-  deprecations не задокументировано. Для 2022 ProgrammingGuide.pdf не
-  публикуется (404), то есть 2022 зажат между 2021 и 2023.
+- **Stability:** the OpenMaple chapter is textually identical in the official
+  Programming Guides for 2018, 2021 and 2023 — the C API is stable, no ABI
+  changes or deprecations are documented. For 2022 ProgrammingGuide.pdf is not
+  published (404), so 2022 is squeezed between 2021 and 2023.
 
-### Python: важная поправка
+### Python: an important correction
 
-- Официальный **«OpenMaple for Python» появился только в Maple 2023**
-  (verbatim из Maple 2023 Connectivity update). В 2023 модуль назывался
-  `import maple`, с 2024 — `maplesoft.maple`, а README на GitHub прямо пишет
-  «requires an installation of Maple 2024 or later».
-  → **в 2018 и 2022 его нет.**
-- Репозиторий `github.com/Maplesoft/openmaple` (MIT, создан 2024-08-21, жив)
-  содержит `maplesoft/maple/maplec_ctypes.py` — готовый набор объявлений
-  ctypes, который мы можем **адаптировать под 2018/2022**
-  (нюансы: там буфер `err` всего 1024 байта при требуемых 2048; жёстко
-  зашит `c_int64` для `M_INT`).
-- Других рабочих Python-обёрток нет: PyPI `PyMaple` — не про то,
-  `openmaple`/`pyopenmaple`/`maplebridge` не существуют. Единственная живая
-  не-Python обёртка — `mezzarobba/openmaple-ocaml` (public domain, pre-alpha)
-  как референс.
-- **Разрешение неопределённости:** OpenMaple C API документирован уже в
-  Maple 2018 Programming Guide (гл. про OpenMaple, с. 476) и текстуально совпал
-  с 2021/2023 ⇒ `libmaplec` в 2018 и 2022 **есть**, и своя тонкая
-  ctypes-обёртка под старые версии — рабочий путь.
-- Модель сессии у официального Python-биндинга — **persistent, stateful**:
-  модульная глобальная `Session` держит одно живое ядро, переменные переживают
-  вызовы. Именно такая семантика нам и нужна.
-- Ещё один референс модели результатов — **MapleNet Compute API**
+- The official **"OpenMaple for Python" appeared only in Maple 2023**
+  (verbatim from the Maple 2023 Connectivity update). In 2023 the module was
+  called `import maple`, since 2024 — `maplesoft.maple`, and the README on GitHub
+  directly says "requires an installation of Maple 2024 or later".
+  → **it does not exist in 2018 and 2022.**
+- The repository `github.com/Maplesoft/openmaple` (MIT, created 2024-08-21,
+  alive) contains `maplesoft/maple/maplec_ctypes.py` — a ready set of ctypes
+  declarations that we can **adapt to 2018/2022**
+  (nuances: there the `err` buffer is only 1024 bytes while 2048 is required;
+  `c_int64` is hardcoded for `M_INT`).
+- There are no other working Python wrappers: the PyPI `PyMaple` is not what we
+  need, `openmaple`/`pyopenmaple`/`maplebridge` do not exist. The only live
+  non-Python wrapper is `mezzarobba/openmaple-ocaml` (public domain, pre-alpha)
+  as a reference.
+- **Resolving the uncertainty:** the OpenMaple C API is documented already in the
+  Maple 2018 Programming Guide (the OpenMaple chapter, p. 476) and was textually
+  identical to 2021/2023 ⇒ `libmaplec` **exists** in 2018 and 2022, and a thin
+  ctypes wrapper of our own for the old versions is a workable path.
+- The session model of the official Python binding is **persistent, stateful**:
+  the module-level global `Session` holds one live kernel, variables survive
+  calls. That is exactly the semantics we need.
+- Another reference for the result model is the **MapleNet Compute API**
   (protobuf Request/Reply, `Session{id,timeout}`, `OutputOptions TEXT|MATHML`,
-  `PlotOptions IMAGE|PROTOBUFFER` с размерами в пикселях и типизированный поток
-  событий `result/printf/print/lprint/error/warning/server_error/image_plot/plot`).
-  Требует сервер MapleNet, а не desktop Maple, но как образец модели
-  «результат + вывод + график» очень полезен.
+  `PlotOptions IMAGE|PROTOBUFFER` with dimensions in pixels and a typed stream of
+  events `result/printf/print/lprint/error/warning/server_error/image_plot/plot`).
+  It requires a MapleNet server, not desktop Maple, but as a model of
+  "result + output + plot" it is very useful.
 
-**Вывод:** для 2018/2022 путь такой — либо C/C++ helper, либо **ctypes-обёртка
-на базе MIT-кода Maplesoft**, либо (проще всего) отдельный процесс
-`cmaple`/`maple`, см. `research/01-cli-batch.md`.
+**Conclusion:** for 2018/2022 the path is either a C/C++ helper, or a **ctypes
+wrapper based on Maplesoft's MIT code**, or (simplest) a separate `cmaple`/`maple`
+process, see `research/01-cli-batch.md`.
 
 ---
 
-## 5. Запуск Maple снаружи: CLI и batch
+## 5. Running Maple from outside: CLI and batch
 
-(Раздел дополняется; ниже — подтверждённое официальной справкой и
-Programming Guide 2018/2022, детали в `research/01-cli-batch.md`.)
+(Section being expanded; below is what is confirmed by the official help and the
+2018/2022 Programming Guide, details in `research/01-cli-batch.md`.)
 
-**Имена команд — важно не перепутать:**
+**Command names — important not to mix up:**
 
-- Linux/macOS: консольный Maple — это `maple` (скрипт в `bin/` установки),
-  GUI — `xmaple`.
-- Windows: консольный — `cmaple(.exe)`, GUI — `maplew`.
-- Официально: «To start the Command-line version in Mac or Linux, use the
-  `maple` command. In Windows, use the `cmaple` command»
+- Linux/macOS: the console Maple is `maple` (a script in the install's `bin/`),
+  the GUI is `xmaple`.
+- Windows: console — `cmaple(.exe)`, GUI — `maplew`.
+- Officially: "To start the Command-line version in Mac or Linux, use the
+  `maple` command. In Windows, use the `cmaple` command"
   ([Maple Versions](https://www.maplesoft.com/support/help/maple/view.aspx?path=versions));
-  Maple 2018 Programming Guide §14.4 — то же самое.
-  → MCP-сервер под Linux должен звать `<maple>/bin/maple`, а не `cmaple`.
+  Maple 2018 Programming Guide §14.4 — the same.
+  → The MCP server on Linux must call `<maple>/bin/maple`, not `cmaple`.
 
-**Запуск скрипта:**
+**Running a script:**
 
 ```bash
-maple -q -s script.mpl        # позиционный файл после опций
-maple < script.mpl            # так делают на HPC-кластерах (NCSU)
+maple -q -s script.mpl        # positional file after the options
+maple < script.mpl            # that's how it's done on HPC clusters (NCSU)
 ```
 
-- **`-f` — это НЕ «выполнить файл»**, а «использовать указанный license-файл».
-  Исполняемый скрипт — это позиционный `file` в конце командной строки.
-- `-c <команда>` — выполнить команду до чтения входа; опцию можно повторять,
-  они выполняются по порядку. Классический паттерн:
+- **`-f` is NOT "execute file"** but "use the specified license file". The
+  executable script is the positional `file` at the end of the command line.
+- `-c <command>` — execute a command before reading input; the option can be
+  repeated, they run in order. The classic pattern:
   `cmaple -q -b <libdir> -cread(...) -cquit`.
-- `-w` — это **warning level**, не «worksheet».
-- По calling sequence: `-B` — batch-режим, `-b libname` — путь к главной
-  библиотеке (уточняется).
+- `-w` is the **warning level**, not "worksheet".
+- By calling sequence: `-B` is batch mode, `-b libname` is the path to the main
+  library (to be confirmed).
 
-**Коды возврата (одинаковы в 2018 и 2022):**
+**Return codes (the same in 2018 and 2022):**
 
-| Код | Значение |
+| Code | Meaning |
 |---|---|
-| 0 | нормальное завершение |
-| 1 | ошибка инициализации |
-| 2 | скрипт оборвался (например, незакрытый разделитель) |
-| 3 | не удалось переоткрыть stdin после скрипта с `-F` |
-| 4 | ошибка при обработке скрипта (порог зависит от `interface(errorbreak)`) |
-| 5 | ядро неожиданно завершилось |
-| n | результат `quit(n)` / `done(n)` / `stop(n)` |
+| 0 | normal termination |
+| 1 | initialization error |
+| 2 | the script broke off (e.g. an unclosed delimiter) |
+| 3 | failed to reopen stdin after a script with `-F` |
+| 4 | error while processing the script (the threshold depends on `interface(errorbreak)`) |
+| 5 | the kernel terminated unexpectedly |
+| n | the result of `quit(n)` / `done(n)` / `stop(n)` |
 
-**Критично для автоматизации:** при дефолтном `errorbreak=1` прерывается
-только **синтаксическая** ошибка (код 4), а **runtime-ошибка скрипт не
-останавливает и код остаётся 0**. Чтобы любая ошибка давала код 4, нужно
-запускать с `-e2` (в 2022+ есть и `-e3` — с печатью stack trace).
-Это надо либо зашивать в наш запуск, либо явно проверять вывод на ошибки.
+**Critical for automation:** with the default `errorbreak=1` only a **syntax**
+error aborts (code 4), while a **runtime error does not stop the script and the
+code stays 0**. To make any error produce code 4, you need to run with `-e2`
+(in 2022+ there is also `-e3` — with stack trace printing). This must either be
+baked into our launch or the output must be explicitly checked for errors.
 
-**Различия 2018 ↔ 2022 по опциям:** в 2018 есть `-cw` (Classic Worksheet) и
-нет `--echofile`/`--strip-debug-info`; в 2022 наоборот. `-noAI` — только
-свежие версии (2024+).
+**2018 ↔ 2022 option differences:** 2018 has `-cw` (Classic Worksheet) and does
+not have `--echofile`/`--strip-debug-info`; 2022 is the opposite. `-noAI` is only
+in recent versions (2024+).
 
-### 5.1 Варианты backend'а: сравнение
+### 5.1 Backend options: comparison
 
-| Вариант | Версии | Состояние сессии | Старт/память | Сложность | Комментарий |
+| Variant | Versions | Session state | Startup/memory | Complexity | Comment |
 |---|---|---|---|---|---|
-| CLI `maple -q -s -e2 file.mpl` (процесс на запрос) | 2018, 2022 | нет (stateless) | процесс живёт только на запрос; Maplesoft заявляет ~0.1 с на старт (проверить на месте) | низкая | самый предсказуемый; парсим stdout/stderr и код возврата |
-| Долгоживущий `maple` + stdin/stdout с маркером-сентинелом | 2018, 2022 | да | резидентное ядро (сотни МБ) | средняя | хрупко: буферизация, частичные чтения, смешение вывода |
-| OpenMaple C через свою ctypes-обёртку | 2018, 2022 (API стабилен 2018→2023) | да | in-process; одно ядро на поток ⇒ один процесс на сессию | средне-высокая | структурированные `ALGEB`; референс — MIT-код Maplesoft |
-| OpenMaple Java | 2018, 2022 | да | +JVM; **обязателен `-Xss100M`** (иначе segfault); одно `Engine` на JVM; `stop()` терминален, сброс — `restart()`; `dispose()` на каждый результат | высокая | только если нужны типизированные объекты |
-| **Официальное Jupyter-ядро Maple (ZeroMQ)** | **2022+** | да | как обычное ядро Jupyter | средняя (протокол готовый) | `Jupyter[GenerateKernelConfiguration](dir)` + `jupyter kernelspec install dir/maple` |
-| OpenMaple for Python | 2023+ | да | — | — | не наш случай |
-| MapleNet (сервер) | отдельно | да | — | высокая | не для тонкого локального бокса |
+| CLI `maple -q -s -e2 file.mpl` (process per request) | 2018, 2022 | no (stateless) | the process lives only for the request; Maplesoft claims ~0.1 s to start (verify on site) | low | the most predictable; we parse stdout/stderr and the return code |
+| Long-lived `maple` + stdin/stdout with a sentinel marker | 2018, 2022 | yes | a resident kernel (hundreds of MB) | medium | fragile: buffering, partial reads, mixed output |
+| OpenMaple C via our own ctypes wrapper | 2018, 2022 (API stable 2018→2023) | yes | in-process; one kernel per thread ⇒ one process per session | medium-high | structured `ALGEB`; reference — Maplesoft's MIT code |
+| OpenMaple Java | 2018, 2022 | yes | +JVM; **`-Xss100M` is mandatory** (otherwise segfault); one `Engine` per JVM; `stop()` is terminal, reset — `restart()`; `dispose()` on every result | high | only if typed objects are needed |
+| **Official Maple Jupyter kernel (ZeroMQ)** | **2022+** | yes | like an ordinary Jupyter kernel | medium (the protocol is ready-made) | `Jupyter[GenerateKernelConfiguration](dir)` + `jupyter kernelspec install dir/maple` |
+| OpenMaple for Python | 2023+ | yes | — | — | not our case |
+| MapleNet (server) | separate | yes | — | high | not for a thin local box |
 
-Нюанс по Java: имена JAR в доках расходятся — Programming Guides 2018/2021/2023
-говорят `$MAPLE/java/{externalcall.jar,jopenmaple.jar}`, а текущая справка —
-`Maple.jar` + `externalcall.jar` (класс `com.maplesoft.openmaple` внутри
-`Maple.jar`). Официального `openmaple.jar` нет. На месте надо просто
-посмотреть `ls $MAPLE/java`. Бутстрап из Guide 2018:
+A nuance on Java: the JAR names in the docs diverge — the 2018/2021/2023
+Programming Guides say `$MAPLE/java/{externalcall.jar,jopenmaple.jar}`, while the
+current help says `Maple.jar` + `externalcall.jar` (the class
+`com.maplesoft.openmaple` inside `Maple.jar`). There is no official
+`openmaple.jar`. On site you just have to look at `ls $MAPLE/java`. The bootstrap
+from the 2018 Guide:
 
 ```java
 Engine t = new Engine(new String[]{"java"}, new EngineCallBacksDefault(), null, null);
 t.evaluate("int(x,x);");
 ```
 
-(`args[0]` обязан быть `"java"`, четвёртый аргумент — `null`.)
+(`args[0]` must be `"java"`, the fourth argument is `null`.)
 
-**Рекомендация:** базовый backend — CLI (работает и в 2018, и в 2022, без JVM и
-без нативных зависимостей); на Maple 2022 опционально подключаем официальное
-Jupyter-ядро; Java — только если реально нужны типизированные Maple-объекты,
-и тогда один долгоживущий helper-JVM (per-request JVM недопустим).
+**Recommendation:** the base backend is the CLI (works in both 2018 and 2022,
+without a JVM and without native dependencies); on Maple 2022 we optionally hook
+up the official Jupyter kernel; Java — only if typed Maple objects are really
+needed, and then a single long-lived helper JVM (a per-request JVM is
+unacceptable).
 
-### 5.2 Рекомендуемая архитектура (черновик)
+### 5.2 Recommended architecture (draft)
 
-**Где живёт сервер.** Только на машине, где установлен и лицензирован Maple:
-ядро, библиотеки и лицензия локальны, облачного обходного пути для 2018/2022 нет.
-В Икар его подключаем как `stdio` (если это тот же хост) или `streamable-http`.
+**Where the server lives.** Only on the machine where Maple is installed and
+licensed: the kernel, libraries and license are local, and there is no cloud
+workaround for 2018/2022. We hook it into Icarus as `stdio` (if it is the same
+host) or `streamable-http`.
 
-**Процесс.** Консольный Maple — это **REPL**: он живёт, пока открыт stdin, и
-хранит состояние сессии. На EOF по умолчанию **выходит**; `-F` заставляет
-продолжить. Готовим так:
+**The process.** Console Maple is a **REPL**: it lives as long as stdin is open
+and keeps session state. On EOF it **exits** by default; `-F` makes it continue.
+We set it up like this:
 
-- запуск `<maple>/bin/maple -q -s -t` (Linux/macOS) или `cmaple.exe …` (Windows);
-  **`-t` — машинный режим**: prompt становится `#-->`, prettyprint отключается;
-- `-q` **не** убирает prompt `"> "` — убирает `interface(quiet=true)`;
-- **документированного управления flush для stdout нет** (`interface` и
-  `kernelopts` не имеют `flush`; `fflush`/`FileTools:-Flush` — только для файлов).
-  Поэтому реальные обёртки либо работают через **pty** (SageMath: `maple -t` +
-  ожидание `#-->`; Emacs comint: `^> `), либо читают до **явного маркера**
-  (TeXmacs: `printf(\`tmstart\n\`)` / `printf(\`tmend\n\`)`; старый maplev:
+- launch `<maple>/bin/maple -q -s -t` (Linux/macOS) or `cmaple.exe …` (Windows);
+  **`-t` is machine mode**: the prompt becomes `#-->`, prettyprint is disabled;
+- `-q` does **not** remove the `"> "` prompt — it does `interface(quiet=true)`;
+- **there is no documented flush control for stdout** (`interface` and
+  `kernelopts` have no `flush`; `fflush`/`FileTools:-Flush` are for files only).
+  Therefore real wrappers either work through a **pty** (SageMath: `maple -t` +
+  waiting for `#-->`; Emacs comint: `^> `), or read until an **explicit marker**
+  (TeXmacs: `printf(\`tmstart\n\`)` / `printf(\`tmend\n\`)`; the old maplev:
   `lprint(END_OF_OUTPUT);`);
-- выставляем `interface(errorbreak=0)`: при чтении от пользователя обработка
-  продолжается после любой ошибки, но для перенаправленного stdin значения 1–3
-  останавливают разбор, а поведение ветки «pipe» не задокументировано;
-- `quit`/`done`/`stop` — ключевые слова, сессию убивают и не перехватываются: их
-  надо вырезать из приходящего кода или быть готовыми перезапустить процесс
-  (старт ~0.1 с);
-- `restart` — только отдельной строкой; сбрасывает и опции `interface`, но при
-  `-c` команды `-c` выполняются заново (удобно переустановить настройки);
-- убивать зависшее — `timelimit(N, …)` + `kernelopts(cpulimit)`/`-T`, снаружи
-  SIGINT→SIGTERM→SIGKILL **в группу процессов** (Linux `bin/maple` — shell-скрипт,
-  `exec`-поведение не подтверждено; TeXmacs делает `setsid()` + `killpg()`).
+- we set `interface(errorbreak=0)`: when reading from a user, processing
+  continues after any error, but for redirected stdin values 1–3 stop parsing,
+  and the behavior of the "pipe" branch is undocumented;
+- `quit`/`done`/`stop` are keywords, they kill the session and are not
+  intercepted: they must be stripped from incoming code, or be ready to restart
+  the process (startup ~0.1 s);
+- `restart` is only on a separate line; it resets `interface` options too, but
+  with `-c` the `-c` commands are re-executed (convenient for reinstalling
+  settings);
+- to kill a hung process — `timelimit(N, …)` + `kernelopts(cpulimit)`/`-T`, from
+  outside SIGINT→SIGTERM→SIGKILL **to the process group** (on Linux `bin/maple`
+  is a shell script, the `exec` behavior is unconfirmed; TeXmacs does `setsid()` +
+  `killpg()`).
 
-**Почему это хрупко.** Отсутствие гарантированного flush и опора на маркеры — ровно
-та причина, по которой текущий maplev ушёл с `cmaple` на собственный
-OpenMaple-бинарь (`pmaple` с `fflush(NULL)`), а SageMath/Emacs сидят на pty. Если
-persistent-режим окажется нестабильным, переходим на OpenMaple или Jupyter-ядро.
+**Why this is fragile.** The lack of guaranteed flush and the reliance on markers
+is exactly why the current maplev moved from `cmaple` to its own OpenMaple binary
+(`pmaple` with `fflush(NULL)`), while SageMath/Emacs sit on a pty. If the
+persistent mode turns out to be unstable, we switch to OpenMaple or the Jupyter
+kernel.
 
-- `-e2` **обязателен**: иначе runtime-ошибка не меняет код возврата, и провал
-  легко «потерять».
-- Перед запросами ставим машинно-читаемый вывод, иначе результат придёт
-  типографским текстом и с ANSI-цветом (на UNIX ANSI **включён по умолчанию**):
+- `-e2` is **mandatory**: otherwise a runtime error does not change the return
+  code and a failure is easily "lost".
+- Before requests we set machine-readable output, otherwise the result comes as
+  typeset text and with ANSI color (on UNIX ANSI is **on by default**):
   ```maple
   interface(prettyprint=0):
   interface(ansi=false):
   interface(quiet=true):
   ```
-  Без `ansi=false` парсер обязан срезать escape-последовательности.
-- «Выполнить одну ячейку» = отправить код ячейки как есть и собрать: stdout,
-  поток ошибок, результат последнего выражения, при необходимости —
-  LaTeX/MathML/PNG, выгруженные во временный файл.
+  Without `ansi=false` the parser is forced to strip escape sequences.
+- "Execute one cell" = send the cell's code as is and collect: stdout, the error
+  stream, the result of the last expression, and if needed — LaTeX/MathML/PNG
+  dumped to a temp file.
 
-**Fallback.** Для изоляции «чистого» запуска — процесс на запрос
-(`maple -q -s -e2 tmp.mpl`), ценой старта. На Maple 2022 — опциональный backend
-на официальном Jupyter-ядре.
+**Fallback.** For isolating a "clean" run — a process per request
+(`maple -q -s -e2 tmp.mpl`), at the cost of startup. On Maple 2022 — an optional
+backend on the official Jupyter kernel.
 
-**Формат воркшитов.** `.mw` — обычный XML, поэтому читаем/пишем сами, без
-сторонних библиотек: парсим `<Group><Input><Text-field style="Maple Input">`,
-генерируем только 1-D. 2-D вход снаружи нечитаем — для него зовём
-`Worksheet:-WorksheetToMapleText` (если пакет работает headless; если нет —
-честно сообщаем, что ячейка 2-D и снаружи не читается). Base64-выводы
-(`<Equation>`, `<Plot>`) не синтезируем.
+**Worksheet format.** `.mw` is ordinary XML, so we read/write it ourselves,
+without third-party libraries: we parse `<Group><Input><Text-field style="Maple Input">`
+and generate only 1-D. 2-D input is unreadable from outside — for it we call
+`Worksheet:-WorksheetToMapleText` (if the package works headless; if not — we
+honestly report that the cell is 2-D and cannot be read from outside). We do not
+synthesize base64 outputs (`<Equation>`, `<Plot>`).
 
-**Ресурсы тонкого прода.** Лимиты ядра через `-T` (cpu/data/stack/core);
-`lifecycle: lazy` в конфиге Икара; idle-timeout, гасящий ядро; один сеанс на
-пользователя, без пула ядер.
+**Thin prod resources.** Kernel limits via `-T` (cpu/data/stack/core);
+`lifecycle: lazy` in the Icarus config; an idle timeout that shuts the kernel
+down; one session per user, no kernel pool.
 
-**Чего не делаем.** Per-request JVM; несколько ядер на тонком боксе;
-GUI/X11 — если только не выяснится, что пакет `Worksheet` без GUI не работает
-(тогда либо Xvfb, либо живём только XML-путём).
+**What we don't do.** Per-request JVM; multiple kernels on a thin box;
+GUI/X11 — unless it turns out that the `Worksheet` package does not work without a
+GUI (then either Xvfb or we live with the XML path only).
 
-### 5.3 Как выполнить одну ячейку (execution group)
+### 5.3 How to execute a single cell (execution group)
 
-**Короткий ответ: документированного API «выполнить одну group из неоткрытого
-`.mw`» нет.** Ни в `Worksheet`, ни в `DocumentTools` нет команды, принимающей
-номер/идентификатор группы; в командной строке нет опции выбора группы или метки
-(`DocumentTools:-Run` и `:-Evaluate` не существуют).
+**Short answer: there is no documented API to "execute a single group from an
+unopened `.mw`".** Neither in `Worksheet` nor in `DocumentTools` is there a
+command that takes a group number/identifier; on the command line there is no
+option to select a group or label (`DocumentTools:-Run` and `:-Evaluate` do not
+exist).
 
-Что реально есть (детали — `research/07-…md`):
+What actually exists (details — `research/07-…md`):
 
-| Возможность | Команда | Выполняет? | Охват | GUI? |
+| Capability | Command | Executes? | Scope | GUI? |
 |---|---|---|---|---|
-| Выполнить **весь** воркшит как процедуру | `DocumentTools:-RunWorksheet(ws, …)` | да | все группы, в **новом ядре** | нет — явно поддерживает «command-line Maple» |
-| Воркшит → **1-D текст** | `Worksheet:-WorksheetToMapleText("f.mw")` (2017+) | нет | все входные группы | UNVERIFIED в CLI |
-| Воркшит → **XML-дерево** | `Worksheet:-ReadFile("f.mw")` | нет | все узлы | UNVERIFIED в CLI |
-| Внутренняя метка → выражение | `DocumentTools:-Retrieve("f.mw", L6)` | **нет** (только возвращает) | один помеченный выход | UNVERIFIED в CLI |
-| Открыть воркшит в GUI | `Worksheet:-Display` / `DisplayFile` | GUI | — | **да** — «cannot be used in the Command-line version» |
+| Execute the **whole** worksheet as a procedure | `DocumentTools:-RunWorksheet(ws, …)` | yes | all groups, in a **fresh kernel** | no — explicitly supports "command-line Maple" |
+| Worksheet → **1-D text** | `Worksheet:-WorksheetToMapleText("f.mw")` (2017+) | no | all input groups | UNVERIFIED in CLI |
+| Worksheet → **XML tree** | `Worksheet:-ReadFile("f.mw")` | no | all nodes | UNVERIFIED in CLI |
+| Internal label → expression | `DocumentTools:-Retrieve("f.mw", L6)` | **no** (only returns) | one labeled output | UNVERIFIED in CLI |
+| Open the worksheet in the GUI | `Worksheet:-Display` / `DisplayFile` | GUI | — | **yes** — "cannot be used in the Command-line version" |
 
-Про `RunWorksheet`: новый движок (состояние с вызывающим не разделяется), есть
-`var_init`/`outputs`, а **досрочный выход — top-level `return`** в конце последней
-нужной группы. Он **существовал уже в 2018** (PG2018, с. 190); в справке 2022 у
-параметра `inheritlibname` пометка «(optional, cmaple only)», и прямо сказано,
-что воркшит «runs headless». Часть параметров новее 2022, поэтому набор для 2018
-надо проверить. `DocumentTools:-Retrieve(filename, label)` адресует по
-`labelreference` (`L1`, `L6`; в реальном `.mw` подтверждён
-`<Label-Scheme value="2"/>`), но только **возвращает** выражение, не выполняя
-его. `WorksheetToMapleText` выдаёт весь файл **без разделителей групп**. Отсюда
-практический приём: **один execution group — один файл** + `RunWorksheet`, либо
-извлечение N-й группы из XML (наш основной путь).
+About `RunWorksheet`: a new engine (state is not shared with the caller), there
+are `var_init`/`outputs`, and **early exit is a top-level `return`** at the end of
+the last group needed. It **already existed in 2018** (PG2018, p. 190); in the
+2022 help the `inheritlibname` parameter has the note "(optional, cmaple only)",
+and it says directly that the worksheet "runs headless". Some parameters are newer
+than 2022, so the set for 2018 needs to be checked.
+`DocumentTools:-Retrieve(filename, label)` addresses by
+`labelreference` (`L1`, `L6`; in a real `.mw`
+`<Label-Scheme value="2"/>` is confirmed), but it only **returns** the expression
+without executing it. `WorksheetToMapleText` outputs the whole file **without
+group separators**. Hence the practical trick: **one execution group — one file**
++ `RunWorksheet`, or extracting the N-th group from the XML (our main path).
 
-**Практический путь (то, что и будем делать):** вытащить текст
+**The practical path (what we will actually do):** pull out the text
 `<Group><Input><Text-field style="Maple Input" prompt="&gt; ">…</Text-field></Input></Group>`
-и отдать ядру (`read`, stdin, `-c` или OpenMaple). Одна execution group — это
-просто один блок операторов; в формате файла в ней нет ничего «магического».
+and feed it to the kernel (`read`, stdin, `-c` or OpenMaple). One execution group
+is just one block of statements; there is nothing "magical" about it in the file
+format.
 
-**Семантические оговорки:**
+**Semantic caveats:**
 
-- Группа рассчитана на **общее состояние ядра и документный порядок**, поэтому
-  выполнять группу *k* в одиночку осмысленно, только если она самодостаточна.
-  Честная операция «выполнить часть воркшита» — **выполнить префикс 1…k по
-  порядку**.
-- `restart` внутри группы надо уважать: он сбрасывает всё (включая опции
-  `interface`) и обязан быть на отдельной строке; при `-c` команды `-c` после
-  него выполняются заново.
-- **~34% реальных входов — только-2-D** и снаружи нечитаемы; их линеаризуем через
-  `Worksheet:-WorksheetToMapleText`.
-- Выполнение фрагмента **не создаёт метки уравнений** и **не меняет `.mw`** на
-  диске.
-- Формат официально «not documented, and is subject to change» — парсим защитно.
+- A group relies on the **shared kernel state and document order**, so executing
+  group *k* alone makes sense only if it is self-contained. The honest operation
+  "execute part of the worksheet" is to **execute the prefix 1…k in order**.
+- `restart` inside a group must be respected: it resets everything (including
+  `interface` options) and must be on a separate line; with `-c` the `-c` commands
+  are re-executed after it.
+- **~34% of real inputs are 2-D-only** and unreadable from outside; we linearize
+  them via `Worksheet:-WorksheetToMapleText`.
+- Executing a fragment **does not create equation labels** and **does not modify
+  the `.mw`** on disk.
+- The format is officially "not documented, and is subject to change" — we parse
+  defensively.
 
-### 5.4 Эксплуатация: лимиты, лицензия, диагностика
+### 5.4 Operations: limits, license, diagnostics
 
-- **Память/CPU.** `-T cpu,data,stack,core` — OS-лимиты, значения в
-  **килобайтах**, можно указать любой префикс из четырёх. Пример «60 c CPU,
-  4 ГиБ»: `maple -q -s -T 60,4194304 job.mpl`. `--init-reserve-mem=` задаёт
-  размер виртуальной карты (и это же максимум памяти сессии); при конфликте
-  **`-T` имеет приоритет**. Есть и `kernelopts(datalimit=…)`.
-- **Лимит на одно вычисление.** `timelimit(seconds, expr)` внутри кода, а `-T` —
-  внешний предохранитель.
-- **Как убивать зависшее.** Сигнал (SIGINT/SIGTERM) надо слать **процессу ядра
-  или группе процессов**, а не обёртке-скрипту `maple`: на Linux `maple` — это
-  shell-обёртка (точное поведение `exec` — в списке непроверенного).
-  **Проверено (см. §10.1.1):** `bin/maple` делает `exec cmaple`, но ядро
-  `mserver` — отдельный процесс-ребёнок обёртки, и убийство одной обёртки его не
-  трогает. Рабочий приём — своя группа процессов на сессию (`spawn(..., {
-  detached: true })`) и сигнал всей группе.
-- **Лицензия.** Для batch не нужно ничего сверх обычной активированной лицензии:
-  single-user `license.dat` в `<maple>/license/` либо сетевой FlexNet-сервер
-  (`lmgrd` + `maplelmg`). **Каждый живой процесс Maple — отдельный лицензионный
-  инстанс**, поэтому пул ядер плох ещё и по лицензии. Признак проблемы —
-  код возврата `1`.
-- **Проба при старте** (версия/платформа/лицензия):
+- **Memory/CPU.** `-T cpu,data,stack,core` are OS limits, values in
+  **kilobytes**, any prefix out of the four can be given. Example "60 s CPU,
+  4 GiB": `maple -q -s -T 60,4194304 job.mpl`. `--init-reserve-mem=` sets
+  the size of the virtual map (and that is also the session's maximum memory);
+  on conflict **`-T` takes priority**. There is also `kernelopts(datalimit=…)`.
+- **Limit per computation.** `timelimit(seconds, expr)` inside the code, while
+  `-T` is the external fuse.
+- **How to kill a hung process.** The signal (SIGINT/SIGTERM) must be sent
+  **to the kernel process or the process group**, not to the `maple` wrapper
+  script: on Linux `maple` is a shell wrapper (the exact `exec` behavior is on the
+  unverified list). **Verified (see §10.1.1):** `bin/maple` does `exec cmaple`,
+  but the `mserver` kernel is a separate child process of the wrapper, and killing
+  the wrapper alone does not touch it. The working approach is our own process
+  group per session (`spawn(..., {
+  detached: true })`) and a signal to the whole group.
+- **License.** For batch, nothing beyond an ordinary activated license is needed:
+  a single-user `license.dat` in `<maple>/license/` or a network FlexNet server
+  (`lmgrd` + `maplelmg`). **Every live Maple process is a separate license
+  instance**, so a kernel pool is bad for licensing too. The sign of trouble is
+  return code `1`.
+- **Startup probe** (version/platform/license):
   ```sh
   /opt/maple2022/bin/maple -q -s -e2 \
     -c 'printf("PROBE %a %a %a\n", kernelopts(version), kernelopts(platform), kernelopts(wordsize)):'
   ```
-- **Проверка синтаксиса без выполнения** (отдельный полезный инструмент):
+- **Syntax check without execution** (a separate useful tool):
   `maple -q -s -P -e0 file.mpl`.
-- **Официальная оценка старта** (PG2018 §14.4, тот же текст в 2021/2022):
-  «Starting the Maple command-line interface, automatically executing a command
-  file, and stopping the Maple session can take about **one tenth of a second**»
-  — Maplesoft сами позиционируют CLI как пригодный для вызова из других
-  приложений «даже для быстрых вычислений». Проверить на месте.
+- **Official startup estimate** (PG2018 §14.4, the same text in 2021/2022):
+  "Starting the Maple command-line interface, automatically executing a command
+  file, and stopping the Maple session can take about **one tenth of a second**"
+  — Maplesoft itself positions the CLI as suitable for being called from other
+  applications "even for quick computations". Verify on site.
 
-### 5.5 Сериализация результата (что реально есть)
+### 5.5 Result serialization (what actually exists)
 
-| Что нужно | Чем делать | Статус |
+| What is needed | How to do it | Status |
 |---|---|---|
-| машиночитаемый текст | `interface(prettyprint=0)`, `lprint`, `printf`/`sprintf` (`%a %A %q %m`) | подтверждено |
-| значение выражения строкой | `convert(expr, string)` | подтверждено |
-| запись вывода в файл | `writeto`, `FileTools`; в CLI ещё `interface(echofile)` | подтверждено |
-| XML воркшита из Maple | `printf("%Zm", …)`; `DocumentTools:-ContentToString` | подтверждено |
-| LaTeX | `latex(expr, output=string)` | `latex` **переписан в 2021** → наборы опций 2018 и 2022 разные (для 2018 UNVERIFIED) |
-| MathML | `MathML:-ExportContent(expr)` | подтверждено; **`convert(expr,'MathML')` не документирован** |
-| график в файл | `plotsetup(png\|gif\|jpeg\|postscript, plotoutput=…)`, затем `plot(...)`; `Export(…, format="PNG"\|"GIF"\|"JPEG")`; `plottools:-exportplot` (GIF/JPEG/TIFF + вектор) | подтверждено |
-| график в SVG/EPS | — | **SVG не поддерживается**, `plot(..., output=…)` — **такой опции нет** |
+| machine-readable text | `interface(prettyprint=0)`, `lprint`, `printf`/`sprintf` (`%a %A %q %m`) | confirmed |
+| expression value as a string | `convert(expr, string)` | confirmed |
+| writing output to a file | `writeto`, `FileTools`; in the CLI also `interface(echofile)` | confirmed |
+| worksheet XML from Maple | `printf("%Zm", …)`; `DocumentTools:-ContentToString` | confirmed |
+| LaTeX | `latex(expr, output=string)` | `latex` was **rewritten in 2021** → the option sets for 2018 and 2022 differ (UNVERIFIED for 2018) |
+| MathML | `MathML:-ExportContent(expr)` | confirmed; **`convert(expr,'MathML')` is not documented** |
+| plot to file | `plotsetup(png\|gif\|jpeg\|postscript, plotoutput=…)`, then `plot(...)`; `Export(…, format="PNG"\|"GIF"\|"JPEG")`; `plottools:-exportplot` (GIF/JPEG/TIFF + vector) | confirmed |
+| plot to SVG/EPS | — | **SVG is not supported**, `plot(..., output=…)` — **there is no such option** |
 
-Важные дефолты CLI: `;` показывает значение, `:` подавляет; `interface(echo)` по
-умолчанию 1, то есть **ввод эхом повторяется**, когда это не tty (`quiet=true`
-перебивает); `prettyprint` в CLI по умолчанию 1 (в GUI — 3); **`printbytes` по
-умолчанию true → в вывод попадает мусор «bytes used=…»** (надо выключать);
-`warnlevel` 3; `errorbreak` 1. Поэтому протокол строим на **рамках-сентинелах
-через `printf` и терминаторах-двоеточиях**, а не на разборе позиций.
+Important CLI defaults: `;` shows the value, `:` suppresses it; `interface(echo)`
+defaults to 1, that is **input is echoed back** when it is not a tty
+(`quiet=true` overrides); `prettyprint` defaults to 1 in the CLI (in the GUI — 3);
+**`printbytes` defaults to true → junk "bytes used=…" gets into the output**
+(must be turned off); `warnlevel` 3; `errorbreak` 1. Therefore we build the
+protocol on **sentinel frames via `printf` and colon terminators**, not on
+positional parsing.
 
 ---
 
-## 6. Как это стыкуется с Икаром
+## 6. How this fits with Icarus
 
-Точная схема слота (`packages/service/src/config.ts`):
+The exact slot schema (`packages/service/src/config.ts`):
 
 ```ts
 export type McpServerConfig = {
@@ -589,300 +608,311 @@ export type McpServerConfig = {
 };
 ```
 
-- В `config.yaml` это `mcp: { <имя>: {...} }`; в README пример — `mcp: {}`.
-- `pi-mcp-extension` читает `~/.pi/agent/mcp.json`; сервис генерирует
-  `settings.json` + `mcp.json` из конфига.
-- Есть образец минимального stdio-сервера: `docker/user/mcp/echo-server.mjs`
-  (raw JSON-RPC построчно; `initialize` / `notifications/initialized` /
-  `tools/list` / `tools/call`; протокол `2024-11-05`).
-- `lifecycle: eager|lazy` — можно держать ядро Maple прогретым (`eager`) или
-  поднимать по требованию (`lazy`); для «тонкого прода» это рычаг памяти.
+- In `config.yaml` it is `mcp: { <name>: {...} }`; in the README the example is
+  `mcp: {}`.
+- `pi-mcp-extension` reads `~/.pi/agent/mcp.json`; the service generates
+  `settings.json` + `mcp.json` from the config.
+- There is a sample minimal stdio server: `docker/user/mcp/echo-server.mjs`
+  (raw JSON-RPC line by line; `initialize` / `notifications/initialized` /
+  `tools/list` / `tools/call`; protocol `2024-11-05`).
+- `lifecycle: eager|lazy` — you can keep the Maple kernel warm (`eager`) or bring
+  it up on demand (`lazy`); for "thin prod" this is a memory lever.
 
-Следствие: Maple-MCP — отдельный процесс, который удобнее всего запускать
-**там, где стоит Maple** (на машине мамы), и подключать в Икар либо как
-локальный stdio-сервер, либо как `streamable-http` (если Maple на другой
-машине). Ядро Икара править не нужно.
+Consequence: Maple-MCP is a separate process that is most conveniently run
+**where Maple is installed** (on mom's machine), and hooked into Icarus either as
+a local stdio server or as `streamable-http` (if Maple is on another machine).
+The Icarus core does not need to be modified.
 
-**Что надо уточнить у владелицы железки:** ОС и версию (2018 или 2022). От этого
-зависит имя исполняемого файла (`cmaple.exe` в Windows vs `bin/maple` в
-Linux/macOS), пути (в Windows — что-то вида
-`C:\Program Files\Maple 2022\bin.X86_64_WINDOWS\cmaple.exe`), наличие
-Jupyter-ядра (только 2022) и вообще то, где физически может жить MCP-сервер.
-До этого момента все конкретные команды в отчёте даны в двух вариантах.
+**What needs to be confirmed with the owner of the hardware:** the OS and version
+(2018 or 2022). This determines the name of the executable (`cmaple.exe` on
+Windows vs `bin/maple` on Linux/macOS), the paths (on Windows something like
+`C:\Program Files\Maple 2022\bin.X86_64_WINDOWS\cmaple.exe`), the presence of the
+Jupyter kernel (2022 only), and in general where the MCP server can physically
+live. Until then, all specific commands in the report are given in two variants.
 
 ---
 
-## 7. Набор инструментов MCP (предложение)
+## 7. MCP tool set (proposal)
 
-Список официального Maple MCP неизвестен (§2), поэтому это **предложение**,
-собранное из вендорских и community-поверхностей (детали —
-`research/06-mcp-prior-art.md` §3.7). Префикс `maple_` обязателен: без него имена
-вроде `matrix_operation` конфликтуют с SymPy/Sage-серверами.
+The list of the official Maple MCP is unknown (§2), so this is a **proposal**
+assembled from vendor and community surfaces (details —
+`research/06-mcp-prior-art.md` §3.7). The `maple_` prefix is mandatory: without it,
+names like `matrix_operation` conflict with SymPy/Sage servers.
 
-**Tier 1 — ядро (делать первым):**
+**Tier 1 — core (do first):**
 
-| Инструмент | Назначение | Параметры | По образцу |
+| Tool | Purpose | Parameters | Modeled after |
 |---|---|---|---|
-| `maple_evaluate_code` | выполнить код в сессии, вернуть результаты | `code`, `timeout_seconds?`, `session?` | Wolfram `WolframLanguageEvaluator` |
-| `maple_check_code` | статический анализ **без выполнения** | `code` или `path` | MathWorks `check_matlab_code` |
-| `maple_help` | справка по команде/теме | `topic` | Wolfram `WolframContext` |
-| `maple_health` | проверка, что счёт работает: версия + задержка | — | sagemath `check_sage_health` |
+| `maple_evaluate_code` | execute code in the session, return the results | `code`, `timeout_seconds?`, `session?` | Wolfram `WolframLanguageEvaluator` |
+| `maple_check_code` | static analysis **without execution** | `code` or `path` | MathWorks `check_matlab_code` |
+| `maple_help` | help on a command/topic | `topic` | Wolfram `WolframContext` |
+| `maple_health` | check that computation works: version + latency | — | sagemath `check_sage_health` |
 
-**Tier 2 — сессии и качество вывода:**
+**Tier 2 — sessions and output quality:**
 
-| Инструмент | Назначение |
+| Tool | Purpose |
 |---|---|
-| `maple_verify` | независимая перепроверка утверждения: proved / refuted / supported / undecided (родные `verify`/`is`) |
-| `maple_validate_code` | нормализация/разбор кода и внятные синтаксические ошибки **без выполнения** |
-| `maple_start_session` / `maple_list_sessions` / `maple_stop_session` | именованные рабочие пространства с независимым состоянием |
-| `maple_reset_session` / `maple_interrupt_session` / `maple_cancel_session` | сброс / прерывание с сохранением состояния / отмена |
-| `maple_to_latex` | выражение → LaTeX или MathML |
-| `maple_plot` | график как изображение (`png`/`svg`, ширина/высота) |
+| `maple_verify` | independent re-verification of a statement: proved / refuted / supported / undecided (native `verify`/`is`) |
+| `maple_validate_code` | normalization/parsing of code and clear syntax errors **without execution** |
+| `maple_start_session` / `maple_list_sessions` / `maple_stop_session` | named workspaces with independent state |
+| `maple_reset_session` / `maple_interrupt_session` / `maple_cancel_session` | reset / interrupt preserving state / cancel |
+| `maple_to_latex` | expression → LaTeX or MathML |
+| `maple_plot` | plot as an image (`png`/`svg`, width/height) |
 
-**Tier 3 — документы: только на уровне документа, НЕ по ячейкам.** Это самая
-важная поправка, которую даёт prior art: оба вендора, реально поставляющие
-работу с документами (Wolfram `ReadNotebook`/`WriteNotebook`, MathCAD
-`open_worksheet`/`calculate_worksheet`/`save_as_pdf`), дают **операции над целым
-документом с текстовым форматом обмена**, а не `create_cell`/`edit_cell`/
-`run_cell`. Придумывать per-cell API не нужно — прецедента нет, а поверхность
-растёт. Если окажется, что локальный Maple не даёт удобной работы с документами,
-Tier 3 можно выбросить целиком, не трогая Tier 1–2.
+**Tier 3 — documents: document level only, NOT per cell.** This is the most
+important correction that the prior art gives: both vendors that actually ship
+document work (Wolfram `ReadNotebook`/`WriteNotebook`, MathCAD
+`open_worksheet`/`calculate_worksheet`/`save_as_pdf`) provide **operations over a
+whole document with a text exchange format**, not `create_cell`/`edit_cell`/
+`run_cell`. There is no need to invent a per-cell API — there is no precedent, and
+the surface grows. If it turns out that local Maple does not offer convenient
+document work, Tier 3 can be thrown out entirely without touching Tiers 1–2.
 
-| Инструмент | Назначение |
+| Tool | Purpose |
 |---|---|
-| `maple_read_document` | прочитать воркшит как markdown/текст |
-| `maple_write_document` | записать markdown/текст как документ Maple |
-| `maple_run_document` | выполнить документ и вернуть результаты |
-| `maple_export_document` | экспорт в PDF/LaTeX/… |
+| `maple_read_document` | read a worksheet as markdown/text |
+| `maple_write_document` | write markdown/text as a Maple document |
+| `maple_run_document` | execute the document and return the results |
+| `maple_export_document` | export to PDF/LaTeX/… |
 
-**Широкий tier операций (`maple_solve`, `maple_dsolve`, `maple_int`, …) — не
-сейчас.** У вендорских серверов поверхность маленькая; но у ближайшего
-community-аналога (`maxima-mcp`) — 133 операции, и там эмпирически требуется
-отдельный routing-документ «тип задачи → инструмент», иначе выбор инструментов
-деградирует. Рекомендация: начать с Tier 1–2, измерить, и добавлять широкий tier
-только если generic-evaluator не хватает.
+**The broad tier of operations (`maple_solve`, `maple_dsolve`, `maple_int`, …) —
+not now.** Vendor servers have a small surface; but the nearest community
+analogue (`maxima-mcp`) has 133 operations, and there empirically a separate
+routing document "task type → tool" is required, otherwise tool selection
+degrades. Recommendation: start with Tiers 1–2, measure, and add the broad tier
+only if the generic evaluator is not enough.
 
-**Сквозные правила (все подкреплены источниками в §3.7 отчёта 06):**
+**Cross-cutting rules (all backed by sources in §3.7 of report 06):**
 
-- Машинно-читаемый **статус результата**: `exact` / `approximate` /
-  `unevaluated` / `no_closed_form` / `error` / `timeout` + текст warning.
-  Это защищает от того, чтобы «Maple вернул `int(...)` без изменений» модель
-  подала как ответ.
-- `isError: true` для ошибок Maple, а не JSON-RPC error; таймаут не должен
-  выглядеть как математический ответ.
-- Жёсткие таймауты с задокументированным дефолтом + лимит памяти, где возможно.
-- **Усечение вывода с явным маркером** — символьный вывод Maple бывает огромным.
-- **Биг-инты передавать строкой**: JSON-числа в JS-клиентах — это IEEE double,
-  поэтому 30-значное целое молча округлится ещё до нас.
-- Предупреждение в описании про команды, убивающие сессию (`restart`, `quit`,
-  переопределение встроенных имён).
-- Аннотации по эффекту: read-only для `check`/`help`/`health`/`read`,
-  destructive для всего, что пишет или исполняет.
-- Честность про sandbox: Maple исполняет произвольный код (файлы, `system()`,
-  сокеты), поэтому «списки запрещённых подстрок» — защита от аварий, а не от
-  злонамеренного кода; граница — OS-ограничение (отдельный пользователь,
-  контейнер), и это надо написать в документации.
-- Транспорт — **stdio** для локального сервера (и никаких API-ключей в
-  query-параметрах, как у облачного Maple MCP).
+- A machine-readable **result status**: `exact` / `approximate` /
+  `unevaluated` / `no_closed_form` / `error` / `timeout` + warning text.
+  This protects against the model presenting "Maple returned `int(...)` unchanged"
+  as an answer.
+- `isError: true` for Maple errors, not a JSON-RPC error; a timeout must not
+  look like a mathematical answer.
+- Hard timeouts with a documented default + a memory limit where possible.
+- **Output truncation with an explicit marker** — Maple symbolic output can be
+  huge.
+- **Pass big integers as strings**: JSON numbers in JS clients are IEEE doubles,
+  so a 30-digit integer will be silently rounded before it even reaches us.
+- A warning in the description about commands that kill the session (`restart`,
+  `quit`, overriding built-in names).
+- Effect annotations: read-only for `check`/`help`/`health`/`read`, destructive
+  for anything that writes or executes.
+- Honesty about the sandbox: Maple executes arbitrary code (files, `system()`,
+  sockets), so "forbidden substring lists" are protection against accidents, not
+  against malicious code; the boundary is an OS restriction (a separate user, a
+  container), and this must be written in the docs.
+- Transport is **stdio** for a local server (and no API keys in query parameters,
+  like the cloud Maple MCP).
 
 ---
 
-## 8. Детальные отчёты (в этом же worktree)
+## 8. Detailed reports (in this same worktree)
 
-| Файл | Тема | Состояние |
+| File | Topic | State |
 |---|---|---|
-| `research/01-cli-batch.md` | CLI `maple`/`cmaple`, headless, batch, коды возврата, лимиты, лицензия | готов (кроме §3/§4 — см. 07) |
-| `research/02-openmaple-c.md` | OpenMaple C API + Python-биндинги | готов |
-| `research/03-openmaple-java-dotnet.md` | Java/.NET, стоимость моста, Jupyter | готов |
-| `research/04-file-formats.md` | `.mw`/`.mws`/`.mpl`, XML, сторонние парсеры | готов |
-| `research/05-in-maple-worksheet-api.md` | `Worksheet`/`DocumentTools`, одна ячейка, сериализация | готов |
-| `research/06-mcp-prior-art.md` | официальный Maple MCP, CAS-MCP, набор инструментов | готов |
-| `research/07-single-group-and-persistent-process.md` | одна execution group + долгоживущий процесс | готов |
+| `research/01-cli-batch.md` | CLI `maple`/`cmaple`, headless, batch, return codes, limits, license | ready (except §3/§4 — see 07) |
+| `research/02-openmaple-c.md` | OpenMaple C API + Python bindings | ready |
+| `research/03-openmaple-java-dotnet.md` | Java/.NET, bridge cost, Jupyter | ready |
+| `research/04-file-formats.md` | `.mw`/`.mws`/`.mpl`, XML, third-party parsers | ready |
+| `research/05-in-maple-worksheet-api.md` | `Worksheet`/`DocumentTools`, one cell, serialization | ready |
+| `research/06-mcp-prior-art.md` | official Maple MCP, CAS-MCP, tool set | ready |
+| `research/07-single-group-and-persistent-process.md` | one execution group + long-lived process | ready |
 
-## 9. Что прогнать на живой установке (smoke-тесты)
+## 9. What to run on a live installation (smoke tests)
 
-Порядок — от дешёвого к дорогому. Всё это надо сделать **на машине с Maple**,
-до написания MCP-сервера.
+The order is from cheap to expensive. All of this must be done **on the machine
+with Maple**, before writing the MCP server.
 
-1. **Лицензия и версия.**
+1. **License and version.**
    `maple -q -s -e2 -c 'printf("%a %a\n", kernelopts(version), kernelopts(wordsize)):'`
-   (Linux: `<maple>/bin/maple`, Windows: `cmaple.exe`). Код возврата 1 — проблема
-   с лицензией/установкой.
-2. **Headless-пакет `Worksheet`** (главный невыясненный пункт): работает ли
+   (Linux: `<maple>/bin/maple`, Windows: `cmaple.exe`). A return code of 1 is a
+   license/installation problem.
+2. **The headless `Worksheet` package** (the main unresolved point): whether
    `Worksheet:-ReadFile` / `Worksheet:-ToString` / `Worksheet:-WriteFile` /
-   `Worksheet:-WorksheetToMapleText` под командным `maple` без GUI. Заведомо
-   GUI-only только `Display` (подтверждено вербатим). Если остальное работает —
-   чтение и генерация воркшитов делаются «изнутри Maple», а не своим XML-кодом.
+   `Worksheet:-WorksheetToMapleText` work under the command-line `maple` without a
+   GUI. Only `Display` is known to be GUI-only (confirmed verbatim). If the rest
+   works, reading and generating worksheets is done "from inside Maple" rather
+   than with our own XML code.
 3. **`DocumentTools` headless:** `InsertContent`, `Retrieve(path, label)`,
-   `GetProperty`/`SetProperty` — что работает без открытого окна.
-4. **Persistent-протокол:** запустить `maple -q -s -t` как долгоживущий процесс
-   (и отдельно — через pty), отправить два запроса с маркером-сентинелом,
-   проверить: (а) сохраняется ли состояние между запросами, (б) флашится ли вывод
-   при stdout=pipe, (в) что происходит после синтаксической и runtime-ошибки при
-   `errorbreak=0`, (г) виден ли prompt `#-->` и годится ли он как sentinel.
-5. **Замер старта и памяти:** время до первого результата и RSS ядра (idle и
-   после тяжёлого счёта) — от этого зависит, можно ли держать ядро прогретым на
-   тонком боксе.
-6. **Круг `.mw`:** сгенерировать минимальный `.mw` нашим XML-кодом, открыть его
-   в Maple 2018 и 2022 — проверяем, что формат принят; затем прочитать в Maple
-   файл, созданный GUI, и сравнить структуру.
-7. **Одна ячейка:** извлечь текст `<Group><Input><Text-field style="Maple Input">`
-   из реального воркшита, выполнить префикс 1…k, сравнить с результатом
-   выполнения тех же ячеек в GUI (порядок, состояние, вывод). Отдельно проверить
-   `DocumentTools:-RunWorksheet` (весь воркшит headless, новый движок, ранний
-   выход через top-level `return`) — существуют ли эти параметры в 2018/2022.
-   И проверить линеаризацию 2-D через `Worksheet:-WorksheetToMapleText`.
-8. **Сериализация:** `latex(expr, output=string)` (и какие опции есть именно в
-   2018 — `latex` переписан в 2021), `MathML:-ExportContent`,
-   `plotsetup(png, plotoutput=…)`, `Export(…, format="PNG")`, запись в файл — всё
-   headless. Проверить, что `printf("%Zm", …)` и
-   `DocumentTools:-ContentToString` дают валидный `.mw`.
-9. **Тонкие места версий:** `.mws` в 2022 (только миграция), `-e3` в 2022 vs
-   `-e2` в 2018, наличие `--echofile`, поведение `interface(ansi=false)`,
-   выключение `printbytes` и `echo`.
-10. **Создание `.mw` изнутри Maple (headless):** `DocumentTools:-Layout:-*` →
-    `ContentToString` → `FileTools:-Text:-WriteFile`; открыть результат в GUI
-    обеих версий.
+   `GetProperty`/`SetProperty` — what works without an open window.
+4. **Persistent protocol:** launch `maple -q -s -t` as a long-lived process
+   (and separately through a pty), send two requests with a sentinel marker,
+   check: (a) whether state persists between requests, (b) whether output is
+   flushed when stdout=pipe, (c) what happens after a syntax and a runtime error
+   with `errorbreak=0`, (d) whether the `#-->` prompt is visible and whether it
+   works as a sentinel.
+5. **Startup and memory measurement:** time to first result and kernel RSS (idle
+   and after heavy computation) — this determines whether the kernel can be kept
+   warm on a thin box.
+6. **`.mw` round trip:** generate a minimal `.mw` with our XML code, open it in
+   Maple 2018 and 2022 — verify that the format is accepted; then read into Maple
+   a file created by the GUI and compare the structure.
+7. **One cell:** extract the text `<Group><Input><Text-field style="Maple Input">`
+   from a real worksheet, execute the prefix 1…k, compare with the result of
+   executing the same cells in the GUI (order, state, output). Separately test
+   `DocumentTools:-RunWorksheet` (the whole worksheet headless, fresh engine,
+   early exit via top-level `return`) — whether these parameters exist in
+   2018/2022. And test 2-D linearization via `Worksheet:-WorksheetToMapleText`.
+8. **Serialization:** `latex(expr, output=string)` (and which options exist
+   specifically in 2018 — `latex` was rewritten in 2021), `MathML:-ExportContent`,
+   `plotsetup(png, plotoutput=…)`, `Export(…, format="PNG")`, writing to a file —
+   all headless. Verify that `printf("%Zm", …)` and
+   `DocumentTools:-ContentToString` produce a valid `.mw`.
+9. **Version gotchas:** `.mws` in 2022 (migration only), `-e3` in 2022 vs
+   `-e2` in 2018, the presence of `--echofile`, the behavior of
+   `interface(ansi=false)`, turning off `printbytes` and `echo`.
+10. **Creating a `.mw` from inside Maple (headless):** `DocumentTools:-Layout:-*` →
+    `ContentToString` → `FileTools:-Text:-WriteFile`; open the result in the GUI
+    of both versions.
 
 ---
 
-## 10. Что подтвердилось на живой установке (Maple 18.00)
+## 10. What was confirmed on a live installation (Maple 18.00)
 
-На машине оказался **Maple 18.00** (`X86 64 LINUX, Feb 10 2014, Build ID
-922027`, `/opt/maple18`), а не «Maple 2018». Это важно: часть API, которую мы
-считали доступной «в 2018», в 18.0 отсутствует.
+The machine turned out to have **Maple 18.00** (`X86 64 LINUX, Feb 10 2014, Build
+ID 922027`, `/opt/maple18`), not "Maple 2018". This matters: part of the API that
+we considered available "in 2018" is absent in 18.0.
 
-Проверено вживую:
+Verified live:
 
-- `Worksheet:-ReadFile/WriteFile/FromString/ToString/Convert` — есть и
-  **работают headless**; `Worksheet:-WorksheetToMapleText` — **нет** (2017+).
+- `Worksheet:-ReadFile/WriteFile/FromString/ToString/Convert` exist and
+  **work headless**; `Worksheet:-WorksheetToMapleText` — **absent** (2017+).
 - `DocumentTools:-InsertContent/GetProperty/SetProperty/Do/Retrieve/RunWorksheet/GetDocumentProperty`
-  — есть; **`Tabulate` и `ContentToString` — нет**.
-- `Worksheet:-Display` — только GUI (как и писала справка).
-- `latex(expr, output=string)`, `MathML:-ExportContent` работают; графику
-  отдаёт `plottools:-exportplot` в **gif/jpeg/bmp**, а `png`/`tiff` — **нет**.
-  `Export(..., format="PNG")` в 18.0 просто возвращает невычисленный вызов.
-- **`maple -c` использовать нельзя**: launcher `maple` — shell-скрипт, который
-  делает `eval` аргументов, поэтому код и пути с кавычками и слэшами ломаются.
-  Надёжно — через stdin или файл-скрипт.
-- **Синтаксическая ошибка в живом REPL вешает поток**: следующие операторы не
-  выполняются. Runtime-ошибки безопасны. Спасает предварительная проверка
-  синтаксиса отдельным процессом (`maple -P`) — тогда сессия не портится.
-- `maple -q -s -t` даёт чистый вывод без prompt'а и без «bytes used»; вывод
-  флэшится сразу; старт ~50 мс; RSS ядра ~5 МБ.
-- `.mw` в Maple 18 — тот же plain-text XML; в примерах встречается
-  `<Version major="11" …>` (файл, не пересохранённый ещё с Maple 11), то есть
-  `major` — версия формата, а не год релиза.
-- 2-D ввод удаётся читать по атрибуту `input-equation` (линейная форма Maple),
-  а не только как «непрозрачный base64».
-- **Внешние библиотеки Maple 18 не грузятся на современной glibc:**
-  `libatlas.so` и `libmsp.so` (2014 год) требуют исполняемого стека, а `dlopen`
-  в glibc 2.41+ (Ubuntu 26.04) такие объекты отвергает. Симптом —
+  exist; **`Tabulate` and `ContentToString` — absent**.
+- `Worksheet:-Display` — GUI only (as the help said).
+- `latex(expr, output=string)`, `MathML:-ExportContent` work; graphics is
+  provided by `plottools:-exportplot` in **gif/jpeg/bmp**, while `png`/`tiff` —
+  **not**. `Export(..., format="PNG")` in 18.0 simply returns an unevaluated call.
+- **`maple -c` must not be used**: the `maple` launcher is a shell script that
+  does `eval` on the arguments, so code and paths with quotes and slashes break.
+  Reliable — via stdin or a script file.
+- **A syntax error in a live REPL hangs the stream**: subsequent statements are
+  not executed. Runtime errors are safe. A preliminary syntax check in a separate
+  process (`maple -P`) saves it — then the session is not corrupted.
+- `maple -q -s -t` gives clean output without a prompt and without "bytes used";
+  output is flushed immediately; startup ~50 ms; kernel RSS ~5 MB.
+- `.mw` in Maple 18 is the same plain-text XML; the examples contain
+  `<Version major="11" …>` (a file not re-saved since Maple 11), i.e. `major` is
+  the format version, not the release year.
+- 2-D input can be read from the `input-equation` attribute (Maple's linear
+  form), not only as "opaque base64".
+- **Maple 18 external libraries do not load on a modern glibc:**
+  `libatlas.so` and `libmsp.so` (from 2014) require an executable stack, and
+  `dlopen` in glibc 2.41+ (Ubuntu 26.04) rejects such objects. The symptom is
   `Error, (in dsolve) external library libmodLA.so could not be found/used`,
-  то есть молча ломаются `dsolve`, `pdsolve`, численные ОДУ и всё, что тянет
-  ATLAS. Лечится снятием флага `PT_GNU_STACK RWE`:
-  `tools/maple-mcp/fix-execstack.py` (с бэкапами `*.bak-execstack`, есть
-  `--restore`). После фикса `dsolve` даёт `y(x) = 1/k*sin(k*x)`,
-  `pdsolve` решает уравнение теплопроводности.
+  i.e. `dsolve`, `pdsolve`, numeric ODEs and everything that pulls in ATLAS
+  silently break. It is fixed by clearing the `PT_GNU_STACK RWE` flag:
+  `tools/maple-mcp/fix-execstack.py` (with `*.bak-execstack` backups, there is
+  `--restore`). After the fix, `dsolve` gives `y(x) = 1/k*sin(k*x)` and
+  `pdsolve` solves the heat equation.
 
-Реализация по итогам: **`tools/maple-mcp/`** — сервер (stdio + Streamable HTTP)
-и самотесты (27 + 25 проверок, все зелёные).
+Implementation based on the results: **`tools/maple-mcp/`** — the server
+(stdio + Streamable HTTP) and self-tests (27 + 25 checks, all green).
 
-### 10.1 Сессии между чатами: как это устроено на самом деле
+### 10.1 Sessions across chats: how it actually works
 
-- **Мост pi убивает наш MCP-процесс в конце чата** (`session_shutdown` →
-  `manager.shutdownAll()`), так что держать состояние в памяти ядра нельзя.
-  Поэтому состояние живёт в **журнале**: `$MAPLE_SESSION_DIR/<имя>.jsonl`,
-  а при первом обращении к сессии в новом процессе журнал проигрывается в свежее
-  ядро (в ответе — пометка «сессия восстановлена из журнала: N шагов»).
-- Проверено на **трёх последовательных процессах** MCP: в первом вводим данные и
-  решаем ОДУ, во втором продолжаем (`m=2 k=3`, `y(1)`) и дописываем шаг, в третьем
-  снова читаем состояние. И отдельно — **на двух разных контейнерах**:
-  `q:=5:` в одном, `q*100` → `500` в другом (журнал лёг в персистентный маунт
-  `~/.pi/agent/maple-mcp`).
-- Ядро гасится после **5 минут** простоя (`MAPLE_IDLE_SECONDS`), журнал остаётся —
-  следующий вызов поднимает ядро и восстанавливает состояние.
-- `restart` в коде очищает журнал; `maple_session_forget` стирает его совсем.
-- `pi-mcp-extension` **выбрасывает изображения**, заменяя их текстом
-  `[Image: image/gif, base64 encoded]`. Поэтому `maple_plot` возвращает и
-  image-контент (для клиентов, которые его умеют), и путь к файлу на диске.
-- Журнал — это повтор команд, а не снимок памяти: тяжёлый шаг при восстановлении
-  выполняется заново. Для долгих расчётов результаты лучше сохранять в файл.
+- **The pi bridge kills our MCP process at the end of the chat**
+  (`session_shutdown` → `manager.shutdownAll()`), so state cannot be held in
+  kernel memory. Therefore state lives in a **journal**:
+  `$MAPLE_SESSION_DIR/<name>.jsonl`, and on the first access to a session in a
+  new process the journal is replayed into a fresh kernel (the response has a note
+  "session restored from journal: N steps").
+- Verified across **three consecutive** MCP processes: in the first we enter data
+  and solve an ODE, in the second we continue (`m=2 k=3`, `y(1)`) and append a
+  step, in the third we read the state again. And separately — **in two different
+  containers**: `q:=5:` in one, `q*100` → `500` in the other (the journal landed
+  in the persistent mount `~/.pi/agent/maple-mcp`).
+- The kernel is shut down after **5 minutes** idle (`MAPLE_IDLE_SECONDS`), the
+  journal remains — the next call brings the kernel up and restores the state.
+- `restart` in the code clears the journal; `maple_session_forget` erases it
+  entirely.
+- `pi-mcp-extension` **discards images**, replacing them with the text
+  `[Image: image/gif, base64 encoded]`. That is why `maple_plot` returns both
+  image content (for clients that support it) and the file path on disk.
+- The journal is a replay of commands, not a memory snapshot: a heavy step is
+  re-executed on restore. For long computations it is better to save results to a
+  file.
 
-### 10.1.1 Утечка процессов: брошенное ядро остаётся зомби
+### 10.1.1 Process leak: an abandoned kernel stays a zombie
 
-Проверено на Maple 18 (X86 64 Linux) и в контейнере человека:
+Verified on Maple 18 (X86 64 Linux) and in the owner's container:
 
-- В CLI-режиме `bin/maple` делает `exec cmaple`, а `cmaple` порождает **второй**
-  процесс — ядро `mserver` (в общей с обёрткой сессии и группе процессов).
-  `child.kill()` в Node бьёт только по обёртке, и ядро это переживает: `mserver`
-  живёт ещё секунды (в тяжёлом счёте — сколько угодно), затем падает по SIGSEGV
-  (в логе видно `apport`), уже сиротой.
-- В контейнере человека PID 1 — `sleep infinity` из образа, а он не вызывает
-  `wait()`. Поэтому каждый осиротевший `mserver`, завершившись, остаётся зомби
-  (`[mserver] <defunct>`) **навсегда**: сессия гасится по таймауту, `reset`,
-  простою и на `session_shutdown` — за разговор таких набирались сотни.
-- Лечение с двух сторон. (1) `maple-mcp` запускает Maple в отдельной **группе
-  процессов** (`spawn(..., { detached: true })` — это `setsid`, лидер = pid
-  обёртки) и гасит группу целиком (`process.kill(-pgid, SIG)`), а на выходе
-  процесса добивает остатки групп; так ядро не остаётся жить без обёртки.
-  (2) контейнерам людей добавлен `init: true` — tini в роли PID 1 подбирает
-  сирот, если они всё-таки появились (например, MCP убили SIGKILL'ом и добить
-  группу было некому).
-- Закреплено тестами: `tools/maple-mcp/test-sessions.mjs` (§6 — ядро стартует в
-  своей группе, группа пустеет после таймаута и после остановки MCP) и
-  `packages/service/test/containers.test.ts` (`init: true` у контейнера человека).
+- In CLI mode `bin/maple` does `exec cmaple`, and `cmaple` spawns a **second**
+  process — the `mserver` kernel (in the same session and process group as the
+  wrapper). `child.kill()` in Node hits only the wrapper, and the kernel survives
+  it: `mserver` lives for a few more seconds (under heavy computation —
+  indefinitely), then crashes with SIGSEGV (you can see `apport` in the log),
+  already an orphan.
+- In the owner's container PID 1 is `sleep infinity` from the image, and it does
+  not call `wait()`. Therefore every orphaned `mserver`, once it exits, stays a
+  zombie (`[mserver] <defunct>`) **forever**: the session is shut down on timeout,
+  `reset`, idle, and on `session_shutdown` — hundreds accumulated over a single
+  conversation.
+- The fix is two-sided. (1) `maple-mcp` launches Maple in a separate **process
+  group** (`spawn(..., { detached: true })` — that is `setsid`, the leader = the
+  wrapper's pid) and shuts down the whole group (`process.kill(-pgid, SIG)`), and
+  on process exit finishes off the remaining groups; this way the kernel does not
+  stay alive without the wrapper. (2) `init: true` was added to the owners'
+  containers — tini as PID 1 reaps orphans if they do appear anyway (for example,
+  the MCP was killed with SIGKILL and there was no one to finish off the group).
+- Locked in by tests: `tools/maple-mcp/test-sessions.mjs` (§6 — the kernel starts
+  in its own group, the group empties after the timeout and after MCP shutdown)
+  and `packages/service/test/containers.test.ts` (`init: true` on the owner's
+  container).
 
-### 10.2 Инструкции агенту: в описаниях инструментов, а не отдельным файлом
+### 10.2 Agent instructions: in the tool descriptions, not a separate file
 
-Сначала подробная инструкция жила отдельным `MAPLE.md`, а в `AGENTS.md` был указатель.
-Потом её убрали: файл, который модель читает только по напоминанию, проигрывает
-описаниям инструментов, которые она видит в каждом разговоре. Сейчас короткое
-правило лежит в `instructions` MCP-хендшейка, а подробности — в описаниях
-`maple_evaluate_code` («считать в голове нельзя», как звучит честный отказ),
-`maple_to_latex` (формулы человеку — всегда LaTeX) и `maple_plot` (markdown-строку
-вставлять дословно). Сервер при этом обычный встроенный MCP: `hidden: true`
-убирает его из панели, а журналы и графики он держит в `.maple/` рабочей папки.
+At first the detailed instruction lived in a separate `MAPLE.md`, and `AGENTS.md`
+had a pointer to it. Then it was removed: a file that the model reads only when
+reminded loses to the tool descriptions that it sees in every conversation. Now
+the short rule sits in the MCP handshake `instructions`, and the details are in
+the descriptions of `maple_evaluate_code` ("you cannot compute in your head", as
+the honest refusal sounds), `maple_to_latex` (formulas for a human are always
+LaTeX) and `maple_plot` (insert the markdown string verbatim). The server is an
+ordinary built-in MCP: `hidden: true` removes it from the panel, and it keeps
+journals and plots in the working folder's `.maple/`.
 
 ---
 
-## 11. Источники
+## 11. Sources
 
-Официальное (Maplesoft):
+Official (Maplesoft):
 
-- https://www.maplesoft.com/products/maplemcp/index.aspx — официальный Maple MCP
-- https://www.maplesoft.com.cn/products/MapleMCP/ — то же (CN)
-- https://www.maplesoft.com/support/help/maple/view.aspx?path=maple — команда `maple` и опции
+- https://www.maplesoft.com/products/maplemcp/index.aspx — the official Maple MCP
+- https://www.maplesoft.com.cn/products/MapleMCP/ — the same (CN)
+- https://www.maplesoft.com/support/help/maple/view.aspx?path=maple — the `maple` command and options
 - https://www.maplesoft.com/support/help/maple/view.aspx?path=versions — `maple` vs `cmaple` vs `xmaple`
-- https://www.maplesoft.com/support/help/maple/view.aspx?path=Formats/MW — формат `.mw`
-- https://www.maplesoft.com/support/help/maple/view.aspx?path=Formats%2fMWS — формат `.mws`
-- https://www.maplesoft.com/support/help/maple/view.aspx?path=Worksheet — пакет `Worksheet`
+- https://www.maplesoft.com/support/help/maple/view.aspx?path=Formats/MW — the `.mw` format
+- https://www.maplesoft.com/support/help/maple/view.aspx?path=Formats%2fMWS — the `.mws` format
+- https://www.maplesoft.com/support/help/maple/view.aspx?path=Worksheet — the `Worksheet` package
 - https://www.maplesoft.com/support/help/maple/view.aspx?path=Worksheet%2fConvert — `Convert`
-- https://www.maplesoft.com/support/help/maple/view.aspx?path=examples/WorksheetPackage — примеры
-- https://www.maplesoft.com/support/help/maple/view.aspx?path=Worksheet%2fDTD и `.../Worksheet%2fSchema` — legacy Maple-8 XML (не `.mw`)
+- https://www.maplesoft.com/support/help/maple/view.aspx?path=examples/WorksheetPackage — examples
+- https://www.maplesoft.com/support/help/maple/view.aspx?path=Worksheet%2fDTD and `.../Worksheet%2fSchema` — legacy Maple-8 XML (not `.mw`)
 - https://www.maplesoft.com/support/help/maple/view.aspx?path=OpenMaple — OpenMaple overview
-- https://www.maplesoft.com/support/help/maple/view.aspx?path=OpenMaple/C/API и `.../OpenMaple/C/Examples` — C API
-- https://www.maplesoft.com/support/help/maple/view.aspx?path=OpenMaple/Python/API — Python API (2023+)
-- https://www.maplesoft.com/support/help/maple/view.aspx?path=Jupyter/MapleKernel/Configuring — Jupyter-ядро Maple (2022+)
+- https://www.maplesoft.com/support/help/maple/view.aspx?path=OpenMaple/C/API and `.../OpenMaple/C/Examples` — the C API
+- https://www.maplesoft.com/support/help/maple/view.aspx?path=OpenMaple/Python/API — the Python API (2023+)
+- https://www.maplesoft.com/support/help/maple/view.aspx?path=Jupyter/MapleKernel/Configuring — the Maple Jupyter kernel (2022+)
 - https://www.maplesoft.com/documentation_center/ — Programming Guides (2018/2021/2023), User Manual
-- https://web.mit.edu/maple_v2018/ProgrammingGuide.pdf — зеркало Guide 2018 (§14.3–14.4)
-- https://www.maplesoft.com/documentation_center/MapleNet2021/MapleNetComputeAPI.pdf — модель результатов MapleNet
+- https://web.mit.edu/maple_v2018/ProgrammingGuide.pdf — mirror of the 2018 Guide (§14.3–14.4)
+- https://www.maplesoft.com/documentation_center/MapleNet2021/MapleNetComputeAPI.pdf — the MapleNet result model
 
-Стороннее и практика:
+Third-party and practice:
 
-- https://www.maplesoft.com/support/help/maple/view.aspx?path=DocumentTools/RunWorksheet — выполнить весь воркшит headless
-- https://www.maplesoft.com/support/help/maple/view.aspx?path=DocumentTools/Retrieve — метка → выражение (без выполнения)
-- https://www.maplesoft.com/support/help/maple/view.aspx?path=DocumentTools/ContentToString — XML воркшита строкой (headless)
-- https://www.maplesoft.com/support/help/maple/view.aspx?path=DocumentTools/GetDocumentProperty и `.../SetDocumentProperty` — свойства документа из файла (2017+/2021+)
-- https://www.maplesoft.com/support/help/maple/view.aspx?path=latex — LaTeX (переписан в 2021)
-- https://www.maplesoft.com/support/help/maple/view.aspx?path=plotsetup и `.../Export` — вывод графиков
-- https://www.maplesoft.com/support/help/maple/view.aspx?path=printf — спецификаторы, в т.ч. `%Zm`
-- https://www.maplesoft.com/support/help/maple/view.aspx?path=Worksheet/Display — «cannot be used in the Command-line version»
-- https://www.maplesoft.com/support/help/maple/view.aspx?path=worksheet/expressions/equationlabels — метки уравнений
-- https://github.com/Maplesoft/openmaple — официальный ctypes-биндинг (MIT, Maple 2024+), референс для своей обёртки
-- https://github.com/mezzarobba/openmaple-ocaml — OCaml-обёртка OpenMaple (public domain, референс)
-- https://github.com/davidovitch/maple-to-python — `mw2txt.py`, единственный внешний читатель `.mw`
-- https://agenttools.wolfram.com/mcp — Wolfram MCP, референс формы инструментов
-- https://hpc.ncsu.edu/Software/Apps.php?app=Maple — реальный batch-запуск `maple < script.mpl`
-- http://ftp.informatik.rwth-aachen.de/maple/mplbatch.htm — исторический паттерн `-c`/`-q`/`-b`
-- SageMath (интерфейс `maple` через pexpect/`maple -t`), TeXmacs (плагин Maple: `tmstart`/`tmend`, `errorbreak=0`, `setsid`+`killpg`), maplev (Emacs; в 3.x ушёл на свой OpenMaple-бинарь `pmaple`) — реальные примеры обвязки CLI
+- https://www.maplesoft.com/support/help/maple/view.aspx?path=DocumentTools/RunWorksheet — execute the whole worksheet headless
+- https://www.maplesoft.com/support/help/maple/view.aspx?path=DocumentTools/Retrieve — label → expression (without execution)
+- https://www.maplesoft.com/support/help/maple/view.aspx?path=DocumentTools/ContentToString — worksheet XML as a string (headless)
+- https://www.maplesoft.com/support/help/maple/view.aspx?path=DocumentTools/GetDocumentProperty and `.../SetDocumentProperty` — document properties from a file (2017+/2021+)
+- https://www.maplesoft.com/support/help/maple/view.aspx?path=latex — LaTeX (rewritten in 2021)
+- https://www.maplesoft.com/support/help/maple/view.aspx?path=plotsetup and `.../Export` — plot output
+- https://www.maplesoft.com/support/help/maple/view.aspx?path=printf — specifiers, incl. `%Zm`
+- https://www.maplesoft.com/support/help/maple/view.aspx?path=Worksheet/Display — "cannot be used in the Command-line version"
+- https://www.maplesoft.com/support/help/maple/view.aspx?path=worksheet/expressions/equationlabels — equation labels
+- https://github.com/Maplesoft/openmaple — the official ctypes binding (MIT, Maple 2024+), a reference for our own wrapper
+- https://github.com/mezzarobba/openmaple-ocaml — an OCaml wrapper for OpenMaple (public domain, reference)
+- https://github.com/davidovitch/maple-to-python — `mw2txt.py`, the only external reader of `.mw`
+- https://agenttools.wolfram.com/mcp — Wolfram MCP, a reference for the tool form
+- https://hpc.ncsu.edu/Software/Apps.php?app=Maple — a real batch run `maple < script.mpl`
+- http://ftp.informatik.rwth-aachen.de/maple/mplbatch.htm — the historical `-c`/`-q`/`-b` pattern
+- SageMath (the `maple` interface via pexpect/`maple -t`), TeXmacs (the Maple plugin: `tmstart`/`tmend`, `errorbreak=0`, `setsid`+`killpg`), maplev (Emacs; in 3.x it moved to its own OpenMaple binary `pmaple`) — real examples of CLI wrapping

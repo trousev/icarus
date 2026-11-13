@@ -1,7 +1,7 @@
-// API папок в левом меню: список, создание, переименование, свёрнутость, удаление.
+// Folder API in the left menu: list, create, rename, collapsed state, delete.
 //
-// Папка — не рабочая директория и не конфиг: только полка для разговоров. Поэтому
-// здесь нет ни настроек, ни промптов, ни файлов на диске — один маленький реестр.
+// A folder is not a working directory and not config: just a shelf for conversations. That's why
+// there are no settings, prompts, or files on disk here — one small registry.
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { findUser, type IcarusConfig, type UserConfig } from '../config.ts';
 import { errorBody } from '../http/sse.ts';
@@ -16,8 +16,8 @@ function json(res: ServerResponse, status: number, payload: unknown): void {
 }
 
 async function bodyOf(req: IncomingMessage): Promise<Record<string, unknown>> {
-  // Битое тело пусть долетит до общего catch: там оно станет 400 с текстом,
-  // а не молчаливым «менять нечего».
+  // Let a broken body reach the shared catch: there it becomes a 400 with text,
+  // instead of a silent "nothing to change".
   return (await readJsonBody(req)) as Record<string, unknown>;
 }
 
@@ -60,8 +60,8 @@ export async function handleFoldersApi(
         return;
       }
       if (changesName) renameFolder(ctx.config, user, id, body.name);
-      // Переименование и сворачивание могут прийти одним запросом: клиент шлёт
-      // то, что изменилось, и не хочет двух round-trip'ов на одно действие.
+      // Rename and collapse can come in one request: the client sends
+      // what changed and doesn't want two round-trips for one action.
       const folder = changesCollapsed
         ? setFolderCollapsed(ctx.config, user, id, body.collapsed as boolean)
         : readFolders(ctx.config, user).find((item) => item.id === id);

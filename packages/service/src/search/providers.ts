@@ -1,8 +1,8 @@
-// Адаптеры поисковиков: как позвать, как разобрать ответ и чем он пахнет при отказе.
+// Search engine adapters: how to call, how to parse the response and what it smells like on refusal.
 //
-// Разбор выдачи вынесен в чистые функции (parse*): их проверяют тесты на реальных
-// формах ответов, не поднимая ни сервера, ни сети. Сам запрос — тонкий слой поверх
-// fetch: ключ, заголовки, тело, таймаут приходит снаружи.
+// Result parsing is moved into pure functions (parse*): tests check them against real
+// response shapes without starting a server or the network. The request itself is a thin layer on top of
+// fetch: key, headers, body, timeout come from outside.
 import {
   type SearchProviderId,
   type SearchProvider,
@@ -11,7 +11,7 @@ import {
 import { requestJson } from './request.ts';
 import { nextUtcMidnight, youFreeSearch } from './you-mcp.ts';
 
-/** Выдержка в списке результатов — одна строка: переводы строк только путают. */
+/** Snippet in the result list is a single line: line breaks only confuse. */
 const SNIPPET_LIMIT = 500;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -33,7 +33,7 @@ function squash(value: string): string {
   return oneLine.length > SNIPPET_LIMIT ? `${oneLine.slice(0, SNIPPET_LIMIT - 1)}…` : oneLine;
 }
 
-/** Результат из полей, в которых провайдеры расходятся: title/link/snippet/description. */
+/** Result from the fields where providers diverge: title/link/snippet/description. */
 function resultOf(row: unknown, urlKeys: string[], titleKeys: string[], textKeys: string[]): SearchResult | null {
   const item = asRecord(row);
   if (!item) return null;
@@ -44,7 +44,7 @@ function resultOf(row: unknown, urlKeys: string[], titleKeys: string[], textKeys
   return { title, url, ...(text ? { snippet: squash(text) } : {}) };
 }
 
-// --- разбор выдачи ------------------------------------------------------------
+// --- result parsing ------------------------------------------------------------
 
 /** SerpApi: organic_results[].link/snippet. */
 export function parseSerpApi(payload: unknown, limit = 6): SearchResult[] {
@@ -62,8 +62,8 @@ export function parseSerpStack(payload: unknown, limit = 6): SearchResult[] {
     .slice(0, limit);
 }
 
-/** Brave: web.results[].description — это HTML с подсветкой, чистим до текста. */
-/** Brave подсвечивает совпадения тегами — агенту нужен текст, а не разметка. */
+/** Brave: web.results[].description is HTML with highlighting, we clean it to text. */
+/** Brave highlights matches with tags — the agent needs text, not markup. */
 function plainText(value: string): string {
   return value
     .replace(/<[^>]+>/g, ' ')
@@ -86,7 +86,7 @@ export function parseBrave(payload: unknown, limit = 6): SearchResult[] {
     .slice(0, limit);
 }
 
-/** Exa: results[].highlights[] — выдержки, релевантные запросу; иначе просто text. */
+/** Exa: results[].highlights[] are excerpts relevant to the query; otherwise just text. */
 export function parseExa(payload: unknown, limit = 6): SearchResult[] {
   return asList(asRecord(payload)?.results)
     .map((row) => {
@@ -111,7 +111,7 @@ export function parseTavily(payload: unknown, limit = 6): SearchResult[] {
     .slice(0, limit);
 }
 
-/** Firecrawl: v1 отдаёт data[], v2 — data.web[]. Понимаем оба. */
+/** Firecrawl: v1 returns data[], v2 returns data.web[]. We understand both. */
 export function parseFirecrawl(payload: unknown, limit = 6): SearchResult[] {
   const data = asRecord(payload)?.data;
   const rows = asList(data).length > 0 ? asList(data) : asList(asRecord(data)?.web);
@@ -122,9 +122,9 @@ export function parseFirecrawl(payload: unknown, limit = 6): SearchResult[] {
 }
 
 /**
- * You.com: results.web[].description, иначе первая snippets[], иначе первый
- * contents.highlights. У бесплатного MCP нет snippets, зато есть highlights —
- * куски самой страницы по запросу; для агента это полезнее короткого описания.
+ * You.com: results.web[].description, otherwise the first snippets[], otherwise the first
+ * contents.highlights. The free MCP has no snippets but does have highlights —
+ * chunks of the page itself for the query; for the agent this is more useful than a short description.
  */
 export function parseYou(payload: unknown, limit = 6): SearchResult[] {
   const rows = asList(asRecord(asRecord(payload)?.results)?.web);
@@ -151,7 +151,7 @@ export function parseLinkup(payload: unknown, limit = 6): SearchResult[] {
     .slice(0, limit);
 }
 
-// --- провайдеры --------------------------------------------------------------
+// --- providers --------------------------------------------------------------
 
 const serpapi: SearchProvider = {
   id: 'serpapi',
@@ -210,7 +210,7 @@ const exa: SearchProvider = {
       {
         method: 'POST',
         headers: { 'content-type': 'application/json', accept: 'application/json', authorization: `Bearer ${ctx.key}` },
-        // highlights — выдержки под запрос; по цене входят в сам поиск.
+        // highlights are excerpts for the query; they are included in the search price itself.
         body: JSON.stringify({ query, numResults: limit, type: 'auto', contents: { highlights: true } }),
       },
       ctx,
@@ -242,7 +242,7 @@ const firecrawl: SearchProvider = {
   label: 'Firecrawl Search',
   keyNames: ['FIRECRAWL_API_KEY'],
   async search(query, limit, ctx) {
-    // v1 отдаёт data[] с title/description/url; v2 кладёт то же в data.web[].
+    // v1 returns data[] with title/description/url; v2 puts the same into data.web[].
     const payload = await requestJson(
       'https://api.firecrawl.dev/v1/search',
       {
@@ -260,7 +260,7 @@ const you: SearchProvider = {
   id: 'you',
   label: 'You.com',
   keyNames: ['YOU_API_KEY', 'YDC_API_KEY'],
-  // Без ключа поиск всё равно идёт — через бесплатный MCP, см. you-free.
+  // Without a key the search still works — via the free MCP, see you-free.
   keylessTwin: 'you-free',
   async search(query, limit, ctx) {
     const payload = await requestJson(
@@ -277,9 +277,9 @@ const you: SearchProvider = {
 };
 
 /**
- * You.com без ключа: их бесплатный профиль живёт только по MCP (100 запросов в
- * сутки на IP). Авторизации нет, поэтому провайдер доступен всегда — и остаётся
- * последней страховкой, когда ключей нет вовсе или все они в карантине.
+ * You.com without a key: their free profile lives only over MCP (100 requests per
+ * day per IP). There is no authorization, so the provider is always available — and remains
+ * the last safeguard when there are no keys at all or all of them are quarantined.
  */
 const youFree: SearchProvider = {
   id: 'you-free',
@@ -312,9 +312,9 @@ const linkup: SearchProvider = {
 };
 
 /**
- * Все поисковые провайдеры по id. Cloudflare сюда не входит: он умеет только
- * извлекать страницы, поэтому и тип у карты — SearchProviderId, а не ProviderId.
- * Рейтинг (в каком порядке пробовать) живёт в router.ts.
+ * All search providers by id. Cloudflare is not included: it can only
+ * extract pages, which is why the map type is SearchProviderId, not ProviderId.
+ * The rating (in which order to try) lives in router.ts.
  */
 export const PROVIDERS: Record<SearchProviderId, SearchProvider> = {
   serpapi,
@@ -324,7 +324,7 @@ export const PROVIDERS: Record<SearchProviderId, SearchProvider> = {
   tavily,
   firecrawl,
   you,
-  // Ключ с дефисом — это и есть id провайдера: он уезжает в ответ /search и в состояние.
+  // A key with a hyphen is the provider id: it goes into the /search response and into the state.
   'you-free': youFree,
   linkup,
 };

@@ -1,31 +1,31 @@
-// Инструмент Икара get_control_panel_link: адрес панели управления, а вход в неё —
-// обычный вход человека через SSO-прокси. Никаких пропусков и сроков тут не осталось.
+// Icarus tool get_control_panel_link: the control panel address, and the login into it
+// is the human's regular login through the SSO proxy. No passes or expirations remain here.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import registerControlPanel, { controlPanelLink } from '../../extensions/control-panel.ts';
 
-/** Ссылка или падение: в тестах нас интересует, что именно уехало человеку. */
+/** The link or a throw: in the tests we care about exactly what went out to the human. */
 function urlOf(input: string): string {
   const result = controlPanelLink({ url: input });
   if (!('url' in result)) throw new Error(result.error);
   return result.url;
 }
 
-test('инструмент отдаёт адрес панели как есть', () => {
+test('the tool returns the panel address as is', () => {
   assert.equal(urlOf('https://chat.trousev.pro/'), 'https://chat.trousev.pro/');
 
-  // Хвостовые слэши не удваиваем: адрес приходит и с ними, и без.
+  // We do not double trailing slashes: the address comes both with and without them.
   assert.equal(urlOf('https://chat.trousev.pro'), 'https://chat.trousev.pro/');
   assert.equal(urlOf(' http://localhost:8081// '), 'http://localhost:8081/');
 });
 
-test('в адресе нет ни ключа, ни пропуска — пускать будет прокси', () => {
+test('the address has no key or pass — the proxy will let people in', () => {
   const url = new URL(urlOf('https://chat.trousev.pro/'));
   assert.deepEqual([...url.searchParams.keys()], [], 'параметров доступа в ссылке быть не должно');
   assert.equal(url.pathname, '/', 'корень домена — это и есть панель');
 });
 
-test('без адреса инструмент честно отказывает', () => {
+test('without an address the tool honestly refuses', () => {
   for (const env of [{}, { url: '   ' }]) {
     const result = controlPanelLink(env);
     if (!('error' in result)) throw new Error(`ожидал отказ для ${JSON.stringify(env)}`);
@@ -33,7 +33,7 @@ test('без адреса инструмент честно отказывает
   }
 });
 
-test('расширение регистрирует инструмент и в руках Икара отдаёт адрес панели', async () => {
+test('the extension registers the tool and in Icarus\'s hands returns the panel address', async () => {
   const tools: any[] = [];
   registerControlPanel({ registerTool: (tool: unknown) => tools.push(tool) } as never);
   assert.deepEqual(tools.map((tool) => tool.name), ['get_control_panel_link']);

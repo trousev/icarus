@@ -1,10 +1,10 @@
-// Чат в панели: список диалогов, история из файлов pi и живой поток ответа.
+// Chat in the panel: list of dialogs, history from pi files, and the live answer stream.
 //
-// Разговор здесь — тот же, что у Telegram: (человек, conversationId) → сессия pi.
-// Поэтому веб-чат не заводит второй агент, а просто даёт ещё один вход к тому же
-// контейнеру и той же памяти. chats.json хранит только метаданные разговора;
-// превью и время последнего сообщения читаются из файла сессии — и только для
-// той страницы списка, которую панель показала.
+// A conversation here is the same as in Telegram: (person, conversationId) → pi session.
+// That's why the web chat doesn't spin up a second agent, it just gives another entry point
+// to the same container and the same memory. chats.json stores only conversation metadata;
+// preview and last-message time are read from the session file — and only for
+// the page of the list that the panel displayed.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -98,19 +98,19 @@ import { log } from '../log.ts';
 
 export { readChats };
 
-/** Один субагент в трассировке: кто, что делает и чем кончил. */
+/** One subagent in the trace: who, what it does, and how it ended. */
 export type ChatSubagentStep = {
   agent: string;
   task: string;
-  /** queued | running | ok | error | aborted | skipped — как в инструменте. */
+  /** queued | running | ok | error | aborted | skipped — as in the tool. */
   status: string;
-  /** Чем занят прямо сейчас, пока жив: «web_search: amazon.ie». */
+  /** What it's busy with right now while alive: «web_search: amazon.ie». */
   activity?: string;
-  /** Куда ребёнок уже ходил: последние шаги для вложенного списка в панели. */
+  /** Where the child has already been: the last steps for the nested list in the panel. */
   actions?: string[];
-  /** Сколько шагов было всего: список хранит только последние. */
+  /** Total number of steps: the list stores only the last ones. */
   actionsTotal?: number;
-  /** Сколько уже работает или работал: панель считает по нему секунды. */
+  /** How long it has been or was working: the panel counts seconds by it. */
   startedAt?: number;
   ms?: number;
   error?: string;
@@ -122,19 +122,19 @@ export type ChatTraceStep = {
   detail: string;
   status: 'running' | 'ok' | 'error';
   result?: string;
-  /** Только у шага subagent: список детей и их состояние. */
+  /** Only on a subagent step: the list of children and their state. */
   subagents?: ChatSubagentStep[];
 };
 
-/** Сколько символов задания видно в панели: целиком оно занимает пол-экрана. */
+/** How many task characters are visible in the panel: in full it takes up half the screen. */
 const SUBAGENT_TASK_CHARS = 160;
-/** Шагов ребёнка показываем не больше десяти: это подсказка, а не отчёт. */
+/** We show no more than ten child steps: this is a hint, not a report. */
 const SUBAGENT_ACTION_LIMIT = 10;
 
 /**
- * Субагенты из деталей инструмента. Детали приходят дважды — в прогрессе и в итоге,
- * форма одна, поэтому и разбор один. Мусор в деталях не должен ронять ход: не
- * разобрали — просто не показываем.
+ * Subagents from the tool details. Details arrive twice — in the progress and in the result,
+ * the shape is the same, so the parsing is the same. Garbage in the details must not crash the
+ * turn: if we couldn't parse it, we just don't show it.
  */
 export function subagentsOf(value: unknown): ChatSubagentStep[] {
   if (!Array.isArray(value)) return [];
@@ -168,7 +168,7 @@ export function subagentsOf(value: unknown): ChatSubagentStep[] {
   return states;
 }
 
-/** Задачи из аргументов вызова: пока прогресса нет, список уже можно показать. */
+/** Tasks from the call arguments: before there's progress, the list can already be shown. */
 function queuedSubagents(args: Record<string, unknown>): ChatSubagentStep[] {
   const tasks = Array.isArray(args.tasks) ? args.tasks : [];
   const states: ChatSubagentStep[] = [];
@@ -185,7 +185,7 @@ function queuedSubagents(args: Record<string, unknown>): ChatSubagentStep[] {
   return states;
 }
 
-/** Вложение в истории: путь внутри контейнера и признак «это картинка». */
+/** An attachment in the history: the path inside the container and an «is this an image» flag. */
 export type ChatAttachment = { path: string; image: boolean };
 
 export type ChatMessage = {
@@ -195,95 +195,95 @@ export type ChatMessage = {
   thinking?: string;
   trace?: ChatTraceStep[];
   attachments?: ChatAttachment[];
-  /** Не реплика, а граница между сессиями: после /clear контекст начат заново. */
+  /** Not a message but a boundary between sessions: after /clear the context was started anew. */
   divider?: 'clear';
 };
 
 export type ChatSummary = {
   id: string;
   title: string;
-  /** Последний ответ (или реплика человека) из файла сессии. */
+  /** The last answer (or the person's message) from the session file. */
   preview: string;
   createdAt: string;
-  /** Время последнего сообщения из файла; у пустого разговора — createdAt. */
+  /** Time of the last message from the file; for an empty conversation — createdAt. */
   updatedAt: string;
   channel: ChatChannel;
-  /** Рабочая папка разговора. */
+  /** The conversation's workspace. */
   workspace: string;
-  /** Папка в левом меню; нет поля — разговор во «Входящих». */
+  /** Folder in the left menu; if absent, the conversation is in «Inbox». */
   folder?: string;
-  /** Разговор завела задача: он живёт в виртуальном дереве, а не в общем списке. */
+  /** The conversation was started by a task: it lives in the virtual tree, not the common list. */
   task?: ChatTaskMark;
   /**
-   * Писать отсюда нельзя. Веб-чат и Telegram панель ведёт (это один разговор),
-   * разговоры через API — только смотрит.
+   * Writing from here is not allowed. The panel runs the web chat and Telegram (it's one
+   * conversation); conversations via the API it only watches.
    */
   readOnly: boolean;
-  /** Откуда пришла последняя реплика: этим подписывается шапка разговора. */
+  /** Where the last message came from: this is what the conversation header is signed with. */
   lastTurn?: ChatTurn;
-  /** Разговор убран в архив: он живёт в своей секции, а не в общем списке. */
+  /** The conversation is archived: it lives in its own section, not in the general list. */
   archived: boolean;
 };
 
 export type ChatHistory = { chat: ChatSummary; messages: ChatMessage[] };
 
-/** Страница списка: курсор — это смещение, чтобы не тащить в браузер весь реестр. */
+/** List page: the cursor is an offset, so as not to drag the whole registry into the browser. */
 export type ChatPage = {
   chats: ChatSummary[];
   nextCursor: string | null;
   total: number;
-  /** Виртуальное дерево «Задачи» — только на первой странице обычного списка. */
+  /** The virtual «Задачи» tree — only on the first page of the regular list. */
   tasks?: TaskChatGroup[];
 };
 
-/** Ветка дерева «Задачи»: дата запуска и разговоры этого дня. */
+/** A «Задачи» tree branch: the launch date and that day's conversations. */
 export type TaskChatRun = { date: string; chats: ChatSummary[] };
 
-/** Одна задача в дереве: имя и запуски по датам, свежие сверху. */
+/** One task in the tree: a name and runs by date, newest on top. */
 export type TaskChatGroup = { id: string; name: string; runs: TaskChatRun[] };
 
 export type ChatApiContext = {
   config: IcarusConfig;
   userId: string;
-  /** null — панель поднята без докера: чат честно скажет, что ему некуда идти. */
+  /** null — the panel is running without Docker: the chat will honestly say it has nowhere to go. */
   registry?: SessionRegistry;
   /**
-   * Вынести Telegram-разговор из Telegram: архивация в панели и в боте — одно
-   * действие, и топик удаляется вместе с сообщениями (см. archiveChat). Не
-   * передан — панель без бота: архив остаётся отметкой в реестре.
+   * Take a Telegram conversation out of Telegram: archiving in the panel and in the bot is one
+   * action, and the topic is deleted along with the messages (see archiveChat). Not
+   * passed — panel without a bot: the archive remains just a mark in the registry.
    */
   archiveTelegram?: (user: UserConfig, chat: ChatRecord) => Promise<void>;
 };
 
-/** Отказ писать туда, где историей владеет не панель. */
+/** Refusal to write where the history is owned not by the panel. */
 const READ_ONLY_CHAT = 'этот разговор идёт через API: в панели он только для чтения';
 
-/** Сколько ждём, пока прерванный ход допишется, прежде чем начать новый. */
+/** How long we wait for the interrupted turn to finish writing before starting a new one. */
 const INTERRUPT_WAIT_MS = 10_000;
 
 const PREVIEW_CHARS = 110;
 const DEFAULT_PAGE_SIZE = 30;
 const MAX_PAGE_SIZE = 100;
 
-/** Сколько разговоров отдать за раз: клиент догружает следующую страницу скроллом. */
+/** How many conversations to return at once: the client loads the next page by scrolling. */
 export function pageLimit(value: unknown): number {
   const parsed = typeof value === 'string' ? Number(value) : typeof value === 'number' ? value : NaN;
   if (!Number.isFinite(parsed)) return DEFAULT_PAGE_SIZE;
   return Math.min(MAX_PAGE_SIZE, Math.max(1, Math.trunc(parsed)));
 }
 
-/** Курсор — смещение в уже отсортированном списке; отрицательное и мусор — начало. */
+/** The cursor is an offset in the already sorted list; negative and garbage mean the start. */
 function pageOffset(cursor: unknown): number {
   const parsed = typeof cursor === 'string' ? Number(cursor) : NaN;
   if (!Number.isFinite(parsed) || parsed < 0) return 0;
   return Math.trunc(parsed);
 }
 
-/** Новый веб-чат; остальные каналы появляются в реестре сами при первом ходе. */
+/** New web chat; other channels appear in the registry on their own on the first turn. */
 export function createChat(
   config: IcarusConfig,
   user: UserConfig,
-  // Третий аргумент — workspace, но старые вызовы передавали сюда дату: различаем.
+  // The third argument is the workspace, but old calls passed a date here: we tell them apart.
   workspaceOrNow: string | Date = DEFAULT_WORKSPACE,
   now = new Date(),
 ): ChatSummary {
@@ -294,7 +294,7 @@ export function createChat(
 
 const IMAGE_MIME = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
 const MAX_ATTACHMENTS = 8;
-/** Декодированный предел: JSON с base64 должен влезать в readJsonBody (16 МБ). */
+/** Decoded limit: the JSON with base64 must fit into readJsonBody (16 MB). */
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 const PROMPT_FILES_MARKER = '\n\n[Пользователь приложил файлы, они уже лежат на диске:';
 
@@ -324,9 +324,9 @@ function safeAttachmentName(name: string): string {
 }
 
 /**
- * Вложения из браузера: base64 в JSON, потому что разбирать multipart в node:http
- * без зависимости — лишний слой. Файлы ложим в incoming/ человека, картинки ещё и
- * отдаём модели нативно; имя на диске своё, чтобы два «photo.jpg» не спорили.
+ * Attachments from the browser: base64 in JSON, because parsing multipart in node:http
+ * without a dependency is an extra layer. We put files into the person's incoming/, images
+ * additionally go to the model natively; the name on disk is our own so two «photo.jpg» don't clash.
  */
 export function parseUploadAttachments(value: unknown, incomingDir: string): UploadedAttachments {
   if (value === undefined) return emptyAttachments();
@@ -366,7 +366,7 @@ export function parseUploadAttachments(value: unknown, incomingDir: string): Upl
   return result;
 }
 
-/** Разбирает след вложения в реплике pi: путь остаётся в prompt, а в чате — плашкой. */
+/** Parses the attachment trail in the pi message: the path stays in the prompt, and in the chat it becomes a chip. */
 export function splitPromptAttachments(text: string): { text: string; attachments: ChatAttachment[] } {
   const at = text.indexOf(PROMPT_FILES_MARKER);
   if (at === -1) return { text, attachments: [] };
@@ -388,9 +388,9 @@ export function splitPromptAttachments(text: string): { text: string; attachment
 }
 
 function previewOf(text: string): string {
-  // В превью не должно быть markdown-картинки: в списке диалогов она выглядит
-  // как «!\[котик](/workspaces/.icarus/...)». Сам путь оставляем: если человек спросил
-  // адрес файла, именно он и должен быть виден в строке превью.
+  // The preview must not contain a markdown image: in the dialog list it looks
+  // like «!\[kitty](/workspaces/.icarus/...)». We keep the path itself: if the person asked
+  // for a file address, that's exactly what should be visible in the preview line.
   const plain = text
     .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/[*_`#>]+/g, ' ')
@@ -400,8 +400,8 @@ function previewOf(text: string): string {
 }
 
 /**
- * Закрывает ход веб-чата: первая реплика становится заголовком. Превью и время
- * в реестре не хранятся — их посчитает файл сессии, когда список покажет чат.
+ * Closes the web chat turn: the first message becomes the title. Preview and time
+ * are not stored in the registry — the session file computes them when the list shows the chat.
  */
 export function finishChat(
   config: IcarusConfig,
@@ -409,17 +409,17 @@ export function finishChat(
   id: string,
   userText: string,
 ): ChatRecord | null {
-  // Единственное место, где ход закрывается окончательно: успех, провал и обрыв
-  // запроса "closed" проходят через него, а сорвавшийся ход в catch в него не
-  // доходит. Поэтому сводку шлём отсюда, а не из streamTurn: иначе любой ранний
-  // выход оставил бы разговор жёлтым навсегда.
+  // The only place where the turn is closed for good: success, failure, and the abort
+  // of the "closed" request pass through it, while a crashed turn in catch never
+  // reaches it. That's why we send the summary from here, not from streamTurn: otherwise any
+  // early exit would leave the conversation yellow forever.
   const chat = findChatRecord(config, user, id);
   const settled = !chat || !isGenericTitle(chat) ? chat : retitleChat(config, user, chat, userText);
   broadcast({ userId: user.id, chatId: id, type: 'idle', chat: settled ?? undefined });
   return settled;
 }
 
-/** Первая реплика становится заголовком: остальные ходы его уже не трогают. */
+/** The first message becomes the title: later turns no longer touch it. */
 function retitleChat(
   config: IcarusConfig,
   user: UserConfig,
@@ -429,17 +429,17 @@ function retitleChat(
   const generated = titleFromText(userText);
   if (!generated) return chat;
   const title = generated.length >= 47 ? `${generated.slice(0, 46).trimEnd()}…` : generated;
-  // Имя наше, а не человека: модель ещё может уточнить его по первым репликам.
+  // The name is ours, not the person's: the model may still refine it from the first messages.
   return applyAutoTitle(config, user, chat.id, title) ?? chat;
 }
 
-/** Сколько первых реплик участвует в живом заголовке: дальше имя должно устояться. */
+/** How many first messages take part in the live title: after that the name should settle. */
 const AUTO_TITLE_TURNS = 3;
 
-/** Сколько ждём модель на заголовок в панели: ответ человеку уже ушёл, но и зря висеть незачем. */
+/** How long we wait for the model for a title in the panel: the answer to the person has already gone out, and there's no point hanging around. */
 export const AUTO_TITLE_TIMEOUT_MS = 8_000;
 
-/** Разговор для промпта заголовка: первые реплики человека и первый ответ Икара. */
+/** The conversation for the title prompt: the person's first messages and Icarus's first answer. */
 function titleConversation(opening: OpeningExchange): string {
   const lines = opening.users.map((text) => `User: ${text}`);
   if (opening.assistant) lines.push(`AI: ${opening.assistant}`);
@@ -447,13 +447,13 @@ function titleConversation(opening: OpeningExchange): string {
 }
 
 /**
- * Живой заголовок: модель читает начало разговора и называет его по смыслу.
- * Ход к этому моменту уже отдан человеку, поэтому имя приезжает отдельным
- * событием сводки, а не задерживает ответ. Уточняем только своё имя и только
- * первые ходы: дальше разговор либо уже назван человеком, либо тема устоялась.
+ * Live title: the model reads the start of the conversation and names it by meaning.
+ * The turn has already been handed to the person by this point, so the name arrives as a separate
+ * summary event and doesn't delay the answer. We refine only our own name and only
+ * the first turns: after that the conversation is either already named by the person or the topic has settled.
  *
- * `ask` — разовый вызов дешёвой модели. Сбой или таймаут оставляют эвристику:
- * имя из первой реплики уже стоит, модель лишь пытается сделать его лучше.
+ * `ask` is a one-off call to a cheap model. A failure or timeout leaves the heuristic:
+ * the name from the first message is already there, the model merely tries to make it better.
  */
 export async function refineChatTitle(
   config: IcarusConfig,
@@ -462,8 +462,8 @@ export async function refineChatTitle(
   chatId: string,
 ): Promise<string | null> {
   const chat = findChatRecord(config, user, chatId);
-  // Архивный разговор убран с глаз: имя ему модель не меняет (см. applyAutoTitle),
-  // значит и звать её незачем.
+  // The archived conversation is out of sight: the model doesn't rename it (see applyAutoTitle),
+  // so there's no point calling it either.
   if (!chat || chat.archivedAt || !isAutoTitle(chat)) return null;
 
   const file = sessionFileForId(userPaths(config, user).sessions, sessionIdOf(chat, user));
@@ -476,10 +476,10 @@ export async function refineChatTitle(
     conversation: titleConversation(opening),
     fallback: titleFromUserText(opening.users[0] ?? ''),
   });
-  // Эвристику уже поставил finishChat: второй раз то же имя не пишем.
+  // The heuristic was already set by finishChat: we don't write the same name a second time.
   if (asked.source !== 'model') return null;
 
-  // Пока модель думала, человек мог назвать разговор сам — его имя сильнее.
+  // While the model was thinking, the person could have named the conversation themselves — their name wins.
   const updated = applyAutoTitle(config, user, chatId, asked.title);
   if (!updated || updated.title === chat.title) return null;
   broadcast({ userId: user.id, chatId: updated.id, type: 'title', chat: updated });
@@ -488,12 +488,12 @@ export async function refineChatTitle(
 }
 
 /**
- * Картинка по пути, который модель написала в markdown. Наружу отдаём только
- * картинки из вложений и рабочих папок человека: оба каталога уже смонтированы
- * в контейнер. Всё остальное — 404, а не «почитай хост».
+ * An image at the path the model wrote in markdown. We expose only
+ * images from the person's attachments and workspaces: both directories are already mounted
+ * into the container. Everything else is a 404, not «read the host».
  *
- * Путь разбирает localFileOf — там же, где его разбирает Telegram: оба канала
- * должны показывать человеку одно и то же.
+ * The path is parsed by localFileOf — the same place where Telegram parses it: both channels
+ * must show the person the same thing.
  */
 export function chatImageFile(
   config: IcarusConfig,
@@ -505,8 +505,8 @@ export function chatImageFile(
 }
 
 /**
- * Любой файл по пути из markdown: панель отдаёт его ссылкой на скачивание.
- * Тот же localFileOf, что и у картинки, — но без ограничения «только картинка».
+ * Any file at a path from markdown: the panel serves it as a download link.
+ * The same localFileOf as for the image — but without the «image only» restriction.
  */
 export function chatAttachmentFile(
   config: IcarusConfig,
@@ -525,12 +525,12 @@ type SessionDigest = {
 };
 
 /**
- * Кэш пересказов файлов: список диалогов запрашивается на каждый поисковый ввод,
- * а файлы сессий бывают большими. Ключ — путь, свежесть — mtime и размер.
+ * Cache of file digests: the dialog list is requested on every search keystroke,
+ * and session files can be large. The key is the path, freshness is mtime and size.
  */
 const digestCache = new Map<string, { mtimeMs: number; size: number; digest: SessionDigest | null }>();
 
-/** Первое сообщение — заголовок, последний ответ — превью, без полной истории. */
+/** The first message is the title, the last answer is the preview, without the full history. */
 function digestSessionFile(session: FileSession): SessionDigest | null {
   const cached = digestCache.get(session.file);
   if (cached && cached.mtimeMs === session.mtimeMs && cached.size === session.size) return cached.digest;
@@ -571,8 +571,8 @@ function digestSessionFile(session: FileSession): SessionDigest | null {
     const message = entry.message;
     if (message.role === 'user') {
       const parsed = splitPromptAttachments(textOf(message.content).trim());
-      // В списке «[голосовое, 4 с] Разговор» выглядит шумно: пометку оставляем
-      // в истории и превью, а заголовок берём с текста.
+      // In the list «[voice, 4 s] Conversation» looks noisy: we keep the marker
+      // in the history and preview, and take the title from the text.
       const clean = parsed.text.replace(/^\[(?:голосовое|voice)[^\]]*\]\s*/i, '');
       if (clean && !titleText) titleText = clean;
       if (parsed.text) lastUser = parsed.text;
@@ -584,7 +584,7 @@ function digestSessionFile(session: FileSession): SessionDigest | null {
     }
   }
 
-  // Пустой файл — не разговор: такие остаются после /stats на новом разговоре.
+  // An empty file is not a conversation: such files remain after /stats on a new conversation.
   if (messages === 0) {
     digestCache.set(session.file, { mtimeMs: session.mtimeMs, size: session.size, digest: null });
     return null;
@@ -603,7 +603,7 @@ function digestSessionFile(session: FileSession): SessionDigest | null {
   return digest;
 }
 
-/** Сводка для браузера: метаданные из реестра, превью и время — из файла сессии. */
+/** Summary for the browser: metadata from the registry, preview and time from the session file. */
 function summaryOf(chat: ChatRecord, digest: SessionDigest | null): ChatSummary {
   return {
     id: chat.id,
@@ -613,7 +613,7 @@ function summaryOf(chat: ChatRecord, digest: SessionDigest | null): ChatSummary 
     updatedAt: digest?.updatedAt || chat.createdAt,
     channel: chat.channel,
     workspace: chat.workspace,
-    // Пустое поле не шлём: у разговора во «Входящих» папки просто нет.
+    // We don't send an empty field: a conversation in the «Inbox» simply has no folder.
     ...(chat.folder ? { folder: chat.folder } : {}),
     ...(chat.task ? { task: chat.task } : {}),
     readOnly: !panelCanWrite(chat),
@@ -622,7 +622,7 @@ function summaryOf(chat: ChatRecord, digest: SessionDigest | null): ChatSummary 
   };
 }
 
-/** Находит файл сессии для записи реестра: список и история ходят разными путями. */
+/** Finds the session file for a registry record: the list and history take different paths. */
 function sessionForId(config: IcarusConfig, user: UserConfig, sessionId: string): FileSession | null {
   const file = sessionFileForId(userPaths(config, user).sessions, sessionId);
   if (!file) return null;
@@ -636,9 +636,9 @@ function sessionForId(config: IcarusConfig, user: UserConfig, sessionId: string)
 
 
 /**
- * Сводки для показанной страницы: превью и время читаются только для неё.
- * У разговора после /clear несколько сессий: берём самую свежую непустую,
- * чтобы превью и время не обнулялись от одного очищенного контекста.
+ * Digests for the shown page: preview and time are read only for it.
+ * After /clear a conversation has several sessions: we take the freshest non-empty one,
+ * so that preview and time don't reset from a single cleared context.
  */
 function summariesOf(config: IcarusConfig, user: UserConfig, records: ChatRecord[]): ChatSummary[] {
   const wanted = new Set(records.flatMap((chat) => sessionIdsOf(chat, user)));
@@ -659,14 +659,14 @@ function summariesOf(config: IcarusConfig, user: UserConfig, records: ChatRecord
 }
 
 /**
- * Страница списка. Сортируем по createdAt — время создания не меняется, поэтому
- * страницы не прыгают от нового сообщения. Превью и время последнего сообщения
- * читаются только для показанной страницы; stat — тоже только для неё.
+ * List page. We sort by createdAt — the creation time doesn't change, so
+ * pages don't jump from a new message. Preview and last-message time
+ * are read only for the shown page; stat too — only for it.
  *
- * Архив — отдельная страница того же списка (`archived`): обычный сайдбар его
- * не показывает, иначе «убрать с глаз» ничего бы не меняло. Чаты задач в обычном
- * списке не показываются вовсе — у них своё дерево «Задачи» (см. taskChatTree);
- * в архиве они лежат как любые другие, потому что архив — это «не вижу каждый день».
+ * The archive is a separate page of the same list (`archived`): the regular sidebar
+ * doesn't show it, otherwise «убрать с глаз» would change nothing. Task chats aren't
+ * shown in the regular list at all — they have their own «Задачи» tree (see taskChatTree);
+ * in the archive they lie like any others, because the archive is «не вижу каждый день».
  */
 export function listChatPage(
   config: IcarusConfig,
@@ -698,7 +698,7 @@ export function listChatPage(
   };
 }
 
-/** Дата запуска в поясе человека: одна ветка дерева — один календарный день. */
+/** Run date in the person's time zone: one tree branch — one calendar day. */
 function runDate(iso: string, timeZone: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return '';
@@ -711,17 +711,17 @@ function runDate(iso: string, timeZone: string): string {
 }
 
 /**
- * Виртуальное дерево «Задачи → имя задачи → дата запуска → разговоры».
+ * The virtual «Задачи → task name → launch date → conversations» tree.
  *
- * Это вид поверх метки в chats.json, а не папка: folders.json не трогается, поэтому
- * перетащить чат в «Задачи» нельзя, а удалить ветку нечего — она собирается из самих
- * чатов. Имя берём у самой задачи, а не из метки чата: переименовал задачу — ветка
- * сменила подпись, хотя старые разговоры остались те же. Если задачу уже удалили,
- * подпись остаётся прежней из метки. Свежее сверху: сначала задачи с последним
- * запуском, внутри задачи — поздние даты. Так же устроен и обычный список, и человек
- * ищет глазами последний результат, а не первый.
+ * This is a view on top of the mark in chats.json, not a folder: folders.json isn't touched, so
+ * a chat can't be dragged into «Задачи», and there's no branch to delete — it's assembled from the
+ * chats themselves. We take the name from the task itself, not from the chat mark: renamed the task —
+ * the branch changed its caption, though the old conversations stayed the same. If the task has
+ * already been deleted, the caption remains the previous one from the mark. Newest on top: first tasks
+ * with the latest run, inside a task — later dates. The regular list is arranged the same way; the
+ * person looks for the last result, not the first.
  *
- * Архивные разговоры сюда не попадают: они уходят в «Архив», как и любые другие.
+ * Archived conversations don't get here: they go to «Архив», like any others.
  */
 export function taskChatTree(config: IcarusConfig, user: UserConfig, query = ''): TaskChatGroup[] {
   const needle = query.trim().toLocaleLowerCase('ru');
@@ -735,7 +735,7 @@ export function taskChatTree(config: IcarusConfig, user: UserConfig, query = '')
     if (needle && !`${name}\n${chat.title}`.toLocaleLowerCase('ru').includes(needle)) continue;
     const group = groups.get(chat.task.id) ?? { name, runs: new Map<string, ChatRecord[]>() };
     groups.set(chat.task.id, group);
-    // У старых записей runAt мог не сохраниться: createdAt у чата задачи и есть запуск.
+    // In old records runAt might not be saved: a task chat's createdAt is the run.
     const date = runDate(chat.runAt ?? chat.createdAt, timeZone);
     const runs = group.runs.get(date) ?? [];
     runs.push(chat);
@@ -763,7 +763,7 @@ export function taskChatTree(config: IcarusConfig, user: UserConfig, query = '')
     );
 }
 
-/** Превью после хода: файл только что дописан, а ответ у нас уже в руках. */
+/** Preview after a turn: the file was just appended, and we already hold the answer. */
 export function summaryAfterTurn(chat: ChatRecord, userText: string, assistantText: string): ChatSummary {
   return {
     id: chat.id,
@@ -783,8 +783,8 @@ export function summaryAfterTurn(chat: ChatRecord, userText: string, assistantTe
 
 function resultText(result: unknown): string {
   if (typeof result === 'string') {
-    // pi иногда кладёт в toolResult JSON-строку с блоками content — разворачиваем,
-    // иначе в истории под шагом видно сырой [{"type":"text",…}].
+    // pi sometimes puts a JSON string with content blocks into toolResult — we unwrap it,
+    // otherwise the history under the step shows raw [{"type":"text",…}].
     const text = result.trim();
     if (text.startsWith('[') || text.startsWith('{')) {
       try {
@@ -792,7 +792,7 @@ function resultText(result: unknown): string {
         const nested = resultText(parsed);
         if (nested && nested !== text) return nested;
       } catch {
-        /* это просто текст, не JSON */
+        /* this is just text, not JSON */
       }
     }
     return result;
@@ -815,17 +815,17 @@ function clip(text: string, limit: number): string {
   return flat.length > limit ? `${flat.slice(0, limit - 1)}…` : flat;
 }
 
-/** Человеческий ярлык шага: по нему в трассировке видно, чем Икар занимался. */
+/** Human label of the step: it shows in the trace what Icarus was doing. */
 export function traceLabel(tool: string, args: Record<string, unknown> = {}): string {
   const text = JSON.stringify(args);
   if (tool.startsWith('mcp_homeassistant')) return 'ДОМ';
   if (tool === 'mcp_connect' || tool === 'mcp_status') return 'MCP';
-  // Любой пользовательский MCP: mcp_<сервер>_<инструмент>. Иначе всё, что человек
-  // добавил сам, рисовалось бы безликим «ТУЛ».
+  // Any custom MCP: mcp_<server>_<tool>. Otherwise everything the person
+  // added themselves would be drawn as a faceless «TOOL».
   if (/^mcp_[a-z0-9]+_/.test(tool)) return 'MCP';
   if (tool === 'web_search') return 'ПОИСК';
-  // Извлечение страницы — не поиск: в трассировке это разные занятия, и по
-  // подписи должно быть видно, что Икар не искал, а открывал конкретный URL.
+  // Fetching a page is not search: in the trace these are different activities, and by
+  // the label one should see that Icarus wasn't searching but opening a specific URL.
   if (tool === 'web_fetch') return 'СТРАНИЦА';
   if (tool === 'bash') {
     return /memory|journal|identity|preferences|projects/i.test(text) ? 'ПАМЯТЬ' : 'ТЕРМИНАЛ';
@@ -841,15 +841,15 @@ export function traceLabel(tool: string, args: Record<string, unknown> = {}): st
 }
 
 /**
- * Подпись шага с именем реального провайдера: «курс евро · brave».
- * Поисковый роутер отвечает чужим именем, и без этого в трассировке висит router.
+ * Step label with the real provider name: «euro rate · brave».
+ * The search router answers under a foreign name, and without this «router» hangs in the trace.
  */
 export function traceUpstream(detail: string, upstream: unknown): string {
   if (typeof upstream !== 'string' || upstream.trim() === '') return detail;
   return clip(detail ? `${detail} · ${upstream}` : upstream, 140);
 }
 
-/** Строка под ярлыком: команда, путь, запрос или имя MCP-сервера. */
+/** The line under the label: command, path, query, or MCP server name. */
 export function traceDetail(tool: string, args: Record<string, unknown> = {}): string {
   const first = (value: unknown): string => (typeof value === 'string' ? value.split('\n')[0] ?? '' : '');
   if (tool === 'subagent') {
@@ -898,7 +898,7 @@ function stepFor(tool: string, args: Record<string, unknown>, id: string): ChatT
   return step;
 }
 
-/** Разбор файла сессии в ленту. Общий для веб-чата и для внешних разговоров. */
+/** Parses the session file into a feed. Shared by the web chat and external conversations. */
 function readMessages(file: string, user: UserConfig, chatId: string): ChatMessage[] {
   const messages: ChatMessage[] = [];
   let lines: string[];
@@ -980,8 +980,8 @@ function readMessages(file: string, user: UserConfig, chatId: string): ChatMessa
       step.status = message.isError === true ? 'error' : 'ok';
       const result = clip(resultText(message.content), 500);
       if (result) step.result = result;
-      // pi кладёт детали инструмента в тот же toolResult: по ним история знает,
-      // чем кончил каждый субагент, а не только «сколько их было».
+      // pi puts the tool details into the same toolResult: from them the history knows
+      // how each subagent ended, not just «how many there were».
       const details = message.details as Record<string, unknown> | undefined;
       const states = subagentsOf(details?.subagents);
       if (states.length > 0) step.subagents = states;
@@ -995,27 +995,27 @@ function readMessages(file: string, user: UserConfig, chatId: string): ChatMessa
   return messages;
 }
 
-/** Заголовок из реплики: та же длина и хвост, что у finishChat. */
+/** Title from a message: the same length and tail as in finishChat. */
 function titleFromUserText(text: string): string {
   const generated = titleFromText(text);
   return generated.length >= 47 ? `${generated.slice(0, 46).trimEnd()}…` : generated;
 }
 
 /**
- * История разговора из файла сессии pi. Показываем только диалог: текст человека и
- * ответы Икара, а вызовы инструментов собираем в трассировку — так в чате видно,
- * что агент делал руками, но сырые результаты не засоряют ответ.
+ * Conversation history from the pi session file. We show only the dialog: the person's text and
+ * Icarus's answers, while tool calls are gathered into the trace — this way the chat shows
+ * what the agent did by hand, but raw results don't clutter the answer.
  *
- * Разговор ищем в общем реестре: веб-чат по своему id, Telegram и API — по
- * conversationId или старому `session:<id>`. Превью и время берём из уже
- * разобранных сообщений, чтобы не читать файл второй раз.
+ * We look up the conversation in the shared registry: the web chat by its own id, Telegram and API by
+ * conversationId or the old `session:<id>`. We take the preview and time from the already
+ * parsed messages so as not to read the file a second time.
  */
 export function readHistory(config: IcarusConfig, user: UserConfig, chatId: string): ChatHistory | null {
   const chat = findChatRecord(config, user, chatId);
   if (!chat) return null;
 
-  // Сессий может быть несколько (после /clear): старые остаются историей,
-  // новая — текущим контекстом. Между ними — разделитель, а не потерянная лента.
+  // There may be several sessions (after /clear): the old ones remain history,
+  // the new one is the current context. Between them is a divider, not a lost feed.
   const messages: ChatMessage[] = [];
   for (const [index, epoch] of sessionEpochsOf(chat, user).entries()) {
     if (index > 0) {
@@ -1072,22 +1072,22 @@ async function bodyOf(req: IncomingMessage): Promise<Record<string, unknown>> {
   }
 }
 
-/** Ключ разговора: им же пользуется hub, чтобы не путать людей. */
+/** Conversation key: the hub also uses it so as not to confuse people. */
 function turnKey(userId: string, chatId: string): string {
   return `${userId}\u0000${chatId}`;
 }
 
-/** Кто сейчас досылает очередь: второй заход в тот же разговор ни к чему. */
+/** Who is currently draining the queue: a second pass into the same conversation is pointless. */
 const draining = new Set<string>();
 
 /**
- * Разговор занят операцией «сейчас»: прерванный ход дописывается, и очередь не
- * должна влезть в этот зазор. Без защёлки очередная реплика стартовала бы в тот
- * же момент, и в ленте перемешались бы два ответа.
+ * The conversation is busy with the «now» operation: the interrupted turn is finishing writing, and the queue
+ * must not slip into this gap. Without the latch the next message would start at the same
+ * moment, and two answers would get mixed up in the feed.
  */
 const starting = new Set<string>();
 
-/** Идёт ли ход в разговоре: hub знает про ход, реестр — про занятую сессию. */
+/** Whether a turn is running in the conversation: the hub knows about the turn, the registry about the busy session. */
 function inTurn(registry: SessionRegistry, userId: string, chatId: string): boolean {
   if (runningTurn(userId, chatId)) return true;
   const session = registry.get(userId, chatId);
@@ -1095,9 +1095,9 @@ function inTurn(registry: SessionRegistry, userId: string, chatId: string): bool
 }
 
 /**
- * Прерывание только просит pi остановиться — ход дописывает ответ и закрывает
- * журнал ещё мгновение. Ждём именно конца: иначе новая реплика влезет в занятую
- * сессию и получит 409.
+ * An interrupt only asks pi to stop — the turn finishes writing the answer and closes
+ * the journal for another moment. We wait for the actual end: otherwise the new message would get into the busy
+ * session and receive a 409.
  */
 async function waitTurnEnd(userId: string, chatId: string, timeoutMs: number): Promise<void> {
   const turn = runningTurn(userId, chatId);
@@ -1116,11 +1116,11 @@ async function waitTurnEnd(userId: string, chatId: string, timeoutMs: number): P
   }
 }
 
-/** Один ход: реплика человека, события pi и запись ответа в разговор. */
+/** One turn: the person's message, pi events, and recording the answer into the conversation. */
 type TurnJob = {
   config: IcarusConfig;
   user: UserConfig;
-  /** Реестр — только ради живого заголовка: разовый вызов дешёвой модели. */
+  /** The registry is only for the live title: a one-off call to a cheap model. */
   registry: SessionRegistry;
   chatId: string;
   session: Awaited<ReturnType<SessionRegistry['acquire']>>;
@@ -1129,9 +1129,9 @@ type TurnJob = {
 };
 
 /**
- * Запускает ход и отдаёт его журнал и обещание конца. HTTP-ответ сюда не входит:
- * ход из очереди живёт без запроса, а панель цепляется к журналу через сводку.
- * Ошибки не выбрасываются — они уезжают событием `error`, как и раньше.
+ * Starts a turn and returns its journal and a promise of the end. The HTTP response is not part of this:
+ * a turn from the queue lives without a request, and the panel attaches to the journal via the summary.
+ * Errors are not thrown — they leave as an `error` event, as before.
  */
 function beginTurn(job: TurnJob): { turn: Turn; finished: Promise<void> } {
   const { config, user, registry, chatId, session, text, attachments } = job;
@@ -1148,23 +1148,23 @@ function beginTurn(job: TurnJob): { turn: Turn; finished: Promise<void> } {
   const toolArgs = new Map<string, Record<string, unknown>>();
   const reauthSent = new Set<string>();
 
-  // Ход переживает зрителя: события копит hub, а HTTP-ответ — лишь один из
-  // подписчиков. F5 вычеркнет его, ход продолжит идти, а панель потом догонит.
+  // The turn outlives the viewer: the hub accumulates events, and the HTTP response is only one of
+  // the subscribers. F5 will cross it out, the turn keeps going, and the panel catches up later.
   const turn = startTurn(user.id, chatId);
-  // Сайдбар других разговоров должен узнать, что тут начали думать.
+  // The sidebar of other conversations must learn that thinking has started here.
   broadcast({ userId: user.id, chatId, type: 'busy' });
   const send = (event: Record<string, unknown>): void => emit(turn, event);
-  // Реплика — часть журнала хода, а не только DOM отправителя: панель после F5
-  // доигрывает ход и должна показать, на что это ответ. Отправитель свой пузырь
-  // уже нарисовал и это событие пропустит (см. клиент).
+  // The message is part of the turn journal, not just the sender's DOM: after F5 the panel
+  // replays the turn and must show what this is an answer to. The sender has already
+  // drawn its bubble and will skip this event (see the client).
   send({ type: 'user', text: text || attachments.names.join(', ') });
 
   const unsubscribeSession = session.onEvent((event) => {
     switch (event.type) {
       case 'message_update': {
         const delta = event.assistantMessageEvent as { type?: string; delta?: string } | undefined;
-        // Начало размышления отдельным событием не шлём: в ленте уже стоит
-        // «Икар думает», а строка под композером прогресс не показывает.
+        // We don't send the start of thinking as a separate event: the feed already shows
+        // «Icarus is thinking», and the line under the composer doesn't show progress.
         if (delta?.type === 'text_delta' && delta.delta) {
           answer += delta.delta;
           send({ type: 'text', text: delta.delta });
@@ -1220,8 +1220,8 @@ function beginTurn(job: TurnJob): { turn: Turn; finished: Promise<void> } {
           | undefined;
         const states = subagentsOf(details?.subagents);
         if (states.length > 0) step.subagents = states;
-        // Поисковый роутер отвечает чужим именем: в трассировке показываем, кто
-        // именно сходил в сеть, иначе в строке шага так и висит «router».
+        // The search router answers under a foreign name: in the trace we show who
+        // exactly went online, otherwise «router» keeps hanging in the step line.
         step.detail = traceUpstream(step.detail, details?.upstream);
         send({
           type: 'step-end',
@@ -1252,21 +1252,21 @@ function beginTurn(job: TurnJob): { turn: Turn; finished: Promise<void> } {
 
   const finished = (async () => {
     try {
-      // Канал хода пишем до prompt: файл сессии каналы не различает, а шапка
-      // панели и отбивка в Telegram должны знать, кто говорил последним.
+      // We write the turn channel before prompt: the session file doesn't distinguish channels, and the panel
+      // header and the Telegram footer must know who spoke last.
       recordTurn(config, user, chatId, 'web');
       await session.prompt(prompt, attachments.images);
       await settled;
 
       const userText = text || attachments.names.join(', ');
-      // `finishChat` не только даёт запись с заголовком, но и шлёт в сводку
-      // `idle` — поэтому он обязан стоять до `done`, иначе гонка: ответ дошёл,
-      // а точка в сайдбаре ещё жёлтая.
+      // `finishChat` not only returns a record with the title but also sends `idle` to the
+      // summary — that's why it must run before `done`, otherwise a race: the answer arrived,
+      // but the dot in the sidebar is still yellow.
       const record = finishChat(config, user, chatId, userText);
       const summary = record ? summaryAfterTurn(record, userText, answer) : null;
       send({ type: 'done', chat: summary, steps });
-      // Заголовок догоняет ответ: имя от модели приезжает отдельным событием
-      // сводки, поэтому человек не ждёт модель ради названия разговора.
+      // The title catches up with the answer: the name from the model arrives as a separate summary
+      // event, so the person doesn't wait for the model just to name the conversation.
       void refineChatTitle(
         config,
         user,
@@ -1285,12 +1285,12 @@ function beginTurn(job: TurnJob): { turn: Turn; finished: Promise<void> } {
     } catch (error) {
       log.error('чат: ход сорвался', { user: user.id, chatId, error: String(error) });
       send({ type: 'error', message: error instanceof Error ? error.message : String(error) });
-      // Сорвавшийся ход тоже «встал»: `finishChat` в него не доходит, поэтому
-      // `idle` шлём здесь — иначе разговор залипнет жёлтым навсегда.
+      // A crashed turn also «settled»: `finishChat` doesn't reach it, so we send
+      // `idle` here — otherwise the conversation would stick yellow forever.
       finishChat(config, user, chatId, text || attachments.names.join(', '));
     } finally {
-      // Ход встал: догоняющий зритель получит хвост и закроет соединение сам,
-      // а очередь узнает, что можно брать следующую реплику.
+      // The turn settled: the catching-up viewer will get the tail and close the connection itself,
+      // and the queue learns it can take the next message.
       finishTurn(turn);
       unsubscribeSession();
     }
@@ -1300,8 +1300,8 @@ function beginTurn(job: TurnJob): { turn: Turn; finished: Promise<void> } {
 }
 
 /**
- * Один ход в ответ на HTTP: проверяет разговор, поднимает сессию, пишет поток и
- * закрывает ответ, когда ход встал. Дальше очередь может взять следующую реплику.
+ * One turn in response to HTTP: checks the conversation, brings up the session, writes the stream, and
+ * closes the response when the turn settled. After that the queue can take the next message.
  */
 async function streamTurn(
   req: IncomingMessage,
@@ -1318,8 +1318,8 @@ async function streamTurn(
     json(res, 404, errorBody('разговор не найден'));
     return;
   }
-  // Telegram панель продолжает: это тот же разговор и та же сессия pi. Читать
-  // отсюда можно только API-вход — его клиент владеет историей сам.
+  // The panel continues Telegram: it's the same conversation and the same pi session. Read
+  // access here is only for the API entry — its client owns the history itself.
   if (!panelCanWrite(chat)) {
     json(res, 403, errorBody(READ_ONLY_CHAT, 'permission_error'));
     return;
@@ -1333,10 +1333,10 @@ async function streamTurn(
     return;
   }
   if (session.busy) {
-    // Ход идёт либо без зрителя (панель перезагрузили), либо в другом канале —
-    // и это один и тот же ход. Прицепиться можно только к своему потоку: у
-    // Telegram-хода его в панели нет, и второй ответ начинать нельзя. Живой
-    // ход панель догонит сама, а чужой — увидит пометку канала.
+    // The turn is either running without a viewer (the panel was reloaded) or in another channel —
+    // and it's the same turn. You can only attach to your own stream: a Telegram turn has none
+    // in the panel, and a second answer must not be started. The live turn the panel will
+    // catch up on its own, and for a foreign one it will see the channel mark.
     const live = Boolean(runningTurn(user.id, chat.id));
     json(res, 409, {
       ...errorBody('в этом разговоре уже идёт ответ', 'conflict_error'),
@@ -1354,7 +1354,7 @@ async function streamTurn(
   });
 
   const { turn, finished } = beginTurn({ config, user, registry, chatId, session, text, attachments });
-  // Пишем зрителю, только пока он есть; остальное уже накоплено в hub.
+  // We write to the viewer only while it exists; the rest has already been accumulated in the hub.
   const unsubscribe = subscribe(turn, (event) => {
     if (res.writableEnded) return;
     res.write(`${JSON.stringify(event)}\n`);
@@ -1369,11 +1369,11 @@ async function streamTurn(
 }
 
 /**
- * Досылает очередь: после конца хода берём следующую реплику и начинаем её.
+ * Drains the queue: after the end of a turn we take the next message and start it.
  *
- * Ход из очереди живёт без HTTP-ответа — его события копит hub, и панель цепляется
- * к ним через сводку. Поэтому очередь и переживает F5: реплика лежит здесь, а не в
- * браузере, и ждёт только конца чужого хода.
+ * A turn from the queue lives without an HTTP response — the hub accumulates its events, and the panel attaches
+ * to them via the summary. That's why the queue survives F5: the message lies here, not in the
+ * browser, and waits only for the end of someone else's turn.
  */
 async function drainQueued(
   config: IcarusConfig,
@@ -1388,8 +1388,8 @@ async function drainQueued(
     for (;;) {
       const head = queued(user.id, chatId)[0];
       if (!head) return;
-      // Ход уже идёт — он сам позовёт очередь, когда встанет. «Сейчас» держит
-      // защёлку, пока его ход не начнётся: иначе мы влезем в зазор прерывания.
+      // A turn is already running — it will call the queue itself when it settles. «Now» holds
+      // the latch until its turn starts: otherwise we'd slip into the interrupt gap.
       if (runningTurn(user.id, chatId) || starting.has(key)) return;
       const chat = findChatRecord(config, user, chatId);
       if (!chat || !panelCanWrite(chat)) {
@@ -1400,7 +1400,7 @@ async function drainQueued(
       try {
         session = await registry.acquire(user, chatId, chat.workspace, chat.artifact);
       } catch (error) {
-        // Сессии нет — очередь не выкидываем: человек увидит её и решит сам.
+        // No session — we don't drop the queue: the person will see it and decide themselves.
         log.warn('чат: очередь не смогла поднять сессию', {
           user: user.id,
           chatId,
@@ -1408,9 +1408,9 @@ async function drainQueued(
         });
         return;
       }
-      // Сжатие — не ход, но сессия занята им же: ждём, а не отказываем.
+      // Compaction is not a turn, but the session is busy with it: we wait, not refuse.
       if (session.compacting) await session.compacting;
-      // Пока поднимали сессию, разговор мог занять кто-то другой.
+      // While the session was coming up, someone else could have taken the conversation.
       if (session.busy || runningTurn(user.id, chatId) || starting.has(key)) return;
 
       takeNext(user.id, chatId);
@@ -1431,12 +1431,12 @@ async function drainQueued(
   }
 }
 
-/** Очередь изменилась — говорим об этом панели, чтобы индикатор не врал. */
+/** The queue changed — we tell the panel so the indicator doesn't lie. */
 function broadcastQueue(userId: string, chatId: string): void {
   broadcast({ userId, chatId, type: 'queue', queue: queueView(userId, chatId) });
 }
 
-/** Снимает очередь разговора и сообщает об этом панели. */
+/** Clears the conversation's queue and tells the panel about it. */
 function clearQueued(user: UserConfig, chatId: string): number {
   const dropped = clearQueue(user.id, chatId).length;
   if (dropped > 0) broadcastQueue(user.id, chatId);
@@ -1472,8 +1472,8 @@ export async function handleChatApi(
         url.searchParams.get('workspace'),
         archived,
       );
-      // Дерево «Задачи» едет вместе с первой страницей списка: сайдбару оно нужно
-      // в том же такте и с тем же поиском. В архив и на догрузку его не считаем.
+      // The «Задачи» tree travels with the first page of the list: the sidebar needs it
+      // in the same tick and with the same search. We don't compute it for the archive or on page-down.
       json(res, 200, archived || cursor ? page : { ...page, tasks: taskChatTree(ctx.config, user, query) });
       return true;
     }
@@ -1489,8 +1489,8 @@ export async function handleChatApi(
       return true;
     }
 
-    // Архив — это отметка в реестре, а не удаление: файл сессии и вложения
-    // остаются на месте, поэтому маршрут только двигает разговор между списками.
+    // Archiving is a mark in the registry, not a deletion: the session file and attachments
+    // stay in place, so the route only moves the conversation between lists.
     if (pathname === '/panel/api/chat/archive' && req.method === 'POST') {
       const body = await bodyOf(req);
       const chatId = chatIdOf(body.chatId);
@@ -1512,7 +1512,7 @@ export async function handleChatApi(
         return true;
       }
       if (outcome.topicError) {
-        // Архив состоялся, а топик Telegram остался: это стоит увидеть в логе.
+        // The archive happened but the Telegram topic remained: this is worth seeing in the log.
         log.warn('панель: топик Telegram не удалился при архивации', {
           user: user.id,
           chat: chat.id,
@@ -1523,9 +1523,9 @@ export async function handleChatApi(
       return true;
     }
 
-    // Имя разговора из списка чатов: та же запись в chats.json, что и у `/rename`
-    // в веб-чате, поэтому имя видят и панель, и Telegram. После этого автоматика
-    // разговор не переименовывает: имя выбрал человек.
+    // Conversation name from the chat list: the same entry in chats.json as for `/rename`
+    // in the web chat, so both the panel and Telegram see the name. After this the automation
+    // doesn't rename the conversation: the person chose the name.
     if (pathname === '/panel/api/chats' && req.method === 'PATCH') {
       const body = await bodyOf(req);
       const id = chatIdOf(body.id);
@@ -1533,7 +1533,7 @@ export async function handleChatApi(
         json(res, 400, errorBody('не указан разговор'));
         return true;
       }
-      // Длина та же, что у /rename: у темы в Telegram предел 128 символов.
+      // The same length as for /rename: a Telegram topic has a 128-character limit.
       const title = typeof body.title === 'string' ? body.title.replace(/\s+/g, ' ').trim().slice(0, 128) : '';
       if (!title) {
         json(res, 400, errorBody('пустое имя разговора'));
@@ -1549,8 +1549,8 @@ export async function handleChatApi(
       return true;
     }
 
-    // Картинку отдаём до проверки реестра: показать уже лежащий файл можно и
-    // тогда, когда чат почему-то поднят без pi.
+    // We serve the image before checking the registry: an already lying file can be shown even
+    // when the chat is for some reason running without pi.
     if (pathname === '/panel/api/chat/image' && req.method === 'GET') {
       const image = chatImageFile(ctx.config, user, url.searchParams.get('path'));
       if (!image) {
@@ -1562,9 +1562,9 @@ export async function handleChatApi(
       return true;
     }
 
-    // Файл из ответа агента: не картинку он рисует ссылкой, и по клику человек
-    // должен получить его, а не 404 от статики. Не картинку отдаём скачиванием:
-    // HTML из ответа модели, открытый в origin панели, — это чужая страница.
+    // A file from the agent's answer: non-images it draws as a link, and on click the person
+    // must receive it, not a 404 from static. We serve non-images as a download:
+    // HTML from the model's answer, opened in the panel's origin, is a foreign page.
     if (pathname === '/panel/api/chat/file' && req.method === 'GET') {
       const file = chatAttachmentFile(ctx.config, user, url.searchParams.get('path'));
       if (!file) {
@@ -1581,9 +1581,9 @@ export async function handleChatApi(
       return true;
     }
 
-    // Историю читаем и без pi: она лежит в файле сессии, и показать старый
-    // разговор можно даже там, где контейнер ещё не поднят. Отправлять реплику
-    // без сессии некуда — это проверим ниже.
+    // We read the history even without pi: it lies in the session file, and showing an old
+    // conversation is possible even where the container isn't up yet. There's nowhere to
+    // send a message without a session — we'll check that below.
     if (pathname === '/panel/api/chat/history' && req.method === 'GET') {
       const id = chatIdOf(url.searchParams.get('id'));
       if (!id) {
@@ -1595,23 +1595,23 @@ export async function handleChatApi(
         json(res, 404, errorBody('разговор не найден'));
         return true;
       }
-      // Ход мог пережить перезагрузку панели: сообщаем об этом сразу вместе с
-      // историей, чтобы клиент цеплялся к потоку, а не гадал, почему тихо.
-      // Только про идущий ход: доигранный ответ уже лежит в истории, и второй
-      // раз рисовать его из потока нельзя.
+      // The turn could have survived a panel reload: we report this right away along with the
+      // history, so the client attaches to the stream instead of wondering why it's quiet.
+      // Only about a running turn: an already replayed answer is in the history, and drawing it
+      // from the stream a second time is not allowed.
       json(res, 200, {
         ...history,
         live: Boolean(runningTurn(user.id, id)),
-        // Очередь живёт на сервере: перезагруженная панель должна увидеть, что
-        // написанное во время хода никуда не пропало.
+        // The queue lives on the server: a reloaded panel must see that what was written
+        // during the turn didn't disappear.
         queue: queueView(user.id, id),
       });
       return true;
     }
 
-    // Сводка по всем разговорам: какое событие кому. Отдельным каналом, а не
-    // живым потоком разговора, — панели нужно знать про чужие ходы, не читая их
-    // целиком. Дельт текста тут нет: только старт и финал.
+    // Summary for all conversations: which event goes to whom. As a separate channel, not the
+    // live stream of a conversation — the panel needs to know about foreign turns without reading them
+    // in full. There are no text deltas here: only the start and the finale.
     if (pathname === '/panel/api/chat/events' && req.method === 'GET') {
       res.writeHead(200, {
         'content-type': 'text/event-stream; charset=utf-8',
@@ -1619,11 +1619,11 @@ export async function handleChatApi(
         connection: 'keep-alive',
         'x-accel-buffering': 'no',
       });
-      // Комментарий-строка сразу: прокси и браузер должны увидеть живое соединение,
-      // а не решить, что ответ завис.
+      // A comment line right away: the proxy and browser must see a live connection,
+      // not decide that the response hung.
       res.write(': icarus bulletin\n\n');
       const off = watchAll((event) => {
-        // Чужие ходы человека не касаются.
+        // Foreign turns are none of the person's business.
         if (event.userId !== user.id) return;
         if (res.writableEnded) return;
         try {
@@ -1637,14 +1637,14 @@ export async function handleChatApi(
     }
 
     if (pathname === '/panel/api/chat/status' && req.method === 'GET') {
-      // Снимок для того, кто только открыл панель или переподключил сводку:
-      // события за время разрыва потеряны, а состояние — вот оно.
+      // A snapshot for someone who just opened the panel or reconnected the summary:
+      // events during the gap are lost, but the state is right here.
       json(res, 200, { busy: ctx.registry?.busyConversations(user.id) ?? [] });
       return true;
     }
 
-    // Папки — это раскладка меню, а не работа агента: перенос доступен и тогда,
-    // когда панель поднята без pi. Поэтому маршрут стоит до проверки реестра.
+    // Folders are menu layout, not agent work: moving is available even when
+    // the panel runs without pi. That's why the route is before the registry check.
     if (pathname === '/panel/api/chat/folder' && req.method === 'POST') {
       const body = await bodyOf(req);
       const id = chatIdOf(body.id);
@@ -1671,9 +1671,9 @@ export async function handleChatApi(
       return true;
     }
 
-    // Команды pi: скиллы, промпт-шаблоны и команды расширений. Их список знает
-    // только сам pi, поэтому палитра спрашивает его лениво — когда человек уже
-    // набрал «/». Команды самого чата приезжают в странице, без запроса.
+    // pi commands: skills, prompt templates, and extension commands. Only pi itself knows
+    // their list, so the palette asks it lazily — when the person has already
+    // typed «/». The chat's own commands arrive in the page, without a request.
     if (pathname === '/panel/api/chat/commands' && req.method === 'GET') {
       const id = chatIdOf(url.searchParams.get('id'));
       if (!id) {
@@ -1685,8 +1685,8 @@ export async function handleChatApi(
         json(res, 404, errorBody('разговор не найден'));
         return true;
       }
-      // Команды — про разговор, а не про канал: в API-разговоре их всё равно
-      // не отправить, а в Telegram их разбирает бот.
+      // Commands are about the conversation, not the channel: in an API conversation they can't
+      // be sent anyway, and in Telegram the bot parses them.
       if (!panelCanWrite(chat)) {
         json(res, 200, { commands: [] });
         return true;
@@ -1696,9 +1696,9 @@ export async function handleChatApi(
       return true;
     }
 
-    // Команда в веб-чате: разбираем её здесь, а не в браузере, — один разбор и
-    // один набор текстов на все входы. `handled: false` значит «это команда pi»,
-    // и клиент отправит её обычной репликой.
+    // A command in the web chat: we parse it here, not in the browser — one parse and
+    // one set of texts for all entry points. `handled: false` means «this is a pi command»,
+    // and the client will send it as a regular message.
     if (pathname === '/panel/api/chat/command' && req.method === 'POST') {
       const body = await bodyOf(req);
       const text = typeof body.text === 'string' ? body.text.trim() : '';
@@ -1711,18 +1711,18 @@ export async function handleChatApi(
         json(res, 200, { handled: false });
         return true;
       }
-      // Справка не зависит от разговора: её можно спросить и до первого сообщения.
+      // Help doesn't depend on the conversation: it can be asked even before the first message.
       if (command.name === 'help') {
         json(res, 200, { handled: true, text: WEB_HELP });
         return true;
       }
-      // Убранные команды объясняем сами, а не отправляем их в pi репликой.
+      // Removed commands we explain ourselves instead of sending them to pi as a message.
       if (REMOVED_COMMANDS.has(command.name)) {
         json(res, 200, { handled: true, text: TOPICS_REMOVED });
         return true;
       }
-      // Незнакомая команда без аргументов — опечатка; с аргументами это уже
-      // реплика для pi (его шаблоны и команды расширений).
+      // An unfamiliar command without arguments is a typo; with arguments it's already
+      // a message for pi (its templates and extension commands).
       if (!WEB_COMMAND_NAMES.has(command.name)) {
         json(res, 200, command.args === '' ? { handled: true, text: UNKNOWN_COMMAND } : { handled: false });
         return true;
@@ -1738,8 +1738,8 @@ export async function handleChatApi(
         json(res, 404, errorBody('разговор не найден'));
         return true;
       }
-      // Команды правят разговор целиком (в том числе общий с Telegram), поэтому
-      // API-вход здесь закрыт так же, как и `chat/send`.
+      // Commands edit the whole conversation (including one shared with Telegram), so the
+      // API entry is closed here just like `chat/send`.
       if (!panelCanWrite(chat)) {
         json(res, 403, errorBody(READ_ONLY_CHAT, 'permission_error'));
         return true;
@@ -1751,8 +1751,8 @@ export async function handleChatApi(
         return true;
       }
       if (command.name === 'stop') {
-        // «Стоп» — это «останови всё»: реплики, ждущие очереди, человек уже
-        // отменил, иначе через секунду Икар снова начнёт думать без спроса.
+        // «Stop» means «stop everything»: the person has already cancelled the messages
+        // waiting in the queue, otherwise in a second Icarus would start thinking again unprompted.
         const dropped = clearQueued(user, chatId);
         json(res, 200, { handled: true, text: stopText(await ctx.registry.abort(user, chatId), dropped) });
         return true;
@@ -1764,8 +1764,8 @@ export async function handleChatApi(
       if (command.name === 'clear') {
         clearQueued(user, chatId);
         const outcome = await ctx.registry.clear(user, chatId);
-        // Ленту не перечитываем: старые сообщения остаются, клиент рисует
-        // разделитель «контекст очищен». `cleared` говорит, что он уместен.
+        // We don't re-read the feed: the old messages remain, the client draws the
+        // «context cleared» divider. `cleared` says that it's appropriate.
         json(res, 200, {
           handled: true,
           text: clearText(outcome),
@@ -1778,7 +1778,7 @@ export async function handleChatApi(
         json(res, 200, {
           handled: true,
           text: renameText(outcome),
-          // Клиент обновляет заголовок и сайдбар сразу, без перезагрузки ленты.
+          // The client updates the title and sidebar right away, without reloading the feed.
           ...(outcome.status === 'renamed' ? { title: outcome.title } : {}),
         });
         return true;
@@ -1791,9 +1791,9 @@ export async function handleChatApi(
       return true;
     }
 
-    // Догон идущего хода: панель открылась заново (F5, новая вкладка) и хочет
-    // прицепиться к тому, что уже происходит. Отдаём накопленное и держим
-    // соединение до конца хода — это и есть «переподключиться к стриму».
+    // Catching up to a running turn: the panel opened again (F5, new tab) and wants
+    // to attach to what's already happening. We return the accumulated data and hold
+    // the connection until the end of the turn — that's «reconnect to the stream».
     if (pathname === '/panel/api/chat/stream' && req.method === 'GET') {
       const id = chatIdOf(url.searchParams.get('id'));
       if (!id) {
@@ -1811,7 +1811,7 @@ export async function handleChatApi(
       }
       const turn = liveTurn(user.id, id);
       if (!turn) {
-        // Хода нет: панель просто берёт историю, поток ей не нужен.
+        // No turn: the panel just takes the history, it doesn't need the stream.
         json(res, 200, { live: false });
         return true;
       }
@@ -1825,11 +1825,11 @@ export async function handleChatApi(
       res.write(`${JSON.stringify({ type: 'live', resumed: true })}\n`);
 
       let off = (): void => {};
-      // Зритель ушёл (F5, закрытая вкладка) — просто вычёркиваем его. Ход продолжает
-      // идти, и следующая панель догонит его тем же накопленным журналом.
+      // The viewer left (F5, closed tab) — we just cross it out. The turn keeps
+      // going, and the next panel will catch up to it with the same accumulated journal.
       const detach = (): void => off();
       res.on('close', detach);
-      // Уходим сразу после `done`/`error`: дальше ход уже нечего рассказывать.
+      // We leave right after `done`/`error`: there's nothing more to tell about the turn.
       off = subscribe(turn, (event) => {
         if (res.writableEnded) return;
         res.write(`${JSON.stringify(event)}\n`);
@@ -1838,7 +1838,7 @@ export async function handleChatApi(
           res.end();
         }
       });
-      // Ход успел встать, пока подписывались: хвост отдан на replay, закрываемся.
+      // The turn managed to settle while we were subscribing: the tail was given on replay, we close.
       if (turn.done && !res.writableEnded) {
         off();
         res.end();
@@ -1854,8 +1854,8 @@ export async function handleChatApi(
         json(res, 400, errorBody('нужен chatId'));
         return true;
       }
-      // Продолжаем веб-чат и Telegram-разговор: это одна сессия pi, а транспорт —
-      // только труба. API-вход остаётся чужим: там историей владеет клиент.
+      // We continue the web chat and the Telegram conversation: it's one pi session, and transport
+      // is just a pipe. The API entry stays foreign: there the client owns the history.
       const chat = findChatRecord(ctx.config, user, chatId);
       if (!chat) {
         json(res, 404, errorBody('разговор не найден'));
@@ -1880,12 +1880,12 @@ export async function handleChatApi(
         json(res, 400, errorBody('нужны text или вложения'));
         return true;
       }
-      // Две разные операции, а не одна: «в очередь» — обещание доехать после
-      // текущего хода, «сейчас» — отмена чужой работы под свою реплику. Без
-      // параметра считаем, что человек просто написал: тогда при занятом
-      // разговоре реплика встаёт в очередь, а не пропадает молча.
+      // Two different operations, not one: «enqueue» is a promise to arrive after the
+      // current turn, «now» is cancelling someone else's work for your message. Without the
+      // parameter we assume the person just wrote: then with a busy
+      // conversation the message goes into the queue instead of silently disappearing.
       const now = body.mode === 'now';
-      // Защёлка: пока мы прерываем прошлый ход и начинаем свой, очередь молчит.
+      // Latch: while we interrupt the previous turn and start our own, the queue stays silent.
       const nowKey = now ? turnKey(user.id, chat.id) : '';
       if (nowKey) starting.add(nowKey);
       try {
@@ -1903,12 +1903,12 @@ export async function handleChatApi(
               json(res, 409, { ...errorBody(`ход не прервался: ${outcome.error}`, 'conflict_error'), retry: true });
               return true;
             }
-            // Дождались: прежний ход дописал частичный ответ, и только теперь
-            // можно начинать новый, не влезая в занятую сессию.
+            // Waited: the previous turn finished writing a partial answer, and only now
+            // can we start a new one without slipping into the busy session.
             if (outcome.status === 'stopped') await waitTurnEnd(user.id, chat.id, INTERRUPT_WAIT_MS);
           }
-          // Не прервали (гонка в конце хода) — реплика всё равно не пропадает:
-          // она встаёт в очередь и доедет, когда разговор освободится.
+          // Didn't interrupt (a race at the end of the turn) — the message still doesn't disappear:
+          // it goes into the queue and arrives when the conversation frees up.
           if (inTurn(ctx.registry, user.id, chat.id)) {
             const placed = enqueue(user.id, chat.id, { text, attachments });
             if (!placed) {
@@ -1933,7 +1933,7 @@ export async function handleChatApi(
       } finally {
         if (nowKey) starting.delete(nowKey);
       }
-      // Ход встал — следующая реплика из очереди, если она есть.
+      // The turn settled — the next message from the queue, if any.
       await drainQueued(ctx.config, user, ctx.registry, chat.id);
       return true;
     }
@@ -1952,14 +1952,14 @@ export async function handleChatApi(
       }
       const session = ctx.registry.get(user.id, chat.id);
       const ok = session ? await session.abort() : false;
-      // Кнопка «стоп» останавливает всё: иначе через мгновение начнётся первая
-      // реплика из очереди, а человек уже нажал «хватит».
+      // The «stop» button stops everything: otherwise in a moment the first message from the queue
+      // would start, and the person has already pressed «enough».
       const dropped = clearQueued(user, chat.id);
       json(res, 200, { ok, dropped });
       return true;
     }
 
-    // Убрать одну реплику из очереди: человек передумал до того, как её отправили.
+    // Remove one message from the queue: the person changed their mind before it was sent.
     if (pathname === '/panel/api/chat/queue/drop' && req.method === 'POST') {
       const body = await bodyOf(req);
       const chatId = chatIdOf(body.chatId);

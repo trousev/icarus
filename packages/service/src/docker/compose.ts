@@ -1,17 +1,19 @@
-// Сборка docker-compose.yml: единственный владелец контейнеров — docker compose.
+// Building docker-compose.yml: docker compose is the sole owner of containers.
 //
-// Раньше сервис сам создавал контейнеры через `docker run` и сам же их реконсилировал.
-// Это давало тёплый старт, но упиралось в сервис: упал он — контейнеры никто не пересоздаст,
-// перезагрузилась машина — icarus не вернётся, а состояние на хосте зависело от того,
-// дожил ли процесс до своей реконсиляции. Теперь файл собирает ./script/server из config.yaml,
-// а жизненным циклом распоряжается docker: `restart: unless-stopped` поднимает контейнеры
-// после падения и перезагрузки, `docker compose up` пересоздаёт их при смене образа, маунтов
-// или окружения, а выбывшие люди уходят вместе с исчезнувшим сервисом (--remove-orphans).
-// Смену кода сервиса в это сравнение добавляет отпечаток ICARUS_REVISION (см. revision.ts):
-// исходники монтируются, и без него контейнер оставался бы жить со старым кодом.
+// Previously the service created containers itself via `docker run` and reconciled them
+// itself too. That gave a warm start, but it all rested on the service: if it crashed, no
+// one would recreate the containers; if the machine rebooted, icarus wouldn't come back;
+// and the state on the host depended on whether the process survived to its reconciliation.
+// Now ./script/server builds the file from config.yaml, and docker manages the lifecycle:
+// `restart: unless-stopped` brings containers up after a crash and a reboot,
+// `docker compose up` recreates them when the image, mounts, or environment change, and
+// departed people leave along with the vanished service (--remove-orphans). The
+// ICARUS_REVISION fingerprint adds a service code change to that comparison (see
+// revision.ts): sources are mounted, and without it the container would keep living with
+// the old code.
 //
-// Здесь только чистая сборка YAML: никакого docker и никаких побочных эффектов — так её
-// можно проверять тестами, а решения о запуске остаются в script/server.
+// Here it's purely YAML building: no docker and no side effects — that way it can be
+// checked by tests, and launch decisions stay in script/server.
 import fs from 'node:fs';
 import path from 'node:path';
 import { stringify as stringifyYaml } from 'yaml';
@@ -28,36 +30,37 @@ import {
 import { containerEnv, LABEL_MANAGED, LABEL_SPEC, LABEL_USER, specFor } from './spec.ts';
 import { storePaths as skillStorePaths } from '../skills/registry.ts';
 
-/** Имя compose-проекта: по этой метке compose отличает свои контейнеры от чужих. */
+/** Compose project name: by this label compose tells its containers from foreign ones. */
 export const COMPOSE_PROJECT = 'icarus';
-/** Имя сервиса и контейнера самого icarus. */
+/** The service and container name of icarus itself. */
 export const SERVICE_NAME = 'icarus';
-/** Образ сервиса по умолчанию; собирается из docker/service/. */
+/** Default service image; built from docker/service/. */
 export const DEFAULT_SERVICE_IMAGE = 'icarus-service:dev';
 
 export type ComposeOptions = {
-  /** Корень репозитория: монтируется в контейнер сервиса, чтобы код и расширения совпадали. */
+  /** Repository root: mounted into the service container so code and extensions match. */
   repoRoot: string;
-  /** Путь к config.yaml — он же передаётся сервису аргументом. */
+  /** Path to config.yaml — it's also passed to the service as an argument. */
   configPath: string;
-  /** uid:gid сервиса: под ним пишется dataDir, чтобы файлы не становились root-овыми. */
+  /** uid:gid of the service: dataDir is written under it so files don't become root-owned. */
   runAs: string;
-  /** Домашний каталог хоста: `~` в конфиге должен разворачиваться в тот же путь. */
+  /** Host home directory: `~` in the config must expand to the same path. */
   home: string;
-  /** Путь к docker.sock на хосте; null — сокет не монтируем (хост задан через DOCKER_HOST). */
+  /** Path to docker.sock on the host; null means we don't mount the socket (host is set via DOCKER_HOST). */
   dockerSocket: string | null;
-  /** Значение DOCKER_HOST, если docker слушает не на локальном сокете. */
+  /** DOCKER_HOST value if docker listens on something other than the local socket. */
   dockerHost?: string | null;
-  /** Дополнительные группы контейнера сервиса (доступ к docker.sock). */
+  /** Extra groups for the service container (access to docker.sock). */
   extraGroups?: string[];
-  /** Образ сервиса. */
+  /** Service image. */
   serviceImage?: string;
-  /** env-файл с ключами (.env в корне репозитория), если он есть: едет в сервис и людям. */
+  /** env file with keys (.env in the repository root), if present: it goes to the service and to people. */
   envFile?: string;
   /**
-   * Отпечаток кода сервиса (см. revision.ts). Исходники монтируются в контейнер, а не
-   * запекаются в образ, поэтому без отпечатка `docker compose up` не считает смену кода
-   * поводом пересоздать контейнер, и старый процесс живёт со старым кодом в памяти.
+   * Service code fingerprint (see revision.ts). Sources are mounted into the container
+   * rather than baked into the image, so without the fingerprint `docker compose up`
+   * doesn't consider a code change a reason to recreate the container, and the old
+   * process lives with the old code in memory.
    */
   revision: string;
 };
@@ -65,9 +68,10 @@ export type ComposeOptions = {
 type ComposeService = Record<string, unknown>;
 
 function bind(source: string, target: string, mode?: 'ro'): string {
-  // Путь не подставился — docker разберёт «::ro» и упадёт «invalid spec» уже посреди
-  // сборки. Падаем раньше и внятнее: конфиг с пустым маунтом до docker не доезжает
-  // (см. parseMounts в config.ts — там эта же проверка ловит неподставившуюся ${VAR}).
+  // The path wasn't substituted — docker will parse "::ro" and fail with "invalid spec"
+  // in the middle of the build. We fail earlier and more clearly: a config with an empty
+  // mount doesn't reach docker (see parseMounts in config.ts — the same check there
+  // catches an unsubstituted ${VAR}).
   if (source === '' || target === '') {
     throw new Error(`маунт с пустым путём: «${source}:${target}» — проверь переменные окружения в config.yaml`);
   }
@@ -75,54 +79,55 @@ function bind(source: string, target: string, mode?: 'ro'): string {
 }
 
 /**
- * Тома контейнера человека: корень рабочих пространств, служебное и общие маунты.
+ * The person's container volumes: the workspaces root, service data, and shared mounts.
  *
- * Монтируется один корень `/workspaces`, внутри которого лежат и папки workspace'ов,
- * и служебный `.icarus`. Поэтому новый workspace — это `mkdir`, а не новый маунт:
- * контейнер не пересоздаётся, живые сессии не рвутся.
+ * A single root `/workspaces` is mounted, holding both the workspace folders and the
+ * service `.icarus`. So a new workspace is a `mkdir`, not a new mount: the container
+ * isn't recreated, live sessions aren't broken.
  */
 export function userVolumes(config: IcarusConfig, user: UserConfig): string[] {
   const paths = userPaths(config, user);
   return [
     bind(paths.workspaces, CONTAINER_PATHS.workspaces),
-    // «Приватный» — единственный workspace, смонтированный только для чтения.
-    // Он лежит внутри уже смонтированного корня, поэтому docker накладывает его
-    // поверх; порядок в списке задаёт родителя раньше ребёнка.
+    // "Private" is the only workspace mounted read-only. It lies inside the already
+    // mounted root, so docker overlays it on top; the order in the list puts the parent
+    // before the child.
     bind(path.join(paths.workspaces, PRIVATE_WORKSPACE), containerWorkspace(PRIVATE_WORKSPACE), 'ro'),
-    // shared-memory — единственный каталог памяти, который не принадлежит человеку:
-    // он общий на весь инстанс и лежит вне его дерева.
+    // shared-memory is the only memory directory that doesn't belong to the person:
+    // it's shared across the whole instance and lies outside their tree.
     bind(paths.sharedMemory, CONTAINER_PATHS.sharedMemory),
-    // Снимки расшаренных скиллов: общие на инстанс и только для чтения. Свой
-    // каталог `pi-agent/skills` остаётся личным, поэтому чужой скилл нельзя
-    // переписать или удалить из контейнера получателя.
+    // Snapshots of shared skills: instance-wide and read-only. The person's own
+    // `pi-agent/skills` directory stays private, so someone else's skill can't be
+    // overwritten or deleted from the recipient's container.
     bind(skillStorePaths(config).shared, CONTAINER_PATHS.sharedSkills, 'ro'),
-    // Глобальная библиотека артефактов: одна на всех, лежит в dataDir и видна
-    // каждому контейнеру как /artifacts. Права внутри папок проверяют панель,
-    // MCP и folder-guard, а не docker.
+    // Global artifact library: one for everyone, it lives in dataDir and is visible
+    // to every container as /artifacts. Permissions inside the folders are enforced by
+    // the panel, MCP, and folder-guard, not by docker.
     bind(path.join(config.dataDir, 'artifacts'), CONTAINER_PATHS.artifacts),
-    // Реестр разговоров — только для чтения: агент по id панели находит файл сессии,
-    // но писать в него не должен (реестр ведёт сервис, см. sessions/chats.ts).
+    // Chat registry — read-only: by the panel id the agent finds the session file, but
+    // mustn't write to it (the registry is maintained by the service, see sessions/chats.ts).
     ...(fs.existsSync(paths.chats) ? [bind(paths.chats, CONTAINER_PATHS.chats, 'ro')] : []),
-    // Карта разговоров — тот же read-only: её рендерит сервис перед стартом контейнера.
+    // Chat map — the same read-only: the service renders it before starting the container.
     ...(fs.existsSync(paths.sessionsMap) ? [bind(paths.sessionsMap, CONTAINER_PATHS.sessionsMap, 'ro')] : []),
     bind(paths.piAgent, CONTAINER_PATHS.piAgent),
-    // Maple — единственное внешнее дерево, которое контейнер видит. Путь установки
-    // обязан совпадать с хостовым: launcher ищет свои библиотеки по записанному
-    // внутри пути. Отдельного поля в конфиге для этого больше нет — сервис знает сам.
+    // Maple is the only external tree the container sees. The install path must match
+    // the host's: the launcher looks for its libraries by the path recorded inside.
+    // There's no separate config field for this anymore — the service knows on its own.
     ...(config.mapleDir !== undefined ? [bind(config.mapleDir, config.mapleDir, 'ro')] : []),
-    // Код встроенных MCP живёт в репозитории, но в контейнер едут только сами
-    // серверы: каталог `tools` целиком содержит стенды и логи, которым там нечего
-    // делать. Артефакты, OPDS и Кинозал нужны всегда, Maple — только когда он включён.
+    // The code of built-in MCPs lives in the repository, but only the servers themselves
+    // travel into the container: the `tools` directory as a whole contains test benches
+    // and logs that have no business there. Artifacts, OPDS, and Kinozal are always
+    // needed, Maple only when it's enabled.
     bind(path.join(REPO_ROOT, 'tools', 'artifacts-mcp'), '/opt/icarus/tools/artifacts-mcp', 'ro'),
     bind(path.join(REPO_ROOT, 'tools', 'opds-mcp'), '/opt/icarus/tools/opds-mcp', 'ro'),
-    // Кинозал: сервер маленький, ключи приходят из панели, а не из маунта. Монтируем
-    // всегда: рецепт «Кинозал» добавляется в панели и после сборки конфига, а путь
-    // /opt/icarus/tools/arr-mcp должен существовать к тому моменту.
+    // Kinozal: the server is small, keys come from the panel, not from a mount. We always
+    // mount it: the "Kinozal" recipe is added in the panel even after the config is built,
+    // and the path /opt/icarus/tools/arr-mcp must exist by then.
     bind(path.join(REPO_ROOT, 'tools', 'arr-mcp'), '/opt/icarus/tools/arr-mcp', 'ro'),
-    // Видео в блог-пост: тот же случай — рецепт добавляется в панели после сборки
-    // конфига, а путь из команды должен существовать уже тогда. Бинарников (yt-dlp,
-    // ffmpeg) здесь нет: сервер скачивает их себе в служебный каталог при первом
-    // вызове, поэтому маунт остаётся только для чтения и лёгкий.
+    // Video to blog post: the same case — the recipe is added in the panel after the
+    // config is built, and the path from the command must exist by then. There are no
+    // binaries (yt-dlp, ffmpeg) here: the server downloads them into its service
+    // directory on first call, so the mount stays read-only and light.
     ...(config.mapleDir !== undefined
       ? [bind(path.join(REPO_ROOT, 'tools', 'maple-mcp'), '/opt/icarus/tools/maple-mcp', 'ro')]
       : []),
@@ -130,7 +135,7 @@ export function userVolumes(config: IcarusConfig, user: UserConfig): string[] {
   ];
 }
 
-/** Метки владения: по ним /healthz понимает, чей контейнер и не устарел ли он. */
+/** Ownership labels: by them /healthz knows whose container it is and whether it's stale. */
 export function userLabels(config: IcarusConfig, user: UserConfig): Record<string, string> {
   return {
     [LABEL_MANAGED]: '1',
@@ -140,9 +145,10 @@ export function userLabels(config: IcarusConfig, user: UserConfig): Record<strin
 }
 
 /**
- * Куда публиковать порт. `0.0.0.0` в конфиге — это «слушать везде», и публиковать
- * тогда нужно тоже везде; конкретный адрес (например, 127.0.0.1) ограничивает и публикацию.
- * `localhost` docker в адресе публикации не понимает — переводим в 127.0.0.1.
+ * Where to publish the port. `0.0.0.0` in the config means "listen everywhere", and then
+ * it must be published everywhere too; a specific address (e.g. 127.0.0.1) limits the
+ * publication as well. docker doesn't understand `localhost` in a publish address — we
+ * translate it to 127.0.0.1.
  */
 export function publishAddress(host: string, port: number): string {
   if (host === '0.0.0.0' || host === '' || host === '::') return `${port}:${port}`;
@@ -151,10 +157,10 @@ export function publishAddress(host: string, port: number): string {
 
 function serviceEnvironment(config: IcarusConfig, options: ComposeOptions): Record<string, string> {
   return {
-    // Без этого `~` в конфиге развернулся бы в /root внутри контейнера и все маунты уехали бы.
+    // Without this, `~` in the config would expand to /root inside the container and all mounts would be off.
     HOME: options.home,
     ICARUS_CONFIG: options.configPath,
-    // Отпечаток кода: меняется код — меняется окружение — compose пересоздаёт сервис.
+    // Code fingerprint: code changes — environment changes — compose recreates the service.
     ICARUS_REVISION: options.revision,
     ...(options.dockerHost ? { DOCKER_HOST: options.dockerHost } : {}),
   };
@@ -176,19 +182,19 @@ function composeHeader(config: IcarusConfig, options: ComposeOptions): string {
 }
 
 /**
- * Собирает docker-compose.yml целиком: сервис и по контейнеру на человека.
- * Юзер-контейнеры получают те же имена, маунты, окружение и метки, что раньше
- * давал `docker run`, — сервис продолжает находить их по имени и отпечатку.
+ * Builds docker-compose.yml in full: the service and one container per person.
+ * User containers get the same names, mounts, environment, and labels that `docker run`
+ * used to give them — the service keeps finding them by name and fingerprint.
  */
 export function renderCompose(config: IcarusConfig, options: ComposeOptions): string {
   const network = config.docker.network ?? null;
   const attach = network ? { networks: [network] } : {};
   const serviceImage = options.serviceImage ?? DEFAULT_SERVICE_IMAGE;
-  // Ключи подключаем файлом, а не значениями в YAML: docker-compose.yml остаётся без
-  // секретов, а compose сам пересоздаёт контейнеры при правке .env.
+  // We attach keys via a file rather than values in YAML: docker-compose.yml stays free
+  // of secrets, and compose itself recreates containers when .env is edited.
   const envFile = options.envFile ? { env_file: [options.envFile] } : {};
-  // Свой DNS — только если человек попросил: по умолчанию контейнеры получают резолвер
-  // хоста, а вместе с ним имена других контейнеров (см. docker.dns в конфиге).
+  // Custom DNS only if the person asked: by default containers get the host's resolver
+  // and with it the names of other containers (see docker.dns in the config).
   const dns = config.docker.dns ?? [];
   const dnsServers = dns.length > 0 ? { dns } : {};
 
@@ -199,11 +205,11 @@ export function renderCompose(config: IcarusConfig, options: ComposeOptions): st
       image: config.docker.image,
       container_name: name,
       restart: 'unless-stopped',
-      // У человека PID 1 — `sleep infinity` из образа, а он сирот не подбирает: любой
-      // процесс, переживший своего родителя, после смерти остаётся зомби навсегда.
-      // Так и копились `[mserver] <defunct>`: у Maple убили обёртку cmaple, ядро
-      // осиротело и, завершившись, висело зомби. init (tini) в роли PID 1 подчищает
-      // такие сироты — ровно как в контейнере сервиса ниже.
+      // In a person's container PID 1 is the image's `sleep infinity`, and it doesn't
+      // reap orphans: any process that outlives its parent stays a zombie forever after
+      // dying. That's how `[mserver] <defunct>` piled up: Maple's cmaple wrapper was
+      // killed, the kernel was orphaned and, having exited, hung as a zombie. init (tini)
+      // as PID 1 cleans up such orphans — exactly as in the service container below.
       init: true,
       labels: userLabels(config, user),
       environment: containerEnv(config, user),
@@ -216,16 +222,17 @@ export function renderCompose(config: IcarusConfig, options: ComposeOptions): st
 
   const service: ComposeService = {
     image: serviceImage,
-    // Образ сервиса compose собирает сам (docker/service — node, git, клиент docker).
-    // Контекст сборки здесь, а не в script/server: так `docker compose build` собирает
-    // сервис вместе со всем стеком, и сборка уходит в отдельную фазу до пересоздания.
-    // У контейнеров людей build нет намеренно: образ у них общий, и на каждый сервис
-    // compose собирал бы его заново, подменяя тег то одним, то другим результатом.
+    // compose builds the service image itself (docker/service — node, git, docker client).
+    // The build context is here rather than in script/server: that way `docker compose build`
+    // builds the service along with the whole stack, and the build becomes a separate phase
+    // before recreation. People's containers have no build on purpose: their image is shared,
+    // and compose would rebuild it per service, swapping the tag between different results.
     build: { context: path.join(options.repoRoot, 'docker', 'service') },
     container_name: SERVICE_NAME,
     restart: 'unless-stopped',
-    // init подчищает зомби от docker exec, а user — чтобы память на хосте принадлежала
-    // человеку, а не root-у: dataDir монтируется и в сервис, и в контейнеры людей.
+    // init cleans up zombies from docker exec, and user — so that memory on the host belongs
+    // to the person rather than root: dataDir is mounted both into the service and into
+    // people's containers.
     init: true,
     user: options.runAs,
     ...(options.extraGroups && options.extraGroups.length > 0 ? { group_add: options.extraGroups } : {}),
@@ -237,10 +244,10 @@ export function renderCompose(config: IcarusConfig, options: ComposeOptions): st
     ports: [publishAddress(config.host, config.port)],
     volumes: [
       ...(options.dockerSocket ? [bind(options.dockerSocket, options.dockerSocket)] : []),
-      // Репозиторий монтируется по тому же пути: REPO_ROOT и пути маунтов внутри
-      // контейнера обязаны совпадать с хостовыми, иначе docker создаст чужие каталоги.
+      // The repository is mounted at the same path: REPO_ROOT and mount paths inside the
+      // container must match the host's, otherwise docker will create foreign directories.
       bind(options.repoRoot, options.repoRoot),
-      // Конфиг может лежать и вне репозитория (--config): без явного маунта сервис его не увидит.
+      // The config may also lie outside the repository (--config): without an explicit mount the service won't see it.
       bind(options.configPath, options.configPath, 'ro'),
       bind(config.dataDir, config.dataDir),
     ],
@@ -257,7 +264,7 @@ export function renderCompose(config: IcarusConfig, options: ComposeOptions): st
   const document = {
     name: COMPOSE_PROJECT,
     services: { [SERVICE_NAME]: service, ...userServices },
-    // Сеть из конфига сервис не создаёт: она должна существовать, как и при `docker run --network`.
+    // The service doesn't create the network from the config: it must already exist, as with `docker run --network`.
     ...(network ? { networks: { [network]: { external: true } } } : {}),
   };
 

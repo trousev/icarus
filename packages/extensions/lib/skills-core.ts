@@ -1,12 +1,12 @@
-// Каталог скиллов для системного промпта.
+// Skill catalog for the system prompt.
 //
-// Персона (persona.ts) ЗАМЕНЯЕТ системный промпт pi целиком, а pi вставляет каталог
-// скиллов только в свой собственный сборщик промпта — до замены. Поэтому каталог
-// собираем здесь сами, повторяя формат pi (core/skills.ts, formatSkillsForPrompt):
-// у моделей он «привычный», и отступать от него без причины не стоит.
+// The persona (persona.ts) REPLACES the pi system prompt entirely, and pi inserts the skill
+// catalog only into its own prompt builder — before the replacement. So we build the catalog
+// here ourselves, repeating pi's format (core/skills.ts, formatSkillsForPrompt):
+// models find it "familiar", and there is no reason to deviate from it.
 //
-// Сам скилл в промпт не едет: там только имя, описание и путь. Тело модели читают
-// обычным read, когда задача совпала с описанием.
+// The skill itself does not go into the prompt: only the name, description and path. The model
+// reads the body with a normal read when a task matches the description.
 
 export type SkillEntry = {
   name: string;
@@ -24,7 +24,7 @@ function escapeXml(value: string): string {
     .replace(/'/g, '&apos;');
 }
 
-/** Какой тул называется в подсказке: у pi это read, если он есть, иначе bash. */
+/** Which tool is named in the hint: in pi it is read if present, otherwise bash. */
 export function skillFileReadTool(tools: string[]): 'read' | 'bash' | null {
   if (tools.includes('read')) return 'read';
   if (tools.includes('bash')) return 'bash';

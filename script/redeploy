@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
-# Боевой деплой Icarus: этот скрипт запускает .github/workflows/deploy.yml на trousev.pro.
+# Icarus production deploy: this script runs .github/workflows/deploy.yml on trousev.pro.
 #
-#   ./script/redeploy              обычный деплой (образы собираются по кешу)
-#   ./script/redeploy --no-cache   то же, но образы собираются с нуля
+#   ./script/redeploy              normal deploy (images are built from cache)
+#   ./script/redeploy --no-cache   same, but images are built from scratch
 #
-# Workflow делает только git fetch + reset --hard и зовёт этот скрипт: у
-# appleboy/ssh-action с script_stop после каждой строки вставляется проверка кода
-# возврата, и многострочные if/while прямо в workflow обрывают деплой — вся логика
-# живёт здесь.
+# The workflow does only git fetch + reset --hard and calls this script: with
+# appleboy/ssh-action and script_stop a return code check is inserted after every line,
+# and multi-line if/while right in the workflow break the deploy — all the logic
+# lives here.
 #
-# Шаги:
-#   1. node >= 22.19 (код исполняется как TypeScript) — если на хосте его нет,
-#      кладём официальную сборку node в ~/.local/share/icarus: sudo на хосте нет;
-#   2. ./script/update — зависимости строго по lockfile и локальные .env/config.yaml;
-#   3. секреты из GitHub уезжают в .env, а config.yaml правит render-config.ts:
-#      люди (ICARUS_USERS), порт, dataDir, ключ API, адрес панели;
-#   4. ./script/server -d — собирает docker-compose.yml и поднимает стек в фоне;
-#   5. ждём /healthz: пока контейнеры людей не на месте, деплой не зелёный.
+# Steps:
+#   1. node >= 22.19 (the code runs as TypeScript) — if the host does not have it,
+#      we put the official node build in ~/.local/share/icarus: there is no sudo on the host;
+#   2. ./script/update — dependencies strictly by lockfile and local .env/config.yaml;
+#   3. secrets from GitHub go into .env, and config.yaml is edited by render-config.ts:
+#      people (ICARUS_USERS), port, dataDir, API key, panel address;
+#   4. ./script/server -d — builds docker-compose.yml and brings the stack up in the background;
+#   5. we wait for /healthz: while people's containers are not in place, the deploy is not green.
 #
 # Переменные окружения приходят из workflow (секреты — из environment production):
 #   ICARUS_USERS      люди через пробел или запятую (variables.ICARUS_USERS)
@@ -48,14 +48,14 @@ cd "$ROOT"
 
 PORT="${ICARUS_PORT:-8081}"
 DATA_DIR="${ICARUS_DATA_DIR:-$ROOT/runtime}"
-# Панель живёт на chat.trousev.pro (переехала с memory.trousev.pro). Адрес нужен
-# Икару, чтобы называть человеку ссылку: дефолт ставим здесь, а явный ICARUS_URL
-# из variables остаётся сильнее — им можно переопределить домен без правки кода.
+# The panel lives at chat.trousev.pro (moved from memory.trousev.pro). The address is needed
+# by Icarus to give a person a link: we set the default here, and an explicit ICARUS_URL
+# from variables stays stronger — it can override the domain without editing code.
 URL="${ICARUS_URL:-https://chat.trousev.pro/}"
-# Резолвер хоста контейнерам не друг: unbound там пускает только 10.0.0.0/8, а Docker'овский
-# резолвер, получив от него молчание, ~4 секунды ждёт таймаут и только потом уходит на
-# следующий сервер — каждый запрос pi к модели становился на эти секунды длиннее, поэтому
-# контейнерам выдаём публичные серверы явно. Хост починят — ICARUS_DNS=none уберёт строку.
+# The host resolver is no friend to the containers: unbound there only allows 10.0.0.0/8, and the Docker
+# resolver, getting silence from it, waits ~4 seconds for the timeout and only then goes to
+# the next server — every pi request to the model became that many seconds longer, so
+# we hand the containers public servers explicitly. Once the host is fixed — ICARUS_DNS=none removes the line.
 DNS="${ICARUS_DNS:-1.1.1.1 8.8.8.8}"
 NODE_HOME="${ICARUS_NODE_HOME:-$HOME/.local/share/icarus/node}"
 NODE_URL_BASE="${ICARUS_NODE_URL:-https://nodejs.org/dist/latest-v24.x}"
@@ -76,18 +76,18 @@ for arg in "$@"; do
   esac
 done
 
-# --- что уже есть на хосте -----------------------------------------------------
+# --- what is already on the host -----------------------------------------------
 command -v docker >/dev/null 2>&1 || die 'не нашёл docker'
 docker compose version >/dev/null 2>&1 || die 'не нашёл docker compose (плагин compose v2)'
 
-# pnpm ставит npm в ~/.local, поэтому его bin должен быть в PATH до ./script/update.
+# pnpm installs npm into ~/.local, so its bin must be in PATH before ./script/update.
 export PATH="$HOME/.local/bin:$PATH"
 
 # --- node ----------------------------------------------------------------------
-# Код исполняется как TypeScript (`node file.ts`) — это умеет node >= 22.19. На хосте
-# может стоять системный node старее (на trousev.pro это 20.x), а ставить пакеты
-# через apt нечем: sudo без пароля нет. Поэтому свежую сборку кладём в домашний
-# каталог и переиспользуем её при следующих деплоях.
+# The code runs as TypeScript (`node file.ts`) — node >= 22.19 can do that. The host
+# may have an older system node (on trousev.pro it is 20.x), and there is no way
+# to install packages via apt: there is no passwordless sudo. So we put a fresh build in the home
+# directory and reuse it on subsequent deploys.
 node_ok() {
   local bin="${1:-}" major minor
   [ -n "$bin" ] && [ -x "$bin" ] || return 1
@@ -105,7 +105,7 @@ install_node() {
   [ -n "$line" ] || die 'в SHASUMS256.txt нет сборки linux-x64'
   file="${line##* }"
   tmp="$(mktemp -d)"
-  # shellcheck disable=SC2064 # раскрываем $tmp сразу: подчищать надо именно свой каталог
+  # shellcheck disable=SC2064 # expand $tmp immediately: we must clean up our own directory
   trap "rm -rf '$tmp'" EXIT
   curl -fsSL -o "$tmp/$file" "$NODE_URL_BASE/$file" || die "не скачал $file"
   (cd "$tmp" && printf '%s\n' "$line" | sha256sum -c -) || die 'сборка node не сошлась по sha256'
@@ -130,8 +130,8 @@ fi
 say "node $(node -v)"
 
 # --- pnpm ----------------------------------------------------------------------
-# Версия — из packageManager в package.json, как и в CI. corepack на хосте (0.24.0)
-# pnpm 12 не умеет: у пакета бинарь вместо bin/pnpm.cjs, который corepack ищет.
+# The version — from packageManager in package.json, as in CI. corepack on the host (0.24.0)
+# cannot handle pnpm 12: the package has a binary instead of bin/pnpm.cjs, which corepack looks for.
 if ! command -v pnpm >/dev/null 2>&1; then
   PNPM_VERSION="$(node -p "JSON.parse(require('node:fs').readFileSync('package.json', 'utf8')).packageManager" | sed 's/^pnpm@//')"
   say "ставлю pnpm@$PNPM_VERSION в ~/.local"
@@ -139,19 +139,19 @@ if ! command -v pnpm >/dev/null 2>&1; then
 fi
 say "pnpm $(pnpm -v)"
 
-# --- зависимости и локальные конфиги -------------------------------------------
-# CI=1 — установка строго по lockfile: разъехавшиеся package.json и pnpm-lock.yaml
-# должны ронять деплой, а не тихо переписывать lockfile на проде.
+# --- dependencies and local configs --------------------------------------------
+# CI=1 — installation strictly by lockfile: diverged package.json and pnpm-lock.yaml
+# must fail the deploy, not quietly rewrite the lockfile in prod.
 say 'зависимости и локальные конфиги (./script/update)'
 CI=1 ./script/update
 
-# --- секреты из GitHub → .env --------------------------------------------------
-# Ключи не пишутся ни в docker-compose.yml, ни в лог: файл уезжает в контейнеры
-# через env_file, а права 600 ему оставляет ./script/update.
+# --- secrets from GitHub → .env -------------------------------------------------
+# Keys are written neither into docker-compose.yml nor into the log: the file goes into the containers
+# via env_file, and ./script/update leaves mode 600 on it.
 #
-# Это не отменяет настройки панели «Ключи»: они лежат в keys.json и сильнее .env.
-# ./script/server перед сборкой стека приводит .env к keys.json, так что деплой
-# не возвращает к жизни ключ, который админ поменял или убрал в панели.
+# This does not cancel the panel "Keys" settings: they lie in keys.json and win over .env.
+# ./script/server brings .env in line with keys.json before building the stack, so a deploy
+# does not revive a key that an admin changed or removed in the panel.
 upsert_env() {
   local key="$1" value="${2:-}" file="$ROOT/.env" tmp
   [ -n "$value" ] || return 0
@@ -168,7 +168,7 @@ upsert_env DEEPINFRA_API_KEY "${DEEPINFRA_API_KEY:-}"
 [ -z "${DEEPINFRA_API_KEY:-}" ] || say 'DEEPINFRA_API_KEY обновлён в .env'
 upsert_env TAVILY_API_KEY "${TAVILY_API_KEY:-}"
 [ -z "${TAVILY_API_KEY:-}" ] || say 'TAVILY_API_KEY обновлён в .env'
-# Токен telegram-бота: без него блок telegram в config.yaml просто не поднимется.
+# Telegram bot token: without it the telegram block in config.yaml simply does not come up.
 upsert_env TELEGRAM_BOT_TOKEN "${TELEGRAM_BOT_TOKEN:-}"
 [ -z "${TELEGRAM_BOT_TOKEN:-}" ] || say 'TELEGRAM_BOT_TOKEN обновлён в .env'
 
@@ -184,11 +184,11 @@ upsert_env MAPLE_DIR "$MAPLE_DIR"
 say "MAPLE_DIR=$MAPLE_DIR записан в .env"
 
 # --- config.yaml ---------------------------------------------------------------
-# Люди — из variables, ключ API — из секрета, DNS — из кода (ICARUS_DNS), маппинг
-# telegram — из variables.ICARUS_TELEGRAM_MAPPING; остальное в config.yaml не трогаем,
-# чтобы правки на хосте (модели, маунты, MCP) пережили деплой.
-# Пустой ICARUS_URL — это дефолт из скрипта (chat.trousev.pro), а не «не трогать»:
-# после переезда старый адрес панели в конфиге оставаться не должен.
+# People — from variables, the API key — from a secret, DNS — from the code (ICARUS_DNS), the
+# telegram mapping — from variables.ICARUS_TELEGRAM_MAPPING; we do not touch the rest in config.yaml,
+# so that edits on the host (models, mounts, MCP) survive a deploy.
+# An empty ICARUS_URL is the script default (chat.trousev.pro), not "leave alone":
+# after the move the old panel address must not remain in the config.
 say 'правлю config.yaml (люди, порт, dataDir, docker.dns, apiKey, url, telegram, час тишины)'
 ICARUS_PORT="$PORT" ICARUS_DATA_DIR="$DATA_DIR" ICARUS_DNS="$DNS" \
   ICARUS_URL="$URL" \
@@ -196,7 +196,7 @@ ICARUS_PORT="$PORT" ICARUS_DATA_DIR="$DATA_DIR" ICARUS_DNS="$DNS" \
   ICARUS_SESSION_IDLE_MINUTES="${ICARUS_SESSION_IDLE_MINUTES:-60}" \
   node packages/service/src/docker/render-config.ts
 
-# --- запуск --------------------------------------------------------------------
+# --- launch --------------------------------------------------------------------
 if [ "$NO_CACHE" = 1 ]; then
   say 'собираю образы с нуля и поднимаю стек (./script/server -d --build)'
   ./script/server -d --build
@@ -205,15 +205,15 @@ else
   ./script/server -d
 fi
 
-# --- проверка ------------------------------------------------------------------
+# --- check ---------------------------------------------------------------------
 if ! command -v curl >/dev/null 2>&1; then
   warn 'нет curl — /healthz не проверяю'
   say 'деплой завершён'
   exit 0
 fi
 
-# /healthz отдаёт состояние контейнеров людей: missing != 0 — это людей нет в докере,
-# и «деплой прошёл» было бы враньём. Сервис поднимается не мгновенно, поэтому ждём.
+# /healthz reports the state of people's containers: missing != 0 means people are absent from docker,
+# and "the deploy passed" would be a lie. The service does not come up instantly, so we wait.
 say "жду /healthz на порту $PORT"
 deadline=$((SECONDS + HEALTH_TIMEOUT))
 health=''
