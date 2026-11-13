@@ -704,8 +704,8 @@ export class TelegramBot {
       return null;
     }
 
-    // Действие уже стоит с заготовки (см. runTurn): здесь расшифровку не начинаем
-    // заново, а только ждём её.
+    // Действие уже стоит с начала хода (см. runTurn): здесь его не переставляем,
+    // а только ждём расшифровку.
     let transcript: string;
     try {
       transcript = await this.transcribe(voice.audio, voice.mimeType);
@@ -728,7 +728,7 @@ export class TelegramBot {
     return voicePrompt(spoken, voice.duration);
   }
 
-  /** Ход: заготовка ответа, расшифровка голосового, реплика в pi, поток событий — в правки сообщения. */
+  /** Ход: действие Telegram, расшифровка голосового, реплика в pi, поток событий — в правки сообщения. */
   private async runTurn(message: TelegramMessage, user: UserConfig, incoming: Incoming, route: Route): Promise<void> {
     const conversationId = route.conversationId;
     const reply = new TelegramReply(this.api, message.chat.id, {
@@ -742,10 +742,11 @@ export class TelegramBot {
       // Если Telegram отобьёт топик, ответ уедет ответом на реплику человека — в тот же топик.
       ...(route.anchor === undefined ? {} : { anchorMessageId: route.anchor }),
     });
-    // Заготовку показываем до поднятия сессии: контейнер и pi стартуют секунды,
-    // и человек должен видеть, что его услышали. Голосовое начинается с расшифровки,
-    // и показывать в это время «выбирает стикер» было бы враньём.
-    await reply.start(incoming.voice && this.transcribe ? 'record_voice' : THINKING_ACTION);
+    // Ход начинается сразу, до поднятия сессии: контейнер и pi стартуют секунды,
+    // и человек должен видеть, что его услышали, — действием, а не заготовкой
+    // с многоточием. Голосовое начинается с расшифровки, и обещать в это время
+    // «выбирает стикер» было бы враньём.
+    reply.start(incoming.voice && this.transcribe ? 'record_voice' : THINKING_ACTION);
 
     let text = incoming.text;
     if (incoming.voice) {
