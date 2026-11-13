@@ -1,0 +1,17 @@
+{
+  "name": "video-blog-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP-сервер видео в блог-пост: yt-dlp, Whisper и редактор на DeepInfra",
+  "bin": {
+    "video-blog-mcp": "./server.mjs"
+  },
+  "scripts": {
+    "test": "node test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

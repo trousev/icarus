@@ -119,9 +119,14 @@ export function userVolumes(config: IcarusConfig, user: UserConfig): string[] {
     // всегда: рецепт «Кинозал» добавляется в панели и после сборки конфига, а путь
     // /opt/icarus/tools/arr-mcp должен существовать к тому моменту.
     bind(path.join(REPO_ROOT, 'tools', 'arr-mcp'), '/opt/icarus/tools/arr-mcp', 'ro'),
+    // Видео в блог-пост: тот же случай — рецепт добавляется в панели после сборки
+    // конфига, а путь из команды должен существовать уже тогда. Бинарников (yt-dlp,
+    // ffmpeg) здесь нет: сервер скачивает их себе в служебный каталог при первом
+    // вызове, поэтому маунт остаётся только для чтения и лёгкий.
     ...(config.mapleDir !== undefined
       ? [bind(path.join(REPO_ROOT, 'tools', 'maple-mcp'), '/opt/icarus/tools/maple-mcp', 'ro')]
       : []),
+    bind(path.join(REPO_ROOT, 'tools', 'video-blog-mcp'), '/opt/icarus/tools/video-blog-mcp', 'ro'),
   ];
 }
 

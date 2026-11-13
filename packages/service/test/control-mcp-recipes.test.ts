@@ -360,6 +360,42 @@ test('Кинозал — обычный рецепт: четыре env-ключ�
     assert.equal(env.ARR_SONARR_URL, undefined, 'пустая вторая пара не уезжает в контейнер');
   });
 });
+test('Видео в блог-пост — обычный рецепт: ключей не просит, ленивый, берёт ключ Икара', async () => {
+  const recipe = recipeById('video-blog');
+  assert.ok(recipe, 'рецепт видео в блог-пост есть в каталоге');
+  assert.equal(recipe.category, 'медиа');
+  assert.equal(recipe.transport, 'stdio');
+  assert.equal(recipe.command, 'node');
+  assert.deepEqual(recipe.args, ['/opt/icarus/tools/video-blog-mcp/server.mjs'], 'сервер едет в контейнер из репозитория');
+  assert.deepEqual(recipe.secrets, [], 'отдельных ключей нет: работает на DEEPINFRA_API_KEY Икара');
+  assert.equal(recipe.auth, 'none');
+  assert.ok(recipe.env?.VIDEO_BLOG_ASR_MODEL, 'модель расшифровки видна и меняется в форме');
+  assert.ok(recipe.env?.VIDEO_BLOG_LLM_MODEL, 'модель редактора видна и меняется в форме');
+  assert.ok(
+    recipe.requires.some((line) => line.includes('DEEPINFRA_API_KEY')),
+    'сказано, чей это ключ, а не «нужен ключ вообще»',
+  );
+
+  await withServer(async (base, config) => {
+    const editor = (await (await get(base, '/panel/mcp/recipe?id=video-blog')).json()) as Editor;
+    assert.deepEqual(editor.expectsEnv, [], 'форма ничего не просит у человека');
+
+    const added = await fetch(`${base}/panel/mcp/add`, {
+      method: 'POST',
+      headers: headers('probe'),
+      body: JSON.stringify(formBody(editor)),
+    });
+    assert.equal(added.status, 200);
+    const created = (await added.json()) as { server: { id: string; ready: boolean } };
+    assert.equal(created.server.ready, true, 'ключей нет — сервер готов сразу');
+
+    const entry = piMcp(config, 'probe').mcpServers[created.server.id];
+    assert.equal(entry.command, 'node');
+    assert.deepEqual(entry.args, ['/opt/icarus/tools/video-blog-mcp/server.mjs']);
+    assert.equal(entry.lifecycle, 'lazy', 'рецепт не тянет инструменты в каждый разговор');
+    assert.deepEqual(entry.env, recipe.env, 'несекретные настройки доехали до сервера');
+  });
+});
 test('страница MCP рисует каталог рецептов, а не только список серверов', async () => {
   await withServer(async (base) => {
     const response = await get(base, '/panel/mcp');
