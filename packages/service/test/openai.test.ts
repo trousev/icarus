@@ -83,6 +83,9 @@ test('контейнер монтирует память, сессии и реп
   assert.match(joined, /\/tools\/opds-mcp:\/opt\/icarus\/tools\/opds-mcp:ro/);
   // Кинозал монтируется всегда: сервер может понадобиться и после сборки конфига.
   assert.match(joined, /\/tools\/arr-mcp:\/opt\/icarus\/tools\/arr-mcp:ro/);
+  // Видео в блог-пост — такой же рецепт из каталога: маунт только для чтения,
+  // потому что бинарники сервер скачивает себе в служебный каталог сам.
+  assert.match(joined, /\/tools\/video-blog-mcp:\/opt\/icarus\/tools\/video-blog-mcp:ro/);
   assert.doesNotMatch(joined, /\/tools:\/opt\/icarus\/tools:ro/);
 });
 
