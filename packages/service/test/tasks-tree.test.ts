@@ -17,7 +17,10 @@ import {
   type ChatTaskMark,
 } from '../src/sessions/chats.ts';
 import { createFolder, readFolders } from '../src/sessions/folders.ts';
+import { createTask, parseTaskInput, readTasks, taskName, writeTasks } from '../src/sessions/scheduled.ts';
 import { makeConfig, PANEL_USER_HEADER, probe } from './fixtures.ts';
+
+const PROMPT = 'Собери сводку по проекту X и приложи список рисков, а заодно проверь сроки и зависимости';
 
 function fixture() {
   const config = makeConfig({ users: [probe('probe')], env: { TZ: 'Europe/Moscow' } });
@@ -190,4 +193,45 @@ test('API списка отдаёт дерево вместе с первой с
   } finally {
     server.close();
   }
+});
+
+test('ветка называется именем задачи, а переименование меняет подпись', () => {
+  const { config, user } = fixture();
+  const now = new Date('2026-11-12T09:00:00.000Z');
+  const created = createTask(
+    config,
+    user,
+    parseTaskInput(
+      { name: 'Сводка по проекту', prompt: PROMPT, repeat: { kind: 'daily', time: '08:00' } },
+      'Europe/Moscow',
+      now,
+    ),
+    now,
+  );
+  // Метка чата хранит имя на момент запуска — например, старое.
+  taskChat(config, user, '2026-11-12T09:05:00.000Z', { id: created.id, name: 'Старое имя' }, 'Старое имя');
+
+  assert.equal(taskChatTree(config, user)[0].name, 'Сводка по проекту', 'в дереве имя задачи, а не метки');
+
+  const renamed = readTasks(config, user).map((task) => ({ ...task, name: 'Сводка за неделю' }));
+  writeTasks(config, user, renamed);
+  assert.equal(taskChatTree(config, user)[0].name, 'Сводка за неделю', 'переименовал задачу — сменилась ветка');
+});
+
+test('старая задача без имени не падает: ветка выводится из первой строки промпта', () => {
+  const { config, user } = fixture();
+  // Запись из файла, который завели до появления имени: поля name просто нет.
+  const old = {
+    id: 'task-old',
+    prompt: `${PROMPT}\nвторая строка промпта`,
+    repeat: { kind: 'daily', time: '08:00' },
+    enabled: true,
+    createdAt: '2026-11-01T09:00:00.000Z',
+    nextRunAt: '2026-11-13T08:00:00.000Z',
+  };
+  writeTasks(config, user, [old as never]);
+  taskChat(config, user, '2026-11-12T09:00:00.000Z', { id: old.id, name: 'старая метка' }, 'старая метка');
+
+  assert.equal(taskName(readTasks(config, user)[0]), PROMPT.slice(0, 59) + '…', 'длинная строка аккуратно обрезана');
+  assert.equal(taskChatTree(config, user)[0].name, PROMPT.slice(0, 59) + '…');
 });

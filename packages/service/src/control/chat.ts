@@ -48,6 +48,7 @@ import {
 } from '../sessions/chats.ts';
 import { findFolder } from '../sessions/folders.ts';
 import { taskTimeZone } from '../sessions/schedule.ts';
+import { readTasks, taskName } from '../sessions/scheduled.ts';
 import {
   readOpeningExchange,
   sessionFileForId,
@@ -713,22 +714,26 @@ function runDate(iso: string, timeZone: string): string {
  * Виртуальное дерево «Задачи → имя задачи → дата запуска → разговоры».
  *
  * Это вид поверх метки в chats.json, а не папка: folders.json не трогается, поэтому
- * перетащить чат в «Задачи» нельзя, а удалить или переименовать ветку нечего — она
- * собирается из самих чатов. Свежее сверху: сначала задачи с последним запуском,
- * внутри задачи — поздние даты. Так же устроен и обычный список, и человек ищет
- * глазами последний результат, а не первый.
+ * перетащить чат в «Задачи» нельзя, а удалить ветку нечего — она собирается из самих
+ * чатов. Имя берём у самой задачи, а не из метки чата: переименовал задачу — ветка
+ * сменила подпись, хотя старые разговоры остались те же. Если задачу уже удалили,
+ * подпись остаётся прежней из метки. Свежее сверху: сначала задачи с последним
+ * запуском, внутри задачи — поздние даты. Так же устроен и обычный список, и человек
+ * ищет глазами последний результат, а не первый.
  *
  * Архивные разговоры сюда не попадают: они уходят в «Архив», как и любые другие.
  */
 export function taskChatTree(config: IcarusConfig, user: UserConfig, query = ''): TaskChatGroup[] {
   const needle = query.trim().toLocaleLowerCase('ru');
   const timeZone = taskTimeZone(config);
+  const names = new Map(readTasks(config, user).map((task) => [task.id, taskName(task)]));
   const groups = new Map<string, { name: string; runs: Map<string, ChatRecord[]> }>();
 
   for (const chat of readChats(config, user)) {
     if (!chat.task || chat.archivedAt) continue;
-    if (needle && !`${chat.task.name}\n${chat.title}`.toLocaleLowerCase('ru').includes(needle)) continue;
-    const group = groups.get(chat.task.id) ?? { name: chat.task.name, runs: new Map<string, ChatRecord[]>() };
+    const name = names.get(chat.task.id) ?? chat.task.name;
+    if (needle && !`${name}\n${chat.title}`.toLocaleLowerCase('ru').includes(needle)) continue;
+    const group = groups.get(chat.task.id) ?? { name, runs: new Map<string, ChatRecord[]>() };
     groups.set(chat.task.id, group);
     // У старых записей runAt мог не сохраниться: createdAt у чата задачи и есть запуск.
     const date = runDate(chat.runAt ?? chat.createdAt, timeZone);

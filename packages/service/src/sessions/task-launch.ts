@@ -2,21 +2,14 @@
 // реплика из панели (SessionRegistry), только человек ничего не нажимает.
 //
 // Новый разговор помечен задачей: в общем списке таких чатов нет, панель собирает
-// их в виртуальное дерево «Задачи → имя задачи → дата запуска». Заголовок берём из
-// промпта сразу: человек видит в дереве, что именно запустилось, ещё до первого
-// слова модели. Своего имени у задачи нет — имя ветки и заголовок растут из одного
-// и того же промпта.
+// их в виртуальное дерево «Задачи → имя задачи → дата запуска». Заголовок разговора
+// — имя задачи, а не промпт: человек видит в дереве и в открытом чате, ЧТО это за
+// прогон, ещё до первого слова модели. У старых задач имени нет — берём промпт.
 import { DEFAULT_WORKSPACE, type IcarusConfig, type UserConfig } from '../config.ts';
 import { log, redact } from '../log.ts';
 import { createChatRecord, recordTurn } from './chats.ts';
 import type { SessionRegistry } from './registry.ts';
-import type { TaskLauncher } from './scheduled.ts';
-
-/** Заголовок разговора: первая строка промпта — в списке видно, что запустилось. */
-function titleFor(prompt: string): string {
-  const line = (prompt.split('\n')[0] ?? '').replace(/\s+/g, ' ').trim();
-  return line.length > 60 ? `${line.slice(0, 59).trimEnd()}…` : line;
-}
+import { taskName, type TaskLauncher } from './scheduled.ts';
 
 export function taskLauncher(config: IcarusConfig, registry: SessionRegistry): TaskLauncher {
   return {
@@ -25,7 +18,7 @@ export function taskLauncher(config: IcarusConfig, registry: SessionRegistry): T
     busy: (user: UserConfig) => registry.busyConversations(user.id).length > 0,
     launch: async (user, task) => {
       const workspace = task.workspace ?? DEFAULT_WORKSPACE;
-      const name = titleFor(task.prompt);
+      const name = taskName(task);
       const chat = createChatRecord(config, user, workspace, new Date(), {
         title: name,
         task: { id: task.id, name },

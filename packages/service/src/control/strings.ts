@@ -297,6 +297,9 @@ export type PanelStrings = {
   tasksIntro: string;
   tasksNew: string;
   tasksEmpty: string;
+  /** «Название» — человеческое имя задачи, по нему подписана ветка дерева. */
+  tasksNameLabel: string;
+  tasksNamePlaceholder: string;
   tasksPromptLabel: string;
   tasksPromptPlaceholder: string;
   tasksWhen: string;
@@ -662,6 +665,8 @@ const RU: PanelStrings = {
   tasksEmpty:
     'Пока пусто. Заведи задачу: напиши, что должен сделать агент, и выбери, когда запускать — ' +
     'результат появится новым разговором.',
+  tasksNameLabel: 'Название',
+  tasksNamePlaceholder: 'Например: Сводка по проекту — пусто, и ветка назовётся по первой строке промпта',
   tasksPromptLabel: 'Что должен сделать агент',
   tasksPromptPlaceholder: 'Например: собери сводку по проекту X и приложи список рисков',
   tasksWhen: 'Когда',
@@ -1024,6 +1029,8 @@ const EN: PanelStrings = {
   tasksEmpty:
     'Nothing here yet. Add a task: write what the agent should do and pick when to run it — ' +
     'the result appears as a new conversation.',
+  tasksNameLabel: 'Name',
+  tasksNamePlaceholder: 'For example: Project summary — leave empty and the branch takes the first prompt line',
   tasksPromptLabel: 'What the agent should do',
   tasksPromptPlaceholder: 'For example: gather a summary of project X and list the risks',
   tasksWhen: 'When',
