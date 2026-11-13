@@ -1,20 +1,15 @@
 // Launching a scheduled task: a new conversation and a prompt into it — the same way as
 // a panel reply (SessionRegistry), only the person presses nothing.
 //
-// The new conversation is an ordinary chat, not a service thread: it appears in the list,
-// can be opened, continued and archived. We take the title from the prompt right away: the
-// person sees in the list what exactly launched, even before the model's first word.
+// A new conversation is marked with a task: there are no such chats in the common list, the panel
+// gathers them into the virtual «Задачи → task name → launch date» tree. The conversation title
+// is the task name, not the prompt: the person sees in the tree and in the open chat WHAT this run
+// is, even before the model's first word. Old tasks have no name — we take the prompt.
 import { DEFAULT_WORKSPACE, type IcarusConfig, type UserConfig } from '../config.ts';
 import { log, redact } from '../log.ts';
 import { createChatRecord, recordTurn } from './chats.ts';
 import type { SessionRegistry } from './registry.ts';
-import type { TaskLauncher } from './scheduled.ts';
-
-/** Conversation title: the first line of the prompt — the list shows what launched. */
-function titleFor(prompt: string): string {
-  const line = (prompt.split('\n')[0] ?? '').replace(/\s+/g, ' ').trim();
-  return line.length > 60 ? `${line.slice(0, 59).trimEnd()}…` : line;
-}
+import { taskName, type TaskLauncher } from './scheduled.ts';
 
 export function taskLauncher(config: IcarusConfig, registry: SessionRegistry): TaskLauncher {
   return {
@@ -23,7 +18,11 @@ export function taskLauncher(config: IcarusConfig, registry: SessionRegistry): T
     busy: (user: UserConfig) => registry.busyConversations(user.id).length > 0,
     launch: async (user, task) => {
       const workspace = task.workspace ?? DEFAULT_WORKSPACE;
-      const chat = createChatRecord(config, user, workspace, new Date(), { title: titleFor(task.prompt) });
+      const name = taskName(task);
+      const chat = createChatRecord(config, user, workspace, new Date(), {
+        title: name,
+        task: { id: task.id, name },
+      });
       const chatId = chat.conversationId ?? chat.id;
       try {
         // The registry brings up a pi session in this conversation; the prompt goes into

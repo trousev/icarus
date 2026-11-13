@@ -117,13 +117,19 @@ env:
 # they live in dataDir/mcp and are toggled per person. A person can also disable a common server
 # from this block for themselves — the config does not change because of that.
 #
-# lifecycle: lazy (default) — the server does not connect in advance, and its tools do not
-# hang in the prompt of every conversation. In AGENTS.md a hint appears for such a server:
-# before first use the model calls mcp_connect. description —
-# a human explanation of when the server is needed; without it the model sees only the name.
-# lifecycle: eager — the server is needed always, its tools go into every request.
-# hidden: true — a service server: everyone has it, it is not in the panel, you cannot
-# disable it. That is how built-in abilities (Maple) live, not someone else's tools.
+# Секреты у каждого MCP свои. Общий сервер объявляет только ИМЕНА: secrets: [Authorization]
+# (для stdio — имена переменных окружения). Значение вводит человек в панели
+# (MCP → «Настроить доступ»), и оно ложится в его credentials.json под этим
+# сервером. Поэтому подстановок ${VAR}/env: в mcp.headers и mcp.env нет: там
+# остаются только несекретные настройки — адреса, порты, режимы.
+#
+# lifecycle: lazy (дефолт) — сервер не подключается заранее, и его инструменты не
+# висят в промпте каждого разговора. В AGENTS.md для такого сервера появляется
+# подсказка: перед первым использованием модель зовёт mcp_connect. description —
+# человеческое объяснение, когда сервер нужен; без него модель видит только имя.
+# lifecycle: eager — сервер нужен всегда, его инструменты едут в каждый запрос.
+# hidden: true — служебный сервер: он есть у всех, в панели его нет, выключить себе
+# его нельзя. Так живут встроенные умения (Maple), а не чужие инструменты.
 mcp:
   echo:
     command: node
@@ -154,35 +160,37 @@ mcp:
 # MAPLE_DIR is set in .env — the service mounts it into the container at the same path as
 # on the host: the launcher looks for its libraries by the recorded internal path.
 #
-# The server has no storage of its own: it keeps session journals and charts in the conversation
-# working folder, in the hidden `.maple/`. It also has no section of its own in the panel — hidden: true
-# removes it from the MCP list and forbids disabling it: this is a built-in ability.
+# Своего хранилища у сервера нет: журналы сессий и графики он держит в рабочей папке
+# разговора, в скрытом `.maple/`. Своего раздела в панели тоже нет — hidden: true
+# убирает его из списка MCP и запрещает выключать: это встроенное умение.
+# MAPLE_BIN — путь буквально, без ${MAPLE_DIR}: у MCP больше нет подстановок.
 #  maple:
 #    command: node
 #    args: ['/opt/icarus/tools/maple-mcp/server.mjs']
 #    env:
-#      MAPLE_BIN: ${MAPLE_DIR}/bin/maple
+#      MAPLE_BIN: /opt/maple18/bin/maple
 #      MAPLE_TIMEOUT_SECONDS: "25"
 #    lifecycle: eager
 #    hidden: true
 #    description: "Mathematics and analytics: symbolic, numeric, and with plots"
 
-# Home Assistant: the MCP server lives in HA itself (address like <host>/api/mcp) and without
-# a key answers 401 — its auth is not its own, but the usual HA one: a long-lived
-# access key. Issue it: <HA address>/profile/security → "Long-lived access
-# tokens" → "Create token"; the key is shown once and lives 10 years. Any user
-# can issue it, but the endpoint will only let an administrator in if the
-# Model Context Protocol Server integration has the "Require an administrator
-# account" option enabled (for new entries — enabled; for a non-admin it answers 403, not 401).
-# The key itself — in .env, only the substitution in the config: it is in git, and the key is not.
-# The tools will arrive to Icarus with a prefix: mcp_homeassistant_<name>.
-# lifecycle: lazy — the server connects only when the conversation touches the home; before
-# that its tools do not take up the prompt and do not disturb other sessions.
+# Home Assistant: MCP-сервер живёт в самом HA (адрес вида <хост>/api/mcp) и без
+# ключа отвечает 401 — авторизация у него не своя, а обычная для HA: долгоживущий
+# ключ доступа. Выписать его: <адрес HA>/profile/security → «Long-lived access
+# tokens» → «Create token»; ключ показывается один раз и живёт 10 лет. Выписать
+# может любой пользователь, но эндпоинт пустит только администратора, если у
+# интеграции Model Context Protocol Server включена опция «Require an administrator
+# account» (у новых записей — включена; не админу он ответит 403, а не 401).
+#
+# В конфиге — только имя секрета. Значение каждый вводит в панели сам, со своим
+# ключом: сервер из config.yaml больше не берёт ключ из .env.
+# Инструменты приедут Икару с префиксом: mcp_homeassistant_<имя>.
+# lifecycle: lazy — сервер подключится только когда разговор коснётся дома; до
+# этого его инструменты не занимают промпт и не мешают остальным сессиям.
 #  homeassistant:
 #    transport: streamable-http
 #    url: http://10.0.0.16/api/mcp
-#    headers:
-#      Authorization: Bearer ${HOMEASSISTANT_TOKEN}
+#    secrets: [Authorization]
 #    lifecycle: lazy
 #    description: "Smart home: lights, climate, scenes, sensors, and device states"
 

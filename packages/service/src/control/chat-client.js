@@ -282,6 +282,37 @@ const ARCHIVE_OPEN_KEY = 'icarus.archive-open';
 let archivedChats = [];
 let archiveOpen = false;
 
+/**
+ * The virtual «Задачи» tree from the server: task → launch date → conversations.
+ * It isn't and can't be in folders.json: it's a view on top of the mark in chats.json.
+ * We keep the collapsed state in the browser — like unread, the server doesn't need it.
+ */
+let taskGroups = [];
+const TASKS_TREE_KEY = 'icarus.tasks-tree';
+let tasksOpen = true;
+const tasksCollapsed = new Set();
+
+function loadTasksTreeState() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(TASKS_TREE_KEY) || 'null');
+    if (!raw || typeof raw !== 'object') return;
+    tasksOpen = raw.open !== false;
+    for (const id of Array.isArray(raw.collapsed) ? raw.collapsed : []) {
+      if (typeof id === 'string') tasksCollapsed.add(id);
+    }
+  } catch {
+    /* broken key — the tree will just start expanded */
+  }
+}
+
+function saveTasksTreeState() {
+  try {
+    localStorage.setItem(TASKS_TREE_KEY, JSON.stringify({ open: tasksOpen, collapsed: [...tasksCollapsed] }));
+  } catch {
+    /* private mode — the state simply won't be remembered */
+  }
+}
+
 function storedArchiveOpen() {
   try {
     return localStorage.getItem(ARCHIVE_OPEN_KEY) === '1';
@@ -345,6 +376,8 @@ function markRead(chatId) {
  */
 function pruneUnread() {
   const known = new Set(chats.map((chat) => chat.id));
+  // Task chats live not in the common list but in the tree: their dots aren't orphans either.
+  for (const group of taskGroups) for (const run of group.runs) for (const chat of run.chats) known.add(chat.id);
   let changed = false;
   for (const id of [...unread]) {
     if (known.has(id)) continue;
@@ -561,15 +594,91 @@ function folderHeadHtml(folder, count) {
 /** The chat name currently being edited in the list; `null` — not editing. */
 let renamingId = null;
 
-/** Fields whose Enter already saved the name: blur follows, we don't write a second time. */
+/** Run date of a branch: an ISO key from the server, the caption — in the interface language. */
+function runDateLabel(key) {
+  const parts = String(key || '').split('-').map(Number);
+  if (parts.length !== 3 || parts.some((part) => !Number.isFinite(part))) return key || '';
+  const date = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2], 12));
+  const locale = cfg.ui.lang === 'en' ? 'en-GB' : 'ru-RU';
+  const sameYear = parts[0] === new Date().getFullYear();
+  return date.toLocaleDateString(locale, {
+    day: 'numeric',
+    month: 'short',
+    timeZone: 'UTC',
+    ...(sameYear ? {} : { year: 'numeric' }),
+  });
+}
+
+/**
+ * A conversation row inside «Задачи». Externally the same list row, but without the pencil and
+ * «⋯»: the branch is virtual, and there's nowhere to move such a chat by hand. Dragging it is
+ * also impossible — the row isn't `.chat-row`, so the drag handler doesn't see it.
+ */
+function taskChatRowHtml(chat) {
+  const dot = busyChats.has(chat.id) ? 'busy' : unread.has(chat.id) ? 'unread' : '';
+  return (
+    '<div class="task-row">' +
+    '<button class="chat-item task-chat' +
+    (chat.id === currentId ? ' active' : '') +
+    '" data-id="' + esc(chat.id) + '">' +
+    '<div class="chat-item-top">' +
+    (dot ? '<span class="chat-dot ' + dot + '"></span>' : '') +
+    '<span class="chat-item-title">' + esc(chat.title) + '</span>' +
+    '<time class="chat-item-time">' + esc(timeLabel(chat.createdAt)) + '</time>' +
+    '</div><div class="chat-item-preview">' + esc(cleanPreview(chat.preview || '')) + '</div></button></div>'
+  );
+}
+
+/**
+ * The «Задачи» tree: two levels of nesting under the root — task and launch date.
+ * The browser remembers the collapsed state of the root and tasks: it's a view, not a folder,
+ * and the server knows nothing about it — unlike real folders, whose collapsed lives on the server.
+ */
+function taskTreeHtml() {
+  if (!taskGroups.length) return '';
+  // During a search collapsed state doesn't hide what's found — just like real folders.
+  const searching = el('chat-search').value.trim() !== '';
+  const open = tasksOpen || searching;
+  const total = taskGroups.reduce(
+    (sum, group) => sum + group.runs.reduce((count, run) => count + run.chats.length, 0),
+    0,
+  );
+  let html =
+    '<div class="folder-head task-root' + (open ? '' : ' collapsed') +
+    '" data-task-root="1" role="button" tabindex="0" aria-expanded="' + (open ? 'true' : 'false') + '">' +
+    '<span class="folder-caret" aria-hidden="true">▾</span>' +
+    '<span class="folder-name">' + esc(cfg.ui.sectionTasks) + '</span>' +
+    '<span class="folder-count">' + total + '</span></div>';
+  if (!open) return html;
+  for (const group of taskGroups) {
+    const collapsed = !searching && tasksCollapsed.has(group.id);
+    const count = group.runs.reduce((n, run) => n + run.chats.length, 0);
+    html +=
+      '<div class="folder-head task-head' + (collapsed ? ' collapsed' : '') +
+      '" data-task="' + esc(group.id) + '" role="button" tabindex="0" aria-expanded="' +
+      (collapsed ? 'false' : 'true') + '">' +
+      '<span class="folder-caret" aria-hidden="true">▾</span>' +
+      '<span class="folder-name">' + esc(group.name) + '</span>' +
+      '<span class="folder-count">' + count + '</span></div>';
+    if (collapsed) continue;
+    for (const run of group.runs) {
+      html +=
+        '<p class="task-date">' + esc(runDateLabel(run.date)) + '</p>' +
+        run.chats.map(taskChatRowHtml).join('');
+    }
+  }
+  return html;
+}
+
+/** Fields whose name Enter already saved: blur follows, we don't write a second time. */
 const renameCommitted = new WeakSet();
 
 function renderChats() {
   const box = el('chat-list');
   const top = box.scrollTop;
   const query = el('chat-search').value.trim();
-  if (!chats.length && !folders.length && !folderDraft) {
-    // In a draft the "start a new chat" hint is superfluous: it's already started.
+  if (!chats.length && !folders.length && !folderDraft && !taskGroups.length) {
+    // In a draft the «начни новый чат» hint is superfluous: it's already started.
     box.innerHTML = query
       ? '<p class="side-empty">' + esc(cfg.ui.chatListEmptySearch) + '</p>'
       : draft
@@ -582,6 +691,8 @@ function renderChats() {
   if (folderDraft) {
     html += '<div class="folder-new"><input id="folder-new-name" placeholder="' + esc(cfg.ui.folderName) + '" maxlength="64" autocomplete="off"></div>';
   }
+  // «Задачи» stands above the folders: it's a separate world, not another shelf.
+  html += taskTreeHtml();
 
   if (!folders.length) {
     // There are no folders yet — the list lives as before. There's no point creating
@@ -637,6 +748,8 @@ function bindChatList(box) {
   });
   box.querySelectorAll('.chat-item').forEach((node) => {
     node.onclick = () => selectChat(node.dataset.id);
+    // A task chat isn't renamed from the list: it doesn't live in the common row registry.
+    if (node.classList.contains('task-chat')) return;
     node.ondblclick = (event) => {
       event.preventDefault();
       startRename(node.dataset.id);
@@ -648,7 +761,39 @@ function bindChatList(box) {
       openChatMenu(node.dataset.id, node);
     };
   });
-  box.querySelectorAll('.folder-head').forEach((head) => {
+  // «Задачи» is a virtual tree: we collapse the top two levels, we don't go into the folder
+  // registry and don't save anything on the server.
+  box.querySelectorAll('[data-task-root]').forEach((head) => {
+    const toggle = () => {
+      tasksOpen = !tasksOpen;
+      saveTasksTreeState();
+      renderChats();
+    };
+    head.onclick = toggle;
+    head.onkeydown = (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      toggle();
+    };
+  });
+  box.querySelectorAll('[data-task]').forEach((head) => {
+    const toggle = () => {
+      const id = head.dataset.task;
+      if (tasksCollapsed.has(id)) tasksCollapsed.delete(id);
+      else tasksCollapsed.add(id);
+      saveTasksTreeState();
+      renderChats();
+    };
+    head.onclick = toggle;
+    head.onkeydown = (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      toggle();
+    };
+  });
+  // data-folder exists only on real folders and «Входящие»: tasks don't have it,
+  // and such a header must neither collapse via the registry nor accept a drop.
+  box.querySelectorAll('.folder-head[data-folder]').forEach((head) => {
     head.onclick = (event) => {
       if (event.target.closest('.folder-act') || event.target.closest('.folder-rename')) return;
       toggleChatFolder(head.dataset.folder).catch((error) => setNote('не удалось свернуть папку: ' + error.message));
@@ -1071,6 +1216,9 @@ async function loadChats(reset = true) {
       chats = chats.concat(incoming.filter((chat) => !seen.has(chat.id)));
     }
     nextCursor = data.nextCursor || null;
+    // The «Задачи» tree arrives with the first page and the same search. On page-down
+    // and in the archive it's absent — then we keep the previous one.
+    if (Array.isArray(data.tasks)) taskGroups = data.tasks;
     if (reset) pruneUnread();
     renderChats();
     if (reset) el('chat-list').scrollTop = 0;
@@ -1106,6 +1254,17 @@ function rememberChat(chat, liveText) {
     if (at >= 0) archivedChats[at] = merged;
     else archivedChats.unshift(merged);
     renderArchive();
+    return;
+  }
+  // A task chat lives in the tree, not in the common list: we update the branch row in place,
+  // otherwise the preview in «Задачи» would lag until the page reload.
+  if (merged.task) {
+    for (const group of taskGroups) {
+      for (const run of group.runs) {
+        const at = run.chats.findIndex((item) => item.id === merged.id);
+        if (at >= 0) run.chats[at] = { ...run.chats[at], ...merged };
+      }
+    }
     return;
   }
   chats = chats.filter((item) => item.id !== merged.id);
@@ -1256,10 +1415,11 @@ async function selectChat(id) {
     currentWorkspace = data.chat.workspace || 'talk';
     updateComposerHint();
     history.replaceState(null, '', '/panel/chat?chat=' + encodeURIComponent(currentId));
-    // An archived chat opens from its own section and doesn't get into the common list.
+    // An archived conversation opens from its own section and doesn't get into the common list.
+    // A task chat too: its place is in the virtual «Задачи» tree.
     if (data.chat.archived) {
       if (!archivedChats.some((chat) => chat.id === currentId)) archivedChats.unshift(data.chat);
-    } else if (!chats.some((chat) => chat.id === currentId)) {
+    } else if (!data.chat.task && !chats.some((chat) => chat.id === currentId)) {
       chats.unshift(data.chat);
     }
     renderChats();
@@ -3678,7 +3838,8 @@ el('new-folder').onclick = () => {
    We listen on the container, not the rows: the list is redrawn as a whole, and handlers
    on rows would have to be attached anew after every redraw. */
 el('chat-list').addEventListener('dragover', (event) => {
-  const head = event.target.closest && event.target.closest('.folder-head');
+  // Only a real folder: «Задачи» is a virtual branch, there's nothing to drop into it.
+  const head = event.target.closest && event.target.closest('.folder-head[data-folder]');
   if (!head || !draggingChatId) return;
   // preventDefault is exactly "you can drop here": without it drop won't happen.
   event.preventDefault();
@@ -3686,11 +3847,11 @@ el('chat-list').addEventListener('dragover', (event) => {
   head.classList.add('drop-target');
 });
 el('chat-list').addEventListener('dragleave', (event) => {
-  const head = event.target.closest && event.target.closest('.folder-head');
+  const head = event.target.closest && event.target.closest('.folder-head[data-folder]');
   if (head) head.classList.remove('drop-target');
 });
 el('chat-list').addEventListener('drop', (event) => {
-  const head = event.target.closest && event.target.closest('.folder-head');
+  const head = event.target.closest && event.target.closest('.folder-head[data-folder]');
   if (!head) return;
   event.preventDefault();
   head.classList.remove('drop-target');
@@ -3905,6 +4066,7 @@ window.addEventListener('focus', () => {
 (async () => {
   archiveOpen = storedArchiveOpen();
   loadUnread();
+  loadTasksTreeState();
   await loadChats(true);
   // Folders — before the first show of the list there are none: they only group the already
   // loaded chats, so we load them after and redraw.

@@ -24,7 +24,13 @@ import { nextRunAt, parseRepeat, taskTimeZone, type TaskRepeat } from './schedul
 
 export type ScheduledTask = {
   id: string;
-  /** What the agent does in the new conversation. A task without a prompt doesn't exist. */
+  /**
+   * The task's human name: the "Tasks" tree branch and its conversations' titles are
+   * labeled by it. Optional: old tasks don't have it, and then the name is derived
+   * from the first line of the prompt (see taskName).
+   */
+  name?: string;
+  /** What the agent does in the new conversation. There is no task without a prompt. */
   prompt: string;
   repeat: TaskRepeat;
   /** The new conversation's working folder; absent — the default workspace. */
@@ -50,12 +56,27 @@ export type TaskView = ScheduledTask & {
 export const TASK_LIMIT = 100;
 /** The prompt is a person's reply: nobody writes longer, and there's no reason to store a canvas. */
 const PROMPT_LIMIT = 4000;
+/** The name is a branch label, not a paragraph: anything longer wouldn't be readable in the menu anyway. */
+const NAME_LIMIT = 80;
 
 export type TaskInput = {
+  name?: string;
   prompt: string;
   repeat: TaskRepeat;
   workspace?: string;
 };
+
+/**
+ * The task name for a person and the panel. An own name is stored in the task; old tasks
+ * don't have one — we take the first line of the prompt and carefully trim it so the branch
+ * label fits into a menu line.
+ */
+export function taskName(task: Pick<ScheduledTask, 'name' | 'prompt'>): string {
+  const own = (task.name ?? '').replace(/\s+/g, ' ').trim();
+  if (own) return own;
+  const line = (task.prompt.split('\n')[0] ?? '').replace(/\s+/g, ' ').trim();
+  return line.length > 60 ? `${line.slice(0, 59).trimEnd()}…` : line;
+}
 
 function tasksFile(config: IcarusConfig, user: UserConfig): string {
   return userPaths(config, user).scheduledTasks;
@@ -71,6 +92,7 @@ function normalize(value: unknown): ScheduledTask | null {
   if (typeof item.prompt !== 'string' || !item.prompt.trim()) return null;
   return {
     id: item.id,
+    ...(typeof item.name === 'string' && item.name.trim() ? { name: item.name.trim() } : {}),
     prompt: item.prompt,
     repeat,
     ...(typeof item.workspace === 'string' && item.workspace.trim() ? { workspace: item.workspace.trim() } : {}),
@@ -113,6 +135,11 @@ export function parseTaskInput(value: unknown, timeZone: string, now = new Date(
     .trim()
     .slice(0, PROMPT_LIMIT);
   if (!prompt) throw new Error('напиши, что должен сделать агент: задача без промпта — это не задача');
+  // The name is optional: an empty field means "name it from the prompt", not an error.
+  const name = String(raw.name ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, NAME_LIMIT);
   const repeat = parseRepeat(raw.repeat);
   if (!repeat) throw new Error('расписание не разобрал: нужен день, время или правило повтора');
   // A one-off "run it yesterday" is not a task but a misunderstanding: the next run
@@ -124,7 +151,7 @@ export function parseTaskInput(value: unknown, timeZone: string, now = new Date(
         : 'не удалось посчитать следующий запуск: проверь время и дни недели',
     );
   }
-  return { prompt, repeat };
+  return { ...(name ? { name } : {}), prompt, repeat };
 }
 
 export function createTask(
@@ -139,6 +166,7 @@ export function createTask(
   const next = nextRunAt(input.repeat, now, timeZone);
   const task: ScheduledTask = {
     id: crypto.randomUUID(),
+    ...(input.name ? { name: input.name } : {}),
     prompt: input.prompt,
     repeat: input.repeat,
     ...(input.workspace ? { workspace: input.workspace } : {}),

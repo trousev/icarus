@@ -77,7 +77,36 @@ test('the task is created with the next run in the user\'s time zone', () => {
   assert.deepEqual(readTasks(config, user).map((item) => item.id), [task.id]);
 });
 
-test('a stranger neither sees nor deletes the task', () => {
+test('a custom task name is saved and read, an empty one is not saved', () => {
+  const { config, user } = setup();
+  const now = new Date('2026-11-08T07:00:00Z');
+  const named = createTask(
+    config,
+    user,
+    parseTaskInput(
+      { name: '  Сводка по проекту  ', prompt: 'Собери сводку по проекту X', repeat: { kind: 'daily', time: '08:00' } },
+      DUBLIN,
+      now,
+    ),
+    now,
+  );
+  const anonymous = createTask(
+    config,
+    user,
+    parseTaskInput({ name: '   ', prompt: 'Полить цветы', repeat: { kind: 'daily', time: '09:00' } }, DUBLIN, now),
+    now,
+  );
+
+  assert.equal(named.name, 'Сводка по проекту', 'имя обрезано и сохранено');
+  assert.equal(anonymous.name, undefined, 'пустое имя — это «назови по промпту», а не пустая строка');
+  assert.deepEqual(
+    readTasks(config, user).map((task) => task.name),
+    ['Сводка по проекту', undefined],
+  );
+  assert.equal(readTasks(config, user)[0].prompt, 'Собери сводку по проекту X', 'промпт не тронут');
+});
+
+test('another person cannot see or delete a task', () => {
   const { config } = setup();
   const owner = probe('probe');
   const stranger = probe('probe2');

@@ -444,3 +444,52 @@ test('the MCP page opens and renders the add button', async () => {
     assert.doesNotThrow(() => new Function(scripts[scripts.length - 1] ?? ''), 'скрипт MCP компилируется');
   });
 });
+
+test('общий MCP из config.yaml: свой ключ из панели, у другого человека — свой', async () => {
+  await withServer(
+    async (base, config) => {
+      assert.deepEqual(Object.keys(piMcp(config, 'probe').mcpServers), [], 'без ключа — ждёт доступа');
+
+      const saved = await post(base, 'probe', 'credentials', {
+        id: 'homeassistant',
+        headers: { Authorization: 'Bearer panel-key' },
+      });
+      assert.equal(saved.status, 200);
+      const view = ((await saved.json()) as { server: { authState: string; canEdit: boolean } }).server;
+      assert.equal(view.authState, 'ready');
+      assert.equal(view.canEdit, false, 'команду и адрес по-прежнему задаёт config.yaml');
+      assert.equal(
+        (piMcp(config, 'probe').mcpServers.homeassistant?.headers as Record<string, string>).Authorization,
+        'Bearer panel-key',
+      );
+      assert.deepEqual(Object.keys(piMcp(config, 'probe2').mcpServers), [], 'ключ не уехал другому');
+
+      const cleared = await post(base, 'probe', 'credentials', { id: 'homeassistant', clear: true });
+      assert.equal(cleared.status, 200);
+      assert.deepEqual(Object.keys(piMcp(config, 'probe').mcpServers), [], 'очистили — снова ждёт доступа');
+    },
+    {
+      mcp: {
+        homeassistant: {
+          transport: 'streamable-http',
+          url: 'http://ha.local/api/mcp',
+          secrets: ['Authorization'],
+        },
+      },
+    },
+  );
+});
+
+test('общий MCP без объявленных секретов не пускает панель к ключам', async () => {
+  await withServer(
+    async (base) => {
+      const response = await post(base, 'probe', 'credentials', {
+        id: 'legacy',
+        headers: { Authorization: 'Bearer mine' },
+      });
+      assert.equal(response.status, 400);
+      assert.match(((await response.json()) as { error: { message: string } }).error.message, /нет объявленных секретов/);
+    },
+    { mcp: { legacy: { url: 'http://legacy.local/mcp', headers: { Authorization: 'Bearer shared' } } } },
+  );
+});

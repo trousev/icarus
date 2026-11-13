@@ -66,6 +66,7 @@ test('the "Tasks" section is in the sidebar and opens', async () => {
     const html = await page.text();
 
     assert.match(html, /<b>Задачи<\/b>/, 'страница называет себя');
+    assert.match(html, /id="task-name"/, 'у задачи есть своё название');
     assert.match(html, /id="task-prompt"/, 'поле промпта на месте');
     assert.match(html, /id="task-workspace"/, 'папку запуска выбирают в форме');
     assert.match(html, /window\.__TASKS_CFG__/, 'клиент знает свой раздел');
@@ -104,6 +105,19 @@ test('GET returns tasks, the time zone and workspaces', async () => {
     assert.equal(task.lastChat, null, 'запусков ещё не было');
     assert.deepEqual(body.workspaces.map((item) => item.slug), ['talk'], 'папка по умолчанию на месте');
     assert.ok(userPaths(config, probe('probe')).scheduledTasks.startsWith(config.dataDir));
+  });
+});
+
+test('a task name is saved and visible in the list', async () => {
+  await withServer(async (base) => {
+    const created = await post(base, 'create', {
+      name: 'Сводка по проекту',
+      prompt: PROMPT,
+      repeat: { kind: 'daily', time: '08:00' },
+    });
+    assert.equal(created.status, 200);
+    const body = await taskBody(await get(base));
+    assert.equal(body.tasks[0].name, 'Сводка по проекту');
   });
 });
 

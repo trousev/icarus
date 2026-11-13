@@ -166,9 +166,10 @@ the containers; the values themselves aren't written into `docker-compose.yml`, 
 
 ### Keys in the panel
 
-The **"Keys"** section (`/panel/keys`) edits the same secrets without `ssh` and without rebuilding the stack:
-model providers, search, Telegram, MCP and any custom variables. Only admins see and open it — people
-with `admin: true` in `users:`:
+Раздел **«Ключи»** (`/panel/keys`) правит те же секреты без `ssh` и пересборки стека:
+провайдеры моделей, поиск, Telegram и любые свои переменные. Ключей MCP здесь нет:
+у каждого MCP своя коллекция секретов, ей рулит раздел **MCP** (см. ниже). Видят и открывают его
+только админы — люди с `admin: true` в `users:`:
 
 ```yaml
 users:
@@ -231,15 +232,24 @@ the manual `/mcp:start`, and a lazy server's tools remained invisible.
 mcp:
   homeassistant:
     url: http://10.0.0.16/api/mcp
-    headers: { Authorization: Bearer ${HOMEASSISTANT_TOKEN} }
-    lifecycle: lazy                              # default; can be omitted
-    description: "Smart home: lights, climate, scenes" # hint for the model, doesn't go into mcp.json
+    secrets: [Authorization]                     # только имя: значение вводится в панели
+    lifecycle: lazy                              # дефолт; можно не писать
+    description: "Умный дом: свет, климат, сцены" # подсказка модели, в mcp.json не едет
 ```
 
-Built-in skills live the same way. Artifacts is the `artifacts` server with `hidden: true` and `lifecycle: lazy`:
-the full instructions live in the `instructions` of the MCP handshake and appear to the model only after
-`mcp_connect`, while the prompt always has only a short trigger description. The person starts talking about
-artifacts — the instructions "unfold"; the person is silent — the context isn't occupied.
+Секреты у каждого MCP свои — и у общего сервера из `config.yaml` тоже. В конфиге стоит
+только **имя** (`secrets`: у HTTP это заголовки, у stdio — переменные окружения);
+значение человек вводит сам в панели, кнопкой «Настроить доступ», и оно ложится в
+`credentials.json` под его `userId`. Поэтому `headers`/`env` в `mcp:` — это несекретные
+настройки (адреса, порты, режимы), а подстановок `${VAR}` и `env:` там больше нет: ключ
+из `.env` был бы один на всех. Пока человек не ввёл свой ключ, сервер помечен «ждёт
+доступа» и не попадает ни в его `mcp.json`, ни в `AGENTS.md`. Команду и адрес общего
+сервера панель не меняет — это config.yaml; своё у него только секреты и включённость.
+
+Так же живут встроенные умения. Артефакты — сервер `artifacts` с `hidden: true` и `lifecycle: lazy`:
+полные инструкции лежат в `instructions` MCP-хендшейка и появляются у модели только после
+`mcp_connect`, а в промпте всегда есть лишь короткое описание-триггер. Заговорил человек об
+артефактах — инструкции «развернулись»; молчит — контекст не занят.
 
 ### MCP from the panel: your own server in a couple of minutes
 
@@ -253,17 +263,24 @@ lives not in the config but in `dataDir/mcp/`:
 
 The **MCP** section in the panel can do everything needed for "I brought a cool MCP for TODO":
 
-- **add** a server: an address (streamable HTTP or the old SSE) or a stdio command that
-  lives in the person's container;
-- **enable / disable** — this is a personal toggle per person. A disabled server
-  goes neither into `mcp.json` nor into `AGENTS.md`: it exists in the panel, but not in the conversation and
-  it doesn't occupy context. An enabled one stays `lifecycle: lazy`, so its tools
-  don't hang in every prompt until the server is needed;
-- **share** or keep to yourself. A shared server arrives to the others
-  **disabled** — they enable it themselves. Keys and OAuth access aren't copied, though: each
-  sets up their own, otherwise "share a server" would mean "share your account";
-- **check** — the panel itself does `initialize` and `tools/list` and shows how many
-  tools the server returned (for stdio it honestly says that the check will happen on connection).
+- **добавить** сервер: адрес (streamable HTTP или старый SSE) либо команду stdio, которая
+  живёт в контейнере человека;
+- **включить / выключить** — это личный переключатель на каждого человека. Выключенный сервер
+  не попадает ни в `mcp.json`, ни в `AGENTS.md`: он есть в панели, но в разговоре его нет и
+  контекст он не занимает. Включённый остаётся `lifecycle: lazy`, поэтому его инструменты
+  не висят в каждом промпте, пока сервер не понадобится;
+- **поделиться** или оставить только себе. Расшаренный сервер приезжает остальным
+  **выключенным** — включают сами. Ключи и OAuth-доступ при этом не копируются: каждый
+  настраивает свой, иначе «поделиться сервером» означало бы «поделиться своим аккаунтом»;
+- **проверить** — панель сама делает `initialize` и `tools/list` и показывает, сколько
+  инструментов отдал сервер (для stdio честно говорит, что проверка будет при подключении);
+- **настроить доступ** — свой ключ к серверу, в том числе к общему из `config.yaml`.
+  Ключи не показываются другим и не копируются при шаринге; «Очистить доступ» убирает их.
+
+Один рецепт — сколько угодно серверов: id подбирается по имени (`opds`, `opds-2`), а
+несекретные настройки правятся у каждого свои, кнопкой «Изменить». Так можно держать два
+OPDS-каталога одновременно — Gutenberg и домашний Calibre — с разными `OPDS_URL`, не
+перетирая друг друга ни в `mcp.json`, ни в `AGENTS.md`.
 
 Above the server list is a catalog of **recipes** — ready-made descriptions for the servers that are
 needed most often: Proton Mail via Bridge, a calendar over CalDAV, Proton Drive files via

@@ -43,9 +43,12 @@ import {
   setChatFolder,
   updateChatTitles,
   type ChatRecord,
+  type ChatTaskMark,
   type ChatTurn,
 } from '../sessions/chats.ts';
 import { findFolder } from '../sessions/folders.ts';
+import { taskTimeZone } from '../sessions/schedule.ts';
+import { readTasks, taskName } from '../sessions/scheduled.ts';
 import {
   readOpeningExchange,
   sessionFileForId,
@@ -209,6 +212,8 @@ export type ChatSummary = {
   workspace: string;
   /** Folder in the left menu; if absent, the conversation is in «Inbox». */
   folder?: string;
+  /** The conversation was started by a task: it lives in the virtual tree, not the common list. */
+  task?: ChatTaskMark;
   /**
    * Writing from here is not allowed. The panel runs the web chat and Telegram (it's one
    * conversation); conversations via the API it only watches.
@@ -222,8 +227,20 @@ export type ChatSummary = {
 
 export type ChatHistory = { chat: ChatSummary; messages: ChatMessage[] };
 
-/** Page of the list: the cursor is an offset, so as not to drag the whole registry into the browser. */
-export type ChatPage = { chats: ChatSummary[]; nextCursor: string | null; total: number };
+/** List page: the cursor is an offset, so as not to drag the whole registry into the browser. */
+export type ChatPage = {
+  chats: ChatSummary[];
+  nextCursor: string | null;
+  total: number;
+  /** The virtual «Задачи» tree — only on the first page of the regular list. */
+  tasks?: TaskChatGroup[];
+};
+
+/** A «Задачи» tree branch: the launch date and that day's conversations. */
+export type TaskChatRun = { date: string; chats: ChatSummary[] };
+
+/** One task in the tree: a name and runs by date, newest on top. */
+export type TaskChatGroup = { id: string; name: string; runs: TaskChatRun[] };
 
 export type ChatApiContext = {
   config: IcarusConfig;
@@ -598,6 +615,7 @@ function summaryOf(chat: ChatRecord, digest: SessionDigest | null): ChatSummary 
     workspace: chat.workspace,
     // We don't send an empty field: a conversation in the «Inbox» simply has no folder.
     ...(chat.folder ? { folder: chat.folder } : {}),
+    ...(chat.task ? { task: chat.task } : {}),
     readOnly: !panelCanWrite(chat),
     ...(chat.lastTurn ? { lastTurn: chat.lastTurn } : {}),
     archived: Boolean(chat.archivedAt),
@@ -618,12 +636,37 @@ function sessionForId(config: IcarusConfig, user: UserConfig, sessionId: string)
 
 
 /**
- * Page of the list. We sort by createdAt — the creation time doesn't change, so
- * pages don't jump because of a new message. Preview and last-message time
- * are read only for the displayed page; stat too only for it.
+ * Digests for the shown page: preview and time are read only for it.
+ * After /clear a conversation has several sessions: we take the freshest non-empty one,
+ * so that preview and time don't reset from a single cleared context.
+ */
+function summariesOf(config: IcarusConfig, user: UserConfig, records: ChatRecord[]): ChatSummary[] {
+  const wanted = new Set(records.flatMap((chat) => sessionIdsOf(chat, user)));
+  const sessions = sessionFilesFor(userPaths(config, user).sessions, wanted);
+  const titles = new Map<string, string>();
+  const chats = records.map((chat) => {
+    let digest: SessionDigest | null = null;
+    for (const sessionId of [...sessionIdsOf(chat, user)].reverse()) {
+      const session = sessions.get(sessionId);
+      digest = session ? digestSessionFile(session) : null;
+      if (digest) break;
+    }
+    if (digest?.title && isGenericTitle(chat)) titles.set(chat.id, digest.title);
+    return summaryOf(chat, digest);
+  });
+  if (titles.size > 0) updateChatTitles(config, user, titles);
+  return chats;
+}
+
+/**
+ * List page. We sort by createdAt — the creation time doesn't change, so
+ * pages don't jump from a new message. Preview and last-message time
+ * are read only for the shown page; stat too — only for it.
  *
  * The archive is a separate page of the same list (`archived`): the regular sidebar
- * doesn't show it, otherwise «out of sight» would change nothing.
+ * doesn't show it, otherwise «убрать с глаз» would change nothing. Task chats aren't
+ * shown in the regular list at all — they have their own «Задачи» tree (see taskChatTree);
+ * in the archive they lie like any others, because the archive is «не вижу каждый день».
  */
 export function listChatPage(
   config: IcarusConfig,
@@ -637,6 +680,7 @@ export function listChatPage(
   const needle = query.trim().toLocaleLowerCase('ru');
   const records = readChats(config, user)
     .filter((chat) => Boolean(chat.archivedAt) === archived)
+    .filter((chat) => archived || !chat.task)
     .filter((chat) => !workspace || chat.workspace === workspace)
     .filter(
       (chat) => !needle || `${chat.title}\n${chat.conversationId ?? ''}`.toLocaleLowerCase('ru').includes(needle),
@@ -646,31 +690,80 @@ export function listChatPage(
   const offset = pageOffset(cursor);
   const size = pageLimit(limit);
   const page = records.slice(offset, offset + size);
-  // After /clear a conversation has several sessions: we take the freshest non-empty one,
-  // so that the preview and time don't reset from a single cleared context.
-  const wanted = new Set(page.flatMap((chat) => sessionIdsOf(chat, user)));
-  const sessions = sessionFilesFor(userPaths(config, user).sessions, wanted);
-  const titles = new Map<string, string>();
-  const chats = page.map((chat) => {
-    let digest: SessionDigest | null = null;
-    for (const sessionId of [...sessionIdsOf(chat, user)].reverse()) {
-      const session = sessions.get(sessionId);
-      digest = session ? digestSessionFile(session) : null;
-      if (digest) break;
-    }
-    if (digest?.title && isGenericTitle(chat)) titles.set(chat.id, digest.title);
-    return summaryOf(chat, digest);
-  });
-  if (titles.size > 0) updateChatTitles(config, user, titles);
 
   return {
-    chats,
+    chats: summariesOf(config, user, page),
     nextCursor: offset + page.length < records.length ? String(offset + page.length) : null,
     total: records.length,
   };
 }
 
-/** Preview after a turn: the file has just been appended to, and we already have the answer in hand. */
+/** Run date in the person's time zone: one tree branch — one calendar day. */
+function runDate(iso: string, timeZone: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+}
+
+/**
+ * The virtual «Задачи → task name → launch date → conversations» tree.
+ *
+ * This is a view on top of the mark in chats.json, not a folder: folders.json isn't touched, so
+ * a chat can't be dragged into «Задачи», and there's no branch to delete — it's assembled from the
+ * chats themselves. We take the name from the task itself, not from the chat mark: renamed the task —
+ * the branch changed its caption, though the old conversations stayed the same. If the task has
+ * already been deleted, the caption remains the previous one from the mark. Newest on top: first tasks
+ * with the latest run, inside a task — later dates. The regular list is arranged the same way; the
+ * person looks for the last result, not the first.
+ *
+ * Archived conversations don't get here: they go to «Архив», like any others.
+ */
+export function taskChatTree(config: IcarusConfig, user: UserConfig, query = ''): TaskChatGroup[] {
+  const needle = query.trim().toLocaleLowerCase('ru');
+  const timeZone = taskTimeZone(config);
+  const names = new Map(readTasks(config, user).map((task) => [task.id, taskName(task)]));
+  const groups = new Map<string, { name: string; runs: Map<string, ChatRecord[]> }>();
+
+  for (const chat of readChats(config, user)) {
+    if (!chat.task || chat.archivedAt) continue;
+    const name = names.get(chat.task.id) ?? chat.task.name;
+    if (needle && !`${name}\n${chat.title}`.toLocaleLowerCase('ru').includes(needle)) continue;
+    const group = groups.get(chat.task.id) ?? { name, runs: new Map<string, ChatRecord[]>() };
+    groups.set(chat.task.id, group);
+    // In old records runAt might not be saved: a task chat's createdAt is the run.
+    const date = runDate(chat.runAt ?? chat.createdAt, timeZone);
+    const runs = group.runs.get(date) ?? [];
+    runs.push(chat);
+    group.runs.set(date, runs);
+  }
+
+  return [...groups.entries()]
+    .map(([id, group]) => ({
+      id,
+      name: group.name,
+      runs: [...group.runs.entries()]
+        .map(([date, chats]) => ({
+          date,
+          chats: summariesOf(
+            config,
+            user,
+            chats.sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id)),
+          ),
+        }))
+        .sort((a, b) => b.date.localeCompare(a.date)),
+    }))
+    .sort(
+      (a, b) =>
+        (b.runs[0]?.date ?? '').localeCompare(a.runs[0]?.date ?? '') || a.name.localeCompare(b.name, 'ru'),
+    );
+}
+
+/** Preview after a turn: the file was just appended, and we already hold the answer. */
 export function summaryAfterTurn(chat: ChatRecord, userText: string, assistantText: string): ChatSummary {
   return {
     id: chat.id,
@@ -680,6 +773,7 @@ export function summaryAfterTurn(chat: ChatRecord, userText: string, assistantTe
     updatedAt: new Date().toISOString(),
     workspace: chat.workspace,
     ...(chat.folder ? { folder: chat.folder } : {}),
+    ...(chat.task ? { task: chat.task } : {}),
     channel: chat.channel,
     readOnly: !panelCanWrite(chat),
     ...(chat.lastTurn ? { lastTurn: chat.lastTurn } : {}),
@@ -950,6 +1044,8 @@ export function readHistory(config: IcarusConfig, user: UserConfig, chatId: stri
       createdAt: chat.createdAt,
       updatedAt: last?.timestamp || chat.createdAt,
       workspace: chat.workspace,
+      ...(chat.folder ? { folder: chat.folder } : {}),
+      ...(chat.task ? { task: chat.task } : {}),
       channel: chat.channel,
       readOnly: !panelCanWrite(chat),
       ...(chat.lastTurn ? { lastTurn: chat.lastTurn } : {}),
@@ -1364,16 +1460,21 @@ export async function handleChatApi(
 
   try {
     if (pathname === '/panel/api/chats' && req.method === 'GET') {
+      const archived = url.searchParams.get('archived') === '1';
+      const query = url.searchParams.get('q') ?? '';
+      const cursor = url.searchParams.get('cursor');
       const page = listChatPage(
         ctx.config,
         user,
-        url.searchParams.get('q') ?? '',
+        query,
         url.searchParams.get('limit'),
-        url.searchParams.get('cursor'),
+        cursor,
         url.searchParams.get('workspace'),
-        url.searchParams.get('archived') === '1',
+        archived,
       );
-      json(res, 200, page);
+      // The «Задачи» tree travels with the first page of the list: the sidebar needs it
+      // in the same tick and with the same search. We don't compute it for the archive or on page-down.
+      json(res, 200, archived || cursor ? page : { ...page, tasks: taskChatTree(ctx.config, user, query) });
       return true;
     }
 

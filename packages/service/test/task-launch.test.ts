@@ -60,11 +60,29 @@ test('launch starts a new conversation: title from the prompt, prompt goes to th
   assert.equal(chats[0].workspace, 'talk');
   // The title is the prompt, not "New chat": the list shows what was launched.
   assert.equal(chats[0].title, PROMPT);
-  // The prompt went through in full, not as the title.
+  // Task label: the panel uses it to move the conversation from the common list into the
+  // "Tasks → task name → run date" tree.
+  assert.deepEqual(chats[0].task, { id: 'task-1', name: PROMPT });
+  assert.ok(chats[0].runAt, 'дата запуска сохранена для ветки дерева');
+  assert.equal(chats[0].folder, undefined, 'задача не превращается в папку меню');
+  // The prompt went in full, not as a title.
   assert.deepEqual(sent, [PROMPT]);
   assert.deepEqual(acquired, [{ conversationId: outcome.chatId, workspace: 'talk' }]);
   // The turn channel is recorded: the panel labels the reply as a web chat.
   assert.equal(findChatRecord(config, user, outcome.chatId ?? '')?.lastTurn?.channel, 'web');
+});
+
+test('a task has a name: the title and the tree branch are labeled with it, not the prompt', async () => {
+  const config = makeConfig({ users: [probe('probe')] });
+  const user = probe('probe');
+  const { registry, sent } = makeRegistry();
+
+  const outcome = await taskLauncher(config, registry).launch(user, task({ name: 'Сводка по проекту' }));
+
+  const chat = readChats(config, user).find((item) => item.id === outcome.chatId);
+  assert.equal(chat?.title, 'Сводка по проекту', 'в открытом чате видно, что это за прогон');
+  assert.deepEqual(chat?.task, { id: 'task-1', name: 'Сводка по проекту' });
+  assert.deepEqual(sent, [PROMPT], 'агенту всё равно уходит полный промпт');
 });
 
 test('a long prompt in the title is cut at the first line', async () => {

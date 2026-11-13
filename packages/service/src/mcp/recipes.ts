@@ -47,6 +47,12 @@ export type McpRecipe = {
   headers?: Record<string, string>;
   /** Keys the form will ask for: only names and hints. */
   secrets: McpRecipeSecret[];
+  /**
+   * The keys are optional: the server works without them. That is how OPDS is built — an open
+   * catalog is read right away, and a login/password is needed only by a closed one. The panel then
+   * does not hold the server in "waiting for access", but shows the "Set up access" button.
+   */
+  secretsOptional?: boolean;
   /** Where the key lives: in stdio environment variables or in an HTTP header. */
   secretKind: 'env' | 'header';
   /** What must be outside before pressing "Add". */
@@ -249,7 +255,14 @@ export const MCP_RECIPES: McpRecipe[] = [
     // The address is an example of a public catalog: it is visible in the form and can be replaced with
     // your own (Calibre, home library). The site is not hardcoded in the server code.
     env: { OPDS_URL: 'https://www.gutenberg.org/ebooks.opds/' },
-    secrets: [],
+    // The catalog may be closed with a password: then these keys are needed. They are personal and
+    // optional — an open catalog works without them.
+    secrets: [
+      { name: 'OPDS_USER', hint: 'логин каталога (basic), если он закрыт паролем' },
+      { name: 'OPDS_PASSWORD', hint: 'пароль каталога (basic)' },
+      { name: 'OPDS_TOKEN', hint: 'Bearer-токен, если каталог пускает по токену' },
+    ],
+    secretsOptional: true,
     secretKind: 'env',
     requires: [
       'сеть из контейнера до OPDS-каталога',
@@ -257,7 +270,7 @@ export const MCP_RECIPES: McpRecipe[] = [
     ],
     steps: [
       'Проверь OPDS_URL: у Project Gutenberg это https://www.gutenberg.org/ebooks.opds/, у Calibre — http://<адрес>:8080/opds/. Адрес самой страницы сайта не подходит: нужен именно OPDS-фид.',
-      'Если каталог закрыт паролем, добавь в переменные окружения OPDS_USER и OPDS_PASSWORD (basic) или OPDS_TOKEN (Bearer).',
+      'Если каталог закрыт паролем, впиши OPDS_USER и OPDS_PASSWORD (basic) или OPDS_TOKEN (Bearer) в «Переменные окружения»: это секреты, они останутся только у тебя.',
       'Добавь сервер: открытый каталог готов сразу, ключей не нужно.',
     ],
     trouble: [

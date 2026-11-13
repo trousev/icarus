@@ -190,7 +190,21 @@
 .folder-act:hover { background: var(--line); color: var(--text); }
 .folder-empty { margin: 2px 10px 6px; font-style: italic; }
 
-/* Folder name fields: custom, not system, — the list row must not jump. */
+/* ── virtual «Задачи» tree ────────────────────────────────────────────────── */
+/* Not a registry folder: the branches are assembled from the run label in chats.json, so the
+   headers have no actions, and the rows can't be dragged into real folders. */
+.folder-head.task-root { color: var(--text); }
+.folder-head.task-head {
+  margin-top: 2px; padding-left: 16px;
+  font-size: 12px; letter-spacing: normal; text-transform: none;
+}
+.task-date {
+  margin: 4px 8px 2px 32px; color: var(--dim); font-size: 10px;
+  letter-spacing: .06em; text-transform: uppercase;
+}
+.task-row .chat-item { padding-left: 34px; }
+
+/* Folder name field: custom, not the system one — the list row must not jump. */
 .folder-new { margin: 10px 2px 2px; }
 .folder-new input, .folder-rename {
   width: 100%; box-sizing: border-box; background: var(--bg); color: var(--text);

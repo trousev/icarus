@@ -53,6 +53,14 @@ export type ChatTelegram = {
   threadId: number | null;
 };
 
+/**
+ * The conversation was started by a scheduled task. This is not a folder: a person doesn't move
+ * such a chat around by hand, and the panel assembles a virtual "Tasks" tree from the marks.
+ * We store the name here rather than take it from the task: the task could have been deleted, but the branch
+ * label must stay the same.
+ */
+export type ChatTaskMark = { id: string; name: string };
+
 export type ChatRecord = {
   id: string;
   title: string;
@@ -80,9 +88,16 @@ export type ChatRecord = {
    */
   telegram?: ChatTelegram;
   /**
-   * The artifact this conversation edits. A regular chat works in a workspace,
-   * while an artifact chat works strictly in the artifact's folder, so a workspace alone
-   * isn't enough for it: the folder is taken from the pi session, not from the working directory.
+   * The "chat created by a task" mark. Such a conversation is not shown in the general list,
+   * but lives in the virtual "Tasks" tree; folders.json says nothing about it.
+   */
+  task?: ChatTaskMark;
+  /** When the task ran: the conversation sits in the tree branch by this date. */
+  runAt?: string;
+  /**
+   * The artifact this conversation edits. A regular chat works in workspace,
+   * while an artifact one — strictly in the artifact's folder, so workspace alone
+   * is not enough for it: the folder is taken from the pi session, not from the working directory.
    */
   artifact?: string;
   /** Where the last reply came from: the panel labels the header by it. */
@@ -210,6 +225,13 @@ function normalize(value: unknown): ChatRecord | null {
       ? { channel: turn.channel, at: turn.at }
       : null;
 
+  // A task mark without an id or a name is useless: there is nowhere to put such a chat in the tree,
+  // and it honestly remains a regular conversation.
+  const task = item.task && typeof item.task === 'object' ? (item.task as Record<string, unknown>) : null;
+  const taskId = task && typeof task.id === 'string' ? task.id.trim() : '';
+  const taskName = task && typeof task.name === 'string' ? task.name.trim() : '';
+  const taskMark: ChatTaskMark | null = taskId && taskName ? { id: taskId, name: taskName } : null;
+
   return {
     id: item.id,
     title: typeof item.title === 'string' && item.title.trim() ? item.title : defaultTitle(channel),
@@ -221,7 +243,10 @@ function normalize(value: unknown): ChatRecord | null {
     ...(sessions.length > 0 ? { sessions } : {}),
     // An empty folder never happens: a reference to a deleted folder is the same as "Inbox".
     ...(typeof item.folder === 'string' && item.folder !== '' ? { folder: item.folder } : {}),
-    // An empty string means "regular chat", not an artifact with an empty name.
+    ...(taskMark ? { task: taskMark } : {}),
+    // We don't store a run date without a mark: for a regular chat createdAt plays its role.
+    ...(taskMark && typeof item.runAt === 'string' && item.runAt ? { runAt: item.runAt } : {}),
+    // An empty string means "a regular chat", not an artifact with an empty name.
     ...(typeof item.artifact === 'string' && item.artifact !== '' ? { artifact: item.artifact } : {}),
     ...(telegram ? { telegram } : {}),
     ...(lastTurn ? { lastTurn } : {}),
@@ -587,7 +612,7 @@ export function createChatRecord(
   user: UserConfig,
   workspace: string = DEFAULT_WORKSPACE,
   now = new Date(),
-  options: { title?: string; artifact?: string } = {},
+  options: { title?: string; artifact?: string; task?: ChatTaskMark } = {},
 ): ChatRecord {
   const id = `web-${now.getTime().toString(36)}-${crypto.randomBytes(3).toString('hex')}`;
   const chat: ChatRecord = {
@@ -598,6 +623,8 @@ export function createChatRecord(
     workspace,
     conversationId: id,
     ...(options.artifact ? { artifact: options.artifact } : {}),
+    // The run date is the creation moment: for a task chat these are the same event.
+    ...(options.task ? { task: options.task, runAt: now.toISOString() } : {}),
   };
   const chats = readChats(config, user);
   chats.unshift(chat);

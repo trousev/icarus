@@ -258,7 +258,7 @@ export function effectiveSecrets(
 // why it's needed and what happens if it's changed. Unknown variables from .env also
 // make it into the list — otherwise saving the file would lose sight of them.
 
-export type KeyGroup = 'models' | 'search' | 'telegram' | 'mcp' | 'tools' | 'other';
+export type KeyGroup = 'models' | 'search' | 'telegram' | 'tools' | 'other';
 
 export type KeyInfo = {
   name: string;
@@ -282,7 +282,6 @@ export const GROUP_LABELS: Record<KeyGroup, string> = {
   models: 'Модели',
   search: 'Поиск',
   telegram: 'Telegram',
-  mcp: 'MCP и сервисы',
   tools: 'Инструменты',
   other: 'Прочее',
 };
@@ -456,14 +455,6 @@ export function keyCatalog(): KeyInfo[] {
       group: 'telegram',
       where: 'https://t.me/BotFather',
       apply: 'restart',
-    },
-    {
-      name: 'HOMEASSISTANT_TOKEN',
-      label: 'Home Assistant — долгий токен',
-      description: 'Long-lived access token для MCP Home Assistant: уезжает в mcp.json.',
-      group: 'mcp',
-      where: 'Профиль HA → Безопасность → Long-lived access tokens',
-      apply: 'session',
     },
     {
       name: 'MAPLE_DIR',

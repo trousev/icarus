@@ -151,6 +151,7 @@
     return (
       '<div class="task-card' + (task.enabled ? '' : ' off') + '" data-id="' + esc(task.id) + '">' +
       '<div class="task-card-head"><div class="task-body">' +
+      (task.name ? '<p class="task-name">' + esc(task.name) + '</p>' : '') +
       '<p class="task-prompt">' + esc(task.prompt) + '</p>' +
       '<div class="task-meta">' + meta.join('<span>·</span>') + '</div>' +
       (task.lastError ? '<div class="task-error">' + esc(fill(ui.tasksError, { error: task.lastError })) + '</div>' : '') +
@@ -219,6 +220,7 @@
   }
 
   function resetForm() {
+    el('task-name').value = '';
     el('task-prompt').value = '';
     el('task-repeat').value = 'daily';
     el('task-time').value = '08:00';
@@ -244,6 +246,8 @@
     el('task-create').disabled = true;
     try {
       await api('/panel/tasks/api/create', {
+        // Пустое имя — не ошибка: сервер подставит первую строку промпта.
+        name: el('task-name').value,
         prompt: el('task-prompt').value,
         repeat: repeatValue(),
         workspace: el('task-workspace').value,

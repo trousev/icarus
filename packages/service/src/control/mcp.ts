@@ -21,6 +21,7 @@ import {
   deleteServer,
   editorOf,
   getCredentials,
+  globalServerOf,
   listVisible,
   readStore,
   saveCredentials,
@@ -214,14 +215,16 @@ function piConfigFor(
   config: IcarusConfig,
   userId: string,
   id: string,
-): { server: McpServerConfig; credentials: ReturnType<typeof getCredentials> } | null {
-  if (Object.hasOwn(config.mcp ?? {}, id)) {
-    const server = config.mcp[id];
-    return server ? { server, credentials: undefined } : null;
+): { server: McpServerConfig; credentials: McpCredentials | undefined } | null {
+  const credentials = getCredentials(config, userId, id);
+  const global = globalServerOf(config, id);
+  if (global) {
+    // У общего сервера ключ личный: проверять его надо с ключом этого человека,
+    // иначе «Проверить» честно покажет 401 у того, кто всё настроил.
+    return { server: toPiConfig(global, credentials), credentials };
   }
   const server = serverForUser(config, userId, id);
   if (!server) return null;
-  const credentials = getCredentials(config, userId, id);
   return { server: toPiConfig(server, credentials), credentials };
 }
 

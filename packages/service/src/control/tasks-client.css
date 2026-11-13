@@ -6,7 +6,9 @@
 .task-card.off { opacity:.66; }
 .task-card-head { display:flex; gap:16px; align-items:flex-start; justify-content:space-between; }
 .task-body { min-width:0; }
+.task-name { color:var(--text); font-weight:600; margin:0 0 4px; max-width:640px; overflow-wrap:anywhere; }
 .task-prompt { color:var(--text); margin:0 0 10px; max-width:640px; white-space:pre-wrap; overflow-wrap:anywhere; }
+.task-card.off .task-name { color:var(--dim); }
 .task-meta { display:flex; gap:10px; flex-wrap:wrap; align-items:center; color:var(--dim); font-size:12px; }
 .task-meta b { color:var(--text); font-weight:500; }
 .task-meta a { color:var(--accent); text-decoration:none; }

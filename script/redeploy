@@ -18,30 +18,29 @@
 #   4. ./script/server -d — builds docker-compose.yml and brings the stack up in the background;
 #   5. we wait for /healthz: while people's containers are not in place, the deploy is not green.
 #
-# Environment variables come from the workflow (secrets — from environment production):
-#   ICARUS_USERS      people separated by spaces or commas (variables.ICARUS_USERS)
-#   ICARUS_API_KEY    key to the OpenAI-compatible endpoint (/v1)
-#   DEEPINFRA_API_KEY provider key from models (DeepInfra)
-#   TAVILY_API_KEY    web search key (Tavily): DeepInfra has no server-side search
-#   ICARUS_PORT       service port (default 8081 — same as locally; on the prod host
-#                     8080 is taken by jitsi)
-#   ICARUS_DATA_DIR   memory directory (default runtime/ inside the checkout)
-#   ICARUS_DNS        DNS servers of the containers (default 1.1.1.1 8.8.8.8, see below)
-#   ICARUS_URL        external control panel address — Icarus gives it to a person
-#                     in chat (default https://chat.trousev.pro/); an explicitly set one
-#                     wins over the default
-#   ICARUS_SESSION_IDLE_MINUTES  how many minutes of silence mean "the conversation is over"
-#                     (compaction and closing of the pi session); default 60 — an hour
-#   ICARUS_TELEGRAM_MAPPING  who from telegram is whose person, as pairs "@username:person"
-#                     separated by commas; empty — we do not touch the mapping from config.yaml,
-#                     `none` — remove it. The bot token — the TELEGRAM_BOT_TOKEN secret.
-#   MAPLE_DIR         Maple installation directory on the host (default /opt/maple18).
-#                     The CLI path inside people's containers is taken from there too: the service
-#                     mounts the installation and substitutes ${MAPLE_DIR} into MAPLE_BIN.
-#   HOMEASSISTANT_TOKEN  key to MCP Home Assistant (secret): goes into .env and
-#                     is substituted into the auth header of mcp.homeassistant.
-#                     Empty — we do not touch the line in .env (the block in config.yaml without a key
-#                     comes up without auth, and HA answers 401).
+# Переменные окружения приходят из workflow (секреты — из environment production):
+#   ICARUS_USERS      люди через пробел или запятую (variables.ICARUS_USERS)
+#   ICARUS_API_KEY    ключ к OpenAI-совместимому эндпоинту (/v1)
+#   DEEPINFRA_API_KEY ключ провайдера из models (DeepInfra)
+#   TAVILY_API_KEY    ключ веб-поиска (Tavily): у DeepInfra серверного поиска нет
+#   ICARUS_PORT       порт сервиса (по умолчанию 8081 — как и локально; на прод-хосте
+#                     8080 занят jitsi)
+#   ICARUS_DATA_DIR   каталог памяти (по умолчанию runtime/ внутри чекаута)
+#   ICARUS_DNS        DNS-серверы контейнеров (по умолчанию 1.1.1.1 8.8.8.8, см. ниже)
+#   ICARUS_URL        внешний адрес панели управления — его Икар называет человеку
+#                     в чате (по умолчанию https://chat.trousev.pro/); явно заданный
+#                     сильнее дефолта
+#   ICARUS_SESSION_IDLE_MINUTES  сколько минут тишины означают «разговор закончен»
+#                     (сжатие и закрытие сессии pi); по умолчанию 60 — час
+#   ICARUS_TELEGRAM_MAPPING  кто из телеграма чей человек, парами «@username:человек»
+#                     через запятую; пусто — маппинг из config.yaml не трогаем,
+#                     `none` — убрать. Токен бота — секрет TELEGRAM_BOT_TOKEN.
+#   MAPLE_DIR         каталог установки Maple на хосте (по умолчанию /opt/maple18).
+#                     Оттуда же берётся путь CLI внутри контейнеров людей: сервис
+#                     монтирует установку, а MAPLE_BIN в config.yaml пишется буквально.
+#
+# Ключей MCP здесь нет: у каждого MCP своя коллекция секретов, значения вводит
+# человек в панели и они лежат в его credentials.json, а не в .env.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -173,18 +172,12 @@ upsert_env TAVILY_API_KEY "${TAVILY_API_KEY:-}"
 upsert_env TELEGRAM_BOT_TOKEN "${TELEGRAM_BOT_TOKEN:-}"
 [ -z "${TELEGRAM_BOT_TOKEN:-}" ] || say 'TELEGRAM_BOT_TOKEN обновлён в .env'
 
-# Key to MCP Home Assistant: without it mcp.homeassistant in config.yaml stays without
-# an auth header, and HA answers 401 — the server just does not appear at Icarus.
-upsert_env HOMEASSISTANT_TOKEN "${HOMEASSISTANT_TOKEN:-}"
-[ -z "${HOMEASSISTANT_TOKEN:-}" ] || say 'HOMEASSISTANT_TOKEN обновлён в .env'
-
-# Maple path: not a secret, but also set from outside (variables.MAPLE_DIR), so that
-# local and prod are configured the same way. An unset repo variable arrives from the
-# workflow not as absence but as an empty string (the SSH action's envs), and an empty environment
-# wins over .env — ${MAPLE_DIR} in MAPLE_BIN would expand to '', and the container would stay
-# without a path to the CLI. So we treat an empty value as "unset",
-# substitute the default and export it: both render-config and compose-write and
-# docker compose must see the same path.
+# Путь к Maple: не секрет, но тоже задаётся снаружи (variables.MAPLE_DIR), чтобы
+# локаль и прод настраивались одинаково. Незаданная repo-переменная приезжает из
+# workflow не пустотой, а пустой строкой (envs SSH-экшена), а пустое окружение
+# сильнее .env. Поэтому пустое значение считаем «не задано», подставляем дефолт и
+# экспортируем его: и render-config, и compose-write, и docker compose обязаны
+# видеть один и тот же путь.
 MAPLE_DIR="${MAPLE_DIR:-/opt/maple18}"
 export MAPLE_DIR
 upsert_env MAPLE_DIR "$MAPLE_DIR"
