@@ -12,7 +12,7 @@
 //
 // Вложения разбираем те же, что и HTTP-вход: картинки уезжают модели нативно
 // и ложатся в incoming/, голосовые — расшифровкой (см. attachments.ts, speech.ts).
-import { DEFAULT_WORKSPACE, findTelegramUser, userPaths, type IcarusConfig, type UserConfig } from '../config.ts';
+import { DEFAULT_WORKSPACE, findTelegramUser, findUser, userPaths, type IcarusConfig, type UserConfig } from '../config.ts';
 import { log, redact } from '../log.ts';
 import { buildPrompt } from '../prompt.ts';
 import { phraseForToolStart, phraseForToolEnd, subagentStatus } from '../reasoning.ts';
@@ -20,7 +20,18 @@ import { mcpReauthNotice } from '../mcp/reauth.ts';
 import { speechTranscriber, type Transcriber } from '../speech.ts';
 import type { SessionRegistry } from '../sessions/registry.ts';
 import type { PiSession } from '../sessions/pi-session.ts';
-import { lastTurnOf, recordTurn, setChatWorkspace, workspaceForConversation } from '../sessions/chats.ts';
+import {
+  findChatRecord,
+  lastTurnOf,
+  recordTurn,
+  refreshChatTitle,
+  renameChat,
+  setChatWorkspace,
+  setTopicTitle,
+  workspaceForConversation,
+} from '../sessions/chats.ts';
+import { AUTO_TITLE_TIMEOUT_MS, refineChatTitle } from '../control/chat.ts';
+import { watchAll } from '../control/chat-live.ts';
 import type { ChatChannel } from '../sessions/identity.ts';
 import {
   findSelectableWorkspace,
@@ -352,6 +363,17 @@ export class TelegramBot {
    */
   private freshTopics = new Map<number, { threadId: number; at: number; name: string }>();
   private freshTopicWindowMs: number;
+  /**
+   * Где живёт каждый разговор: чат и топик Telegram. Имя топика меняется только
+   * по номеру топика, а в `conversationId` его не всегда разберёшь (в группе там
+   * ещё и человек), поэтому запоминаем место, когда мимо пролетает реплика.
+   * Отсюда же берётся место для переименования по сводке панели.
+   */
+  private routes = new Map<string, { userId: string; chatId: number; threadId: number | null }>();
+  /** Очередь переименований: два события заголовка подряд не должны спорить за топик. */
+  private titles = new KeyedQueue();
+  /** Отписка от сводки панели — ставится на старте и снимается в `stop`. */
+  private unwatchTitles: (() => void) | null = null;
 
   constructor(config: IcarusConfig, registry: SessionRegistry, options: TelegramBotOptions = {}) {
     if (!config.telegram) throw new Error('telegram-бот не настроен: нет токена или маппинга');
@@ -367,12 +389,15 @@ export class TelegramBot {
   start(): void {
     void this.announce();
     void this.loop();
+    this.watchTitles();
     log.info('телеграм-бот запущен', { users: Object.keys(this.config.telegram?.mapping ?? {}).length });
   }
 
   stop(): void {
     this.stopped = true;
     this.abort.abort();
+    this.unwatchTitles?.();
+    this.unwatchTitles = null;
   }
 
   /** Знакомство: пишем в лог, под чьим именем работаем, и раскладываем меню команд. */
@@ -529,8 +554,12 @@ export class TelegramBot {
     const threadId = thread.threadId;
 
     // Служебные сообщения топиков: завели или переименовали. Отвечать на них
-    // нечего, а разговором они не являются. Имя в панели хранит /rename.
-    if (message.forum_topic_created || message.forum_topic_edited) return;
+    // нечего, а разговором они не являются — но переименование человеком
+    // значит, что имя топика его, и его надо запомнить (см. noteTopicEdited).
+    if (message.forum_topic_created || message.forum_topic_edited) {
+      this.noteTopicEdited(message);
+      return;
+    }
 
     const user = findTelegramUser(this.config, message.from.username);
     if (!user) {
@@ -542,6 +571,9 @@ export class TelegramBot {
     // Куда относится реплика, считаем один раз: очередь, ответ и сессия pi должны
     // говорить об одном и том же месте.
     const route = this.routeFor(message, user.id, thread);
+    // Место разговора помним: имя топика можно поменять только по номеру топика,
+    // а он есть не в каждом сообщении (служебка, общая лента).
+    this.routes.set(route.conversationId, { userId: user.id, chatId, threadId: route.threadId });
     // В логе видно и топик, и разговор: по этим строкам потом разбираются жалобы
     // «ответ уехал не туда» — в самом Telegram номера топиков не показываются.
     log.info('телеграм: сообщение принято', {
@@ -855,7 +887,118 @@ export class TelegramBot {
       await reply.finish();
       if (files.length > 0) await this.deliverAnswerFiles(message, user, files, route);
       await this.reportUndelivered(message, route, reply);
+      // Имя разговора — после ответа: модель может подумать секунды, а человек не
+      // должен ждать её ради названия топика.
+      void this.settleTitle(user, route).catch((error) => {
+        log.warn('телеграм: заголовок разговора не вышел', { user: user.id, error: describeTelegramError(error) });
+      });
     }
+  }
+
+  /**
+   * Человек переименовал топик в клиенте Telegram — это его имя, и трогать его
+   * больше нельзя: запоминаем как ручное и переносим в заголовок разговора,
+   * чтобы панель показывала то же, что человек видит в Telegram. Свои
+   * переименования узнаём по имени, которое сами поставили: оно уже в `topicTitle`.
+   */
+  private noteTopicEdited(message: TelegramMessage): void {
+    const name = message.forum_topic_edited?.name?.replace(/\s+/g, ' ').trim();
+    if (!name) return;
+    const place = this.placeFor(message.chat.id, topicThreadId(message));
+    if (!place) return;
+    const user = findUser(this.config, place.userId);
+    if (!user) return;
+    const chat = findChatRecord(this.config, user, place.conversationId);
+    if (!chat || chat.topicTitle === name) return;
+    renameChat(this.config, user, place.conversationId, name);
+    setTopicTitle(this.config, user, place.conversationId, name);
+    log.info('телеграм: топик назван человеком', { user: user.id, threadId: place.threadId, name });
+  }
+
+  /** Место разговора по чату и топику: так служебка топика находит разговор. */
+  private placeFor(
+    chatId: number,
+    threadId: number | null,
+  ): { userId: string; conversationId: string; threadId: number | null } | null {
+    for (const [conversationId, place] of this.routes) {
+      if (place.chatId === chatId && place.threadId === threadId) return { ...place, conversationId };
+    }
+    return null;
+  }
+
+  /**
+   * Имя разговора после хода. Эвристику из первой реплики уже мог поставить
+   * pi-сессия; модель уточняет её по первым репликам. Для Telegram это ещё и имя
+   * топика — единственное место, где его можно поменять (см. pushTopicTitle).
+   */
+  private async settleTitle(user: UserConfig, route: Route): Promise<void> {
+    refreshChatTitle(this.config, user, route.conversationId);
+    const refined = await refineChatTitle(
+      this.config,
+      user,
+      (prompt) => this.registry.oneShot(user, prompt, { timeoutMs: AUTO_TITLE_TIMEOUT_MS }),
+      route.conversationId,
+    );
+    const chat = findChatRecord(this.config, user, route.conversationId);
+    // Разговор не в реестре — и переименовывать нечего: имя живёт в chats.json.
+    if (!chat) return;
+    await this.pushTopicTitle(user, route.conversationId, refined ?? chat.title);
+  }
+
+  /**
+   * Ставит топику имя разговора, если оно там ещё не стоит. Telegram не отдаёт
+   * текущее имя топика, поэтому сравниваем с тем, что сами поставили (`topicTitle`
+   * в chats.json): без этого каждое уточнение заголовка слало бы `editForumTopic`
+   * заново, а Telegram оставляет в топике служебку о переименовании.
+   */
+  private pushTopicTitle(user: UserConfig, conversationId: string, title: string): Promise<void> {
+    const place = this.routes.get(conversationId);
+    const threadId = place?.threadId ?? null;
+    // Корень чата — не топик: там имя менять нечем.
+    if (!place || threadId === null) return Promise.resolve();
+    const name = title.replace(/\s+/g, ' ').trim().slice(0, TOPIC_NAME_LIMIT);
+    if (!name) return Promise.resolve();
+    return this.titles.add(conversationId, async () => {
+      const chat = findChatRecord(this.config, user, conversationId);
+      if (chat?.topicTitle === name) return;
+      try {
+        await this.api.editForumTopic(place.chatId, threadId, name);
+        setTopicTitle(this.config, user, conversationId, name);
+        log.info('телеграм: топик назван по разговору', {
+          user: user.id,
+          threadId,
+          name,
+        });
+      } catch (error) {
+        // Не форум или нет прав — молчим: имя в chats.json уже есть, панель его видит.
+        log.warn('телеграм: топик не переименовался', {
+          user: user.id,
+          threadId,
+          error: describeTelegramError(error),
+        });
+      }
+    });
+  }
+
+  /**
+   * Подписка на уточнение заголовков. Разговором можно продолжать и из панели —
+   * у Telegram-разговора имя меняет веб-чат, — а имя топика живёт только в Telegram,
+   * поэтому за сводкой панели следим и мы.
+   */
+  watchTitles(): () => void {
+    if (this.unwatchTitles) return this.unwatchTitles;
+    this.unwatchTitles = watchAll((event) => {
+      if (event.type !== 'title' || !event.chat) return;
+      const chat = event.chat as { id?: unknown; title?: unknown; conversationId?: unknown };
+      if (typeof chat.id !== 'string' || typeof chat.title !== 'string') return;
+      const user = findUser(this.config, event.userId);
+      if (!user) return;
+      const conversationId = typeof chat.conversationId === 'string' ? chat.conversationId : chat.id;
+      void this.pushTopicTitle(user, conversationId, chat.title).catch((error) => {
+        log.warn('телеграм: топик не переименовался по сводке панели', { error: String(error) });
+      });
+    });
+    return this.unwatchTitles;
   }
 
   /**
@@ -923,6 +1066,9 @@ export class TelegramBot {
     }
 
     const outcome = await this.registry.rename(user, route.conversationId, name);
+    // Помним имя, чтобы потом автозаголовок не переименовал топик второй раз.
+    // После `registry.rename`: до него записи разговора может ещё не быть.
+    if (route.threadId !== null) setTopicTitle(this.config, user, route.conversationId, name);
     await this.say(chatId, renameText(outcome), route.threadId, route.anchor);
   }
 

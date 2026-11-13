@@ -414,7 +414,7 @@ function retitleChat(
 const AUTO_TITLE_TURNS = 3;
 
 /** Сколько ждём модель на заголовок в панели: ответ человеку уже ушёл, но и зря висеть незачем. */
-const AUTO_TITLE_TIMEOUT_MS = 8_000;
+export const AUTO_TITLE_TIMEOUT_MS = 8_000;
 
 /** Разговор для промпта заголовка: первые реплики человека и первый ответ Икара. */
 function titleConversation(opening: OpeningExchange): string {

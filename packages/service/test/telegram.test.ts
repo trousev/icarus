@@ -39,7 +39,9 @@ import {
 } from '../src/telegram/api.ts';
 import { MESSAGE_LIMIT, PLACEHOLDER, splitPoint } from '../src/telegram/reply.ts';
 import { userPaths } from '../src/config.ts';
-import { ensureChat, readChats, recordTurn, workspaceForConversation } from '../src/sessions/chats.ts';
+import { ensureChat, findChatRecord, readChats, recordTurn, renameChat, workspaceForConversation } from '../src/sessions/chats.ts';
+import { sessionIdFor } from '../src/sessions/pi-session.ts';
+import { broadcast } from '../src/control/chat-live.ts';
 import { createWorkspace } from '../src/workspaces.ts';
 import { makeConfig, probe } from './fixtures.ts';
 
@@ -333,6 +335,8 @@ function makeBot(
     freshTopicWindowMs?: number;
     /** Своя сессия: тесту про прерывание нужен долгий ход, а не мгновенный. */
     session?: ReturnType<typeof fakeSession>;
+    /** Чем отвечает дешёвая модель на запрос заголовка (реестр `oneShot`). */
+    oneShot?: (prompt: string) => Promise<string>;
   } = {},
 ) {
   const config =
@@ -393,6 +397,10 @@ function makeBot(
           ],
         }
       );
+    },
+    oneShot: async (_user: { id: string }, prompt: string) => {
+      if (!options.oneShot) throw new Error('модель не настроена');
+      return options.oneShot(prompt);
     },
   };
   const { api, state } = fakeApi(options.files ?? { IMAGE: JPEG, VOICE: JPEG });
@@ -1417,4 +1425,123 @@ test('файл из ответа не теряется молча: бот гов
   assert.equal(state.photos.length, 0);
   assert.match(chatText(state, 42), /Не смог отправить файл/, 'человек узнал, что вложения не будет');
   assert.match(chatText(state, 42), /файл не найден/);
+});
+
+// --- заголовок разговора и имя топика ----------------------------------------
+
+/** Файл сессии pi: `<когда создан>_<id>.jsonl`, как его кладёт pi. */
+function putSession(
+  config: ReturnType<typeof makeConfig>,
+  conversationId: string,
+  texts: Array<{ role: 'user' | 'assistant'; text: string }>,
+): void {
+  const user = probe();
+  const dir = userPaths(config, user).sessions;
+  fs.mkdirSync(dir, { recursive: true });
+  const entries = [
+    { type: 'session', timestamp: '2026-11-13T09:00:00.000Z' },
+    ...texts.map((item) => ({
+      type: 'message',
+      timestamp: '2026-11-13T09:00:01.000Z',
+      message: { role: item.role, content: [{ type: 'text', text: item.text }] },
+    })),
+  ];
+  const file = path.join(dir, `2026-11-13T09-00-00-000Z_${sessionIdFor(user.id, conversationId)}.jsonl`);
+  fs.writeFileSync(file, entries.map((entry) => JSON.stringify(entry)).join('\n'));
+}
+
+/** Заголовок считается после ответа: даём фоновой работе доиграть. */
+async function titlesSettled(): Promise<void> {
+  for (let i = 0; i < 5; i += 1) await new Promise((resolve) => setImmediate(resolve));
+}
+
+/** Служебное: человек переименовал топик в клиенте Telegram. */
+function topicEditedUpdate(name: string, threadId: number, chatId = 42): TelegramUpdate {
+  return {
+    update_id: 3,
+    message: {
+      message_id: 21,
+      chat: { id: chatId, type: 'private' },
+      from: { id: 7, username: 'trousev' },
+      message_thread_id: threadId,
+      is_topic_message: true,
+      forum_topic_edited: { name },
+    },
+  };
+}
+
+/** Разговор в топике — с записью в реестре и файлом сессии. */
+function topicChat(): ReturnType<typeof makeConfig> {
+  const config = makeConfig({ telegram: { token: 'bot-token', mapping: { trousev: 'probe' } } });
+  ensureChat(config, probe(), 'telegram-42-17', 'telegram', 'talk');
+  putSession(config, 'telegram-42-17', [
+    { role: 'user', text: 'привет' },
+    { role: 'assistant', text: 'Привет! Чем помочь?' },
+  ]);
+  return config;
+}
+
+test('ИИ называет разговор в топике и переименовывает сам топик', async () => {
+  const config = topicChat();
+  const { bot, state } = makeBot({ config, topics: true, oneShot: async () => 'Знакомство с Икаром' });
+
+  await bot.handleUpdate(messageUpdate('привет', { threadId: 17 }));
+  await titlesSettled();
+
+  assert.deepEqual(state.renames, [{ chatId: 42, threadId: 17, name: 'Знакомство с Икаром' }]);
+  const chat = findChatRecord(config, probe(), 'telegram-42-17');
+  assert.equal(chat?.title, 'Знакомство с Икаром');
+  assert.equal(chat?.titleSource, 'auto');
+  assert.equal(chat?.topicTitle, 'Знакомство с Икаром', 'имя топика записано, чтобы не слать его дважды');
+});
+
+test('уточнение заголовка не переименовывает топик тем же именем дважды', async () => {
+  const config = topicChat();
+  const { bot, state } = makeBot({ config, topics: true, oneShot: async () => 'Знакомство с Икаром' });
+
+  await bot.handleUpdate(messageUpdate('привет', { threadId: 17 }));
+  await titlesSettled();
+  await bot.handleUpdate(messageUpdate('и ещё вопрос', { threadId: 17 }));
+  await titlesSettled();
+
+  assert.equal(state.renames.length, 1, 'топик переименован один раз');
+});
+
+test('имя топика, выбранное человеком, бот не переписывает и уносит в заголовок разговора', async () => {
+  const config = topicChat();
+  const { bot, state } = makeBot({ config, topics: true, oneShot: async () => 'Знакомство с Икаром' });
+
+  await bot.handleUpdate(messageUpdate('привет', { threadId: 17 }));
+  await titlesSettled();
+  // Человек переименовал топик в клиенте: это его имя, спорить с ним нечем.
+  await bot.handleUpdate(topicEditedUpdate('Налоги', 17));
+
+  const renamed = findChatRecord(config, probe(), 'telegram-42-17');
+  assert.equal(renamed?.title, 'Налоги');
+  assert.equal(renamed?.titleSource, 'manual');
+  assert.equal(renamed?.topicTitle, 'Налоги');
+
+  await bot.handleUpdate(messageUpdate('ещё вопрос', { threadId: 17 }));
+  await titlesSettled();
+  assert.equal(findChatRecord(config, probe(), 'telegram-42-17')?.title, 'Налоги', 'имя человека устояло');
+  assert.deepEqual(state.renames, [{ chatId: 42, threadId: 17, name: 'Знакомство с Икаром' }]);
+});
+
+test('имя, поправленное в панели, доезжает до топика Telegram', async () => {
+  const config = topicChat();
+  const { bot, state } = makeBot({ config, topics: true, oneShot: async () => 'Знакомство с Икаром' });
+  const off = bot.watchTitles();
+
+  try {
+    await bot.handleUpdate(messageUpdate('привет', { threadId: 17 }));
+    await titlesSettled();
+
+    const updated = renameChat(config, probe(), 'telegram-42-17', 'Налоги из ФНС');
+    broadcast({ userId: 'probe', chatId: 'telegram-42-17', type: 'title', chat: updated });
+    await titlesSettled();
+
+    assert.deepEqual(state.renames.at(-1), { chatId: 42, threadId: 17, name: 'Налоги из ФНС' });
+  } finally {
+    off();
+  }
 });
