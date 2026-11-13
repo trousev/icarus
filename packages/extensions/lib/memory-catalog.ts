@@ -1,15 +1,15 @@
-// Каталог памяти: файлы и их короткие описания.
+// Memory catalog: files and their short descriptions.
 //
-// Два шага вместо поиска: сначала инструмент отдаёт список файлов с описаниями,
-// потом модель сама решает, что читать. Описание живёт в frontmatter файла:
+// Two steps instead of search: first the tool returns a list of files with descriptions,
+// then the model decides for itself what to read. The description lives in the file's frontmatter:
 //
 //   ---
-//   description: проекты про Arduino и мигающие диоды
+//   description: projects about Arduino and blinking LEDs
 //   ---
-//   - факт...
+//   - fact...
 //
-// Так индекс не надо вести отдельно: описание едет вместе с файлом, и модель
-// обновляет его тем же инструментом, когда содержимое изменилось.
+// This way the index doesn't have to be maintained separately: the description travels with the file, and the model
+// updates it with the same tool when the content has changed.
 import fs from "node:fs";
 import path from "node:path";
 
@@ -53,8 +53,8 @@ function readText(file: string): string {
 }
 
 /**
- * Значение `description` из frontmatter. Нет блока — пусто. Понимает и голую
- * строку без ключа (`---\nпро Arduino\n---`): так тоже пишут руками.
+ * The `description` value from the frontmatter. No block — empty. Also understands a bare
+ * line without a key (`---\nabout Arduino\n---`): people write it that way too.
  */
 export function descriptionOf(text: string): string {
   const lines = text.split("\n");
@@ -70,7 +70,7 @@ export function descriptionOf(text: string): string {
   return bare;
 }
 
-/** Убирает frontmatter: в ядро и в текст фактов описание не едет. */
+/** Removes the frontmatter: the description doesn't travel into the core or the fact text. */
 export function stripFrontmatter(text: string): string {
   const lines = text.split("\n");
   if (lines[0]?.trim() !== "---") return text;
@@ -84,8 +84,8 @@ function cleanDescription(value: string): string {
 }
 
 /**
- * Обновляет или добавляет `description` в frontmatter, не трогая остальные ключи
- * и тело файла. Описание всегда одна строка: индекс не должен разъезжаться.
+ * Updates or adds `description` in the frontmatter without touching the other keys
+ * or the file body. The description is always one line: the index must not diverge.
  */
 export function withDescription(text: string, description: string): string {
   const clean = cleanDescription(description);
@@ -105,7 +105,7 @@ export function withDescription(text: string, description: string): string {
   return ["---", `description: ${clean}`, "---", "", text.replace(/^\n+/, "")].join("\n");
 }
 
-/** Понятное описание, когда его ещё не написали: индекс не должен быть пустым. */
+/** A readable description when none has been written yet: the index must not be empty. */
 function fallbackDescription(rel: string): string {
   if (rel === "identity.md") return "кто он: имя, город, семья, работа";
   if (rel === "preferences.md") return "вкусы, привычки, табу";
@@ -125,7 +125,7 @@ function orderOf(rel: string): number {
   return 5;
 }
 
-/** Файлы памяти с описаниями. Пустые файлы в индекс не берём: читать там нечего. */
+/** Memory files with descriptions. We don't include empty files in the index: there's nothing to read there. */
 export function buildCatalog(root = MEMORY): MemoryFile[] {
   return filesIn(root)
     .map((file) => {
@@ -145,7 +145,7 @@ export function buildCatalog(root = MEMORY): MemoryFile[] {
     .sort((left, right) => orderOf(left.rel) - orderOf(right.rel) || left.rel.localeCompare(right.rel));
 }
 
-/** Текст индекса для инструмента: абсолютные пути, чтобы `read` не гадал. */
+/** The index text for the tool: absolute paths so `read` doesn't have to guess. */
 export function formatCatalog(files: MemoryFile[]): string {
   if (files.length === 0) return "Память пуста: файлов нет.";
   const lines = files.map((file) => {
@@ -162,8 +162,8 @@ export function formatCatalog(files: MemoryFile[]): string {
 }
 
 /**
- * Обновляет описание файла. Путь — только внутри памяти и только `.md`:
- * инструмент не должен уметь писать куда угодно.
+ * Updates a file's description. The path is only inside memory and only `.md`:
+ * the tool must not be able to write anywhere it likes.
  */
 export function updateDescription(rel: string, description: string, root = MEMORY): UpdateResult {
   const cleanRel = rel.trim();

@@ -1,16 +1,16 @@
 #!/usr/bin/env node
-// Maple MCP — MCP-сервер по stdio, который водит локально установленный Maple.
+// Maple MCP — an MCP server over stdio that drives a locally installed Maple.
 //
-// Проверено на Maple 18.00 (X86 64 LINUX, Build ID 922027), CLI:
+// Tested on Maple 18.00 (X86 64 LINUX, Build ID 922027), CLI:
 //   /opt/maple18/bin/maple
 //
-// Идея: держим один (или несколько) долгоживущий консольный Maple
-// (`maple -q -s -t`), пишем ему код в stdin, читаем stdout до sentinel-маркера.
-// Синтаксис проверяем ОТДЕЛЬНЫМ процессом (`-P`, parse only): сырая
-// синтаксическая ошибка в живой сессии вешает разбор потока, а так сессия
-// остаётся целой и сохраняет состояние.
+// Idea: we keep one (or several) long-lived console Maple
+// (`maple -q -s -t`), write code to its stdin, read stdout up to a sentinel marker.
+// We check syntax with a SEPARATE process (`-P`, parse only): a raw
+// syntax error in a live session hangs stream parsing, whereas this way the session
+// stays intact and keeps its state.
 //
-// Без внешних зависимостей: только Node.js >= 18.
+// No external dependencies: only Node.js >= 18.
 
 import { spawn } from 'node:child_process';
 import http from 'node:http';
@@ -21,14 +21,14 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statS
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-// ─────────────────────────── конфигурация ───────────────────────────
+// ─────────────────────────── configuration ───────────────────────────
 
 const MAPLE_BIN = process.env.MAPLE_BIN ?? '/opt/maple18/bin/maple';
 const MAPLE_EXTRA_ARGS = (process.env.MAPLE_ARGS ?? '').split(/\s+/).filter(Boolean);
-/** -q тихо, -s без init-файлов, -t тестовый режим (без prompt и «bytes used»). */
+/** -q quiet, -s without init files, -t test mode (without prompt and "bytes used"). */
 const MAPLE_ARGS = ['-q', '-s', '-t', ...MAPLE_EXTRA_ARGS];
 const MAPLE_TIMEOUT_SECONDS = Number(process.env.MAPLE_TIMEOUT_SECONDS ?? 60);
-/** Простой сессии (сек), после которого ядро прибивается. Состояние — в журнале. */
+/** Session idle time (sec) after which the kernel is killed. State — in the journal. */
 const MAPLE_IDLE_SECONDS = Number(process.env.MAPLE_IDLE_SECONDS ?? 300);
 const MAPLE_MAX_SESSIONS = Number(process.env.MAPLE_MAX_SESSIONS ?? 4);
 const MAPLE_ROOT = process.env.MAPLE_WORKSPACE_ROOT ?? process.cwd();
@@ -43,7 +43,7 @@ const log = (...a) => {
   if (DEBUG) process.stderr.write(`[maple-mcp] ${a.join(' ')}\n`);
 };
 
-// ─────────────────────────── рабочий каталог ───────────────────────────
+// ─────────────────────────── working directory ───────────────────────────
 
 let TMP = null;
 async function tmpDir() {
@@ -65,22 +65,22 @@ function resolveUserPath(p) {
   return path.resolve(MAPLE_ROOT, p);
 }
 
-// ─────────────────────────── журнал сессий ───────────────────────────
+// ─────────────────────────── session journal ───────────────────────────
 //
-// Мост pi → MCP поднимает наш процесс на время чата и убивает в конце
-// (`session_shutdown` → `shutdownAll`). Плюс мы сами гасим ядро после
-// MAPLE_IDLE_SECONDS простоя. Чтобы «продолжить в другом чате», мы пишем
-// журнал выполненного кода и при первом обращении к сессии проигрываем его
-// в свежее ядро — состояние (переменные, функции, assume) возвращается.
+// The pi → MCP bridge starts our process for the duration of a chat and kills it at the end
+// (`session_shutdown` → `shutdownAll`). Plus we kill the kernel ourselves after
+// MAPLE_IDLE_SECONDS of idle. To "continue in another chat", we write
+// a journal of the executed code and on the first access to the session replay it
+// into a fresh kernel — the state (variables, functions, assume) comes back.
 //
-// Своего хранилища у сервера нет: всё живёт в рабочей папке разговора (pi
-// запускает мост с cwd = workspace), в скрытом каталоге `.maple`. Так файлы
-// расчётов лежат там, где человек и так работает, и не требуют отдельного
-// маунта, раздела панели и миграций.
+// The server has no storage of its own: everything lives in the conversation's working folder (pi
+// starts the bridge with cwd = workspace), in the hidden `.maple` directory. That way the files
+// of calculations lie where the person already works, and do not require a separate
+// mount, panel section or migrations.
 
 const SESSION_DIR = process.env.MAPLE_SESSION_DIR ?? path.join(MAPLE_ROOT, '.maple');
 
-/** Графики кладём рядом с журналами: их отдаёт чат, когда модель вставит путь в ответ. */
+/** Plots are put next to the journals: the chat serves them when the model inserts the path into the answer. */
 const PLOT_DIR = process.env.MAPLE_PLOT_DIR ?? path.join(SESSION_DIR, 'plots');
 
 const safeName = (name) => String(name).replace(/[^\w.-]+/g, '_').slice(0, 64) || 'default';
@@ -95,7 +95,7 @@ function journalRead(name) {
     try {
       out.push(JSON.parse(line));
     } catch {
-      // битая строка журнала (обрыв записи) — пропускаем, остальное важнее
+      // a broken journal line (torn write) — skip it, the rest matters more
     }
   }
   return out;
@@ -121,7 +121,7 @@ function journalClear(name) {
     const f = journalPath(name);
     if (existsSync(f)) unlinkSync(f);
   } catch {
-    // журнала нет или он уже удалён — стирать нечего
+    // there is no journal or it has already been deleted — nothing to erase
   }
 }
 
@@ -139,27 +139,27 @@ function journalInfo(name) {
 
 const isRestart = (code) => /(^|\n)[ \t]*restart[ \t]*[:;]?[ \t]*(\n|$)/.test(code);
 
-// ─────────────────────────── запуск Maple ───────────────────────────
+// ─────────────────────────── starting Maple ───────────────────────────
 //
-// Maple — это всегда ДВА процесса: обёртка `cmaple` (её pid возвращает spawn) и ядро
-// `mserver`, которое обёртка порождает сама. Убить одну обёртку мало: ядро остаётся
-// сиротой (проверено — после SIGTERM обёртке `mserver` живёт ещё секунды и падает по
-// SIGSEGV). В контейнере человека PID 1 — это `sleep infinity`, сирот он не подбирает,
-// поэтому каждый брошенный `mserver`, завершившись, навсегда остаётся зомби
-// (`[mserver] <defunct>`) — за разговор таких набирались сотни.
+// Maple is always TWO processes: the `cmaple` wrapper (its pid is returned by spawn) and the
+// `mserver` kernel, which the wrapper spawns itself. Killing just the wrapper is not enough: the kernel
+// becomes orphaned (verified — after SIGTERM to the wrapper `mserver` lives a few more seconds and dies with
+// SIGSEGV). In a person's container PID 1 is `sleep infinity`, which does not reap orphans,
+// so every abandoned `mserver`, once finished, forever stays a zombie
+// (`[mserver] <defunct>`) — hundreds of them accumulated per conversation.
 //
-// Лечим у источника: каждое ядро запускаем в своей группе процессов (`detached: true`
-// — это setsid, лидер группы совпадает с pid обёртки, ядро наследует группу), а гасим
-// не процесс, а группу целиком. Тогда ядро умирает вместе с обёрткой и сирот не бывает.
+// We fix it at the source: we start each kernel in its own process group (`detached: true`
+// — that is setsid, the group leader matches the wrapper's pid, the kernel inherits the group), and we kill
+// not the process but the whole group. Then the kernel dies together with the wrapper and there are no orphans.
 
 class MapleError extends Error {}
 
-/** Живые группы процессов Maple (pgid): нужны, чтобы подмести их на выходе. */
+/** Live Maple process groups (pgid): needed to sweep them on exit. */
 const mapleGroups = new Set();
 
 /**
- * Запуск Maple в отдельной группе процессов: `pid` ребёнка = pgid группы,
- * в которой живут и обёртка `cmaple`, и ядро `mserver`.
+ * Starting Maple in a separate process group: the child's `pid` = the pgid of the group
+ * in which both the `cmaple` wrapper and the `mserver` kernel live.
  */
 function spawnMaple(args, options = {}) {
   const child = spawn(MAPLE_BIN, args, {
@@ -172,45 +172,45 @@ function spawnMaple(args, options = {}) {
   const pgid = child.pid;
   mapleGroups.add(pgid);
   child.once('close', () => {
-    // Обёртка вышла. Если в группе кто-то остался (ядро), добиваем: иначе он осиротеет,
-    // а в контейнере без reaper'а навсегда останется зомби. Живого ядра после выхода
-    // обёртки быть не должно — состояние сессии и так лежит в журнале.
+    // The wrapper has exited. If someone is still left in the group (the kernel), we finish it off: otherwise it becomes orphaned,
+    // and in a container without a reaper it will forever stay a zombie. There should be no live kernel after the wrapper
+    // exits — the session state is in the journal anyway.
     if (mapleGroupAlive(pgid)) killMapleGroup(pgid, 'SIGKILL');
     mapleGroups.delete(pgid);
   });
   return child;
 }
 
-/** Сигнал всей группе Maple — и обёртке, и ядру. `pgid` — это pid обёртки. */
+/** Signal to the whole Maple group — both the wrapper and the kernel. `pgid` is the wrapper's pid. */
 function killMapleGroup(pgid, signal) {
   if (!pgid) return;
   try {
     process.kill(-pgid, signal);
   } catch (e) {
-    // ESRCH — группа уже пуста, это нормальный конец. Остальное — повод для отладки.
+    // ESRCH — the group is already empty, this is a normal end. Anything else is a reason to debug.
     if (e?.code !== 'ESRCH') log('не удалось послать', signal, 'группе', pgid, e?.message ?? e);
   }
 }
 
-/** Жива ли ещё группа (сигнал 0 ничего не убивает, только проверяет). */
+/** Is the group still alive (signal 0 kills nothing, only checks). */
 function mapleGroupAlive(pgid) {
   if (!pgid) return false;
   try {
     process.kill(-pgid, 0);
     return true;
   } catch (e) {
-    // EPERM — группа есть, но сигнал нам не разрешён: считаем живой.
+    // EPERM — the group exists, but the signal is not allowed to us: consider it alive.
     return e?.code === 'EPERM';
   }
 }
 
-// Аварийный выход (в том числе `process.exit` в bye): добиваем всё, что успели поднять.
-// Обработчик 'exit' обязан быть синхронным — process.kill как раз синхронный.
+// Emergency exit (including `process.exit` in bye): finish off everything we managed to start.
+// The 'exit' handler must be synchronous — process.kill is exactly synchronous.
 process.on('exit', () => {
   for (const pgid of mapleGroups) killMapleGroup(pgid, 'SIGKILL');
 });
 
-/** Одноразовый запуск Maple: файл со скриптом → stdout/stderr/код выхода. */
+/** One-off Maple run: a script file → stdout/stderr/exit code. */
 function runMapleOnce(args, { timeoutMs = 30_000, input = null } = {}) {
   return new Promise((resolve) => {
     const child = spawnMaple(args);
@@ -225,7 +225,7 @@ function runMapleOnce(args, { timeoutMs = 30_000, input = null } = {}) {
       resolve({ stdout: out, stderr: err, ...extra });
     };
     const timer = setTimeout(() => {
-      // Группу, а не только обёртку: иначе ядро останется сиротой (см. spawnMaple).
+      // The group, not just the wrapper: otherwise the kernel will stay orphaned (see spawnMaple).
       killMapleGroup(child.pid, 'SIGKILL');
       finish({ timedOut: true, code: null, signal: 'SIGKILL' });
     }, timeoutMs);
@@ -238,7 +238,7 @@ function runMapleOnce(args, { timeoutMs = 30_000, input = null } = {}) {
   });
 }
 
-/** Только разбор синтаксиса, без выполнения (`-P`). */
+/** Syntax parsing only, without execution (`-P`). */
 async function syntaxCheck(code) {
   const file = await tmpFile();
   await writeFile(file, code.endsWith('\n') ? code : code + '\n', 'utf8');
@@ -251,9 +251,9 @@ async function syntaxCheck(code) {
 }
 
 /**
- * Выполнить код отдельным процессом через файл-скрипт.
- * Важно: через `-c` передавать нельзя — launcher `maple` делает `eval`
- * аргумента, и путь/кавычки ломаются.
+ * Execute code in a separate process via a script file.
+ * Important: cannot pass it via `-c` — the `maple` launcher does `eval`
+ * of the argument, and the path/quotes break.
  */
 async function runMapleScript(code, { timeoutMs = 60_000, errorbreak = 2 } = {}) {
   const file = await tmpFile();
@@ -266,12 +266,12 @@ function mapleString(s) {
   return `"${String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
-/** Верхнеуровневые quit/done/stop убивают сессию — такое лучше не пропускать. */
+/** Top-level quit/done/stop kill the session — better not to miss this. */
 function killsSession(code) {
   return /(^|\n)[ \t]*(quit|done|stop)[ \t]*[;:]?[ \t]*(\n|$)/.test(code);
 }
 
-// ─────────────────────────── сессия ───────────────────────────
+// ─────────────────────────── session ───────────────────────────
 
 class MapleSession {
   constructor(id) {
@@ -283,7 +283,7 @@ class MapleSession {
     this.lastUsed = Date.now();
     this.everStarted = false;
     this.dead = true;
-    /** false → при следующем вызове состояние надо проиграть из журнала. */
+    /** false → on the next call the state must be replayed from the journal. */
     this.restored = false;
   }
 
@@ -310,7 +310,7 @@ class MapleSession {
     });
     this.dead = false;
     this.everStarted = true;
-    this.restored = false; // новое ядро — состояние пустое, журнал проиграем при вызове
+    this.restored = false; // new kernel — empty state, we will replay the journal on call
     this.lastUsed = Date.now();
   }
 
@@ -323,18 +323,18 @@ class MapleSession {
     try {
       p.stdin.end();
     } catch {
-      // процесс мог умереть раньше нас — закрывать нечего
+      // the process could have died before us — nothing to close
     }
-    // SIGTERM всей группе: ядро `mserver` — такой же её член, как обёртка `cmaple`.
+    // SIGTERM to the whole group: the `mserver` kernel is as much a member of it as the `cmaple` wrapper.
     killMapleGroup(p.pid, 'SIGTERM');
-    // Ядро в тяжёлом счёте SIGTERM может и не заметить: тогда добиваем группу.
-    // Проверяем именно группу — лидер к этому моменту уже мог выйти, а ядро нет.
+    // The kernel may not notice SIGTERM during a heavy computation: then we finish off the group.
+    // We check exactly the group — the leader might have exited by now, but the kernel not.
     setTimeout(() => {
       if (mapleGroupAlive(p.pid)) killMapleGroup(p.pid, 'SIGKILL');
     }, 1500).unref?.();
   }
 
-  /** Ждём появления маркера в буфере либо таймаута. */
+  /** Wait for the marker to appear in the buffer or for the timeout. */
   waitFor(token, timeoutMs) {
     return new Promise((resolve) => {
       const deadline = Date.now() + timeoutMs;
@@ -357,7 +357,7 @@ class MapleSession {
     });
   }
 
-  /** Выполнить код в живой сессии (с авто-восстановлением состояния из журнала). */
+  /** Execute code in a live session (with automatic state restore from the journal). */
   async evaluate(code, opts = {}) {
     this.queue = this.queue.then(
       () => this.#evaluate(code, opts),
@@ -366,7 +366,7 @@ class MapleSession {
     return this.queue;
   }
 
-  /** Явно поднять ядро и проиграть журнал (инструмент maple_session_resume). */
+  /** Explicitly start the kernel and replay the journal (maple_session_resume tool). */
   async restore(timeoutMs = MAPLE_TIMEOUT_SECONDS * 1000) {
     await this.start();
     if (this.dead || !this.proc) return { ok: false, output: 'не удалось запустить процесс Maple' };
@@ -376,7 +376,7 @@ class MapleSession {
     return { ok: this.restored, output: note ?? `у сессии «${this.id}» пустой журнал`, entries };
   }
 
-  /** Проиграть журнал в свежее ядро. Возвращает заметку или null. */
+  /** Replay the journal into a fresh kernel. Returns a note or null. */
   async #restoreState(timeoutMs) {
     const entries = journalRead(this.id);
     this.restored = true;
@@ -388,7 +388,7 @@ class MapleSession {
       : `[не удалось восстановить сессию «${this.id}»: ${res.output.slice(0, 300)}]`;
   }
 
-  /** Отправить код в ядро и дождаться маркера. */
+  /** Send code to the kernel and wait for the marker. */
   async #run(code, timeoutMs) {
     const token = `__MAPLE_MCP_${randomBytes(8).toString('hex')}__`;
     this.buf = '';
@@ -467,14 +467,14 @@ class MapleSession {
 }
 
 /**
- * Maple «отвечает», просто повторив ввод: `int(x^x, x)` возвращается как есть.
- * Это «не нашёл», а не «доказано, что нет», — и модель любит достраивать второе.
- * Подсказка приходит в самом результате инструмента, в момент, когда это важно.
+ * Maple "answers" by simply echoing the input: `int(x^x, x)` comes back as is.
+ * This is "did not find", not "proved that it does not exist", — and the model likes to complete the latter.
+ * The hint comes in the tool result itself, at the moment when it matters.
  */
 function unevaluatedHint(code, res) {
   if (!res.ok) return '';
-  // Только «действующие» команды: Int/Sum/Product/Limit инертны по замыслу,
-  // их возврат как есть — нормальное поведение, а не «не нашёл».
+  // Only "active" commands: Int/Sum/Product/Limit are inert by design,
+  // returning them as is is normal behavior, not "did not find".
   const heads = /\b(int|sum|product|limit|dsolve|pdsolve|fsolve|solve)\s*\(/;
   const norm = (s) => String(s).replace(/\s+/g, '').replace(/[;:]$/, '').replace(/`/g, '');
   const src = norm(code);
@@ -495,7 +495,7 @@ async function getSession(id = 'default') {
   let s = sessions.get(id);
   if (s) return s;
   if (sessions.size >= MAPLE_MAX_SESSIONS) {
-    // вытесняем самую давнюю простаивающую
+    // evict the longest idle one
     const victim = [...sessions.values()].sort((a, b) => a.lastUsed - b.lastUsed)[0];
     if (victim) {
       await victim.stop();
@@ -528,7 +528,7 @@ setInterval(() => {
       s.stop().then(() => sessions.delete(s.id));
     }
   }
-  // интервал подстраиваем под таймаут: при 300 с хватает 30 с, в тестах — чаще
+  // adjust the interval to the timeout: at 300 s, 30 s is enough; in tests — more often
 }, Math.max(1000, Math.min(30_000, (MAPLE_IDLE_SECONDS * 1000) / 4))).unref();
 
 function journalNames() {
@@ -542,7 +542,7 @@ function journalNames() {
   }
 }
 
-// ─────────────────────────── разбор .mw (XML) ───────────────────────────
+// ─────────────────────────── parsing .mw (XML) ───────────────────────────
 
 function decodeEntities(s) {
   return s
@@ -570,7 +570,7 @@ function parseAttrs(raw) {
   return attrs;
 }
 
-/** Терпимый XML-сканер: строит дерево и запоминает смещения. */
+/** Tolerant XML scanner: builds a tree and remembers offsets. */
 function parseXml(xml) {
   const root = { tag: '#root', attrs: {}, children: [], text: '', start: 0, end: xml.length };
   const stack = [root];
@@ -648,7 +648,7 @@ function textOf(node) {
 }
 
 function sectionPath(group, root) {
-  // путь секций: ищем предков-секций, но у нас дерево без parent — обходим от root.
+  // section path: we look for ancestor sections, but our tree has no parent — traverse from root.
   const out = [];
   const visit = (node, trail) => {
     if (node === group) {
@@ -671,7 +671,7 @@ function sectionPath(group, root) {
   return out;
 }
 
-/** Разбирает .mw в список групп. */
+/** Parses .mw into a list of groups. */
 function parseWorksheet(xml) {
   const root = parseXml(xml);
   const versionNode = findOne(root, 'Version');
@@ -771,7 +771,7 @@ async function readWorksheet(pathStr) {
   return { file, xml, parsed: parseWorksheet(xml) };
 }
 
-// ─────────────────────────── инструменты ───────────────────────────
+// ─────────────────────────── tools ───────────────────────────
 
 const ok = (text) => ({ content: [{ type: 'text', text }], isError: false });
 const fail = (text) => ({ content: [{ type: 'text', text }], isError: true });
@@ -859,7 +859,7 @@ async function toolSessionHistory({ session, limit = 40 }) {
   return ok(`сессия «${id}»: ${entries.length} записей в ${journalPath(id)}\n${body}`);
 }
 
-/** Перезапуск ядра с сохранением журнала: состояние вернётся при следующем вызове. */
+/** Restart the kernel keeping the journal: state will come back on the next call. */
 async function toolSessionReset({ session }) {
   const id = session || 'default';
   const existed = await resetSession(id);
@@ -889,7 +889,7 @@ async function toolLatex({ expression, session }) {
   return ok(res.output);
 }
 
-/** Maple 18 через plottools:-exportplot умеет gif/jpeg/bmp; png и tiff — нет. */
+/** Maple 18 via plottools:-exportplot supports gif/jpeg/bmp; png and tiff — not. */
 const PLOT_FORMATS = { gif: 'gif', jpeg: 'jpeg', jpg: 'jpeg', bmp: 'bmp' };
 
 async function toolPlot({ expression, format = 'gif', session }) {
@@ -897,7 +897,7 @@ async function toolPlot({ expression, format = 'gif', session }) {
   const ext = PLOT_FORMATS[String(format).toLowerCase()];
   if (!ext) return fail(`формат «${format}» этот Maple не умеет. Доступно: gif, jpeg, bmp.`);
   mkdirSync(PLOT_DIR, { recursive: true });
-  // Имя случайное: icarus отдаёт графики без авторизации, угадать путь нельзя.
+  // Random name: icarus serves plots without authorization, the path cannot be guessed.
   const name = `${randomBytes(8).toString('hex')}.${ext}`;
   const file = path.join(PLOT_DIR, name);
   const code = [
@@ -906,8 +906,8 @@ async function toolPlot({ expression, format = 'gif', session }) {
     `printf("PLOT_DONE\\n"):`,
   ].join('\n');
 
-  // Экспорт графика изредка роняет ядро (в контейнере видели код 79) — один ретрай
-  // на свежей сессии; операция идемпотентная, так что повтор безопасен.
+  // Exporting a plot occasionally crashes the kernel (we saw code 79 in the container) — one retry
+  // on a fresh session; the operation is idempotent, so the retry is safe.
   let res;
   for (let attempt = 1; attempt <= 2; attempt++) {
     const s = await getSession(session || 'default');
@@ -923,9 +923,9 @@ async function toolPlot({ expression, format = 'gif', session }) {
   if (!existsSync(file)) return fail(`не удалось экспортировать график (формат ${ext}).\n${res.output}`);
   const data = await readFile(file);
   const mime = ext === 'jpg' ? 'jpeg' : ext;
-  // Путь абсолютный и лежит в workspace: чат сам отдаст его браузеру, когда модель
-  // вставит markdown-строку в ответ. encodeURI — чтобы пробелы в имени папки не
-  // разорвали разметку; сам чат путь раскодирует.
+  // The path is absolute and lies in the workspace: the chat itself will serve it to the browser when the model
+  // inserts the markdown string into the answer. encodeURI — so that spaces in the folder name do not
+  // break the markup; the chat itself will decode the path.
   const url = encodeURI(file);
   const hint =
     `график ${ext}, ${data.length} байт, файл: ${file}\n` +
@@ -1031,7 +1031,7 @@ async function toolWorksheetRunCell({ path: p, index, session, timeout_seconds }
   return toolEval({ code: g.input, session, timeout_seconds });
 }
 
-// ─────────────────────────── описание инструментов ───────────────────────────
+// ─────────────────────────── tool descriptions ───────────────────────────
 
 const TOOLS = [
   {
@@ -1236,13 +1236,13 @@ const HANDLERS = {
   maple_worksheet_run_cell: toolWorksheetRunCell,
 };
 
-// ─────────────────────────── MCP по stdio ───────────────────────────
+// ─────────────────────────── MCP over stdio ───────────────────────────
 
 function send(msg) {
   process.stdout.write(JSON.stringify(msg) + '\n');
 }
 
-/** Обрабатывает сообщение и возвращает ответ (null — для нотификаций). */
+/** Handles a message and returns a response (null — for notifications). */
 async function dispatch(msg) {
   const { id, method, params } = msg;
   if (method === 'initialize') {
@@ -1295,7 +1295,7 @@ async function dispatch(msg) {
 function serveStdio() {
   let stdinBuf = '';
   let inflight = 0;
-  /** Ждём, пока доиграют начатые запросы: иначе на закрытии stdin теряем ответы. */
+  /** Wait until the started requests finish playing out: otherwise on stdin close we lose responses. */
   const idle = (maxMs = 60_000) =>
     new Promise((resolve) => {
       const deadline = Date.now() + maxMs;
@@ -1335,9 +1335,9 @@ function serveStdio() {
 }
 
 /**
- * Streamable HTTP (спецификация MCP 2025-03-26), совместимый с
- * StreamableHTTPClientTransport из @modelcontextprotocol/sdk (его использует
- * pi-mcp-extension). POST /mcp: отвечаем JSON или SSE в зависимости от Accept.
+ * Streamable HTTP (MCP specification 2025-03-26), compatible with
+ * StreamableHTTPClientTransport from @modelcontextprotocol/sdk (used by
+ * pi-mcp-extension). POST /mcp: we answer JSON or SSE depending on Accept.
  */
 function serveHttp(port, host) {
   const server = http.createServer(async (req, res) => {
@@ -1357,7 +1357,7 @@ function serveHttp(port, host) {
       return res.end('not found; MCP endpoint is ' + HTTP_PATH);
     }
     if (req.method === 'GET') {
-      // Отдельный SSE-поток сервер→клиент нам не нужен.
+      // We do not need a separate server→client SSE stream.
       res.writeHead(405, { ...cors, Allow: 'POST, DELETE, OPTIONS' });
       return res.end();
     }
@@ -1430,7 +1430,7 @@ async function bye() {
 process.on('SIGINT', bye);
 process.on('SIGTERM', bye);
 
-// ─────────────────────────── точка входа ───────────────────────────
+// ─────────────────────────── entry point ───────────────────────────
 
 const argv = process.argv.slice(2);
 const httpFlag = argv.findIndex((a) => a === '--http' || a.startsWith('--http='));

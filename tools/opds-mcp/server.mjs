@@ -1,21 +1,21 @@
 #!/usr/bin/env node
-// OPDS-каталог: MCP-сервер, который проксирует книжный каталог по протоколу OPDS.
+// OPDS catalog: an MCP server that proxies a book catalog over the OPDS protocol.
 //
-// OPDS — это Atom/XML, который читают читалки: в нём есть разделы, поиск через
-// OpenSearch и ссылки на файлы. Своего API по ключу у каталогов обычно нет, зато
-// OPDS отдаёт всё нужное без HTML-вёрстки. Сервер универсальный: сайт не зашит,
-// адрес каталога приходит в OPDS_URL, поэтому один и тот же код работает и с
-// Project Gutenberg, и с домашним Calibre, и с библиотекой на другом движке.
+// OPDS is Atom/XML that e-readers read: it has sections, search via
+// OpenSearch and links to files. Catalogs usually have no API of their own with a key, but
+// OPDS hands over everything needed without HTML markup. The server is universal: the site is not hardcoded,
+// the catalog address comes in OPDS_URL, so the same code works with
+// Project Gutenberg, a home Calibre, and a library on another engine.
 //
-// Поиск, навигация и карточка — только чтение. Скачивание — отдельный инструмент
-// с confirm: true, лимитом размера и человеческим именем файла; файл ложится в
-// incoming/, который виден панели и Telegram (тот же путь, что у вложений).
+// Search, navigation and the card are read-only. Downloading is a separate tool
+// with confirm: true, a size limit and a human-readable file name; the file lands in
+// incoming/, which is visible to the panel and Telegram (the same path as attachments).
 //
-// Главная опасность такого сервера — тихая пустая выдача: каталог поменял
-// разметку или в OPDS_URL вписали HTML-страницу, а человеку сказали «ничего не
-// найдено». Поэтому «ничего не найдено» — это только разобранная пустая выдача,
-// а всё остальное (не Atom, 401, таймаут, нет ссылки поиска) — отдельные ошибки
-// с причиной и подсказкой, что чинить.
+// The main danger of such a server is a silent empty result: the catalog changed
+// its markup or an HTML page was put into OPDS_URL, and the person was told "nothing
+// found". So "nothing found" is only a parsed empty result,
+// and everything else (not Atom, 401, timeout, no search link) are separate errors
+// with a reason and a hint about what to fix.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -35,9 +35,9 @@ const MAX_DOWNLOAD_BYTES = Math.floor(envNumber('OPDS_MAX_DOWNLOAD_MB', 25) * 10
 const DOWNLOAD_TIMEOUT_MS = Math.max(120_000, TIMEOUT_MS * 2);
 
 /**
- * Куда класть скачанное: incoming человека. ICARUS_HOME уже есть в контейнере
- * (/workspaces/.icarus), поэтому путь совпадает с папкой вложений — оттуда файл
- * видно и панели, и Telegram. cwd — запасной путь для запуска руками.
+ * Where to put downloads: the person's incoming. ICARUS_HOME is already in the container
+ * (/workspaces/.icarus), so the path matches the attachments folder — from there the file
+ * is visible to both the panel and Telegram. cwd is a fallback path for running by hand.
  */
 const ICARUS_HOME = envText('ICARUS_HOME');
 const SAVE_DIR = envText('OPDS_SAVE_DIR') || path.join(ICARUS_HOME === '' ? process.cwd() : ICARUS_HOME, 'incoming');
@@ -54,7 +54,7 @@ function envNumber(name, fallback) {
   return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
-// --- текст и сущности --------------------------------------------------------
+// --- text and entities -------------------------------------------------------
 
 const ENTITIES = {
   amp: '&',
@@ -82,8 +82,8 @@ function decodeEntities(text) {
 }
 
 /**
- * HTML/XML — в читаемый текст. Сущности разбираем ДО снятия тегов: OPDS отдаёт
- * описание как &lt;p&gt;…&lt;br/&gt;, и без этого абзацы слиплись бы в строку.
+ * HTML/XML to readable text. We decode entities BEFORE stripping tags: OPDS serves
+ * the description as &lt;p&gt;…&lt;br/&gt;, and without this paragraphs would merge into one line.
  */
 function plainText(raw) {
   const decoded = decodeEntities(raw);
@@ -112,9 +112,9 @@ function formatBytes(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`;
 }
 
-// --- разбор Atom/OPDS --------------------------------------------------------
+// --- parsing Atom/OPDS -------------------------------------------------------
 
-/** Префикс пространства имён необязателен: dcterms, dc, atom — у всех каталогов по-разному. */
+/** The namespace prefix is optional: dcterms, dc, atom — it differs across catalogs. */
 const PREFIX = '(?:[\\w.-]+:)?';
 const ENTRY_RE = new RegExp(`<${PREFIX}entry\\b[^>]*>([\\s\\S]*?)</${PREFIX}entry>`, 'gi');
 const LINK_RE = new RegExp(`<${PREFIX}link\\b[^>]*>`, 'gi');
@@ -137,7 +137,7 @@ function parseLinks(xml) {
   });
 }
 
-/** Ответ не Atom/OPDS — это не каталог: HTML-страница, JSON ошибки, что угодно. */
+/** A non-Atom/OPDS response is not a catalog: an HTML page, error JSON, anything. */
 function assertFeed(xml, url, contentType) {
   const head = xml.slice(0, 4000);
   const isFeed = new RegExp(`<${PREFIX}feed\\b`, 'i').test(head) && /xmlns(?::[\w.-]+)?\s*=\s*["']http:\/\/www\.w3\.org\/2005\/Atom["']/i.test(head);
@@ -149,7 +149,7 @@ function assertFeed(xml, url, contentType) {
   }
 }
 
-/** Ссылка на карточку записи: сначала раздел/подкаталог, потом сам OPDS-фид, потом id. */
+/** Link to the entry card: first a section/subsection, then the OPDS feed itself, then the id. */
 function detailHref(entry, feedUrl) {
   const catalog = entry.links.filter((link) => /opds-catalog|application\/atom\+xml/i.test(link.type) || /subsection/i.test(link.rel));
   const preferred =
@@ -202,7 +202,7 @@ function parseFeed(xml, url, contentType = '') {
   };
 }
 
-// --- сеть --------------------------------------------------------------------
+// --- network -----------------------------------------------------------------
 
 function resolveUrl(base, href) {
   try {
@@ -284,7 +284,7 @@ async function fetchFeed(url, what) {
   }
 }
 
-// --- корень каталога и поиск -------------------------------------------------
+// --- catalog root and search -------------------------------------------------
 
 let rootCache = null;
 let templateCache = null;
@@ -297,10 +297,10 @@ async function rootFeed() {
 }
 
 /**
- * Шаблон поиска по правилам OPDS: link rel="search" с {searchTerms} прямо в href
- * либо ссылка на OpenSearch Description, внутри которой есть <Url type="application/atom+xml">.
- * Если шаблона нет — не выдумываем его молча, а возвращаем null: вызывающий
- * попробует стандартные пути и честно перечислит, что не сработало.
+ * Search template per OPDS rules: a link rel="search" with {searchTerms} directly in href
+ * or a link to an OpenSearch Description containing <Url type="application/atom+xml">.
+ * If there is no template, we don't silently invent one but return null: the caller
+ * will try the standard paths and honestly list what didn't work.
  */
 async function searchTemplate() {
   if (templateCache !== null) return templateCache;
@@ -328,8 +328,8 @@ async function searchTemplate() {
 
 function fillTemplate(template, query) {
   const encoded = encodeURIComponent(query);
-  // Необязательные параметры OpenSearch ({startIndex?}, {count?}) не подставляем:
-  // без них каталог отдаёт первую страницу, а битый шаблон — повод для ошибки.
+  // We don't substitute optional OpenSearch parameters ({startIndex?}, {count?}):
+  // without them the catalog returns the first page, and a broken template is a reason for an error.
   return template
     .replace(/\{searchTerms\}/g, encoded)
     .replace(/[?&][^=&#]+=\{[^}]*\?[^}]*\}/g, '');
@@ -359,7 +359,7 @@ async function searchFeed(query) {
   throw new Error(`поиск «${query}» не удался:\n- ${failures.join('\n- ')}`);
 }
 
-// --- формат и описание -------------------------------------------------------
+// --- format and description --------------------------------------------------
 
 const MIME_FORMATS = {
   'application/epub+zip': 'epub',
@@ -380,7 +380,7 @@ const MIME_FORMATS = {
   'application/vnd.amazon.ebook': 'azw3',
 };
 
-/** Порядок предпочтения: EPUB открывает всё, PDF не перевёрстан, дальше по вкусу. */
+/** Preference order: EPUB opens everywhere, PDF isn't reflowed, the rest by taste. */
 const FORMAT_ORDER = ['epub', 'fb2', 'pdf', 'mobi', 'azw3', 'djvu', 'docx', 'doc', 'rtf', 'txt', 'html', 'zip', 'cbr'];
 
 function formatOf(link) {
@@ -392,7 +392,7 @@ function formatOf(link) {
   return subtype === '' ? (ext === '' ? 'file' : ext) : subtype;
 }
 
-/** Формат, под которым файл реально скачать: тот же, что в MIME/расширении, иначе — расширение. */
+/** The format under which the file is actually downloaded: the same as in MIME/extension, otherwise the extension. */
 function extensionOf(format, link) {
   if (/^[a-z0-9]{1,8}$/i.test(format)) return format.toLowerCase();
   return (/\.([a-z0-9]{1,8})(?:[?#]|$)/i.exec(link.href)?.[1] ?? 'bin').toLowerCase();
@@ -428,7 +428,7 @@ function preferredFormat(formats) {
   return formats[0]?.format ?? '';
 }
 
-/** «Аннотация:» среди служебных полей content — обычное дело в OPDS. Берём её и до следующей метки. */
+/** "Annotation:" among the service fields of content is common in OPDS. We take it up to the next label. */
 function annotationOf(content) {
   if (content === '') return '';
   const lines = content.split('\n');
@@ -438,14 +438,14 @@ function annotationOf(content) {
   if (start >= 0) {
     const first = label.exec(lines[start].trim())[1];
     const rest = [first, ...lines.slice(start + 1)];
-    // Следующая служебная метка вида «Reading Level:» или «Автор:» — уже не аннотация.
+    // The next service label like "Reading Level:" or "Author:" is no longer the annotation.
     const stop = rest.findIndex((line, index) => index > 0 && /^[A-ZА-ЯЁ][^:\n]{0,40}:/.test(line.trim()));
     body = (stop > 0 ? rest.slice(0, stop) : rest).join('\n').trim();
   }
   return body.length > 1200 ? `${body.slice(0, 1200).trim()}…` : body;
 }
 
-/** Короткая подпись из content, если автора в записи нет: в выдаче бывает только «Charles Dickens». */
+/** A short byline from content if there's no author in the entry: the results sometimes have only "Charles Dickens". */
 function authorHint(entry) {
   if (entry.authors.length > 0) return entry.authors.join(', ');
   const text = entry.content;
@@ -454,13 +454,13 @@ function authorHint(entry) {
 }
 
 function bookHref(entry) {
-  // Запись с готовыми ссылками на файлы — это уже книга (так отдаёт поиск
-  // Calibre): карточка не нужна, все данные пришли в самой записи.
+  // An entry with ready file links is already a book (that's how the Calibre search
+  // returns it): no card is needed, all the data came in the entry itself.
   if (entry.acquisitions.length > 0) return entry.acquisitions[0].href;
   return entry.detail;
 }
 
-/** Форматы записи одной строкой: в выдаче бывает сразу ссылка на файл, без карточки. */
+/** The entry's formats on one line: the results sometimes have a direct file link, without a card. */
 function entryFormats(entry) {
   return uniqueBy(entry.acquisitions.map((link) => ({ format: formatOf(link), bytes: link.length })), (item) => item.format)
     .map((item) => `${item.format}${item.bytes > 0 ? ` (${formatBytes(item.bytes)})` : ''}`)
@@ -468,10 +468,10 @@ function entryFormats(entry) {
 }
 
 /**
- * Запоминаем книги, которые пришли сразу со ссылками на файлы: у Calibre поиск
- * отдаёт acquisition-записи, и отдельного Atom-фида карточки у них нет. Тогда
- * book_info/book_download берут карточку из памяти, а не пытаются скачать фид с
- * адреса файла. Ключ — ссылка на файл, её и показывает выдача.
+ * We remember books that came with file links straight away: with Calibre the search
+ * returns acquisition entries, and they have no separate Atom card feed. Then
+ * book_info/book_download take the card from memory instead of trying to fetch a feed from
+ * the file URL. The key is the file link, which is what the results show.
  */
 const entryCache = new Map();
 
@@ -508,7 +508,7 @@ function cardFromEntries(entries, url, feedTitle) {
   };
 }
 
-/** Похоже ли на прямую ссылку на файл: тогда фид с неё не придёт. */
+/** Whether it looks like a direct file link: then no feed will come from it. */
 function looksLikeFile(url) {
   return new RegExp(`\\.(${FORMAT_ORDER.join('|')})(?:[?#]|$)`, 'i').test(url);
 }
@@ -531,7 +531,7 @@ async function readCard(link) {
   return cardFromEntries(feed.entries, url, feed.title);
 }
 
-// --- вывод инструментов ------------------------------------------------------
+// --- tool output -------------------------------------------------------------
 
 function searchText(feed, query, limit, catalogTitle) {
   const sections = feed.entries.filter((entry) => isSection(entry, feed.url));
@@ -565,8 +565,8 @@ function searchText(feed, query, limit, catalogTitle) {
 }
 
 function browseText(feed, limit) {
-  // В корне разделы ведут на поисковые фиды — это разделы; в фиде полки записи
-  // ведут на карточки книг — это книги. Различаем по той же ссылке, что и в поиске.
+  // At the root, sections lead to search feeds — these are sections; in a shelf feed the entries
+  // lead to book cards — these are books. We distinguish them by the same link as in search.
   const sections = feed.entries.filter((entry) => entry.acquisitions.length === 0 && isSection(entry, feed.url));
   const books = feed.entries.filter((entry) => entry.acquisitions.length > 0 || !isSection(entry, feed.url));
   const lines = [`Каталог: ${feed.title === '' ? '(без названия)' : feed.title}`, `Ссылка: ${feed.url}`];
@@ -619,7 +619,7 @@ function cardText(card) {
   return lines.join('\n');
 }
 
-// --- скачивание --------------------------------------------------------------
+// --- downloading -------------------------------------------------------------
 
 function cleanName(text) {
   const cleaned = String(text ?? '')
@@ -723,7 +723,7 @@ async function downloadBook(args) {
   return lines.join('\n');
 }
 
-// --- инструменты MCP ---------------------------------------------------------
+// --- MCP tools ---------------------------------------------------------------
 
 const INSTRUCTIONS = `OPDS-каталог книг по адресу из OPDS_URL. Сервер универсальный: он не привязан к сайту и разбирает Atom/OPDS-фид, который отдаёт каталог.
 
@@ -813,7 +813,7 @@ const HANDLERS = {
   book_download: downloadBook,
 };
 
-// --- протокол ----------------------------------------------------------------
+// --- protocol ----------------------------------------------------------------
 
 function send(message) {
   process.stdout.write(`${JSON.stringify(message)}\n`);
@@ -904,7 +904,7 @@ function serveStdio() {
     }
   });
   process.stdin.on('end', async () => {
-    // Не обрываем запрос к чужому каталогу на полуслове: скачивание живёт дольше.
+    // Don't cut off a request to a third-party catalog mid-sentence: a download lives longer.
     await idle(Math.max(60_000, DOWNLOAD_TIMEOUT_MS + 5_000));
     process.exit(0);
   });

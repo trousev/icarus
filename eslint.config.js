@@ -1,6 +1,6 @@
-// Плоский конфиг ESLint. Проверяем только наш код: node_modules, рабочие копии
-// dsh, рантайм-данные (там живут сессии и память пользователей) и сгенерированное
-// не трогаем.
+// Flat ESLint config. We check only our code: node_modules, dsh working copies,
+// runtime data (sessions and user memory live there) and generated files
+// are left alone.
 import js from '@eslint/js';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
@@ -9,11 +9,11 @@ export default tseslint.config(
   {
     ignores: [
       'node_modules/**',
-      // Рабочие копии dsh лежат внутри репозитория, и у каждой свой eslint.config.js
-      // и tsconfig.json. ESLint сам по себе .gitignore не читает, поэтому без этой
-      // строки он заходит в копии, подгружает их конфиги, а typescript-eslint
-      // набирает несколько кандидатов в tsconfigRootDir — и роняет разбор всех
-      // файлов подряд, включая наши собственные. В CI копий нет, там зелено.
+      // dsh working copies lie inside the repository, and each has its own eslint.config.js
+      // and tsconfig.json. ESLint itself does not read .gitignore, so without this
+      // line it enters the copies, loads their configs, and typescript-eslint
+      // collects several candidates for tsconfigRootDir — and crashes the parsing of all
+      // files in a row, including our own. In CI there are no copies, so it is green there.
       '.dsh-worktrees/**',
       'runtime/**',
       'data/**',
@@ -22,14 +22,14 @@ export default tseslint.config(
       '**/*.d.ts',
     ],
   },
-  // Базовый набор правил самого ESLint. Без него остаются только правила
-  // typescript-eslint, то есть мимо проходят no-duplicate-case, no-fallthrough,
-  // no-constant-condition, no-useless-escape и прочее. Для .ts конфликтующие
-  // правила следом гасит typescript-eslint/eslint-recommended: tsc строже.
+  // The base rule set of ESLint itself. Without it only the rules of
+  // typescript-eslint remain, so no-duplicate-case, no-fallthrough,
+  // no-constant-condition, no-useless-escape and the like slip through. For .ts the conflicting
+  // rules are then turned off by typescript-eslint/eslint-recommended: tsc is stricter.
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    // Скрипты и пробники — обычный node-код, им нужны node-глобали и общий набор.
+    // Scripts and probes are ordinary node code, they need node globals and the common set.
     files: ['**/*.{js,mjs,cjs}'],
     languageOptions: {
       ecmaVersion: 2024,
@@ -38,9 +38,9 @@ export default tseslint.config(
     },
   },
   {
-    // Клиенты чата и MCP исполняются в браузере: у них document, fetch и history
-    // вместо process. Это классические script'ы, которые страница вставляет
-    // подряд, поэтому здесь script, а не module.
+    // Chat and MCP clients run in the browser: they have document, fetch and history
+    // instead of process. These are classic scripts that the page inserts
+    // in sequence, so here script, not module.
     files: [
       'packages/service/src/control/chat-client.js',
       'packages/service/src/control/chat-markdown.js',
@@ -64,14 +64,14 @@ export default tseslint.config(
       ecmaVersion: 2024,
       sourceType: 'module',
       parserOptions: {
-        // Корень для поиска tsconfig задаём явно. Иначе typescript-eslint выводит его
-        // из стека вызовов и падает, стоит в дереве появиться второму tsconfig.json
-        // (worktree, копия репозитория, чужой клон). Наш конфиг один — корневой.
+        // We set the root for finding tsconfig explicitly. Otherwise typescript-eslint derives it
+        // from the call stack and crashes as soon as a second tsconfig.json appears in the tree
+        // (a worktree, a repository copy, someone else's clone). Our config is single — the root one.
         tsconfigRootDir: import.meta.dirname,
       },
     },
     rules: {
-      // Обработчикам и колбэкам иногда нужен «намеренно лишний» параметр.
+      // Handlers and callbacks sometimes need an "intentionally extra" parameter.
       '@typescript-eslint/no-unused-vars': [
         'error',
         {
@@ -84,8 +84,8 @@ export default tseslint.config(
     },
   },
   {
-    // Тесты подсовывают заглушки вместо pi, докера и сети: там `any` — это
-    // осознанный инструмент, а не недосмотр. В боевом коде правило работает.
+    // Tests substitute stubs instead of pi, docker and the network: there `any` is
+    // a deliberate tool, not an oversight. In production code the rule applies.
     files: ['**/test/**/*.ts'],
     rules: {
       '@typescript-eslint/no-explicit-any': 'off',

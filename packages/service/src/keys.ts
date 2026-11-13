@@ -1,33 +1,33 @@
-// Ключи инсталляции: чтение, запись и каталог для панели.
+// Installation keys: reading, writing and catalog for the panel.
 //
-// Рабочий файл ключей — .env в корне репозитория (в git не попадает). Панель
-// переписывает его, не теряя комментарии и чужие строки: люди правят .env руками
-// с первого дня, и терять их пояснения при первом же сохранении нельзя.
+// The working key file is .env at the repository root (doesn't go into git). The panel
+// rewrites it without losing comments and other lines: people edit .env by hand from day
+// one, and losing their explanations on the first save is not allowed.
 //
-// Но .env — не единственный хозяин значений: deploy.yml на каждом деплое вливает
-// в него секреты из GitHub и перетирает то, что человек поменял в панели. Поэтому
-// правки панели лежат ещё и в keys.json рядом с .env: он переживает деплой, потому
-// что в git не попадает и лежит вне сравнения с origin/main. Порядок силы:
+// But .env is not the only owner of the values: on every deploy deploy.yml pours GitHub
+// secrets into it and overwrites what a person changed in the panel. That's why panel edits
+// also live in keys.json next to .env: it survives deploy because it doesn't go into git and
+// lies outside the comparison with origin/main. Order of strength:
 //
-//   keys.json (настройки панели) > .env (файл и секреты деплоя) > окружение
+//   keys.json (panel settings) > .env (file and deploy secrets) > environment
 //
-// Удаление — это не «стереть строку и надеяться, что деплой её не вернёт», а
-// запись в removed: значение из .env будет проигнорировано, пока админ не задаст
-// ключ снова. Так «убрал ключ в панели» значит именно убрал.
+// Deletion is not «erase the line and hope deploy doesn't bring it back» but a record in
+// removed: the value from .env will be ignored until the admin sets the key again. So
+// «removed the key in the panel» means exactly removed.
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseEnv } from 'node:util';
 import { ENV_FILE, PROVIDER_ENV, REPO_ROOT } from './config.ts';
 import { log } from './log.ts';
 
-/** Настройки панели: лежат рядом с .env и переживают деплой. */
+/** Panel settings: live next to .env and survive deploy. */
 export const KEYS_FILE = path.join(REPO_ROOT, 'keys.json');
 
 export type KeysStore = {
   version: 1;
-  /** Значения, заданные в панели: они сильнее .env. */
+  /** Values set in the panel: they are stronger than .env. */
   values: Record<string, string>;
-  /** Имена, которые в панели убрали: значения из .env дальше не подхватываются. */
+  /** Names removed in the panel: values from .env are no longer picked up. */
   removed: string[];
   updatedAt?: string;
   updatedBy?: string;
@@ -35,7 +35,7 @@ export type KeysStore = {
 
 const EMPTY_STORE: KeysStore = { version: 1, values: {}, removed: [] };
 
-/** Имя переменной окружения. Строго: значение уезжает в docker exec и в .env. */
+/** Environment variable name. Strict: the value goes into docker exec and into .env. */
 export const ENV_NAME = /^[A-Z][A-Z0-9_]*$/;
 
 export function isEnvName(value: string): boolean {
@@ -43,14 +43,14 @@ export function isEnvName(value: string): boolean {
 }
 
 /**
- * Значение из файла: без кавычек и переводов строк — ключи одного строки.
- * Пробелы по краям срезаем: их приносит копирование из браузера.
+ * Value from the file: without quotes and newlines — a key is a single line.
+ * We trim surrounding spaces: they come from copying in the browser.
  */
 export function normalizeValue(value: string): string {
   return value.trim();
 }
 
-/** Прочитать .env, не трогая окружение. Нет файла — пустая карта, это норма. */
+/** Read .env without touching the environment. No file — empty map, that's fine. */
 export function readEnvFile(file: string = ENV_FILE): Record<string, string> {
   let text: string;
   try {
@@ -72,14 +72,14 @@ export function readEnvFile(file: string = ENV_FILE): Record<string, string> {
 }
 
 /**
- * Значение для строки .env.
+ * Value for a .env line.
  *
- * parseEnv (им же читают сервис и compose) понимает три вида: голое значение,
- * одинарные кавычки (литерал, без раскрытия) и двойные (раскрывает \n). Двойные
- * кавычки он при этом не разэкранирует, поэтому JSON-строка с «"» внутри ломает
- * разбор. Отсюда порядок: голое — если безопасно; одинарные — если внутри нет
- * одинарной кавычки; двойные — если нет ни «"», ни «\». Значение, в котором есть
- * и то и другое, в .env честно не записать — лучше ошибка, чем испорченный файл.
+ * parseEnv (the same one the service and compose read with) understands three kinds: a bare
+ * value, single quotes (literal, no expansion) and double quotes (expands \n). It does not
+ * unescape double quotes, so a JSON string with «"» inside breaks parsing. Hence the order:
+ * bare — if safe; single — if there's no single quote inside; double — if there's neither «"»
+ * nor «\». A value that has both honestly cannot be written to .env — an error is better than
+ * a broken file.
  */
 export function envLine(name: string, value: string): string {
   if (plain(value)) return `${name}=${value}`;
@@ -93,11 +93,11 @@ function plain(value: string): boolean {
 }
 
 /**
- * Поставить или убрать одну переменную в тексте .env.
+ * Set or remove a single variable in the .env text.
  *
- * Правится только строка этого имени: комментарии, порядок и чужие переменные
- * остаются как были. Повторы убираются — иначе parseEnv молча взял бы последний,
- * а человек видел бы два разных значения в одном файле.
+ * Only the line with this name is edited: comments, order and other variables stay as they
+ * were. Duplicates are removed — otherwise parseEnv would silently take the last one while a
+ * person sees two different values in one file.
  */
 export function editEnvText(text: string, name: string, value: string | null): string {
   const lines = text.split(/\r?\n/);
@@ -121,8 +121,8 @@ export function editEnvText(text: string, name: string, value: string | null): s
     if (value !== null) next.push(envLine(name, value));
   }
   if (value !== null && !present) {
-    // Перед добавлением пустая строка: файл читают глазами, и склейка с прошлым
-    // блоком выглядит как часть чужого комментария.
+    // An empty line before adding: the file is read by eye, and gluing it to the previous
+    // block looks like part of someone else's comment.
     if (next.length > 0 && next[next.length - 1] !== '') next.push('');
     next.push(envLine(name, value));
   }
@@ -131,7 +131,7 @@ export function editEnvText(text: string, name: string, value: string | null): s
   return result === '' ? '' : `${result}\n`;
 }
 
-/** Атомарная запись с правами 600: ключи не должны светиться даже соседям. */
+/** Atomic write with 600 permissions: keys must not be visible even to neighbors. */
 function writePrivate(file: string, text: string): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
@@ -140,24 +140,25 @@ function writePrivate(file: string, text: string): void {
   fs.renameSync(tmp, file);
 }
 
-/** Переписать .env одной переменной, сохранив комментарии и остальные строки. */
+/** Rewrite .env with one variable, preserving comments and other lines. */
 export function writeEnvValue(name: string, value: string | null, file: string = ENV_FILE): void {
   let text: string;
   try {
     text = fs.readFileSync(file, 'utf8');
   } catch {
-    // Файла ещё нет — создаём: ./script/update его не успел положить, а ключ уже задают.
+    // The file doesn't exist yet — create it: ./script/update hadn't laid it down yet,
+    // but the key is already being set.
     text = '# Ключи Icarus. Файл правит и панель (раздел «Ключи»), и человек руками.\n';
   }
   writePrivate(file, editEnvText(text, name, value));
 }
 
 /**
- * Привести .env к настройкам панели.
+ * Bring .env in line with panel settings.
  *
- * Зовётся перед сборкой compose: деплой вливает секреты GitHub в .env, а настройки
- * панели сильнее — значит и файл, который уедет в контейнеры, должен совпадать с ними.
- * Пишем один раз, а не по строке на ключ: файл читают и люди, и docker.
+ * Called before the compose build: deploy pours GitHub secrets into .env, and panel settings
+ * are stronger — so the file that goes to containers must match them too. We write once,
+ * not line by line per key: the file is read both by people and by docker.
  */
 export function syncEnvFile(store: KeysStore, file: string = ENV_FILE): void {
   if (Object.keys(store.values).length === 0 && store.removed.length === 0) return;
@@ -174,7 +175,7 @@ export function syncEnvFile(store: KeysStore, file: string = ENV_FILE): void {
   writePrivate(file, text);
 }
 
-/** Прочитать настройки панели. Битый файл — не повод остаться без ключей из .env. */
+/** Read panel settings. A broken file is no reason to be left without keys from .env. */
 export function readKeysStore(file: string = KEYS_FILE): KeysStore {
   let text: string;
   try {
@@ -212,7 +213,7 @@ export function readKeysStore(file: string = KEYS_FILE): KeysStore {
   };
 }
 
-/** Записать настройки панели. Прошлый файл сохраняем рядом: откатиться всегда можно. */
+/** Write panel settings. We keep the previous file nearby: you can always roll back. */
 export function writeKeysStore(store: KeysStore, file: string = KEYS_FILE): void {
   if (fs.existsSync(file)) {
     try {
@@ -233,8 +234,8 @@ export function writeKeysStore(store: KeysStore, file: string = KEYS_FILE): void
 }
 
 /**
- * Итоговые секреты: .env, поверх — настройки панели, из removed — вычеркнутое.
- * Пустое значение не пишем: пустая переменная для расширений — то же, что нет.
+ * Resulting secrets: .env, with panel settings on top, removed ones struck out.
+ * We don't write an empty value: an empty variable for extensions is the same as absent.
  */
 export function effectiveSecrets(
   fileVars: Record<string, string>,
@@ -252,10 +253,10 @@ export function effectiveSecrets(
   return secrets;
 }
 
-// --- каталог для панели -------------------------------------------------------
-// Панель показывает не «содержимое файла», а осмысленный список: что это за ключ,
-// зачем он нужен и что будет, если его поменять. Незнакомые переменные из .env
-// тоже попадают в список — иначе сохранение файла теряло бы их из виду.
+// --- catalog for the panel -------------------------------------------------------
+// The panel shows not «the file contents» but a meaningful list: what this key is,
+// why it's needed and what happens if it's changed. Unknown variables from .env also
+// make it into the list — otherwise saving the file would lose sight of them.
 
 export type KeyGroup = 'models' | 'search' | 'telegram' | 'mcp' | 'tools' | 'other';
 
@@ -264,15 +265,15 @@ export type KeyInfo = {
   label: string;
   description: string;
   group: KeyGroup;
-  /** Где взять ключ. */
+  /** Where to get the key. */
   where?: string;
-  /** Не секрет: показываем значение как есть (например, поисковый провайдер). */
+  /** Not a secret: we show the value as is (e.g. the search provider). */
   plain?: boolean;
   /**
-   * Что нужно, чтобы новое значение доехало:
-   *  - session — следующий разговор (сервис передаёт env в pi сам);
-   *  - restart — перезапуск сервиса (например, токен Telegram-бота);
-   *  - compose — пересборка стека (путь монтируется в контейнеры).
+   * What's needed for a new value to take effect:
+   *  - session — the next conversation (the service passes env to pi itself);
+   *  - restart — restarting the service (e.g. the Telegram bot token);
+   *  - compose — rebuilding the stack (the path is mounted into containers).
    */
   apply?: 'session' | 'restart' | 'compose';
 };
@@ -286,7 +287,7 @@ export const GROUP_LABELS: Record<KeyGroup, string> = {
   other: 'Прочее',
 };
 
-/** Подписи провайдеров pi: имя провайдера — оно же значение в auth.json. */
+/** pi provider labels: the provider name is also the value in auth.json. */
 const PROVIDER_LABELS: Record<string, string> = {
   anthropic: 'Anthropic (Claude)',
   openai: 'OpenAI',
@@ -307,15 +308,15 @@ const PROVIDER_LABELS: Record<string, string> = {
 };
 
 /**
- * Каталог: провайдерские ключи из PROVIDER_ENV плюс всё, чем пользуемся мы сами.
- * Список держим рядом с кодом, который эти имена читает: ключ без подписи в панели
- * выглядит как строка из пяти заглавных букв, и админ не знает, что он делает.
+ * Catalog: provider keys from PROVIDER_ENV plus everything we use ourselves.
+ * We keep the list next to the code that reads these names: a key without a label in the
+ * panel looks like a string of five capital letters, and the admin doesn't know what it does.
  */
 export function keyCatalog(): KeyInfo[] {
   const providers = new Map<string, KeyInfo>();
   for (const [provider, name] of Object.entries(PROVIDER_ENV)) {
-    // Несколько провайдеров делят одну переменную (moonshotai и moonshotai-cn):
-    // в панели это один ключ, а не два одинаковых поля.
+    // Several providers share one variable (moonshotai and moonshotai-cn):
+    // in the panel this is one key, not two identical fields.
     if (providers.has(name)) continue;
     const label = PROVIDER_LABELS[provider] ?? provider;
     providers.set(name, {
@@ -329,8 +330,8 @@ export function keyCatalog(): KeyInfo[] {
 
   return [
     ...providers.values(),
-    // Поисковый роутер держит несколько ключей сразу и сам выбирает живого.
-    // Порядок здесь — тот же рейтинг, что в search/router.ts: сверху Google-выдача.
+    // The search router holds several keys at once and picks a live one itself.
+    // The order here is the same rating as in search/router.ts: Google output on top.
     {
       name: 'SERPAPI_API_KEY',
       label: 'Поиск — SerpApi (Google)',
@@ -475,7 +476,7 @@ export function keyCatalog(): KeyInfo[] {
   ];
 }
 
-/** Каталог плюс всё незнакомое, что уже лежит в .env или в настройках панели. */
+/** Catalog plus everything unfamiliar already in .env or in panel settings. */
 export function fullCatalog(extra: Iterable<string>): KeyInfo[] {
   const catalog = keyCatalog();
   const known = new Set(catalog.map((key) => key.name));
@@ -494,7 +495,7 @@ export function fullCatalog(extra: Iterable<string>): KeyInfo[] {
   return [...catalog, ...others.sort((a, b) => a.name.localeCompare(b.name))];
 }
 
-/** Подсказка вместо значения: сам секрет в браузер не уходит никогда. */
+/** A hint instead of the value: the secret itself never goes to the browser. */
 export function valueHint(value: string, plain = false): string {
   if (value === '') return '';
   if (plain) return value;

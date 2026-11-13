@@ -1,13 +1,14 @@
-// История версий артефактов: императивные снимки после каждого изменения.
+// Artifact version history: imperative snapshots after every change.
 //
-// Человек не знает, что внутри папки лежит git. Для него это просто «История
-// версий» в панели и кнопка «Вернуть». Здесь нет ИИ и нет решений модели:
-// pi даёт событие tool_call/tool_result/turn_end, а расширение фиксирует снимок.
+// The person doesn't know there's git inside the folder. For them it's just "Version
+// history" in the panel and a "Revert" button. There's no AI here and no model
+// decisions: pi emits the tool_call/tool_result/turn_end events, and the extension
+// records a snapshot.
 //
-// Перед write/edit делаем снимок «как было» (на случай первого изменения старой
-// папки), после успешного write/edit — коммит. turn_end добирает всё, что
-// прилетело через MCP или другие инструменты. Служебные файлы (.folder-acl.json,
-// .artifact.json) не версионируются: откат контента не должен менять права.
+// Before write/edit we take a snapshot of "how it was" (in case it's the first change
+// to an old folder), after a successful write/edit — a commit. turn_end picks up
+// everything that came in via MCP or other tools. Service files (.folder-acl.json,
+// .artifact.json) are not versioned: reverting content must not change permissions.
 import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -38,7 +39,7 @@ function ensureExclude(dir: string): void {
   try {
     current = fs.readFileSync(file, "utf8");
   } catch {
-    // файла ещё нет — начнём с пустого
+    // file doesn't exist yet — start from empty
   }
   const lines = new Set(current.split("\n").map((line) => line.trim()));
   const missing = IGNORED.filter((name) => !lines.has(name));
@@ -47,7 +48,7 @@ function ensureExclude(dir: string): void {
   fs.writeFileSync(file, `${prefix}${missing.join("\n")}\n`);
 }
 
-/** Папка артефакта, если путь реально ведёт внутрь неё. */
+/** The artifact folder, if the path actually leads inside it. */
 export function artifactDirFor(target: string, root = ARTIFACTS): string | null {
   if (!target) return null;
   const resolved = canonicalTarget(target);
@@ -64,7 +65,7 @@ export function artifactDirFor(target: string, root = ARTIFACTS): string | null 
   return dir;
 }
 
-/** Может ли текущий человек менять эту папку: история — тоже запись. */
+/** Whether the current person can change this folder: history is also a write. */
 function canWrite(dir: string): boolean {
   if (!VIEWER) return false;
   const acl = readFolderAcl(dir);
@@ -120,7 +121,7 @@ async function commit(ctx: ExtensionContext, dir: string, message: string): Prom
   return true;
 }
 
-/** Очередь на папку: параллельные write в один артефакт не должны драться за index. */
+/** Per-folder queue: parallel writes to one artifact must not fight over the index. */
 function enqueue(dir: string, task: () => Promise<void>): Promise<void> {
   const previous = queues.get(dir) ?? Promise.resolve();
   const next = previous.then(task, task).catch((error) => {
@@ -144,7 +145,7 @@ function messageFor(tool: string, dir: string, target: string): string {
   return `artifact: ${tool} ${relative || "index"}`;
 }
 
-/** Снимок до изменения: нужен, если у старой папки ещё не было истории. */
+/** Snapshot before change: needed if an old folder had no history yet. */
 async function beforeWrite(ctx: ExtensionContext, tool: string, target: string): Promise<void> {
   const dir = artifactDirFor(target);
   if (!dir || !canWrite(dir)) return;
@@ -154,7 +155,7 @@ async function beforeWrite(ctx: ExtensionContext, tool: string, target: string):
   });
 }
 
-/** Коммит после успешного write/edit. */
+/** Commit after a successful write/edit. */
 async function afterWrite(ctx: ExtensionContext, tool: string, target: string): Promise<void> {
   const dir = artifactDirFor(target);
   if (!dir || !canWrite(dir)) return;
@@ -164,7 +165,7 @@ async function afterWrite(ctx: ExtensionContext, tool: string, target: string): 
   });
 }
 
-/** artifact_new создаёт папку без контента: заводим репозиторий заранее. */
+/** artifact_new creates a folder without content: we set up the repository in advance. */
 async function afterArtifactNew(ctx: ExtensionContext, name: string): Promise<void> {
   if (!name) return;
   const dir = artifactDirFor(path.join(ARTIFACTS, name));
@@ -174,7 +175,7 @@ async function afterArtifactNew(ctx: ExtensionContext, name: string): Promise<vo
   });
 }
 
-/** Добор после хода: MCP, bash, любые инструменты, которых мы не назвали. */
+/** Sweep after the turn: MCP, bash, any tools we didn't name. */
 async function sweep(ctx: ExtensionContext): Promise<void> {
   let entries: fs.Dirent[];
   try {
@@ -230,8 +231,8 @@ export default function (pi: ExtensionAPI) {
       }
       return;
     }
-    // bash/powershell могли писать в артефакт в обход write (например, через
-    // разрешённый относительный путь). Фиксируем сразу, не дожидаясь turn_end.
+    // bash/powershell could have written to the artifact bypassing write (for example, via
+    // an allowed relative path). We commit right away without waiting for turn_end.
     if (tool === "bash" || tool === "powershell") {
       try {
         await sweep(ctx);
@@ -249,7 +250,7 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  // Последний шанс: если ход закончился нештатно, снимок всё равно должен остаться.
+  // Last chance: if the turn ended abnormally, the snapshot must still be kept.
   pi.on("session_shutdown", async (_event, ctx) => {
     try {
       await sweep(ctx);

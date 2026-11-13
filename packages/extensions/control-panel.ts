@@ -1,13 +1,13 @@
-// Инструмент Икара: адрес панели управления.
+// Icarus's tool: the control panel address.
 //
-// Панель стоит за SSO-прокси: человек входит в неё своей обычной учёткой (на проде —
-// Authelia), и открывается ему ровно его память. Поэтому ни ссылок с ключами, ни сроков
-// годности тут больше нет: Икару достаточно назвать адрес, а пускать и не пускать —
-// дело прокси.
+// The panel sits behind an SSO proxy: the person logs in with their regular account
+// (Authelia in prod), and exactly their own memory opens up. That's why there are no
+// more keyed links or expiry times here: it's enough for Icarus to name the address, and
+// letting in or not is the proxy's job.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-/** Что нужно инструменту: внешний адрес панели в контейнере человека (ICARUS_URL). */
+/** What the tool needs: the external panel address in the person's container (ICARUS_URL). */
 export type PanelEnv = {
   url?: string;
 };
@@ -15,8 +15,8 @@ export type PanelEnv = {
 export type PanelLinkResult = { url: string } | { error: string };
 
 /**
- * Собирает адрес или объясняет, почему его нет. Функция чистая: окружение передаётся
- * снаружи, поэтому её проверяют тесты без pi и без контейнера.
+ * Builds the address or explains why it's missing. The function is pure: the environment
+ * is passed in, so tests can check it without pi and without a container.
  */
 export function controlPanelLink(env: PanelEnv): PanelLinkResult {
   const url = env.url?.trim();

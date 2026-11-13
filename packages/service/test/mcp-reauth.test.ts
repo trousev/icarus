@@ -1,12 +1,12 @@
-// Ссылка на повторный вход: ошибка авторизации MCP должна превращаться в
-// человеческое «переподключить», а таймаут — нет.
+// Re-login link: an MCP authorization error should turn into a human
+// "reconnect", while a timeout should not.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mcpReauthNotice, mcpReauthUrl, serverIdFromReauthUrl } from '../src/mcp/reauth.ts';
 import { createServer } from '../src/mcp/registry.ts';
 import { makeConfig } from './fixtures.ts';
 
-test('ссылка ведёт на карточку сервера в панели', () => {
+test('the link leads to the server card in the panel', () => {
   const config = makeConfig({ url: 'https://chat.trousev.pro/' });
   assert.equal(
     mcpReauthUrl(config, 'black-forest'),
@@ -18,7 +18,7 @@ test('ссылка ведёт на карточку сервера в панел
   );
 });
 
-test('invalid_token с reauth_url в теле становится уведомлением', () => {
+test('invalid_token with reauth_url in the body becomes a notice', () => {
   const config = makeConfig({ url: 'https://chat.trousev.pro' });
   const notice = mcpReauthNotice({
     config,
@@ -45,7 +45,7 @@ test('invalid_token с reauth_url в теле становится уведом�
   });
 });
 
-test('имя сервера берётся человеческое, а ссылка — из имени тула', () => {
+test('the server name is taken from the human-readable one, and the link from the tool name', () => {
   const config = makeConfig({ url: 'https://chat.trousev.pro' });
   const server = createServer(config, 'probe', {
     name: 'Black Forest',
@@ -66,7 +66,7 @@ test('имя сервера берётся человеческое, а ссыл
   assert.equal(notice?.url, 'https://chat.trousev.pro/panel/mcp?server=black-forest');
 });
 
-test('mcp_connect со старым конфигом тоже даёт ссылку по своему аргументу', () => {
+test('mcp_connect with an old config also yields a link from its argument', () => {
   const config = makeConfig({ url: 'https://chat.trousev.pro' });
   const notice = mcpReauthNotice({
     config,
@@ -79,7 +79,7 @@ test('mcp_connect со старым конфигом тоже даёт ссыл�
   assert.equal(notice?.url, 'https://chat.trousev.pro/panel/mcp?server=black-forest');
 });
 
-test('чужой reauth_url не подставляется: строим свой', () => {
+test('a foreign reauth_url is not substituted: we build our own', () => {
   const config = makeConfig({ url: 'https://chat.trousev.pro' });
   createServer(config, 'probe', {
     name: 'Black Forest',
@@ -107,7 +107,7 @@ test('чужой reauth_url не подставляется: строим сво
   assert.equal(notice?.url, 'https://chat.trousev.pro/panel/mcp?server=black-forest');
 });
 
-test('таймаут и обычная ошибка сервера — не повод звать на вход', () => {
+test('a timeout and an ordinary server error are no reason to call for login', () => {
   const config = makeConfig({ url: 'https://chat.trousev.pro' });
   for (const text of ['MCP error -32001: Request timed out', 'HTTP 500 Internal Server Error']) {
     assert.equal(

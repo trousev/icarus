@@ -1,6 +1,6 @@
-// Живой заголовок разговора: модель называет разговор по первым репликам,
-// эвристика из первой фразы остаётся фолбэком, а имя, выбранное человеком,
-// не переписывается ни моделью, ни ходом разговора.
+// Live conversation title: the model names the conversation from the first turns,
+// the heuristic from the first phrase remains the fallback, and a name chosen by a
+// human is not rewritten by either the model or the course of the conversation.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -21,7 +21,7 @@ function fixture() {
   return { config, user };
 }
 
-/** Файл сессии pi: `<когда создан>_<id>.jsonl`, как его кладёт pi. */
+/** pi session file: `<when created>_<id>.jsonl`, as pi lays it down. */
 function putSessionFile(
   config: ReturnType<typeof makeConfig>,
   user: ReturnType<typeof probe>,
@@ -45,7 +45,7 @@ function dialog(userText: string, assistantText: string, at = '2026-11-01T10:00:
   ];
 }
 
-test('модель называет разговор по смыслу, а не по обрывку фразы', async () => {
+test('the model names the conversation by meaning, not by a fragment of a phrase', async () => {
   const asked: string[] = [];
   const result = await askModelTitle({
     ask: async (prompt) => {
@@ -63,7 +63,7 @@ test('модель называет разговор по смыслу, а не 
   assert.match(asked[0] ?? '', /Смотри, память лежит/, 'и ответ Икара тоже');
 });
 
-test('таймаут модели откатывает на эвристику из первой фразы', async () => {
+test('a model timeout falls back to the heuristic from the first phrase', async () => {
   const result = await askModelTitle({
     ask: async () => {
       throw new Error('модель не ответила за 8000 мс');
@@ -76,7 +76,7 @@ test('таймаут модели откатывает на эвристику �
   assert.equal(result.title, 'Почему не стартует docker compose');
 });
 
-test('мусорный ответ модели — тоже фолбэк, а не заголовок', async () => {
+test('a garbage model response is also a fallback, not a title', async () => {
   for (const raw of ['<think>сейчас придумаю имя</think>\n', '   ', 'Заголовок:']) {
     const result = await askModelTitle({
       ask: async () => raw,
@@ -88,7 +88,7 @@ test('мусорный ответ модели — тоже фолбэк, а н�
   }
 });
 
-test('отмена вместе с ходом не считается поломкой и даёт эвристику', async () => {
+test('cancellation along with a turn is not a failure and yields the heuristic', async () => {
   const controller = new AbortController();
   controller.abort();
 
@@ -105,13 +105,13 @@ test('отмена вместе с ходом не считается полом
   assert.equal(result.source, 'heuristic');
 });
 
-test('живой заголовок: модель называет разговор по первым репликам', async () => {
+test('live title: the model names the conversation from the first turns', async () => {
   const { config, user } = fixture();
   const chat = createChat(config, user, 'talk', new Date('2026-11-01T10:00:00.000Z'));
   putSessionFile(config, user, chat.id, dialog('привет', 'Привет! Чем помочь?'));
   finishChat(config, user, chat.id, 'привет');
 
-  // Сразу после хода имя уже есть — хоть какое-то, из первой фразы.
+  // Right after the turn a name already exists — some kind, from the first phrase.
   assert.equal(readChats(config, user)[0]?.title, 'Привет', 'эвристика не ждёт модель');
   assert.equal(isAutoTitle(readChats(config, user)[0]!), true, 'это наше имя, его можно уточнить');
 
@@ -139,7 +139,7 @@ test('живой заголовок: модель называет разгов�
   assert.equal((last?.chat as { title?: string })?.title, 'Знакомство с Икаром');
 });
 
-test('чат, названный человеком, модель не переименовывает', async () => {
+test('the model does not rename a chat named by a human', async () => {
   const { config, user } = fixture();
   const chat = createChat(config, user, 'talk', new Date('2026-11-01T10:00:00.000Z'));
   putSessionFile(config, user, chat.id, dialog('привет', 'Привет! Чем помочь?'));
@@ -163,7 +163,7 @@ test('чат, названный человеком, модель не пере�
   assert.equal(applyAutoTitle(config, user, chat.id, 'Другое имя'), null, 'и напрямую не переписать');
 });
 
-test('пока модель думает, человек переименовал — имя человека сильнее', async () => {
+test('the human renamed while the model was thinking — the human name wins', async () => {
   const { config, user } = fixture();
   const chat = createChat(config, user, 'talk', new Date('2026-11-01T10:00:00.000Z'));
   putSessionFile(config, user, chat.id, dialog('привет', 'Привет! Чем помочь?'));
@@ -173,7 +173,7 @@ test('пока модель думает, человек переименова�
     config,
     user,
     async () => {
-      // Человек успевает назвать разговор, пока модель «думает».
+      // The human manages to name the conversation while the model is "thinking".
       renameChat(config, user, chat.id, 'Налоги');
       return 'Знакомство с Икаром';
     },
@@ -184,7 +184,7 @@ test('пока модель думает, человек переименова�
   assert.equal(readChats(config, user)[0]?.title, 'Налоги');
 });
 
-test('после третьего хода живой заголовок успокаивается', async () => {
+test('after the third turn the live title settles down', async () => {
   const { config, user } = fixture();
   const chat = createChat(config, user, 'talk', new Date('2026-11-01T10:00:00.000Z'));
   putSessionFile(config, user, chat.id, [
@@ -211,7 +211,7 @@ test('после третьего хода живой заголовок усп�
   assert.equal(readChats(config, user)[0]?.title, 'Первая тема');
 });
 
-test('имя правится из списка чатов и после этого не меняется моделью', async () => {
+test('the name is edited from the chat list and afterwards is not changed by the model', async () => {
   const { config, user } = fixture();
   const chat = createChat(config, user, 'talk', new Date('2026-11-01T10:00:00.000Z'));
   putSessionFile(config, user, chat.id, dialog('привет', 'Привет! Чем помочь?'));
@@ -259,7 +259,7 @@ test('имя правится из списка чатов и после это�
   }
 });
 
-test('архивный разговор сам не переименовывается', async () => {
+test('an archived conversation does not rename itself', async () => {
   const { config, user } = fixture();
   const chat = createChat(config, user, 'talk', new Date('2026-11-01T10:00:00.000Z'));
   putSessionFile(config, user, chat.id, dialog('привет', 'Привет! Чем помочь?'));

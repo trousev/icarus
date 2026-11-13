@@ -1,8 +1,8 @@
-// Клиент чата: без сборки и зависимостей. Сервер отдаёт каркас, список диалогов и
-// историю — этот файл только рисует их и читает NDJSON-поток ответа.
+// Chat client: no build and no dependencies. The server serves the shell, the chat list and
+// history — this file only draws them and reads the NDJSON response stream.
 //
-// Разметка живёт в chat-markdown.js и подключается раньше: это обычные глобальные
-// функции, а не импорт — сборки в панели нет. Подсветка кода — так же.
+// Markup lives in chat-markdown.js and is connected earlier: these are plain global
+// functions, not an import — there is no build in the panel. Code highlighting — likewise.
 /* global markdown, linkify, imageSrc, highlightCode */
 const cfg = window.__CHAT_CFG__;
 
@@ -19,7 +19,7 @@ function cleanPreview(text) {
 }
 
 const plural = (n, one, few, many) => {
-  // Старый вызов передаёт три строки, новый — формы из словаря.
+  // The old call passes three strings, the new one — forms from the dictionary.
   const words = typeof one === 'string' ? { one, few, many } : one;
   if (cfg.ui.lang !== 'ru') return n === 1 ? words.one : words.many;
   const tens = n % 100;
@@ -30,7 +30,7 @@ const plural = (n, one, few, many) => {
   return words.many;
 };
 
-/** Подстановка в шаблон словаря: «{name}» → значение. Тот же приём, что в ui.ts. */
+/** Substitution into a dictionary template: «{name}» → value. Same technique as in ui.ts. */
 const fill = (template, values) =>
   Object.entries(values).reduce((text, [key, value]) => text.split('{' + key + '}').join(String(value)), template);
 
@@ -49,7 +49,7 @@ async function api(path, options = {}) {
   return response.json();
 }
 
-/* ── даты и диалоги ───────────────────────────────────────────────────────── */
+/* ── dates and chats ──────────────────────────────────────────────────────── */
 function startOfDay(date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
 }
@@ -85,8 +85,8 @@ function seconds(ms) {
 }
 
 /**
- * Живой список субагентов под шагом: кто работает, кто в очереди и кто уже кончил.
- * Данные приходят от инструмента (details.subagents) — здесь только рисование.
+ * Live list of subagents under a step: who is working, who is queued and who has already finished.
+ * Data comes from the tool (details.subagents) — here only drawing.
  */
 function subagentsHtml(step, opened) {
   const list = step.subagents;
@@ -101,15 +101,15 @@ function subagentsHtml(step, opened) {
             ? sub.error || (sub.ms ? seconds(sub.ms) : 'готово')
             : 'ждёт очереди';
       const actions = Array.isArray(sub.actions) ? sub.actions : [];
-      // Всего шагов может быть больше, чем помещается в список: не врём числом.
+      // There can be more total steps than fit in the list: we don't lie with the number.
       const total = Number.isFinite(sub.actionsTotal) && sub.actionsTotal > 0 ? sub.actionsTotal : actions.length;
       const label =
         total > actions.length
           ? total + ' ' + plural(total, 'действие', 'действия', 'действий') + ' · последние ' + actions.length
           : actions.length + ' ' + plural(actions.length, 'действие', 'действия', 'действий');
       const key = (step.id || 'step') + ':' + index;
-      // Действия ребёнка — вложенный список: по умолчанию свёрнут, чтобы длинная
-      // трассировка не съедала ответ; раскрытое состояние переживает перерисовку.
+      // A child's actions are a nested list: collapsed by default, so a long
+      // trace doesn't eat the answer; the expanded state survives a redraw.
       const details =
         actions.length > 0
           ? '<details class="sub-actions" data-sub="' +
@@ -150,8 +150,8 @@ function traceHtml(steps, opened) {
   if (!steps || !steps.length) return '';
   const items = steps
     .map((step) => {
-      // Класс по инструменту: поиск и извлечение страницы красятся по-разному,
-      // иначе в трассировке «ПОИСК» с URL выглядит как поиск по этому URL.
+      // Class by tool: page search and fetch are colored differently,
+      // otherwise in the trace "SEARCH" with a URL looks like searching by that URL.
       const tool = String(step.tool || 'tool').replace(/[^a-z0-9_]/gi, '_');
       return (
         '<div class="trace-step ' +
@@ -196,89 +196,89 @@ function assistantHtml(message) {
   );
 }
 
-/** Граница «контекст очищен»: не реплика, а разделитель между сессиями pi. */
+/** "Context cleared" boundary: not a message, but a divider between pi sessions. */
 function clearDividerHtml() {
   return '<div class="turn divider"><hr><span>Контекст очищен</span></div>';
 }
 
-/* ── состояние ────────────────────────────────────────────────────────────── */
+/* ── state ───────────────────────────────────────────────────────────────── */
 let chats = [];
 let currentId = cfg.chatId || null;
 let currentChat = null;
 /**
- * Чей ход панель сейчас СМОТРИТ (подписка на живой поток этого разговора).
- * Было булево `streaming`; стало идентификатором, потому что смотреть можно
- * только один разговор, а идти ходы могут во многих сразу.
+ * Which turn the panel is currently WATCHING (subscription to this chat's live stream).
+ * It used to be a boolean `streaming`; it became an identifier, because you can watch
+ * only one chat while turns can run in many at once.
  */
 let liveChatId = null;
 /**
- * Ящик ответа, который сейчас достримивается, и его обрыв. Держим рядом: ушедший
- * разговор нужно бросить так, чтобы это не выглядело ошибкой в его ленте.
+ * The response box currently being streamed, and its abort. Kept side by side: a departed
+ * chat must be dropped in a way that doesn't look like an error in its feed.
  */
 let liveBox = null;
 let liveAbort = null;
 /**
- * Тело ответа на идущий ход для каждого разговора: F5 или уход в другой чат —
- * это "ушёл смотреть", а не "отвечай заново". Вернувшись к тому же ходу, панель
- * подхватывает ту же плашку: иначе два возврата в один ход — два ответа в ленте.
+ * The body of the response for the ongoing turn for each chat: F5 or leaving to another chat —
+ * that's "went to look", not "answer again". Returning to the same turn, the panel
+ * picks up the same box: otherwise two returns to one turn — two responses in the feed.
  */
 const liveBodies = new Map();
-/** Разговоры, где ход идёт прямо сейчас — из сводки и снимка статуса. */
+/** Chats where a turn is running right now — from the bulletin and the status snapshot. */
 const busyChats = new Set();
-/** Разговоры с непрочитанным ответом — жёлтая/зелёная точка в сайдбаре. */
+/** Chats with an unread response — a yellow/green dot in the sidebar. */
 const unread = new Set();
-/** Идёт ли ход прямо в открытом разговоре: композеру и «стоп» это и нужно. */
+/** Whether a turn is running in the open chat: the composer and "stop" need exactly this. */
 const streaming = () => liveChatId !== null && liveChatId === currentId;
-/** Нажал ли человек «стоп» в этом ходе: по флагу понятно, чем кончился ответ. */
+/** Whether the person pressed "stop" in this turn: the flag shows how the response ended. */
 let stoppedByUser = false;
-/** Черновик нового чата: на сервере его ещё нет, пока не ушло первое сообщение. */
+/** Draft of a new chat: it doesn't exist on the server yet until the first message is sent. */
 let draft = false;
-/** Workspace, в котором появится черновик нового разговора. */
+/** Workspace in which the draft of a new chat will appear. */
 let draftWorkspace = 'talk';
-/** Поколение загрузки истории: ответ, пришедший после смены чата, уже не нужен. */
+/** History load generation: a response that arrived after a chat switch is no longer needed. */
 let historyToken = 0;
-/** Очередь реплик по разговорам: правда живёт на сервере, тут только её вид. */
+/** Queue of messages by chat: the truth lives on the server, here only its view. */
 const queues = new Map();
 /**
- * Свой пузырь, нарисованный заранее. Сервер объявляет реплику событием `user`
- * (по нему её видно после F5), но отправителю рисовать второй такой же незачем.
+ * Our own bubble, drawn in advance. The server announces the message with a `user`
+ * event (by it it's visible after F5), but there's no need for the sender to draw a second one.
  */
 let optimisticUser = null;
-/** Можно ли писать в открытый разговор: Telegram и API в панели только читаются. */
+/** Whether one can write to the open chat: Telegram and API are read-only in the panel. */
 let writable = Boolean(cfg.enabled);
-/** Список диалогов листается страницами: курсор приносит следующую. */
+/** The chat list is paginated: the cursor brings the next page. */
 let nextCursor = null;
 let loadingChats = false;
 let loadGeneration = 0;
 let searchTimer = 0;
 let pending = [];
-/** Workspace'ы человека и тот, в котором открыт текущий разговор. */
+/** The person's workspaces and the one in which the current chat is open. */
 let workspaces = [];
 /**
- * Папки в меню слева. Свёрнутость и состав хранит сервер: меню должно выглядеть
- * одинаково с любого устройства, а не только в этом браузере (в отличие от unread).
+ * Folders in the left menu. Collapsed state and composition are stored by the server: the menu must look
+ * the same from any device, not only in this browser (unlike unread).
  */
 let folders = [];
-/** Открыт ввод новой папки: строка рисуется прямо в списке, без модалки. */
+/** New folder input is open: the row is drawn right in the list, without a modal. */
 let folderDraft = false;
-/** id папки, которую переименовывают на месте. */
+/** id of the folder being renamed in place. */
 let folderRenaming = null;
-/** Разговор, который сейчас тащат мышью: по нему подсвечиваем цель. */
+/** The chat currently being dragged with the mouse: we highlight the target by it. */
 let draggingChatId = null;
-/** Открытое меню «Переместить в…»: одно на всю панель. */
+/** Open "Move to…" menu: one for the whole panel. */
 let chatMenu = null;
 let currentWorkspace = cfg.defaultWorkspace || 'talk';
-/** Папка нового чата по умолчанию: клик по «Новый чат» не тащит папку прошлого разговора. */
+/** Default folder of a new chat: clicking "New chat" doesn't drag the previous chat's folder. */
 const defaultWorkspace = currentWorkspace;
-/** Пустое состояние до подмены экраном выбора workspace'а. */
+/** Empty state before it's replaced by the workspace picker screen. */
 let defaultEmptyHtml = '';
 const CHAT_PAGE_SIZE = 30;
 const MAX_FILES = 8;
 const MAX_TOTAL_BYTES = 10 * 1024 * 1024;
 const UNREAD_KEY = 'icarus.unread';
-/** Развёрнут ли архив: свёрнутое состояние переживает перезагрузку. */
+/** Whether the archive is expanded: the collapsed state survives a reload. */
 const ARCHIVE_OPEN_KEY = 'icarus.archive-open';
-/** Архив — отдельный список того же чата: разговор ушёл с глаз, но не удалён. */
+/** Archive — a separate list of the same chat: the chat left sight but wasn't deleted. */
 let archivedChats = [];
 let archiveOpen = false;
 
@@ -294,21 +294,21 @@ function saveArchiveOpen(open) {
   try {
     localStorage.setItem(ARCHIVE_OPEN_KEY, open ? '1' : '0');
   } catch {
-    /* приватный режим — состояние просто не запомнится */
+    /* private mode — the state simply won't be remembered */
   }
 }
 
 /**
- * Непрочитанное живёт только в браузере: серверу оно ни к чему, а лишний
- * персист ради зелёной точки не нужен. Отсюда и следствие — на другом устройстве
- * точки свои (см. README).
+ * Unread lives only in the browser: the server has no use for it, and extra
+ * persistence for a green dot isn't needed. Hence the consequence — on another device
+ * the dots are its own (see README).
  */
 function loadUnread() {
   try {
     const raw = JSON.parse(localStorage.getItem(UNREAD_KEY) || '[]');
     if (Array.isArray(raw)) for (const id of raw) if (typeof id === 'string') unread.add(id);
   } catch {
-    /* битый ключ — просто начнём с пустого */
+    /* broken key — we'll just start from empty */
   }
 }
 
@@ -316,14 +316,14 @@ function saveUnread() {
   try {
     localStorage.setItem(UNREAD_KEY, JSON.stringify([...unread]));
   } catch {
-    /* приватный режим — точка просто не запомнится */
+    /* private mode — the dot simply won't be remembered */
   }
 }
 
-/** Ответ пришёл в разговор, который человек не смотрит: ставим зелёную точку. */
+/** A response arrived in a chat the person isn't looking at: we set a green dot. */
 function markUnread(chatId) {
   if (!chatId) return;
-  // Смотрим этот разговор и вкладка на виду — ответ и так на экране, точка лишняя.
+  // We're looking at this chat and the tab is visible — the response is already on screen, the dot is superfluous.
   if (chatId === currentId && !document.hidden) return;
   if (unread.has(chatId)) return;
   unread.add(chatId);
@@ -331,7 +331,7 @@ function markUnread(chatId) {
   renderChats();
 }
 
-/** Разговор открыли (или вкладка вернулась к нему) — точка гаснет. */
+/** The chat was opened (or the tab returned to it) — the dot goes out. */
 function markRead(chatId) {
   if (!chatId || !unread.has(chatId)) return;
   unread.delete(chatId);
@@ -340,8 +340,8 @@ function markRead(chatId) {
 }
 
 /**
- * Разговор удалён или его id устарел — точка на него больше не нужна. Чистим по
- * фактически загруженному списку, а не гадаем, что там лежит в localStorage.
+ * The chat was deleted or its id became stale — the dot is no longer needed. We clean by the
+ * actually loaded list, not guessing what's in localStorage.
  */
 function pruneUnread() {
   const known = new Set(chats.map((chat) => chat.id));
@@ -354,7 +354,7 @@ function pruneUnread() {
   if (changed) saveUnread();
 }
 
-/** Как назвать вход, из которого пришёл разговор. */
+/** What to call the entry from which the chat came. */
 function channelName(chat) {
   if (!chat) return '';
   if (chat.channel === 'telegram') return 'Telegram';
@@ -363,9 +363,9 @@ function channelName(chat) {
 }
 
 /**
- * Откуда пришла последняя реплика. Файл сессии каналы не различает, поэтому
- * канал запоминает сервис: шапка показывает отметку последнего хода, а не
- * «здесь начали разговор» (это видно по метке канала в списке).
+ * Where the last message came from. The session file doesn't distinguish channels, so
+ * the service remembers the channel: the header shows the mark of the last turn, not
+ * "the conversation started here" (that's visible from the channel tag in the list).
  */
 function viaLabel(turn) {
   if (!turn) return '';
@@ -374,7 +374,7 @@ function viaLabel(turn) {
   return fill(cfg.ui.viaLast, { name }) + (time ? ' · ' + time : '');
 }
 
-/** Шапка разговора: канал последней реплики. null — черновик или нет данных. */
+/** Chat header: channel of the last message. null — draft or no data. */
 function renderVia(chat) {
   const node = el('chat-via');
   if (!node) return;
@@ -386,9 +386,9 @@ function renderVia(chat) {
 }
 
 /**
- * Что сказать про канал открытого разговора. Из Telegram-разговора ответ в
- * Telegram не уедет — бот живёт своей стороной, — и молчать об этом нельзя:
- * человек ждал бы ответ там.
+ * What to say about the channel of the open chat. From a Telegram chat the response won't
+ * go to Telegram — the bot lives on its own side — and staying silent about it is impossible:
+ * the person would wait for the answer there.
  */
 function chatHint(chat) {
   if (chat && chat.channel === 'telegram') {
@@ -397,14 +397,14 @@ function chatHint(chat) {
   return '';
 }
 
-/** Ход идёт в другом канале: второй начинать нельзя, а смотреть здесь нечего. */
+/** A turn is running in another channel: a second one can't be started, and there's nothing to look at here. */
 function busyInNote(channel) {
   const where =
     channel === 'telegram' ? cfg.ui.busyInTelegram : channel === 'api' ? cfg.ui.busyInApi : cfg.ui.busyInPanel;
   return fill(cfg.ui.busyInNote, { where });
 }
 
-/** Короткая метка в списке диалогов: длинное «только чтение» съедает заголовок. */
+/** Short tag in the chat list: a long "read-only" eats the title. */
 function channelTag(chat) {
   if (!chat) return '';
   if (chat.channel === 'telegram') return 'TG';
@@ -413,8 +413,8 @@ function channelTag(chat) {
 }
 
 /**
- * Композер — по каналу разговора. Веб-чат пишется, Telegram и API читаются:
- * сервер всё равно откажет, но обещать в поле ввода несуществующее нельзя.
+ * Composer — by the chat's channel. The web chat is writable, Telegram and API are read-only:
+ * the server will refuse anyway, but one can't promise in the input field what doesn't exist.
  */
 function setComposer(readOnly) {
   const locked = Boolean(readOnly);
@@ -442,7 +442,7 @@ function setTitle(title) {
   document.title = 'Icarus · ' + (title || cfg.ui.newChat);
 }
 
-/** /rename: новое имя сразу в шапке и в сайдбаре, без перезагрузки ленты. */
+/** /rename: the new name immediately in the header and sidebar, without reloading the feed. */
 function applyChatTitle(chatId, title) {
   if (currentChat && currentChat.id === chatId) {
     currentChat.title = title;
@@ -456,10 +456,10 @@ function applyChatTitle(chatId, title) {
 }
 
 /**
- * Строка под полем ввода — для того, чего не видно в ленте: отказ («не больше
- * восьми вложений»), сорванная загрузка, подтверждение остановки. Что делает
- * Икар прямо сейчас, здесь не пишем: шаги и команды и так идут в трассировке
- * ответа, а второй экран прогресса под композером только мешает читать.
+ * The line under the input field — for what isn't visible in the feed: a refusal ("no more
+ * than eight attachments"), a failed load, a stop confirmation. What Icarus is doing right
+ * now, we don't write here: steps and commands already go into the response trace,
+ * and a second progress screen under the composer only gets in the way of reading.
  */
 function setNote(text) {
   el('chat-note').textContent = text || '';
@@ -470,13 +470,13 @@ function showEmpty(show) {
   if (show) el('chat-messages').innerHTML = '';
 }
 
-/** «Входящие» — не папка в реестре, а всё, что осталось без полки. */
+/** "Inbox" — not a folder in the registry, but everything left without a shelf. */
 const INBOX_FOLDER = { id: '', name: cfg.ui.folderInbox, collapsed: false };
 
-/** Одна строка списка: сам разговор, а кнопки «✎» и «⋯» — рядом, не внутри кнопки. */
+/** One list row: the chat itself, with the "✎" and "⋯" buttons beside it, not inside the button. */
 function chatRowHtml(chat) {
-  // Имя правится прямо в строке списка: двойной клик по названию или карандаш
-  // при наведении. Пока правим — вместо строки стоит поле ввода.
+  // The name is edited right in the list row: double-click on the title or the pencil
+  // on hover. While editing — an input field stands instead of the row.
   if (chat.id === renamingId) {
     return (
       '<div class="chat-row" data-id="' + esc(chat.id) + '">' +
@@ -485,9 +485,9 @@ function chatRowHtml(chat) {
       '" aria-label="' + esc(cfg.ui.chatRenamePlaceholder) + '" /></div></div></div>'
     );
   }
-  // Точка одна и она старше видит занятость: жёлтая — ход идёт, зелёная — есть
-  // непрочитанный ответ. Разметка точки появляется, только когда она нужна, —
-  // иначе `gap` у flex-строки съедал бы место под пустую колонку.
+  // There's one dot and the older one sees busyness: yellow — a turn is running, green — there's
+  // an unread response. The dot markup appears only when needed —
+  // otherwise the `gap` of the flex row would eat space for an empty column.
   const dot = busyChats.has(chat.id) ? 'busy' : unread.has(chat.id) ? 'unread' : '';
   return (
     '<div class="chat-row" data-id="' + esc(chat.id) + '">' +
@@ -501,17 +501,17 @@ function chatRowHtml(chat) {
     (channelTag(chat) ? '<span class="chat-item-tag">' + esc(channelTag(chat)) + '</span>' : '') +
     '<time class="chat-item-time">' + esc(timeLabel(chat.createdAt)) + '</time>' +
     '</div><div class="chat-item-preview">' + esc(cleanPreview(chat.preview || '')) + '</div></button>' +
-    // Переименование — здесь же: имя человек видит в списке и хочет поправить тут.
+    // Renaming — right here: the person sees the name in the list and wants to fix it here.
     '<button class="chat-rename" type="button" data-id="' + esc(chat.id) +
     '" title="' + esc(cfg.ui.chatRename) + '" aria-label="' + esc(cfg.ui.chatRename) + '">✎</button>' +
-    // Перенос доступен и мышью, и с клавиатуры: кнопка открывает меню с папками.
+    // Moving is available both by mouse and by keyboard: the button opens a menu with folders.
     '<button class="chat-more" type="button" data-id="' + esc(chat.id) +
     '" title="' + esc(cfg.ui.chatMove) + '" aria-label="' + esc(cfg.ui.chatMove) + '">⋯</button>' +
     '</div>'
   );
 }
 
-/** Разговоры с прежними заголовками дат: внутри папки они тоже помогают глазам. */
+/** Chats with the previous date headings: inside a folder they also help the eyes. */
 function chatItemsHtml(list, withDates) {
   let group = '';
   let html = '';
@@ -530,12 +530,12 @@ function chatItemsHtml(list, withDates) {
   return html;
 }
 
-/** Заголовок папки: клик сворачивает, «✎» и «×» правят саму папку. */
+/** Folder header: click collapses, "✎" and "×" edit the folder itself. */
 function folderHeadHtml(folder, count) {
   const collapsed = Boolean(folder.collapsed);
   const renaming = folderRenaming === folder.id && folder.id !== '';
-  // «Входящие» — не папка реестра: у них нет ни свёрнутости, ни действий, поэтому
-  // и роль кнопки им не нужна — иначе клавиатура упирается в пустую кнопку.
+  // "Inbox" is not a registry folder: it has neither collapsed state nor actions, so
+  // it doesn't need the button role either — otherwise the keyboard runs into an empty button.
   const interactive = folder.id !== '';
   return (
     '<div class="folder-head' + (collapsed ? ' collapsed' : '') + (interactive ? '' : ' inbox') +
@@ -558,10 +558,10 @@ function folderHeadHtml(folder, count) {
   );
 }
 
-/** Имя разговора, которое сейчас правится в списке; `null` — не правим. */
+/** The chat name currently being edited in the list; `null` — not editing. */
 let renamingId = null;
 
-/** Поля, у которых Enter уже сохранил имя: следом приходит blur, второй раз не пишем. */
+/** Fields whose Enter already saved the name: blur follows, we don't write a second time. */
 const renameCommitted = new WeakSet();
 
 function renderChats() {
@@ -569,7 +569,7 @@ function renderChats() {
   const top = box.scrollTop;
   const query = el('chat-search').value.trim();
   if (!chats.length && !folders.length && !folderDraft) {
-    // В черновике подсказка «начни новый чат» лишняя: он уже начат.
+    // In a draft the "start a new chat" hint is superfluous: it's already started.
     box.innerHTML = query
       ? '<p class="side-empty">' + esc(cfg.ui.chatListEmptySearch) + '</p>'
       : draft
@@ -584,24 +584,24 @@ function renderChats() {
   }
 
   if (!folders.length) {
-    // Папок ещё нет — список живёт как раньше. Заводить «Входящие» на весь
-    // список незачем: заголовок появится, когда появится первая папка.
+    // There are no folders yet — the list lives as before. There's no point creating
+    // "Inbox" for the whole list: the heading will appear when the first folder appears.
     html += chatItemsHtml(chats, true) || (query ? '<p class="side-empty">' + esc(cfg.ui.chatListEmptySearch) + '</p>' : '');
   } else {
     for (const folder of folders) {
       const items = chats.filter((chat) => chat.folder === folder.id);
       html += folderHeadHtml(folder, items.length);
-      // Во время поиска свёрнутость не прячет найденное: иначе человек решит,
-      // что совпадений нет, хотя они лежат в закрытой папке.
+      // During a search collapsed state doesn't hide what's found: otherwise the person decides
+      // there are no matches, while they lie in a closed folder.
       if (folder.collapsed && !query) continue;
-      // Подсказка про перетаскивание — не результат поиска, её тут не место.
+      // The drag hint isn't a search result, it doesn't belong here.
       html += items.length
         ? chatItemsHtml(items, true)
         : query
           ? ''
           : '<p class="side-empty folder-empty">' + esc(cfg.ui.folderDrop) + '</p>';
     }
-    // Разговоры без папки и те, чья папка уже удалена с другого устройства.
+    // Chats without a folder and those whose folder was already deleted from another device.
     const inbox = chats.filter((chat) => !folders.some((folder) => folder.id === chat.folder));
     html += folderHeadHtml(INBOX_FOLDER, inbox.length);
     html += inbox.length
@@ -617,7 +617,7 @@ function renderChats() {
   bindChatList(box);
 }
 
-/** Обработчики строк и заголовков: их пересоздаёт каждая перерисовка списка. */
+/** Row and header handlers: they're recreated by every list redraw. */
 function bindChatList(box) {
   box.querySelectorAll('.chat-row').forEach((row) => {
     row.draggable = true;
@@ -625,8 +625,8 @@ function bindChatList(box) {
       draggingChatId = row.dataset.id;
       row.classList.add('dragging');
       event.dataTransfer.effectAllowed = 'move';
-      // Свой id кладём и текстом: dataTransfer — единственный переносимый между
-      // dragover и drop кусок состояния, глобальная переменная тут ненадёжна.
+      // We also put our id as text: dataTransfer is the only piece of state transferable
+      // between dragover and drop, a global variable is unreliable here.
       event.dataTransfer.setData('text/plain', draggingChatId);
     });
     row.addEventListener('dragend', () => {
@@ -706,7 +706,7 @@ function bindChatList(box) {
         finish(false);
       }
     };
-    // Уход из поля — это отмена: случайный клик по ленте не должен переименовать.
+    // Leaving the field is a cancel: an accidental click on the feed must not rename.
     renameInput.onblur = () => finish(false);
   }
   box.querySelectorAll('.chat-rename').forEach((node) => {
@@ -728,9 +728,9 @@ function bindChatList(box) {
         cancelRename();
       }
     };
-    // Ушли мышкой в другое место — это тоже «готово»: поле не должно висеть.
-    // Но если строку перерисовало событие сводки, это не «человек закончил»:
-    // сохранять обрывок имени из исчезнувшего поля нельзя.
+    // We moved the mouse elsewhere — that's also "done": the field must not hang.
+    // But if the row was redrawn by a bulletin event, that's not "the person finished":
+    // saving a fragment of the name from a vanished field is impossible.
     input.onblur = () => {
       if (input.isConnected === false) return;
       void commitRename(input);
@@ -738,7 +738,7 @@ function bindChatList(box) {
   }
 }
 
-/* ── папки ─────────────────────────────────────────────────────────────────── */
+/* ── folders ────────────────────────────────────────────────────────────────── */
 
 async function loadFolders() {
   try {
@@ -751,7 +751,7 @@ async function loadFolders() {
   renderChats();
 }
 
-/** Меняем папку оптимистично и откатываем, если сервер не принял. */
+/** We change the folder optimistically and roll back if the server didn't accept. */
 async function persistFolder(folderId, changes) {
   const folder = folders.find((item) => item.id === folderId);
   if (!folder) return;
@@ -771,7 +771,7 @@ async function persistFolder(folderId, changes) {
   renderChats();
 }
 
-/** Свернуть/развернуть. У «Входящих» состояния нет — им сворачивать нечего. */
+/** Collapse/expand. "Inbox" has no state — it has nothing to collapse. */
 async function toggleChatFolder(folderId) {
   const folder = folders.find((item) => item.id === folderId);
   if (!folder) return;
@@ -808,7 +808,7 @@ async function renameFolderById(folderId, rawName) {
   renderChats();
 }
 
-/** Удаление папки разговоры не трогает: сервер возвращает их во «Входящие». */
+/** Deleting a folder doesn't touch chats: the server returns them to "Inbox". */
 async function deleteFolderById(folderId) {
   const folder = folders.find((item) => item.id === folderId);
   if (!folder) return;
@@ -828,7 +828,7 @@ async function moveChatToFolder(chatId, folderId) {
     if (folderId) chat.folder = folderId;
     else delete chat.folder;
   }
-  // Перенос в свёрнутую папку выглядел бы как «чат пропал» — раскрываем её.
+  // Moving to a collapsed folder would look like "the chat disappeared" — we expand it.
   const target = folders.find((item) => item.id === folderId);
   if (target && target.collapsed) await persistFolder(folderId, { collapsed: false });
   else renderChats();
@@ -840,7 +840,7 @@ function closeChatMenu() {
   chatMenu = null;
 }
 
-/** Меню «переместить в…»: то же действие, что перетаскивание, но без мыши. */
+/** "Move to…" menu: the same action as dragging, but without the mouse. */
 function openChatMenu(chatId, anchor) {
   closeChatMenu();
   const chat = chats.find((item) => item.id === chatId);
@@ -862,7 +862,7 @@ function openChatMenu(chatId, anchor) {
     '<button type="button" class="chat-menu-new" data-new="1">' + esc(cfg.ui.folderMenuNew) + '</button>';
   document.body.appendChild(menu);
 
-  // Ставим рядом с кнопкой, но не даём вылезти за окно.
+  // We place it next to the button, but don't let it overflow the window.
   const rect = anchor.getBoundingClientRect();
   const width = menu.offsetWidth || 200;
   menu.style.left = Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8)) + 'px';
@@ -890,8 +890,8 @@ function openChatMenu(chatId, anchor) {
 }
 
 /**
- * Строка архива: тот же разговор, но без времени и с кнопкой возврата справа —
- * её видно сразу, потому что в архив заходят редко и ищут именно её.
+ * Archive row: the same chat, but without time and with a restore button on the right —
+ * it's visible immediately, because the archive is visited rarely and people look for exactly it.
  */
 function archivedRowHtml(chat) {
   const tag = channelTag(chat);
@@ -917,8 +917,8 @@ function archivedRowHtml(chat) {
 }
 
 /**
- * Архив в сайдбаре: свёрнутая секция под списком. Счётчик виден и в свёрнутом
- * виде — иначе человек не узнает, что там что-то есть, не открыв её.
+ * Archive in the sidebar: a collapsed section under the list. The counter is visible even in the
+ * collapsed state — otherwise the person won't know there's something there without opening it.
  */
 function renderArchive() {
   const count = el('archive-count');
@@ -951,7 +951,7 @@ async function loadArchived() {
   }
 }
 
-/** Кнопка в шапке говорит, что произойдёт: «В архив» или «Вернуть». */
+/** The header button says what will happen: "Archive" or "Restore". */
 function setArchiveState(chat) {
   const archived = Boolean(chat && chat.archived);
   const button = el('toggle-archive');
@@ -963,8 +963,8 @@ function setArchiveState(chat) {
 }
 
 /**
- * Двигает разговор между списком и архивом. Списки перечитываем с сервера:
- * порядок, превью и total — его дело, а не наша догадка.
+ * Moves the chat between the list and the archive. We re-read the lists from the server:
+ * order, preview and total are its business, not our guess.
  */
 async function setArchived(chatId, archived) {
   await api('/panel/api/chat/archive', {
@@ -1014,8 +1014,8 @@ function cancelRename() {
 }
 
 /**
- * Сохранение имени из списка: сервер пишет его в chats.json, как и `/rename`.
- * Enter и потеря фокуса приходят оба — второй раз запрос не шлём.
+ * Saving the name from the list: the server writes it to chats.json, just like `/rename`.
+ * Enter and loss of focus both come — we don't send the request a second time.
  */
 async function commitRename(input) {
   if (renameCommitted.has(input)) return;
@@ -1042,8 +1042,8 @@ async function commitRename(input) {
 }
 
 /**
- * Страница списка. reset — новый поиск или первый вход; иначе догружаем
- * следующую страницу и дописываем её к уже показанным диалогам.
+ * List page. reset — a new search or the first entry; otherwise we load
+ * the next page and append it to the already shown chats.
  */
 async function loadChats(reset = true) {
   if (!reset && (loadingChats || !nextCursor)) return;
@@ -1065,8 +1065,8 @@ async function loadChats(reset = true) {
     const incoming = data.chats || [];
     if (reset) chats = incoming;
     else {
-      // Пока листали, наверху мог появиться новый разговор: страницы сдвинулись,
-      // и одна и та же запись пришла бы дважды.
+      // While paging, a new chat could appear at the top: the pages shifted,
+      // and the same record would come twice.
       const seen = new Set(chats.map((chat) => chat.id));
       chats = chats.concat(incoming.filter((chat) => !seen.has(chat.id)));
     }
@@ -1082,7 +1082,7 @@ async function loadChats(reset = true) {
   }
 }
 
-/** Первая страница не заполнила сайдбар — скролла не будет, догружаем сами. */
+/** The first page didn't fill the sidebar — there won't be a scroll, we load more ourselves. */
 function maybeLoadMore() {
   const box = el('chat-list');
   if (!nextCursor || loadingChats || box.clientHeight === 0) return;
@@ -1091,7 +1091,7 @@ function maybeLoadMore() {
   }
 }
 
-/** Ход закончился: двигаем свой диалог наверх, не сбрасывая уже загруженные страницы. */
+/** The turn ended: we move our chat to the top without resetting the already loaded pages. */
 function rememberChat(chat, liveText) {
   if (!chat) return;
   const merged = {
@@ -1099,8 +1099,8 @@ function rememberChat(chat, liveText) {
     preview: cleanPreview(chat.preview || liveText || ''),
     updatedAt: chat.updatedAt || new Date().toISOString(),
   };
-  // Архивный разговор ответом не возвращается в общий список: иначе архив
-  // переставал бы значить «не вижу каждый день».
+  // An archived chat isn't returned to the common list by a response: otherwise the archive
+  // would stop meaning "I don't see it every day".
   if (merged.archived) {
     const at = archivedChats.findIndex((item) => item.id === merged.id);
     if (at >= 0) archivedChats[at] = merged;
@@ -1159,8 +1159,8 @@ function clearPending(revoke = true) {
 }
 
 function addFiles(list) {
-  // Прикрепить файл можно, только пока сам этот разговор молчит: вложение уйдёт
-  // вместе со следующей репликой, а она в занятый разговор не пойдёт.
+  // A file can be attached only while this chat is silent: the attachment will go
+  // with the next message, and it won't go into a busy chat.
   if (streaming() || !writable) return;
   let total = pending.reduce((sum, item) => sum + item.file.size, 0);
   for (const file of Array.from(list || [])) {
@@ -1232,21 +1232,21 @@ function renderHistory(messages) {
 }
 
 async function selectChat(id) {
-  // Переключение разговоров больше не заперто: уходим, отписавшись от потока
-  // (ход доживёт на сервере), и цепляемся к новому, если там что-то идёт.
+  // Switching chats is no longer locked: we leave by unsubscribing from the stream
+  // (the turn will survive on the server), and attach to the new one if something is running there.
   if (!id) return;
   if (liveChatId) detachLive();
   markRead(id);
   endDraft();
-  // Из черновика могли остаться экран выбора workspace'а — открытому чату он чужой.
+  // The workspace picker screen could remain from the draft — it's foreign to an open chat.
   restoreEmptyState();
   const token = ++historyToken;
   currentId = id;
-  // Индикатор очереди — про открытый разговор: у чужого он был бы враньём.
+  // The queue indicator is about the open chat: at someone else's it would be a lie.
   renderQueue();
   history.replaceState(null, '', '/panel/chat?chat=' + encodeURIComponent(id));
   renderChats();
-  // Канал уже известен из списка: композер не должен на миг обещать запись.
+  // The channel is already known from the list: the composer must not promise writing for a moment.
   setComposer(Boolean(chats.find((chat) => chat.id === id)?.readOnly));
   try {
     const data = await api('/panel/api/chat/history?id=' + encodeURIComponent(id));
@@ -1256,7 +1256,7 @@ async function selectChat(id) {
     currentWorkspace = data.chat.workspace || 'talk';
     updateComposerHint();
     history.replaceState(null, '', '/panel/chat?chat=' + encodeURIComponent(currentId));
-    // Архивный разговор открывается из своей секции и в общий список не попадает.
+    // An archived chat opens from its own section and doesn't get into the common list.
     if (data.chat.archived) {
       if (!archivedChats.some((chat) => chat.id === currentId)) archivedChats.unshift(data.chat);
     } else if (!chats.some((chat) => chat.id === currentId)) {
@@ -1270,9 +1270,9 @@ async function selectChat(id) {
     setNote(chatHint(currentChat));
     renderVia(currentChat);
     renderHistory(data.messages || []);
-    // Очередь переживает F5: сервер отдаёт её вместе с историей.
+    // The queue survives F5: the server returns it together with the history.
     setQueue(id, data.queue || []);
-    // Разговор открылся, а ход всё ещё идёт: цепляемся к живому потоку.
+    // The chat opened, but the turn is still running: we attach to the live stream.
     if (data.live && !streaming()) void attachLive();
     closeMenu();
   } catch (error) {
@@ -1281,10 +1281,10 @@ async function selectChat(id) {
   }
 }
 
-/* ── новый чат ──────────────────────────────────────────────────────────────
-   Клик по «Новый чат» сразу открывает новый чат: слева появляется строка
-   черновика, справа — выбор workspace'а. Папку можно менять сколько угодно раз,
-   пока не ушло первое сообщение: настоящий чат создаётся только с ним. */
+/* ── new chat ──────────────────────────────────────────────────────────────
+   Clicking "New chat" immediately opens a new chat: a draft row appears on the left,
+   a workspace picker on the right. The folder can be changed any number of times
+   until the first message is sent: the real chat is created only with it. */
 function setDraft(on) {
   draft = on;
   el('new-chat').hidden = on;
@@ -1296,7 +1296,7 @@ function endDraft() {
   if (draft) setDraft(false);
 }
 
-/** Создаёт разговор на сервере — ровно в момент отправки первой реплики. */
+/** Creates the chat on the server — exactly at the moment the first message is sent. */
 async function createChat() {
   const data = await api('/panel/api/chats', {
     method: 'POST',
@@ -1307,10 +1307,10 @@ async function createChat() {
   currentChat = data.chat;
   currentWorkspace = data.chat.workspace || draftWorkspace;
   setDraft(false);
-  // Экран выбора мог остаться в chat-empty после показа workspace'ов.
+  // The picker screen could remain in chat-empty after showing workspaces.
   restoreEmptyState();
-  // rememberChat сам убирает дубликат и двигает разговор наверх, не сбрасывая
-  // уже догруженные страницы списка.
+  // rememberChat itself removes the duplicate and moves the chat to the top, without resetting
+  // the already loaded pages of the list.
   rememberChat(data.chat);
   el('chat-list').scrollTop = 0;
   history.replaceState(null, '', '/panel/chat?chat=' + encodeURIComponent(currentId));
@@ -1341,7 +1341,7 @@ function startDraft(workspace = defaultWorkspace) {
   setTitle(cfg.ui.newChat);
   renderVia(null);
   showEmpty(true);
-  // Выбор workspace — не отдельный экран, а пустое состояние нового чата.
+  // Workspace selection is not a separate screen, but the empty state of a new chat.
   renderPicker();
   updateComposerHint();
   setNote('');
@@ -1351,9 +1351,9 @@ function startDraft(workspace = defaultWorkspace) {
   el('chat-input').focus();
 }
 
-/* ── workspace'ы ─────────────────────────────────────────────────────────────
-   Экран выбора: папки человека, а не контейнеры. Создание и удаление тут —
-   операции над каталогами, контейнер не трогаем вовсе. */
+/* ── workspaces ─────────────────────────────────────────────────────────────
+   Picker screen: the person's folders, not containers. Creating and deleting here —
+   operations on directories, we don't touch the container at all. */
 
 function wsLabel(slug) {
   const found = workspaces.find((item) => item.slug === slug);
@@ -1425,10 +1425,10 @@ function newWsCard(open) {
   );
 }
 
-// Готовые запросы берём из словаря: подпись в панели, а не текст памяти.
+// We take ready-made prompts from the dictionary: a caption in the panel, not memory text.
 const wsPrompts = () => cfg.ui.wsPrompts;
 
-/** Подпись над готовыми запросами: они уйдут в выбранную папку, а не всегда в «Разговор». */
+/** Caption above ready-made prompts: they'll go to the selected folder, not always to "Talk". */
 function suggestTitle() {
   return fill(cfg.ui.wsStartIn, { name: wsLabel(currentWorkspace).toUpperCase() });
 }
@@ -1451,7 +1451,7 @@ function restoreEmptyState() {
   if (defaultEmptyHtml) el('chat-empty').innerHTML = defaultEmptyHtml;
 }
 
-/** Пустое состояние черновика: выбор workspace'а живёт прямо в новом чате. */
+/** Empty state of the draft: workspace selection lives right in the new chat. */
 function renderPicker() {
   el('chat-empty').hidden = false;
   el('chat-empty').innerHTML = pickerHtml();
@@ -1540,7 +1540,7 @@ async function submitWorkspace() {
   await openWorkspace(data.workspace.slug);
 }
 
-/** Выбор папки: в черновике просто переключаем её, не покидая новый чат. */
+/** Folder selection: in a draft we just switch it without leaving the new chat. */
 async function openWorkspace(slug) {
   if (liveChatId) detachLive();
   if (!draft) {
@@ -1553,14 +1553,14 @@ async function openWorkspace(slug) {
   }
   draftWorkspace = slug;
   currentWorkspace = slug;
-  // Перерисовка заодно показывает только что созданную папку и гасит форму создания.
+  // The redraw also shows the just-created folder and hides the creation form.
   renderPicker();
   updateComposerHint();
   setNote('');
   el('chat-input').focus();
 }
 
-/** Готовый запрос уходит в выбранную папку — и создаёт чат, как обычная реплика. */
+/** A ready-made prompt goes to the selected folder — and creates a chat, like a regular message. */
 async function startPrompt(prompt) {
   if (!draft) startDraft();
   await sendText(prompt);
@@ -1569,11 +1569,11 @@ async function startPrompt(prompt) {
 function updateComposerHint() {
   const input = el('chat-input');
   if (input) input.placeholder = fill(cfg.ui.wsInputPlaceholder, { name: wsLabel(currentWorkspace) });
-  // Разговор мог переехать в другую рабочую папку — дерево файлов меняется следом.
+  // The chat could have moved to another working folder — the file tree changes after it.
   syncFilesWorkspace();
 }
 
-/** Список папок изменился: перерисовываем выбор, не выкидывая человека из черновика. */
+/** The folder list changed: we redraw the picker without throwing the person out of the draft. */
 function refreshPicker() {
   if (!draft) {
     startDraft();
@@ -1618,25 +1618,25 @@ function askDeleteWorkspace(slug) {
   };
 }
 
-/* ── файлы workspace ────────────────────────────────────────────────────────
-   Правая панель: дерево рабочей папки открытого разговора и предпросмотр файла.
-   Дерево грузится лениво, по папкам; открытые папки и выбранный файл живут в
-   памяти, а ширина панели и её открытость — в localStorage. */
+/* ── workspace files ────────────────────────────────────────────────────────
+   Right panel: the file tree of the open chat's working folder and file preview.
+   The tree loads lazily, by folder; open folders and the selected file live in
+   memory, while the panel width and its openness — in localStorage. */
 const FILES_OPEN_KEY = 'icarus.files-open';
 const FILES_WIDTH_KEY = 'icarus.files-w';
 const FILES_PREVIEW_KEY = 'icarus.files-preview-h';
 const FILES_WIDTH_DEFAULT = 400;
 const FILES_WIDTH_MIN = 300;
-/** Потолок вдвое выше прежнего: панель можно растянуть на полэкрана. */
+/** The ceiling is twice the previous one: the panel can be stretched to half the screen. */
 const FILES_WIDTH_MAX = 1440;
 const FILES_PREVIEW_MIN = 90;
 
 let filesOpen = false;
-/** Slug workspace'а, чьё дерево сейчас нарисовано. */
+/** Slug of the workspace whose tree is currently drawn. */
 let filesWorkspace = null;
-/** Путь для подписи над деревом: `~/icarus/…/workspaces/talk`. */
+/** Path for the caption above the tree: `~/icarus/…/workspaces/talk`. */
 let filesRootPath = '';
-/** path → { entries, truncated }; грузим только раскрытые папки. */
+/** path → { entries, truncated }; we load only expanded folders. */
 let filesCache = new Map();
 const filesExpanded = new Set();
 let filesSelected = null;
@@ -1644,12 +1644,12 @@ let filesError = '';
 let filesRootToken = 0;
 let filesPreviewToken = 0;
 let filesPreviewHeight = 0;
-/** Текст для кнопки «копировать»: у картинок и бинаря его нет — кнопки тоже. */
+/** Text for the "copy" button: images and binaries don't have it — no button either. */
 let filesPreviewCopy = null;
 let filesCopyTimer = 0;
-/** Идёт удаление: второй клик по корзине не должен отправить второй запрос. */
+/** Deletion in progress: a second click on the trash must not send a second request. */
 let filesDeleting = false;
-/** Поиск по файлам: запрос, находки и защита от гонок при быстром вводе. */
+/** File search: query, hits and race protection during fast typing. */
 let filesSearch = '';
 let filesSearchHits = [];
 let filesSearchScanned = 0;
@@ -1658,11 +1658,11 @@ let filesSearchError = '';
 let filesSearchBusy = false;
 let filesSearchTimer = 0;
 let filesSearchToken = 0;
-/** Меньше двух символов искать бессмысленно: совпадений сотни, а скан на каждый ввод. */
+/** Searching fewer than two characters is pointless: there are hundreds of matches, and a scan on every input. */
 const FILES_SEARCH_MIN = 2;
 /**
- * Последняя позиция каретки в поле ввода. Путь из предпросмотра вставляем туда,
- * а если человек в поле ещё не вставал — в конец: уже набранное не переписываем.
+ * Last caret position in the input field. We insert the path from the preview there,
+ * and if the person hasn't been in the field yet — at the end: we don't overwrite what's typed.
  */
 let composerCaret = null;
 
@@ -1712,7 +1712,7 @@ function saveFilesOpen(open) {
   try {
     localStorage.setItem(FILES_OPEN_KEY, open ? '1' : '0');
   } catch {
-    /* приватный режим — состояние просто не запомнится */
+    /* private mode — the state simply won't be remembered */
   }
 }
 
@@ -1729,7 +1729,7 @@ function saveFilesWidth(width) {
   try {
     localStorage.setItem(FILES_WIDTH_KEY, String(width));
   } catch {
-    /* приватный режим */
+    /* private mode */
   }
 }
 
@@ -1746,11 +1746,11 @@ function saveFilesPreviewHeight(height) {
   try {
     localStorage.setItem(FILES_PREVIEW_KEY, String(Math.round(height)));
   } catch {
-    /* приватный режим */
+    /* private mode */
   }
 }
 
-/** Потолок ширины зависит от окна: панель не должна съесть ленту целиком. */
+/** The width ceiling depends on the window: the panel must not eat the whole feed. */
 function filesWidthLimit() {
   const width = window.innerWidth || 1280;
   return Math.max(FILES_WIDTH_MIN, Math.min(FILES_WIDTH_MAX, width - 720));
@@ -1785,10 +1785,10 @@ function hideFilesPreview() {
 
 function showFilesPreview(html) {
   el('files-preview').innerHTML = html;
-  // Старое содержимое больше не на экране: копировать его уже нечего.
+  // The old content is no longer on screen: there's nothing to copy.
   filesPreviewCopy = null;
   el('files-panel').classList.add('has-preview');
-  // Первый файл забирает примерно половину панели; дальше помним, что человек выбрал.
+  // The first file takes about half the panel; after that we remember what the person chose.
   if (!filesPreviewHeight) {
     setFilesPreviewHeight(
       storedFilesPreviewHeight() || Math.round((el('files-panel').clientHeight || 720) * 0.45),
@@ -1798,7 +1798,7 @@ function showFilesPreview(html) {
   }
 }
 
-/** Строки дерева: рекурсивно по раскрытым папкам, глубина — отступом. */
+/** Tree rows: recursively by expanded folders, depth — by indent. */
 function treeRows(dir, depth, rows) {
   const list = filesCache.get(dir);
   if (!list) return;
@@ -1834,12 +1834,12 @@ function treeRows(dir, depth, rows) {
   }
 }
 
-/** Искомый текст длиннее двух символов: только тогда запускаем запрос. */
+/** The searched text is longer than two characters: only then do we start a request. */
 function filesSearchActive() {
   return filesSearch.trim().length >= FILES_SEARCH_MIN;
 }
 
-/** Находка с подсветкой совпадения: esc по кускам, иначе `<mark>` стал бы текстом. */
+/** A hit with match highlighting: esc by pieces, otherwise `<mark>` would become text. */
 function searchSnippet(hit) {
   const text = String(hit.text || '');
   const match = hit.match;
@@ -1853,7 +1853,7 @@ function searchSnippet(hit) {
   );
 }
 
-/** Результаты поиска занимают место дерева: два списка в одной колонке не нужны. */
+/** Search results take the place of the tree: two lists in one column aren't needed. */
 function searchRows() {
   const rows = [];
   if (filesSearchBusy) rows.push('<p class="files-note">' + esc(cfg.ui.filesSearching) + '</p>');
@@ -1896,7 +1896,7 @@ function renderFiles() {
   if (filesSearchActive()) {
     rows.push(...searchRows());
   } else if (filesSearch.trim()) {
-    // Один символ дал бы сотни совпадений и скан папки на каждую букву.
+    // A single character would give hundreds of matches and a folder scan on every letter.
     rows.push('<p class="files-note">' + esc(cfg.ui.filesTwoChars) + '</p>');
   } else {
     const root = filesCache.get('');
@@ -1915,7 +1915,7 @@ function renderFiles() {
   tree.scrollTop = keep;
 }
 
-/** Корень workspace'а заново: панель открыли или разговор переехал в другую папку. */
+/** Workspace root anew: the panel was opened or the chat moved to another folder. */
 async function loadFilesRoot() {
   if (!filesOpen) return;
   const token = ++filesRootToken;
@@ -1926,7 +1926,7 @@ async function loadFilesRoot() {
   filesExpanded.clear();
   filesSelected = null;
   filesError = '';
-  // Поиск относится к прошлому workspace'у: его находки здесь были бы ложью.
+  // The search belongs to the previous workspace: its hits here would be a lie.
   filesSearch = '';
   filesSearchHits = [];
   filesSearchScanned = 0;
@@ -1953,9 +1953,9 @@ async function loadFilesRoot() {
 }
 
 /**
- * Поиск по workspace. Ответы могут прийти не в том порядке, в каком их
- * отправили, поэтому у каждого запроса свой token: устаревший ответ не должен
- * затереть находки для уже стёртого запроса.
+ * Search across the workspace. Responses may arrive out of the order in which they
+ * were sent, so each request has its own token: a stale response must not
+ * overwrite the hits for an already erased query.
  */
 async function runFilesSearch() {
   if (!filesOpen || !filesWorkspace) return;
@@ -1992,8 +1992,8 @@ async function runFilesSearch() {
 }
 
 /**
- * Ход закончился — агент мог написать файлы. Дерево перечитываем, сохраняя
- * раскрытые папки и выбранный файл: панель не должна схлопываться посреди работы.
+ * The turn ended — the agent could have written files. We re-read the tree while preserving
+ * the expanded folders and the selected file: the panel must not collapse mid-work.
  */
 async function refreshFilesTree() {
   if (!filesOpen || !filesWorkspace) return;
@@ -2026,12 +2026,12 @@ async function refreshFilesTree() {
     filesSelected = null;
     hideFilesPreview();
   }
-  // Агент мог написать файл, который сейчас ищут: результаты пересчитываем.
+  // The agent could have written a file that's currently being searched: we recompute the results.
   if (filesSearchActive()) void runFilesSearch();
   else renderFiles();
 }
 
-/** Запись из уже загруженного дерева: по ней понятно, файл это или папка. */
+/** An entry from the already loaded tree: it shows whether it's a file or a folder. */
 function entryAt(relative) {
   const cut = relative.lastIndexOf('/');
   const parent = cut === -1 ? '' : relative.slice(0, cut);
@@ -2064,7 +2064,7 @@ function toggleFilesPanel() {
   else openFilesPanel();
 }
 
-/** Разговор переехал в другую папку: дерево меняется следом. */
+/** The chat moved to another folder: the tree changes after it. */
 function syncFilesWorkspace() {
   if (!filesOpen) return;
   if (filesWorkspace === currentWorkspace && filesCache.has('')) return;
@@ -2101,7 +2101,7 @@ async function toggleFolder(relative) {
   renderFiles();
 }
 
-/** Убирает удалённую запись из локального дерева, не дожидаясь перечитывания. */
+/** Removes a deleted entry from the local tree without waiting for a re-read. */
 function forgetFilesPath(relative) {
   const cut = relative.lastIndexOf('/');
   const parent = cut === -1 ? '' : relative.slice(0, cut);
@@ -2121,8 +2121,8 @@ function forgetFilesPath(relative) {
 }
 
 /**
- * DELETE отдельным запросом: `api()` рассчитан на JSON-успех, а тут важен
- * именно 409 «папка не пуста» — по нему панель и спрашивает подтверждение.
+ * DELETE as a separate request: `api()` expects a JSON success, but here what matters is
+ * exactly the 409 "folder not empty" — by it the panel also asks for confirmation.
  */
 async function deleteFilesEntryRequest(slug, relative, force) {
   const query = new URLSearchParams({ workspace: slug, path: relative });
@@ -2137,7 +2137,7 @@ async function deleteFilesEntryRequest(slug, relative, force) {
   };
 }
 
-/** Подтверждение удаления: окно, а не тост — удалённое не вернуть. */
+/** Delete confirmation: a window, not a toast — the deleted can't be returned. */
 function askDeleteEntry(entry, nonEmpty) {
   return new Promise((resolve) => {
     const overlay = document.createElement('div');
@@ -2176,9 +2176,9 @@ function askDeleteEntry(entry, nonEmpty) {
 }
 
 /**
- * Удаление: файл всегда спрашивает подтверждение; папку сначала пробуем убрать
- * без force — пустая удаляется сразу, а непустая отвечает 409 и тогда решает
- * человек. Сервер тоже не удалит непустую папку без явного force.
+ * Deletion: a file always asks for confirmation; for a folder we first try to remove it
+ * without force — an empty one is deleted immediately, a non-empty one responds 409 and then the
+ * person decides. The server also won't delete a non-empty folder without an explicit force.
  */
 async function deleteFilesEntry(relative) {
   if (!filesOpen || !filesWorkspace || filesDeleting) return;
@@ -2232,23 +2232,23 @@ async function deleteFilesEntry(relative) {
   }
 }
 
-/** Путь из ссылки/картинки markdown внутрь workspace; `null` — не наш файл. */
+/** Path from a markdown link/image inside the workspace; `null` — not our file. */
 function workspaceRelative(raw) {
   let value = String(raw || '').trim().replace(/^\/+/, '');
   if (!value) return null;
   const own = 'workspaces/' + filesWorkspace + '/';
   if (value.startsWith(own)) return value.slice(own.length);
-  // Чужие рабочие папки и служебное — не показываем и не открываем.
+  // Other people's working folders and service ones — we don't show and don't open.
   if (/^(?:workspaces|\.icarus|incoming)\//.test(value)) return null;
   if (/^[a-z]+:\/\//i.test(value) || value.startsWith('data:')) return null;
   return value;
 }
 
-/** Относительный путь внутри workspace считаем от папки самого markdown-файла. */
+/** We count a relative path inside the workspace from the folder of the markdown file itself. */
 function resolvePreviewPath(basePath, raw) {
   let href = String(raw || '').trim();
   if (!href || href.startsWith('#')) return null;
-  // Чужие схемы и адреса панели — не файлы workspace: ссылка должна остаться ссылкой.
+  // Other schemes and panel addresses — not workspace files: the link must remain a link.
   if (/^[a-z][a-z0-9+.-]*:/i.test(href)) return null;
   if (href.startsWith('/') && !href.startsWith('/workspaces/')) return null;
   href = href.split('#')[0].split('?')[0];
@@ -2256,7 +2256,7 @@ function resolvePreviewPath(basePath, raw) {
   try {
     href = decodeURIComponent(href);
   } catch {
-    /* битое кодирование — оставляем как есть */
+    /* broken encoding — we leave as is */
   }
   const local = workspaceRelative(href);
   if (!local) return null;
@@ -2274,7 +2274,7 @@ function resolvePreviewPath(basePath, raw) {
   return parts.join('/');
 }
 
-/** Картинка из markdown: renderer уже завернул её в /chat/image — достаём путь. */
+/** Image from markdown: the renderer already wrapped it in /chat/image — we extract the path. */
 function markdownImagePath(src) {
   const value = String(src || '');
   if (!value.startsWith('/panel/api/chat/image?')) return value;
@@ -2310,8 +2310,8 @@ function bindPreviewFiles(filePath) {
 }
 
 /**
- * Вставка пути в поле ввода. Именно вставка: уже набранный текст остаётся,
- * путь встаёт в каретку, а если человек в поле ещё не вставал — в конец.
+ * Inserting a path into the input field. Specifically insertion: already typed text remains,
+ * the path goes to the caret, and if the person hasn't been in the field yet — at the end.
  */
 function insertPathIntoChat(relative) {
   const input = el('chat-input');
@@ -2324,7 +2324,7 @@ function insertPathIntoChat(relative) {
   const at = Math.min(composerCaret ?? value.length, value.length);
   const before = value.slice(0, at);
   const after = value.slice(at);
-  // Пробелы по краям — только если без них путь слипнется с соседним текстом.
+  // Spaces on the edges — only if without them the path would stick to adjacent text.
   const lead = before && !/\s$/.test(before) ? ' ' : '';
   const tail = after && !/^\s/.test(after) ? ' ' : '';
   input.value = before + lead + relative + tail + after;
@@ -2335,22 +2335,22 @@ function insertPathIntoChat(relative) {
     try {
       input.setSelectionRange(caret, caret);
     } catch {
-      /* браузер без поддержки — каретка просто останется где была */
+      /* browser without support — the caret will simply stay where it was */
     }
   }
   growInput();
   setNote('');
 }
 
-/** Запоминаем каретку, пока человек работает с полем ввода. */
+/** We remember the caret while the person works with the input field. */
 function rememberComposerCaret() {
   const input = el('chat-input');
   if (typeof input.selectionStart === 'number') composerCaret = input.selectionStart;
 }
 
 /**
- * Текст в буфер обмена. Clipboard API живёт только в защищённом контексте, а
- * панель часто открыта по http в локальной сети — тогда копируем скрытой textarea.
+ * Text to the clipboard. The Clipboard API lives only in a secure context, and
+ * the panel is often opened over http on a local network — then we copy with a hidden textarea.
  */
 async function writeClipboard(text) {
   try {
@@ -2369,14 +2369,14 @@ async function writeClipboard(text) {
     try {
       ok = document.execCommand('copy');
     } catch {
-      /* execCommand в этом браузере нет — остаётся «не вышло» */
+      /* there's no execCommand in this browser — "didn't work" remains */
     }
     area.remove();
     return ok;
   }
 }
 
-/** Предпросмотр показывает первые 256 КБ — для копирования берём файл целиком. */
+/** The preview shows the first 256 KB — for copying we take the whole file. */
 async function fetchPreviewFullText(source) {
   if (!source.slug || !source.path) return null;
   try {
@@ -2401,7 +2401,7 @@ async function copyPreviewContent(button) {
     return;
   }
   setNote('');
-  // Ответ на клик: иконка на секунду становится галочкой, иначе непонятно, сработало ли.
+  // Response to the click: the icon becomes a checkmark for a second, otherwise it's unclear if it worked.
   button.classList.add('copied');
   button.title = cfg.ui.filesCopied;
   button.setAttribute('aria-label', cfg.ui.filesCopied);
@@ -2418,7 +2418,7 @@ async function copyPreviewContent(button) {
 
 function renderFilePreview(data) {
   const file = data.file || {};
-  // Копировать имеет смысл только текст: картинку и бинарь в буфер не положить.
+  // Copying only makes sense for text: an image and a binary can't be put on the clipboard.
   const copyable = data.kind === 'markdown' || data.kind === 'text';
   const copy = copyable
     ? '<button type="button" class="files-copy" title="' + COPY_TITLE +
@@ -2438,8 +2438,8 @@ function renderFilePreview(data) {
       (data.truncated ? '<p class="files-truncated">' + esc(cfg.ui.filesTruncated) + '</p>' : '') +
       '<div class="md files-md">' + markdown(data.text || '') + '</div>';
   } else if (data.kind === 'text') {
-    // Подсветка знает только те языки, которые панель показывает сама; для
-    // остальных `highlightCode` вернёт null, и текст останется текстом.
+    // Highlighting knows only the languages the panel shows itself; for
+    // the rest `highlightCode` returns null, and the text remains text.
     const highlighted = typeof highlightCode === 'function' ? highlightCode(data.text || '', file.type) : null;
     body =
       (data.truncated ? '<p class="files-truncated">' + esc(cfg.ui.filesTruncated) + '</p>' : '') +
@@ -2447,8 +2447,8 @@ function renderFilePreview(data) {
         ? '<pre class="files-code">' + esc(data.text || '') + '</pre>'
         : '<pre class="files-code hl">' + highlighted + '</pre>');
   } else if (data.kind === 'image') {
-    // Вектор тянем на всю ширину: он не мылится. Растр показываем в натуральную
-    // величину, но не шире панели — иначе маленькая картинка выглядела бы кашей.
+    // We stretch the vector to the full width: it doesn't blur. We show the raster at natural
+    // size, but not wider than the panel — otherwise a small image would look like mush.
     const vector = file.type === 'SVG' ? ' vector' : '';
     body =
       '<div class="files-image' + vector + '"><a href="' + esc(data.url || '#') + '" target="_blank" rel="noopener">' +
@@ -2470,7 +2470,7 @@ function renderFilePreview(data) {
   if (data.kind === 'markdown') bindPreviewFiles(file.path || '');
 }
 
-/** Клик по файлу: первый открывает предпросмотр, повторный его прячет. */
+/** Click on a file: the first opens the preview, a repeated one hides it. */
 async function openFilesPreview(relative) {
   if (!filesOpen || !filesWorkspace) return;
   if (filesSelected === relative) {
@@ -2508,23 +2508,23 @@ el('files-tree').addEventListener('click', (event) => {
     void deleteFilesEntry(remove.dataset.del);
     return;
   }
-  // Результат поиска — та же цель «открыть файл», но приходит из другой разметки.
+  // A search result is the same goal "open file", but comes from a different markup.
   const result = event.target.closest('.srow');
   if (result) {
     event.preventDefault();
     void openFilesPreview(result.dataset.path);
     return;
   }
-  // Вся строка — цель клика, не только кнопка с именем: в макете строка широкая,
-  // и попадать в неё должно быть просто.
+  // The whole row is the click target, not only the button with the name: in the mockup the row is wide,
+  // and hitting it should be easy.
   const row = event.target.closest('.frow');
   if (!row) return;
   if (row.dataset.dir === '1') void toggleFolder(row.dataset.path);
   else void openFilesPreview(row.dataset.path);
 });
 
-// Поиск: пока человек печатает, список обновляется сразу (иначе поле выглядит
-// мёртвым), а запрос уходит с задержкой — на каждую букву сканировать папку незачем.
+// Search: while the person types, the list updates immediately (otherwise the field looks
+// dead), and the request goes with a delay — there's no need to scan the folder on every letter.
 const filesSearchInput = el('files-search');
 filesSearchInput.addEventListener('input', () => {
   filesSearch = filesSearchInput.value;
@@ -2541,7 +2541,7 @@ filesSearchInput.addEventListener('keydown', (event) => {
   void runFilesSearch();
 });
 
-// «В чат» в шапке предпросмотра: путь вставляется в поле ввода, а не отправляется.
+// "To chat" in the preview header: the path is inserted into the input field, not sent.
 el('files-preview').addEventListener('click', (event) => {
   const copy = event.target.closest('.files-copy');
   if (copy) {
@@ -2556,7 +2556,7 @@ el('files-preview').addEventListener('click', (event) => {
   if (relative) insertPathIntoChat(relative);
 });
 
-/* Ширина панели: тянем за левую границу, стрелками — с клавиатуры. */
+/* Panel width: we drag the left border, with the arrow keys — from the keyboard. */
 const filesHandle = el('files-resizer');
 let filesDrag = null;
 
@@ -2594,7 +2594,7 @@ filesHandle.addEventListener('keydown', (event) => {
   saveFilesWidth(applyFilesWidth(next));
 });
 
-/* Высота предпросмотра: тянем за разделитель между деревом и файлом. */
+/* Preview height: we drag the splitter between the tree and the file. */
 const filesSplit = el('files-split');
 let filesSplitDrag = null;
 
@@ -2635,13 +2635,13 @@ filesSplit.addEventListener('keydown', (event) => {
   saveFilesPreviewHeight(setFilesPreviewHeight(next));
 });
 
-/* Окно сузили — подрезаем сохранённые размеры, чтобы чат не пропал. */
+/* The window was narrowed — we trim the saved sizes so the chat doesn't disappear. */
 window.addEventListener('resize', () => {
   if (!filesDrag) applyFilesWidth(storedFilesWidth());
   if (!filesSplitDrag && filesPreviewHeight) setFilesPreviewHeight(filesPreviewHeight);
 });
 
-/* ── живой ответ ──────────────────────────────────────────────────────────── */
+/* ── live response ─────────────────────────────────────────────────────────── */
 function scrollToBottom(force = false) {
   const box = el('chat-scroll');
   if (force || box.scrollHeight - box.scrollTop - box.clientHeight < 180) {
@@ -2650,9 +2650,9 @@ function scrollToBottom(force = false) {
 }
 
 /**
- * Реплика человека в ленте. Возвращает узел: отправка убирает его, если сервер
- * принял текст в очередь (тогда реплика появится сама, уже как ход).
- * `before` — чтобы реплика из очереди встала выше плашки ответа, а не под ней.
+ * The person's message in the feed. Returns the node: sending removes it if the server
+ * accepted the text into the queue (then the message appears by itself, already as a turn).
+ * `before` — so that a message from the queue stands above the response box, not under it.
  */
 function addUser(text, files = [], before = null) {
   const node = document.createElement('div');
@@ -2716,8 +2716,8 @@ function addAssistant() {
 }
 
 /**
- * Плажка ответа для идущего хода. Второй заход в тот же ход — не новый ответ:
- * берём уже нарисованную плашку и достраиваем её поверх остальных.
+ * Response box for an ongoing turn. A second entry into the same turn isn't a new response:
+ * we take the already drawn box and build on it above the others.
  */
 function assistantBoxFor(chatId) {
   const existing = liveBodies.get(chatId);
@@ -2732,14 +2732,14 @@ function assistantBoxFor(chatId) {
   return box;
 }
 
-/** Реплика не ушла (её не приняли): убираем и пузырь, иначе в ленте останется вопрос без ответа. */
+/** The message didn't go (it wasn't accepted): we remove both the bubble, otherwise the feed keeps a question without an answer. */
 function dropLastUser() {
   const nodes = el('chat-messages').querySelectorAll('.turn.user');
   const last = nodes[nodes.length - 1];
   if (last) last.remove();
 }
 
-/** Плашка — не ответ, а неудавшийся заход (ход уже занят другим): из ленты её вон. */
+/** The box is not a response, but a failed attempt (the turn is already taken by another): out of the feed. */
 function dropLiveBody(chatId) {
   const box = liveBodies.get(chatId);
   if (!box) return;
@@ -2748,11 +2748,11 @@ function dropLiveBody(chatId) {
 }
 
 /**
- * Ход кончился записью в разговоре, и плашка уже несёт готовый ответ: в ленте её
- * оставляем — это и есть сообщение, которое человек читает. Из карты убираем:
- * вернувшись сюда, панель прочитает запись из истории, а не дорисует второй ответ.
- * Раньше плашку тут выбрасывали из DOM в расчёте, что «запись разговора заменит
- * её», но никто её не перерисовывал: ответ пропадал до перезагрузки страницы.
+ * The turn ended with a record in the chat, and the box already carries the ready response: we leave it
+ * in the feed — that's the message the person reads. We remove it from the map:
+ * returning here, the panel will read the record from history, not draw a second response.
+ * Previously the box was thrown out of the DOM here in the expectation that "the chat record would replace
+ * it", but no one redrew it: the response disappeared until the page reloaded.
  */
 function settleLiveBody(chatId) {
   liveBodies.delete(chatId);
@@ -2761,7 +2761,7 @@ function settleLiveBody(chatId) {
 function renderLive(box) {
   const details = box.trace.querySelector('details.trace');
   if (details) box.traceOpen = details.open;
-  // Раскрытые списки действий детей тоже должны пережить перерисовку.
+  // The expanded lists of child actions must also survive a redraw.
   const opened = new Set();
   box.trace.querySelectorAll('details.sub-actions[open]').forEach((node) => opened.add(node.dataset.sub));
   box.trace.innerHTML = traceHtml(box.steps, opened);
@@ -2773,8 +2773,8 @@ function renderLive(box) {
 }
 
 function handleEvent(box, event) {
-  // Реплика — часть журнала хода, а не только наш пузырь: после F5 и после хода
-  // из очереди она приезжает сюда. Встаёт выше ответа, иначе непонятно, на что он.
+  // The message is part of the turn's log, not just our bubble: after F5 and after a turn
+  // from the queue it arrives here. It stands above the response, otherwise it's unclear what it's for.
   if (event.type === 'user') {
     const text = String(event.text || '');
     if (optimisticUser && optimisticUser.chatId === box.chatId && optimisticUser.text === text) {
@@ -2789,8 +2789,8 @@ function handleEvent(box, event) {
     renderLive(box);
     return;
   }
-  // Шаги и их обновления живут в трассировке ответа: подпись «ТЕРМИНАЛ: такая-то
-  // команда» под композером дублировала её слово в слово, только мельче.
+  // Steps and their updates live in the response trace: the caption "TERMINAL: such-and-such
+  // command" under the composer duplicated it word for word, only smaller.
   if (event.type === 'step') {
     box.steps.push(event.step);
     renderLive(box);
@@ -2839,9 +2839,9 @@ function handleEvent(box, event) {
       box.md.innerHTML = markdown(box.text);
     }
     box.typing.hidden = true;
-    // Ответ окончательный и уже показан живой плашкой: саму плашку оставляем в
-    // ленте (это и есть сообщение), а из карты убираем — иначе следующее
-    // возвращение в этот разговор нарисует его второй раз.
+    // The response is final and already shown by the live box: we leave the box itself
+    // in the feed (that's the message), and remove it from the map — otherwise the next
+    // return to this chat will draw it a second time.
     settleLiveBody(box.chatId);
     if (event.chat) {
       currentChat = event.chat;
@@ -2854,7 +2854,7 @@ function handleEvent(box, event) {
       loadChats(true).catch(() => {});
     }
     setNote(stoppedByUser ? 'остановил — можно писать дальше' : chatHint(currentChat));
-    // Агент мог написать файлы в рабочую папку — дерево справа обновляем сами.
+    // The agent could have written files to the working folder — we update the tree on the right ourselves.
     if (box.chatId === currentId) void refreshFilesTree();
     return;
   }
@@ -2868,18 +2868,18 @@ function handleEvent(box, event) {
 }
 
 /**
- * Отправка реплики. `options.now` — вторая операция: прервать текущий ход и
- * отправить это немедленно. Без неё занятый разговор не отбивает реплику, а
- * ставит её в серверную очередь (202) — человек видит её в индикаторе, а ход
- * начнётся сам, когда освободится.
+ * Sending a message. `options.now` — the second operation: interrupt the current turn and
+ * send this immediately. Without it, a busy chat doesn't reject the message, but
+ * puts it in the server queue (202) — the person sees it in the indicator, and the turn
+ * starts by itself when it frees up.
  */
 async function sendText(forced, options = {}) {
   const input = el('chat-input');
   const text = String(forced ?? input.value).trim();
   const files = pending.slice();
   if (!text && files.length === 0) return;
-  // Команду разбираем до проверки занятости: /stop и /stats нужны именно
-  // во время хода, а обычную реплику в занятый разговор отправлять нельзя.
+  // We parse the command before checking busyness: /stop and /stats are needed exactly
+  // during a turn, while a regular message can't be sent to a busy chat.
   if (text.startsWith('/') && files.length === 0) {
     if (await runCommand(text)) return;
   }
@@ -2911,13 +2911,13 @@ async function sendText(forced, options = {}) {
 
   const turnChatId = currentId;
   const now = options.now === true;
-  // «Сейчас» сначала останавливает чужую работу. Частичный ответ не выбрасываем:
-  // он уже отдан и остаётся в ленте как есть, с пометкой «прервано».
+  // "Now" first stops someone else's work. We don't discard the partial response:
+  // it's already given and remains in the feed as is, marked "interrupted".
   if (now) interruptCurrentBox(turnChatId);
 
-  // Живой поток мог остаться от идущего хода: его плашку не переиспользуем, иначе
-  // новый ответ приклеится к старому. Запоминаем, кому вернуть «живое» состояние,
-  // если реплика уедет в очередь, а чужой ход продолжится.
+  // A live stream could remain from an ongoing turn: we don't reuse its box, otherwise
+  // the new response would stick to the old one. We remember to whom to return the "live" state,
+  // if the message goes to the queue and someone else's turn continues.
   const previous = { abort: liveAbort, box: liveBox, chatId: liveChatId };
   const abort = new AbortController();
   liveAbort = abort;
@@ -2929,7 +2929,7 @@ async function sendText(forced, options = {}) {
   clearPending(false);
   showEmpty(false);
   const userNode = addUser(text, files);
-  // Сервер пришлёт эту же реплику событием хода: свой пузырь у себя не дублируем.
+  // The server will send this same message with a turn event: we don't duplicate our bubble.
   optimisticUser = { chatId: turnChatId, text: text || files.map((item) => item.file.name).join(', ') };
   let box = null;
   let claimed = true;
@@ -2942,8 +2942,8 @@ async function sendText(forced, options = {}) {
       signal: abort.signal,
     });
     if (response.status === 202) {
-      // Сервер взял реплику в очередь. Пузырь убираем: ход начнётся сам, и тогда
-      // сервер объявит реплику событием `user` — иначе текст был бы дважды.
+      // The server took the message to the queue. We remove the bubble: the turn will start by itself, and then
+      // the server will announce the message with a `user` event — otherwise the text would be twice.
       const data = await response.json().catch(() => ({}));
       userNode.remove();
       optimisticUser = null;
@@ -2960,8 +2960,8 @@ async function sendText(forced, options = {}) {
     if (!response.ok) {
       const type = response.headers.get('content-type') || '';
       const data = type.includes('application/json') ? await response.json().catch(() => ({})) : {};
-      // Ход уже идёт (кто-то другой написал туда же): это не ошибка, а повод
-      // прицепиться к живому потоку вместо того, чтобы падать с 409-кой.
+      // The turn is already running (someone else wrote there too): this isn't an error, but a reason
+      // to attach to the live stream instead of falling with a 409.
       if (data.live) {
         userNode.remove();
         optimisticUser = null;
@@ -2971,8 +2971,8 @@ async function sendText(forced, options = {}) {
         await attachLive();
         return;
       }
-      // Ход идёт в другом канале — смотреть здесь нечего: второй ответ начнётся
-      // только со следующей реплики. Пузырь и плашку убираем, текст возвращаем.
+      // The turn is running in another channel — there's nothing to look at here: a second response will start
+      // only with the next message. We remove the bubble and the box, and return the text.
       if (data.busyIn) {
         dropLiveBody(turnChatId);
         dropLastUser();
@@ -2993,14 +2993,14 @@ async function sendText(forced, options = {}) {
     liveBox = box;
     await readStream(response, box);
   } catch (error) {
-    // Ушли в другой разговор — ответ доедет на сервере, панель его догонит.
+    // We left to another chat — the response will reach the server, the panel will catch up.
     if (box && !box.stopped) {
       box.turn.classList.add('error');
       box.text = [box.text, '\n\n[ошибка: ' + error.message + ']'].filter(Boolean).join('');
       box.md.innerHTML = markdown(box.text);
       setNote('');
     } else if (!box) {
-      // Реплика не ушла вовсе — возвращаем её в поле ввода, чтобы не набирать заново.
+      // The message didn't go at all — we return it to the input field so it doesn't have to be typed again.
       userNode.remove();
       optimisticUser = null;
       if (!input.value) input.value = text;
@@ -3011,8 +3011,8 @@ async function sendText(forced, options = {}) {
       if (liveAbort === abort) liveAbort = null;
       if (liveBox === box) liveBox = null;
       markRead(turnChatId);
-      // Ход мог встать и сразу уступить очередь: `busy` по сводке приходит раньше,
-      // чем закрывается наш поток, поэтому догон запускаем и здесь.
+      // The turn could have started and immediately yielded the queue: `busy` from the bulletin arrives earlier
+      // than our stream closes, so we also start the catch-up here.
       if (liveChatId === turnChatId) setLive(null);
       if (currentId === turnChatId && busyChats.has(turnChatId) && !streaming()) void attachLive();
       if (box) box.typing.hidden = true;
@@ -3022,8 +3022,8 @@ async function sendText(forced, options = {}) {
 }
 
 /**
- * «Сейчас»: прерываем текущий ход и сразу отправляем написанное. Текущая плашка
- * остаётся в ленте с тем, что Икар успел сказать, — это и есть частичный ответ.
+ * "Now": interrupt the current turn and immediately send what was written. The current box
+ * remains in the feed with what Icarus managed to say — that's the partial response.
  */
 function interruptCurrentBox(chatId) {
   const box = liveBodies.get(chatId) || (liveBox && liveBox.chatId === chatId ? liveBox : null);
@@ -3048,18 +3048,18 @@ function interruptCurrentBox(chatId) {
   if (liveChatId === chatId) setLive(null);
 }
 
-/** Вернуть «живой поток» тому, кто его вёл: наша реплика уехала в очередь. */
+/** Return the "live stream" to whoever led it: our message went to the queue. */
 function restoreLive(saved) {
   setLive(saved.chatId);
   liveAbort = saved.abort;
   liveBox = saved.box;
 }
 
-/* ── очередь реплик ──────────────────────────────────────────────────────────
-   Очередь живёт на сервере (переживает F5), панель только рисует её вид: счётчик
-   над композером и список того, что доедет после текущего хода. */
+/* ── message queue ──────────────────────────────────────────────────────────
+   The queue lives on the server (survives F5), the panel only draws its view: the counter
+   above the composer and the list of what will arrive after the current turn. */
 
-/** Очередь разговора: `items` — [{id, text}], пустой список убирает индикатор. */
+/** Chat queue: `items` — [{id, text}], an empty list removes the indicator. */
 function setQueue(chatId, items) {
   if (!chatId) return;
   if (items && items.length) queues.set(chatId, items);
@@ -3095,7 +3095,7 @@ function renderQueue() {
   );
 }
 
-/** Убрать реплику из очереди: человек передумал до того, как её отправили. */
+/** Remove a message from the queue: the person changed their mind before it was sent. */
 async function dropQueuedItem(id) {
   if (!currentId) return;
   try {
@@ -3109,7 +3109,7 @@ async function dropQueuedItem(id) {
   }
 }
 
-/** Кнопка «прервать и отправить» живая только когда есть что отправлять. */
+/** The "interrupt and send" button is alive only when there's something to send. */
 function syncNowButton() {
   const button = el('chat-now');
   if (!button) return;
@@ -3117,8 +3117,8 @@ function syncNowButton() {
 }
 
 /**
- * Кнопка «сейчас»: одна операция — прервать чужую работу под свою реплику.
- * Пустое поле — это не отправка, а «просто стоп»: у него своя кнопка.
+ * The "now" button: one operation — interrupt someone else's work for your message.
+ * An empty field isn't a send, but "just stop": it has its own button.
  */
 async function sendNow() {
   if (!String(el('chat-input').value || '').trim()) {
@@ -3128,7 +3128,7 @@ async function sendNow() {
   await sendText(undefined, { now: true });
 }
 
-/** Строчки NDJSON из потока: общий разбор и для отправки, и для догона хода. */
+/** NDJSON lines from the stream: common parsing for both sending and catching up a turn. */
 async function readStream(response, box) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -3138,7 +3138,7 @@ async function readStream(response, box) {
     try {
       chunk = await reader.read();
     } catch (error) {
-      // Отписка рвёт чтение намеренно — это не ошибка ответа.
+      // Unsubscribing breaks the read intentionally — this isn't a response error.
       if (box.stopped) return;
       throw error;
     }
@@ -3153,7 +3153,7 @@ async function readStream(response, box) {
         try {
           handleEvent(box, JSON.parse(line));
         } catch {
-          /* одна битая строка не должна рвать весь ответ */
+          /* one broken line must not break the whole response */
         }
       }
       cut = buffer.indexOf('\n');
@@ -3162,8 +3162,8 @@ async function readStream(response, box) {
 }
 
 /**
- * Перечитать ленту разговора. Нужно там, где ответ уже записан, а в DOM его нет:
- * ход кончился между загрузкой истории и подпиской на живой поток.
+ * Re-read the chat feed. Needed where the response is already recorded but absent in the DOM:
+ * the turn ended between loading the history and subscribing to the live stream.
  */
 async function reloadHistory(chatId) {
   if (currentId !== chatId) return;
@@ -3181,9 +3181,9 @@ async function reloadHistory(chatId) {
 }
 
 /**
- * Догон идущего хода — после F5 или открытия панели на другом устройстве.
- * Сервер сперва отдаёт накопленный журнал, потом живое до самого `done`,
- * поэтому ответ собирается с нуля ровно таким, каким был бы без перезагрузки.
+ * Catch-up of an ongoing turn — after F5 or opening the panel on another device.
+ * The server first gives the accumulated log, then live until `done`,
+ * so the response is assembled from scratch exactly as it would be without a reload.
  */
 async function attachLive() {
   if (streaming() || !currentId) return;
@@ -3199,8 +3199,8 @@ async function attachLive() {
       signal: abort.signal,
     });
     if (!response.ok) {
-      // Ход успел кончиться, пока подписывались: плашка-пустышка — не ответ, её
-      // вон, а готовый ответ уже лежит в записи разговора — перечитываем ленту.
+      // The turn managed to end while we were subscribing: an empty box is not a response, out
+      // with it, and the ready response already lies in the chat record — we re-read the feed.
       dropLiveBody(chatId);
       await reloadHistory(chatId);
       return;
@@ -3209,9 +3209,9 @@ async function attachLive() {
   } catch (error) {
     if (!box.stopped) setNote('догнать ответ не вышло: ' + error.message);
   } finally {
-    // Нас мог обогнать новый ход («прервать и отправить»): тогда «живое»
-    // состояние уже его, и снимать его нельзя — иначе сводка решит, что мы не
-    // подписаны, и прицепит к тому же ходу вторую подписку.
+    // A new turn could have overtaken us ("interrupt and send"): then the "live"
+    // state is already its own, and it can't be removed — otherwise the bulletin decides we're not
+    // subscribed and attaches a second subscription to the same turn.
     if (liveAbort === abort) {
       liveAbort = null;
       if (liveChatId === chatId) setLive(null);
@@ -3222,15 +3222,15 @@ async function attachLive() {
   }
 }
 
-/* ── сводка по всем разговорам ──────────────────────────────────────────────
-   Отдельный канал поверх разговоров: панель узнаёт, что где-то начали думать и
-   где-то закончили, не подписываясь на полный поток каждого разговора. Событий
-   мало (старт и финал), поэтому стримом он не душит. */
+/* ── bulletin across all chats ──────────────────────────────────────────────
+   A separate channel on top of the chats: the panel learns that thinking started somewhere and
+   finished somewhere, without subscribing to the full stream of each chat. There are few
+   events (start and finish), so it doesn't flood with a stream. */
 let bulletin = null;
 
 function applyBulletin(event) {
   if (!event || !event.chatId) return;
-  // Очередь изменилась: её взяли в работу, в неё что-то добавили или сняли.
+  // The queue changed: it was taken to work, something was added to it or removed.
   if (event.type === 'queue') {
     setQueue(event.chatId, event.queue || []);
     return;
@@ -3238,28 +3238,28 @@ function applyBulletin(event) {
   if (event.type === 'busy') {
     busyChats.add(event.chatId);
     renderChats();
-    // Открыт занятый разговор, а мы к нему не подписаны (ход начался в другой
-    // вкладке или мы только что его открыли) — цепляемся.
+    // A busy chat is open, and we aren't subscribed to it (the turn started in another
+    // tab or we just opened it) — we attach.
     if (event.chatId === currentId && !streaming()) void attachLive();
     return;
   }
-  // Имя разговора уточнилось: модель придумала его после хода или человек
-  // переименовал из списка. Двигаем шапку и строку сайдбара, порядок не трогаем.
+  // The chat name was refined: the model came up with it after the turn or the person
+  // renamed it from the list. We move the header and the sidebar row, we don't touch the order.
   if (event.type === 'title') {
     if (event.chat && event.chat.id) applyChatTitle(event.chat.id, event.chat.title);
     return;
   }
   if (event.type !== 'idle') return;
   busyChats.delete(event.chatId);
-  // Ответ окончательный: плашку не выбрасываем — она уже несёт готовый текст.
-  // `idle` приходит по сводке раньше `done` (разные соединения), поэтому именно
-  // здесь ответ и пропадал, если событие успевало первым.
+  // The response is final: we don't throw out the box — it already carries the ready text.
+  // `idle` arrives via the bulletin earlier than `done` (different connections), so exactly
+  // here the response disappeared if the event arrived first.
   settleLiveBody(event.chatId);
   if (event.chat) rememberChat(event.chat);
-  // Ход доехал, пока мы смотрели другой разговор: ставим зелёную точку.
+  // The turn arrived while we were looking at another chat: we set a green dot.
   markUnread(event.chatId);
   renderChats();
-  // Ход мог оставить файлы в рабочей папке — дереву справа есть что показать.
+  // The turn could have left files in the working folder — the tree on the right has something to show.
   void refreshFilesTree();
 }
 
@@ -3267,41 +3267,41 @@ async function syncStatus() {
   try {
     const data = await api('/panel/api/chat/status');
     const incoming = new Set(data.busy || []);
-    // Снимок — истина на момент открытия: подчищаем всё, чего в нём нет (ход мог
-    // кончиться, пока мы были отключены и события за это время потерялись).
+    // The snapshot is the truth at the moment of opening: we clean out everything not in it (a turn could
+    // have ended while we were disconnected and events during that time were lost).
     for (const id of [...busyChats]) if (!incoming.has(id)) busyChats.delete(id);
     for (const id of incoming) busyChats.add(id);
     renderChats();
     if (currentId && busyChats.has(currentId) && !streaming()) void attachLive();
   } catch {
-    /* снимок — удобство; чат должен открыться и без него */
+    /* the snapshot is a convenience; the chat must open without it too */
   }
 }
 
 function startBulletin() {
   if (bulletin || !window.EventSource) return;
   bulletin = new EventSource('/panel/api/chat/events');
-  // `EventSource` сам переподключается, но события за время разрыва теряет —
-  // поэтому на каждое открытие (и первое, и после обрыва) сверяемся с сервером.
+  // `EventSource` reconnects by itself, but loses events during the break —
+  // therefore on every open (both the first and after a break) we check with the server.
   bulletin.onopen = () => void syncStatus();
   bulletin.onmessage = (message) => {
     try {
       applyBulletin(JSON.parse(message.data));
     } catch {
-      /* одна битая строка не должна ронять канал */
+      /* one broken line must not drop the channel */
     }
   };
   bulletin.onerror = () => {
-    // Состояние соединения браузер держит сам; тут делать нечего.
+    // The connection state is kept by the browser itself; there's nothing to do here.
   };
 }
 
 /**
- * Отписка без остановки хода: человек ушёл в другой разговор, но Икар продолжает
- * думать. Вернётся — `/chat/stream` отдаст накопленное с нуля (см. attachLive).
+ * Unsubscribe without stopping the turn: the person left to another chat, but Icarus keeps
+ * thinking. When he returns — `/chat/stream` will give the accumulated from scratch (see attachLive).
  */
 function detachLive() {
-  // Бросаем чтение намеренно: обрыв тут — не ошибка ответа, а уход человека.
+  // We break the read intentionally: a break here isn't a response error, but the person leaving.
   if (liveBox) liveBox.stopped = true;
   if (liveAbort) {
     liveAbort.abort();
@@ -3312,9 +3312,9 @@ function detachLive() {
 }
 
 /**
- * Пока идёт ответ, рядом с «отправить» появляются «стоп» и «прервать и отправить»:
- * остановить ход можно и в середине — вместе с субагентами, которые работают.
- * Сам «отправить» не прячется: при занятом разговоре он кладёт реплику в очередь.
+ * While a response is running, next to "send" appear "stop" and "interrupt and send":
+ * a turn can be stopped even in the middle — together with the subagents that are working.
+ * "Send" itself doesn't hide: in a busy chat it puts the message in the queue.
  */
 function setLive(chatId) {
   liveChatId = chatId || null;
@@ -3328,7 +3328,7 @@ function setLive(chatId) {
   el('chat-send').title = on ? 'Поставить в очередь (Enter)' : 'Отправить (Enter)';
   syncNowButton();
   if (!on) stoppedByUser = false;
-  // Точка «в работе» в сайдбаре — это в том числе наш собственный ход.
+  // The "in progress" dot in the sidebar is also our own turn.
   renderChats();
 }
 
@@ -3341,7 +3341,7 @@ async function stopStream() {
       body: JSON.stringify({ chatId: currentId }),
     });
     stoppedByUser = Boolean(result.ok);
-    // «Стоп» снимает и очередь — говорим об этом, а не прячем пропавшие реплики.
+    // "Stop" also clears the queue — we say so, rather than hiding the disappeared messages.
     if (stoppedByUser && result.dropped) {
       setQueue(currentId, []);
       setNote(`остановил, очередь снята: ${result.dropped} — можно писать дальше`);
@@ -3353,15 +3353,15 @@ async function stopStream() {
   }
 }
 
-/* ── команды ─────────────────────────────────────────────────────────────────
-   В Telegram команды разбирает бот, а в веб-чате их не было вовсе: строка
-   «/compact» уезжала в pi обычной репликой. Теперь разбор общий и живёт на
-   сервере (`/panel/api/chat/command`), а палитра показывает, что можно позвать:
-   команды самого чата — из конфига страницы, команды pi — из `get_commands`. */
+/* ── commands ─────────────────────────────────────────────────────────────────
+   In Telegram the bot parses commands, but in the web chat they didn't exist at all: the line
+   "/compact" went to pi as a regular message. Now the parsing is common and lives on the
+   server (`/panel/api/chat/command`), and the palette shows what can be called:
+   the chat's own commands — from the page config, pi's commands — from `get_commands`. */
 
-/** Команды, которые чат разбирает сам. Приезжают в странице, запрос не нужен. */
+/** Commands the chat parses itself. They come in the page, no request needed. */
 const WEB_COMMANDS = Array.isArray(cfg.commands) ? cfg.commands : [];
-/** Команды pi по разговорам: список спрашиваем один раз на чат. */
+/** pi commands by chat: we ask for the list once per chat. */
 const piCommands = new Map();
 const piRequested = new Set();
 let commandBusy = false;
@@ -3369,7 +3369,7 @@ let paletteOpen = false;
 let paletteRows = [];
 let paletteIndex = 0;
 
-/** Подпись источника: по ней видно, что команда пришла от pi, а не от чата. */
+/** Source label: by it it's visible that the command came from pi, not from the chat. */
 function sourceLabel(source) {
   if (source === 'skill') return 'скилл';
   if (source === 'prompt') return 'шаблон';
@@ -3377,7 +3377,7 @@ function sourceLabel(source) {
   return '';
 }
 
-/** Всё, что можно позвать с косой черты: сначала свои команды, потом pi. */
+/** Everything callable with a slash: first our commands, then pi's. */
 function paletteCandidates() {
   const list = WEB_COMMANDS.map((command) => ({
     name: command.name,
@@ -3407,8 +3407,8 @@ function closePalette() {
 }
 
 /**
- * Палитра открывается только на один токен: «/» или «/com». Как только человек
- * написал пробел, это уже реплика с аргументами — список ему больше не нужен.
+ * The palette opens only on a single token: "/" or "/com". As soon as the person
+ * typed a space, it's already a message with arguments — the list is no longer needed.
  */
 function renderPalette() {
   const input = el('chat-input');
@@ -3450,7 +3450,7 @@ function renderPalette() {
   paletteOpen = true;
 }
 
-/** Список команд pi: лениво, по первому «/» в этом разговоре. */
+/** pi command list: lazily, on the first "/" in this chat. */
 async function ensurePiCommands() {
   const id = currentId;
   if (!id || piCommands.has(id) || piRequested.has(id)) return;
@@ -3459,17 +3459,17 @@ async function ensurePiCommands() {
     const data = await api('/panel/api/chat/commands?id=' + encodeURIComponent(id));
     piCommands.set(id, Array.isArray(data.commands) ? data.commands : []);
   } catch {
-    // Список команд — подсказка, а не условие чата: не вышло — покажем свои.
+    // The command list is a hint, not a chat condition: if it failed — we'll show ours.
     piCommands.set(id, []);
   }
   if (currentId === id) renderPalette();
 }
 
-/** Ввод в поле: тянем высоту и, если это начало команды, обновляем палитру. */
+/** Input in the field: we grow the height and, if this is the start of a command, update the palette. */
 function onComposerInput() {
   growInput();
   syncNowButton();
-  // Новый символ — новый фильтр: выбор начинается с первой строки.
+  // A new character — a new filter: selection starts from the first row.
   paletteIndex = 0;
   renderPalette();
   if (paletteOpen) void ensurePiCommands();
@@ -3481,7 +3481,7 @@ function movePalette(delta) {
   renderPalette();
 }
 
-/** Выбор строки — вставка, а не отправка: аргументы человек допишет сам. */
+/** Selecting a row is insertion, not sending: the person will type the arguments themselves. */
 function choosePalette() {
   const row = paletteRows[paletteIndex];
   if (!row) return false;
@@ -3495,8 +3495,8 @@ function choosePalette() {
 }
 
 /**
- * Клавиши палитры. Возвращает true, если событие уже обработано и отправлять
- * по Enter ничего не нужно.
+ * Palette keys. Returns true if the event has already been handled and there's no need
+ * to send anything on Enter.
  */
 function paletteKeydown(event) {
   if (!paletteOpen) return false;
@@ -3511,8 +3511,8 @@ function paletteKeydown(event) {
     return true;
   }
   if (event.key === 'Enter') {
-    // Команда уже набрана целиком — Enter её выполняет. Доклеивать пробел
-    // и требовать второго нажатия незачем; выбор нужен только для недописанной.
+    // The command is already fully typed — Enter executes it. Appending a space
+    // and requiring a second press is pointless; selection is needed only for an unfinished one.
     const row = paletteRows[paletteIndex];
     if (row && el('chat-input').value.trim().toLowerCase() === '/' + row.name.toLowerCase()) {
       closePalette();
@@ -3535,7 +3535,7 @@ function paletteKeydown(event) {
   return false;
 }
 
-/** Ответ команды — плашка в ленте. В историю он не попадает: это не ответ pi. */
+/** The command's response is a box in the feed. It doesn't get into history: it's not a pi response. */
 function addCommandResult(command, text, failed = false) {
   showEmpty(false);
   const node = document.createElement('div');
@@ -3554,7 +3554,7 @@ function addCommandResult(command, text, failed = false) {
   scrollToBottom(true);
 }
 
-/** Живой /clear: та же плашка, что придёт из истории после перезагрузки. */
+/** Live /clear: the same box that will come from history after a reload. */
 function addClearDivider() {
   showEmpty(false);
   const node = document.createElement('div');
@@ -3567,27 +3567,27 @@ function addClearDivider() {
   scrollToBottom(true);
 }
 
-/** Имя команды так, как его разбирает сервер: до пробела и без «/». */
+/** Command name as the server parses it: up to the space and without "/". */
 function commandName(text) {
   const match = /^\/([a-zA-Z0-9_]+)/.exec(String(text || '').trim());
   return match ? match[1].toLowerCase() : '';
 }
 
 /**
- * Выполняет строку с косой черты. false значит «сервер не взял её себе»:
- * это команда pi, и её нужно отправить в разговор обычной репликой.
+ * Executes a line with a slash. false means "the server didn't take it for itself":
+ * it's a pi command, and it must be sent to the chat as a regular message.
  */
 async function runCommand(text) {
   if (!writable) return false;
-  // Вторую команду поверх первой не запускаем и не отправляем в pi как текст:
-  // это всё ещё команда, просто её время не пришло.
+  // We don't start a second command on top of the first and don't send it to pi as text:
+  // it's still a command, just its time hasn't come.
   if (commandBusy) {
     setNote('предыдущая команда ещё выполняется');
     return true;
   }
   const name = commandName(text);
   if (!name) return false;
-  // Справке разговор не нужен; остальным — нужен, как и обычной реплике.
+  // Help doesn't need a chat; the rest do — like a regular message.
   if (!currentId && name !== 'help') {
     try {
       await createChat();
@@ -3597,8 +3597,8 @@ async function runCommand(text) {
     }
   }
   commandBusy = true;
-  // Чей это ход: пока команда идёт (/compact — это вызов модели), человек может
-  // уйти в другой разговор, и ответ не должен упасть в чужую ленту.
+  // Whose turn this is: while the command runs (/compact is a model call), the person may
+  // leave to another chat, and the response must not fall into someone else's feed.
   const chatId = currentId;
   setNote('выполняю ' + text.trim().split(/\s+/)[0] + '…');
   try {
@@ -3608,7 +3608,7 @@ async function runCommand(text) {
     });
     if (!result || !result.handled) {
       setNote('');
-      // Ушли в другой разговор, пока сервер думал: отправлять команду уже не туда.
+      // We left to another chat while the server was thinking: sending the command is already to the wrong place.
       return currentId !== chatId;
     }
     if (currentId === chatId) {
@@ -3619,14 +3619,14 @@ async function runCommand(text) {
       }
       closePalette();
     }
-    // /clear начинает новый контекст, но старую ленту не выбрасывает: рисуем
-    // разделитель, ровно как он придёт из истории после перезагрузки.
+    // /clear starts a new context, but doesn't throw away the old feed: we draw
+    // a divider, exactly as it will come from history after a reload.
     if (result.cleared && currentId === chatId) {
       addClearDivider();
     } else if (currentId === chatId) {
       addCommandResult(text, result.text || '', Boolean(result.failed));
     }
-    // /rename присылает новое имя: шапка и сайдбар обновляются без перезагрузки.
+    // /rename sends a new name: the header and sidebar update without a reload.
     if (result.title && currentId === chatId) applyChatTitle(chatId, String(result.title));
     setNote('');
     return true;
@@ -3639,7 +3639,7 @@ async function runCommand(text) {
   }
 }
 
-/** Клик по строке палитры: фокус остаётся в поле, выбор — как с клавиатуры. */
+/** Click on a palette row: focus stays in the field, selection — as with the keyboard. */
 el('cmd-palette').addEventListener('mousedown', (event) => event.preventDefault());
 el('cmd-palette').addEventListener('click', (event) => {
   const row = event.target.closest('.cmd-row');
@@ -3650,22 +3650,22 @@ el('cmd-palette').addEventListener('click', (event) => {
   choosePalette();
 });
 
-/* ── композер и меню ──────────────────────────────────────────────────────── */
+/* ── composer and menu ─────────────────────────────────────────────────────── */
 function growInput() {
   const input = el('chat-input');
   input.style.height = 'auto';
   input.style.height = Math.min(input.scrollHeight, 200) + 'px';
 }
 
-/* Меню — всплывающее и только на мелких экранах: на широком колонка диалогов
-   всегда на месте, поэтому сворачивать и разворачивать её нечем и незачем. */
+/* The menu is pop-up and only on small screens: on a wide one the chat column
+   is always in place, so there's nothing and no reason to collapse and expand it. */
 function closeMenu() {
   el('chat-app').classList.remove('side-open');
 }
 
-/* «Новый чат» всегда открывает именно новый чат: workspace выбирается уже в нём. */
+/* "New chat" always opens exactly a new chat: the workspace is chosen already in it. */
 el('new-chat').onclick = () => startDraft();
-/* «+ Папка» открывает ввод прямо в списке: модалка ради одного поля — лишний слой. */
+/* "+ Folder" opens input right in the list: a modal for one field is an extra layer. */
 el('new-folder').onclick = () => {
   folderDraft = true;
   folderRenaming = null;
@@ -3674,13 +3674,13 @@ el('new-folder').onclick = () => {
   if (input) input.scrollIntoView({ block: 'nearest' });
 };
 
-/* ── перетаскивание разговора в папку ──────────────────────────────────────────
-   Слушаем контейнер, а не строки: список перерисовывается целиком, и обработчики
-   на строках пришлось бы вешать заново после каждой перерисовки. */
+/* ── dragging a chat into a folder ──────────────────────────────────────────────
+   We listen on the container, not the rows: the list is redrawn as a whole, and handlers
+   on rows would have to be attached anew after every redraw. */
 el('chat-list').addEventListener('dragover', (event) => {
   const head = event.target.closest && event.target.closest('.folder-head');
   if (!head || !draggingChatId) return;
-  // preventDefault — это и есть «сюда можно бросать»: без него drop не случится.
+  // preventDefault is exactly "you can drop here": without it drop won't happen.
   event.preventDefault();
   if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
   head.classList.add('drop-target');
@@ -3703,7 +3703,7 @@ el('chat-list').addEventListener('drop', (event) => {
   );
 });
 
-/* Меню переноса закрывается кликом мимо и по Escape: висящее меню перекрывает чат. */
+/* The move menu closes on a click outside and on Escape: a hanging menu covers the chat. */
 document.addEventListener('click', (event) => {
   if (!chatMenu) return;
   if (event.target.closest('.chat-menu') || event.target.closest('.chat-more')) return;
@@ -3717,7 +3717,7 @@ el('toggle-side').onclick = () => {
   if (window.matchMedia('(max-width: 900px)').matches) el('chat-app').classList.toggle('side-open');
 };
 el('close-side').onclick = closeMenu;
-/* Архив: секция в сайдбаре сворачивается, состояние помним между заходами. */
+/* Archive: the sidebar section collapses, we remember the state between visits. */
 el('archive-toggle').onclick = () => {
   archiveOpen = !archiveOpen;
   saveArchiveOpen(archiveOpen);
@@ -3726,9 +3726,9 @@ el('archive-toggle').onclick = () => {
 el('toggle-archive').onclick = () => {
   toggleArchive().catch(() => {});
 };
-/* ── ширина панели ────────────────────────────────────────────────────────── */
-/* На широком экране колонку диалогов можно тянуть за правую границу. Ширина
-   живёт в localStorage: иначе её пришлось бы подгонять в каждом заходе. */
+/* ── panel width ────────────────────────────────────────────────────────── */
+/* On a wide screen the chat column can be dragged by the right border. The width
+   lives in localStorage: otherwise it would have to be adjusted on every visit. */
 const SIDE_WIDTH_KEY = 'icarus.side-width';
 const SIDE_WIDTH_DEFAULT = 278;
 const SIDE_WIDTH_MIN = 220;
@@ -3736,7 +3736,7 @@ const SIDE_WIDTH_MAX = 560;
 
 const isNarrow = () => window.matchMedia('(max-width: 900px)').matches;
 
-/** Потолок зависит от окна: панель не должна съесть чат целиком. */
+/** The ceiling depends on the window: the panel must not eat the whole chat. */
 function sideWidthLimit() {
   return Math.max(SIDE_WIDTH_MIN, Math.min(SIDE_WIDTH_MAX, window.innerWidth - 420));
 }
@@ -3763,7 +3763,7 @@ function saveSideWidth(width) {
   try {
     localStorage.setItem(SIDE_WIDTH_KEY, String(width));
   } catch {
-    /* приватный режим — ширина просто не запомнится */
+    /* private mode — the width simply won't be remembered */
   }
 }
 
@@ -3796,7 +3796,7 @@ function endSideDrag(event) {
 sideHandle.addEventListener('pointerup', endSideDrag);
 sideHandle.addEventListener('pointercancel', endSideDrag);
 
-/* Клавиатура: ←/→ двигают ширину, Home возвращает исходную. */
+/* Keyboard: ←/→ move the width, Home returns the original. */
 sideHandle.addEventListener('keydown', (event) => {
   if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Home') return;
   event.preventDefault();
@@ -3807,7 +3807,7 @@ sideHandle.addEventListener('keydown', (event) => {
   saveSideWidth(applySideWidth(next));
 });
 
-/* Окно сузили — подрезаем сохранённую ширину, чтобы чат не пропал. */
+/* The window was narrowed — we trim the saved width so the chat doesn't disappear. */
 window.addEventListener('resize', () => {
   if (!sideDrag && !isNarrow()) applySideWidth(storedSideWidth());
 });
@@ -3832,14 +3832,14 @@ el('chat-app').addEventListener('drop', (event) => {
   addFiles(event.dataTransfer.files);
 });
 el('chat-input').addEventListener('input', onComposerInput);
-// Каретка нужна кнопке «В чат» из панели файлов: путь вставляется на её место.
+// The caret is needed by the "To chat" button from the files panel: the path is inserted at its place.
 for (const type of ['click', 'keyup', 'select', 'input']) {
   el('chat-input').addEventListener(type, rememberComposerCaret);
 }
 el('chat-input').addEventListener('keydown', (event) => {
-  // Пока открыта палитра, Enter выбирает команду, а не отправляет реплику.
+  // While the palette is open, Enter selects a command rather than sending a message.
   if (paletteKeydown(event)) return;
-  // Ctrl+Enter — та же вторая операция с клавиатуры: прервать и отправить.
+  // Ctrl+Enter — the same second operation from the keyboard: interrupt and send.
   if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
     event.preventDefault();
     sendNow().catch(() => {});
@@ -3851,8 +3851,8 @@ el('chat-input').addEventListener('keydown', (event) => {
   }
 });
 el('chat-input').addEventListener('blur', () => {
-  // Клик по строке палитры не уводит фокус (mousedown отменён), а уход из
-  // поля ввода должен убрать список.
+  // Clicking a palette row doesn't remove focus (mousedown is cancelled), but leaving
+  // the input field must remove the list.
   setTimeout(closePalette, 120);
 });
 el('chat-send').onclick = () => {
@@ -3884,8 +3884,8 @@ el('chat-list').addEventListener('scroll', () => {
     loadChats(false).catch((error) => setNote('не удалось догрузить диалоги: ' + error.message));
   }
 });
-/* Подсказки живут и в пустом чате, и в черновике, и перерисовываются вместе с
-   ними: слушаем контейнер, иначе восстановленная разметка теряет обработчики. */
+/* Hints live both in the empty chat and in the draft, and are redrawn together with
+   them: we listen on the container, otherwise restored markup loses handlers. */
 el('chat-empty').addEventListener('click', (event) => {
   const button = event.target.closest('.suggestions button[data-prompt]');
   if (!button) return;
@@ -3894,7 +3894,7 @@ el('chat-empty').addEventListener('click', (event) => {
   else sendText(button.dataset.prompt).catch(() => {});
 });
 
-/* Вкладка вернулась на перед — то, что человек смотрит, становится прочитанным. */
+/* The tab came to the front — what the person is looking at becomes read. */
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden && currentId) markRead(currentId);
 });
@@ -3906,21 +3906,21 @@ window.addEventListener('focus', () => {
   archiveOpen = storedArchiveOpen();
   loadUnread();
   await loadChats(true);
-  // Папки — до первого показа списка как раз нет: они лишь группируют уже
-  // загруженные разговоры, поэтому грузим их следом и перерисовываем.
+  // Folders — before the first show of the list there are none: they only group the already
+  // loaded chats, so we load them after and redraw.
   await loadFolders();
   await loadArchived();
   await loadWorkspaces();
   defaultEmptyHtml = el('chat-empty').innerHTML;
   startBulletin();
-  // Снимок занятости берём сразу, не дожидаясь открытия сводки: ходы могли
-  // начаться до того, как панель открылась, и узнать о них больше негде.
+  // We take the busy snapshot right away, without waiting for the bulletin to open: turns could
+  // have started before the panel opened, and there's nowhere else to learn about them.
   await syncStatus();
   if (currentId) await selectChat(currentId);
   else startDraft();
   updateComposerHint();
-  // Панель файлов открывают не каждый раз, но если её оставили открытой —
-  // восстанавливаем вместе с рабочим деревом текущего разговора.
+  // The files panel isn't opened every time, but if it was left open —
+  // we restore it together with the working tree of the current chat.
   if (storedFilesOpen()) openFilesPanel();
   if (writable) el('chat-input').focus();
 })().catch((error) => {

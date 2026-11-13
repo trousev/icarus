@@ -1,4 +1,4 @@
-// Каталог памяти: описания в frontmatter, индекс файлов, обновление описания.
+// Memory catalog: descriptions in frontmatter, file index, description update.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -21,19 +21,19 @@ function tempMemory(): string {
   return root;
 }
 
-test('описание читается из frontmatter и из голой строки', () => {
+test('the description is read from frontmatter and from a bare line', () => {
   assert.equal(descriptionOf('---\ndescription: про Arduino\n---\n- факт\n'), 'про Arduino');
   assert.equal(descriptionOf('---\nпро Arduino и диоды\n---\n- факт\n'), 'про Arduino и диоды');
   assert.equal(descriptionOf('- просто факт\n'), '');
 });
 
-test('frontmatter вырезается из тела, но описание остаётся в файле', () => {
+test('frontmatter is stripped from the body, but the description stays in the file', () => {
   const text = '---\ndescription: про Arduino\n---\n- диод мигает\n';
   assert.equal(stripFrontmatter(text), '- диод мигает\n');
   assert.equal(descriptionOf(text), 'про Arduino');
 });
 
-test('withDescription добавляет блок и не теряет остальные ключи', () => {
+test('withDescription adds the block and does not lose the other keys', () => {
   const added = withDescription('- факт\n', 'про Arduino');
   assert.match(added, /^---\ndescription: про Arduino\n---\n\n- факт\n$/);
 
@@ -43,14 +43,14 @@ test('withDescription добавляет блок и не теряет оста�
   assert.doesNotMatch(replaced, /description: старое/);
 });
 
-test('описание всегда одна строка и не разрастается', () => {
+test('the description is always one line and does not grow', () => {
   const added = withDescription('- факт\n', '  про\nArduino   и диоды  '.repeat(30));
   const line = added.split('\n')[1] ?? '';
   assert.doesNotMatch(line, /\n/);
   assert.ok(line.length <= 230, `описание не обрезалось: ${line.length}`);
 });
 
-test('каталог: порядок, описания, пустые файлы не мешают', () => {
+test('catalog: order, descriptions, empty files do not interfere', () => {
   const root = tempMemory();
   fs.writeFileSync(path.join(root, 'identity.md'), '---\ndescription: кто он\n---\n- Зовут Саня\n');
   fs.writeFileSync(path.join(root, 'preferences.md'), '- Чай без сахара\n');
@@ -78,7 +78,7 @@ test('каталог: порядок, описания, пустые файлы 
   assert.match(text, /read/, 'модели сказано, чем читать');
 });
 
-test('update_description пишет описание и не выходит за память', () => {
+test('update_description writes the description and does not escape memory', () => {
   const root = tempMemory();
   fs.writeFileSync(path.join(root, 'projects/arduino.md'), '- Мигает диод\n');
 

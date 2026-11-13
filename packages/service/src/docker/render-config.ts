@@ -1,19 +1,19 @@
-// CLI для ./script/redeploy: правит боевой config.yaml на хосте.
+// CLI for ./script/redeploy: edits the production config.yaml on the host.
 //
-// config.yaml — единственный файл, который человек правит руками, поэтому деплой не
-// пересобирает его с нуля, а меняет только то, что приезжает из GitHub: людей
-// (variables.ICARUS_USERS), порт, каталог данных и ключ API. Модели, маунты и MCP
-// остаются такими, какими их оставили на хосте.
+// config.yaml is the only file a person edits by hand, so the deploy doesn't
+// rebuild it from scratch, but changes only what arrives from GitHub: people
+// (variables.ICARUS_USERS), the port, the data directory and the API key. Models, mounts and MCP
+// stay as they were left on the host.
 //
 //   ICARUS_USERS='trousev vita julia' ICARUS_PORT=8081 \
 //     node packages/service/src/docker/render-config.ts
 //
-// Рабочего config.yaml ещё нет — за основу берётся config.example.yaml, и на выходе
-// получается полностью готовый к запуску конфиг.
+// There's no working config.yaml yet — config.example.yaml is taken as the base, and the output
+// is a fully run-ready config.
 //
-// Значения приходят из окружения, а не из argv: apiKey не должен светиться в `ps`.
-// Комментарии в config.yaml не переживают правку — они и не нужны: описание полей
-// живёт в config.example.yaml, а этот файл собирается машиной.
+// Values come from the environment, not from argv: apiKey must not show up in `ps`.
+// Comments in config.yaml don't survive an edit — and they aren't needed: the description of fields
+// lives in config.example.yaml, while this file is assembled by a machine.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -21,10 +21,10 @@ import { pathToFileURL } from 'node:url';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { DEFAULT_CONFIG_PATH, LEGACY_ADMIN_ID, REPO_ROOT } from '../config.ts';
 
-/** Образец, с которого начинается config.yaml, если рабочего файла ещё нет. */
+/** The sample config.yaml starts from when there's no working file yet. */
 const EXAMPLE_CONFIG = path.join(REPO_ROOT, 'config.example.yaml');
 
-/** id идёт в имя контейнера и в путь на диске — тот же шаблон, что в config.ts. */
+/** The id goes into the container name and the on-disk path — the same pattern as in config.ts. */
 const USER_ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
 
 const HEADER = [
@@ -50,15 +50,15 @@ export type RenderResult = {
   users: string[];
   port: number;
   dataDir: string;
-  /** Что стало с docker.dns: список, удалено или не трогали (null). */
+  /** What happened to docker.dns: a list, removed, or untouched (null). */
   dns: string[] | null;
-  /** Откуда взялся ключ API: из секрета, из прежнего файла или сгенерирован заново. */
+  /** Where the API key came from: from the secret, from the previous file, or generated anew. */
   apiKeySource: 'env' | 'config' | 'generated';
-  /** Внешний адрес панели (url) или null, если он не задан. */
+  /** The external panel address (url) or null if it's not set. */
   url: string | null;
-  /** Маппинг telegram-бота: карта, пустая карта (убран) или null (не трогали). */
+  /** Telegram bot mapping: a map, an empty map (removed) or null (untouched). */
   telegram: Record<string, string> | null;
-  /** Час тишины после правки: через него разговор считается законченным. */
+  /** The quiet hour after an edit: after it the conversation is considered finished. */
   sessionIdleMinutes: number;
 };
 
@@ -69,17 +69,17 @@ function asRecord(value: unknown, what: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-/** Человек в config.yaml: id строкой или объект с флагом админа (см. parseUsers). */
+/** A person in config.yaml: an id as a string or an object with an admin flag (see parseUsers). */
 type UserEntry = { id: string; admin?: boolean };
 
-/** Флаг по миграции: у конфига без явных админов админ — trousev. */
+/** Migration flag: for a config without explicit admins, the admin is trousev. */
 function legacyAdmin(id: string): boolean | undefined {
   return id === LEGACY_ADMIN_ID ? true : undefined;
 }
 
 /**
- * Люди из прежнего конфига. Строка — старый формат, объект — новый. Флаг админа
- * переживает деплой: иначе выданный руками доступ пропадал бы при каждом push.
+ * People from the previous config. A string is the old format, an object the new one. The admin flag
+ * survives a deploy: otherwise manually granted access would disappear on every push.
  */
 function existingUsers(value: unknown): UserEntry[] {
   if (!Array.isArray(value)) return [];
@@ -118,7 +118,7 @@ function splitUsers(value: string): string[] {
   return checkUsers(value.split(/[\s,]+/));
 }
 
-/** Как записать человека в YAML: флаг — только когда он явно задан. */
+/** How to write a person into YAML: the flag only when it's explicitly set. */
 function userToYaml(entry: UserEntry): string | { id: string; admin: boolean } {
   if (entry.admin === undefined) return entry.id;
   return { id: entry.id, admin: entry.admin };
@@ -132,12 +132,12 @@ function parsePort(value: string): number {
   return port;
 }
 
-/** Адрес DNS-сервера: тот же шаблон, что в config.ts (IPv4 или IPv6). */
+/** DNS server address: the same pattern as in config.ts (IPv4 or IPv6). */
 const DNS_ENTRY = /^[0-9a-fA-F:.]{3,45}$/;
 
 /**
- * ICARUS_DNS: список адресов через пробел или запятую; `none` — убрать docker.dns;
- * пусто — не трогать то, что уже лежит в конфиге.
+ * ICARUS_DNS: a list of addresses separated by space or comma; `none` — remove docker.dns;
+ * empty — don't touch what's already in the config.
  */
 function parseDns(value: string | undefined): string[] | null {
   const text = value?.trim() ?? '';
@@ -151,19 +151,19 @@ function parseDns(value: string | undefined): string[] | null {
   });
 }
 
-/** Telegram username: тот же вид, что и в config.ts — без «@», нижним регистром. */
+/** Telegram username: the same form as in config.ts — without "@", lowercase. */
 const TELEGRAM_USERNAME = /^[a-zA-Z0-9_]{3,32}$/;
 
 /**
- * ICARUS_TELEGRAM_MAPPING: «кто есть кто» для telegram-бота — пары
- * `@username:человек` через запятую или пробел (человек — id из `ICARUS_USERS`,
- * то есть uid из LDAP на проде):
+ * ICARUS_TELEGRAM_MAPPING: "who is who" for the Telegram bot — pairs
+ * `@username:person` separated by comma or space (the person is an id from `ICARUS_USERS`,
+ * i.e. the uid from LDAP in production):
  *
  *   ICARUS_TELEGRAM_MAPPING='@trousev:trousev,@vita:vita'
  *
- * `none` — убрать маппинг (бот замолчит), пусто — не трогать то, что лежит в конфиге.
- * Человек обязан быть в users: telegram-имя, ведущее в никуда, — это отказ в ответе
- * среди ночи, а не настройка.
+ * `none` — remove the mapping (the bot goes silent), empty — don't touch what's in the config.
+ * The person must be in users: a Telegram name leading nowhere is a refusal to answer
+ * in the middle of the night, not a setting.
  */
 export function parseTelegramMapping(value: string | undefined, users: string[]): Record<string, string> | null {
   const text = value?.trim() ?? '';
@@ -193,9 +193,9 @@ export function parseTelegramMapping(value: string | undefined, users: string[])
 }
 
 /**
- * ICARUS_SESSION_IDLE_MINUTES: сколько минут тишины означают «разговор закончен»
- * (после этого icarus сжимает сессию pi и гасит её). Пусто — не трогать значение
- * из конфига: на хосте его могли настроить руками.
+ * ICARUS_SESSION_IDLE_MINUTES: how many minutes of silence mean "the conversation is over"
+ * (after that icarus compresses the pi session and shuts it down). Empty — don't touch the value
+ * from the config: it could have been configured by hand on the host.
  */
 function parseIdleMinutes(value: string | undefined): number | null {
   const text = value?.trim() ?? '';
@@ -208,8 +208,8 @@ function parseIdleMinutes(value: string | undefined): number | null {
 }
 
 /**
- * Чистая правка конфига: на вход текст, на выход текст. Генератор ключа вынесен
- * параметром, чтобы тест не зависел от случайности.
+ * A pure config edit: text in, text out. The key generator is passed as
+ * a parameter so the test doesn't depend on randomness.
  */
 export function renderConfig(
   sourceText: string,
@@ -218,8 +218,8 @@ export function renderConfig(
 ): RenderResult {
   const doc = asRecord(parseYaml(sourceText), 'config');
 
-  // Люди из ICARUS_USERS приезжают без флагов: админ — по миграции (trousev),
-  // а уже выданные на хосте флаги сохраняем за теми, кто остался в списке.
+  // People from ICARUS_USERS arrive without flags: the admin — by migration (trousev),
+  // while flags already granted on the host are kept for those who remain in the list.
   const previous = existingUsers(doc.users);
   const entries: UserEntry[] = overrides.users?.trim()
     ? splitUsers(overrides.users).map((id) => {
@@ -239,8 +239,8 @@ export function renderConfig(
   if (overrides.dataDir?.trim()) doc.dataDir = overrides.dataDir.trim();
   const dataDir = String(doc.dataDir ?? '~/icarus-data');
 
-  // docker.dns — тоже настройка прода: значение приезжает из окружения, а не правится
-  // руками на хосте (см. ICARUS_DNS в script/redeploy). Пустое — прежнее не трогаем.
+  // docker.dns is also a production setting: the value arrives from the environment, and isn't edited
+  // by hand on the host (see ICARUS_DNS in script/redeploy). Empty — we don't touch the previous one.
   const dns = parseDns(overrides.dns);
   if (dns !== null) {
     const docker = asRecord(doc.docker ?? {}, 'docker');
@@ -255,28 +255,28 @@ export function renderConfig(
   if (fromEnv) doc.apiKey = fromEnv;
   else if (!fromConfig) doc.apiKey = generate();
 
-  // url — внешний адрес панели для личных ссылок. Из окружения правится тем же
-  // путём, что порт и apiKey, но и заданный на хосте не теряется.
+  // url — the external panel address for personal links. It's edited from the environment the same
+  // way as the port and apiKey, but one set on the host isn't lost either.
   const urlOverride = overrides.url?.trim() ?? '';
   if (urlOverride) doc.url = urlOverride;
   const url = typeof doc.url === 'string' && doc.url.trim() !== '' ? doc.url.trim() : null;
 
-  // Час тишины — правило продукта, а не местная настройка: разговор, затихший на
-  // sessionIdleMinutes, icarus считает законченным, сжимает и закрывает. На хосте
-  // его можно переопределить, но деплой ставит своё (по умолчанию час).
+  // The quiet hour is a product rule, not a local setting: a conversation that went quiet for
+  // sessionIdleMinutes is considered finished by icarus, compressed and closed. On the host
+  // it can be overridden, but the deploy sets its own (one hour by default).
   const idleOverride = parseIdleMinutes(overrides.sessionIdleMinutes);
   if (idleOverride !== null) doc.sessionIdleMinutes = idleOverride;
   const sessionIdleMinutes = Number(doc.sessionIdleMinutes ?? 60);
 
-  // telegram.mapping — кто из телеграма чей человек. Рядом в конфиге живёт только
-  // токен (да и тот обычно берётся из .env), поэтому блок правим целиком: маппинг
-  // приезжает из variables.ICARUS_TELEGRAM_MAPPING, а не правится руками на хосте.
+  // telegram.mapping — who from Telegram is whose person. Next to it in the config lives only
+  // the token (and even that is usually taken from .env), so we edit the block as a whole: the mapping
+  // arrives from variables.ICARUS_TELEGRAM_MAPPING, and isn't edited by hand on the host.
   const telegram = parseTelegramMapping(overrides.telegramMapping, users);
   if (telegram !== null) {
     const block = doc.telegram === undefined || doc.telegram === null ? {} : asRecord(doc.telegram, 'telegram');
     if (Object.keys(telegram).length > 0) block.mapping = telegram;
     else delete block.mapping;
-    // Пустой блок в конфиге только путает: нечего настраивать — ключа нет.
+    // An empty block in the config only confuses: nothing to configure — no key.
     if (Object.keys(block).length > 0) doc.telegram = block;
     else delete doc.telegram;
   }
@@ -327,8 +327,8 @@ function main(): void {
     sessionIdleMinutes: process.env.ICARUS_SESSION_IDLE_MINUTES,
   });
 
-  // Ключ API лежит в этом файле, поэтому 600 — и на новый файл, и на старый:
-  // writeFileSync режим у существующего файла не меняет.
+  // The API key lives in this file, so 600 — both for a new file and an old one:
+  // writeFileSync doesn't change the mode of an existing file.
   fs.writeFileSync(file, result.text, { mode: 0o600 });
   fs.chmodSync(file, 0o600);
 
@@ -351,8 +351,8 @@ function main(): void {
   );
 }
 
-// Тесты импортируют renderConfig из этого же файла, поэтому CLI запускаем только
-// тогда, когда файл — точка входа, а не чей-то импорт.
+// Tests import renderConfig from this same file, so we run the CLI only
+// when the file is the entry point, not someone's import.
 const entry = process.argv[1];
 if (entry && import.meta.url === pathToFileURL(entry).href) {
   try {

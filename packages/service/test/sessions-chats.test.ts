@@ -1,5 +1,5 @@
-// Реестр разговоров: миграция старого chats.json, наполнение из файлов сессий
-// и заголовок из первой реплики — один на все каналы.
+// Conversation registry: migration of the old chats.json, filling from session files
+// and the title from the first message — the same for all channels.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -58,7 +58,7 @@ function byId(chats: ChatRecord[], id: string): ChatRecord | undefined {
   return chats.find((chat) => chat.id === id);
 }
 
-test('старый chats.json: preview и updatedAt выбрасываются, канал и conversationId достраиваются', () => {
+test('old chats.json: preview and updatedAt are dropped, channel and conversationId are filled in', () => {
   const { config, user } = fixture();
   fs.writeFileSync(
     path.join(userPaths(config, user).root, 'chats.json'),
@@ -87,7 +87,7 @@ test('старый chats.json: preview и updatedAt выбрасываются, 
   ]);
 });
 
-test('backfill переносит session-index в chats.json, добавляет старые сессии и удаляет второй индекс', () => {
+test('backfill moves session-index into chats.json, adds old sessions and removes the second index', () => {
   const { config, user } = fixture();
   const known = putSession(config, user, 'telegram-42', 'Разговор из Telegram');
   const unknown = putSession(config, user, 'telegram-77', 'Старый разговор');
@@ -114,7 +114,7 @@ test('backfill переносит session-index в chats.json, добавляе�
   assert.equal(readChats(config, user).length, 2, 'повторный проход не плодит записи');
 });
 
-test('ensureChat добавляет Telegram-разговор один раз и подхватывает старую session-запись', () => {
+test('ensureChat adds a Telegram conversation once and picks up the old session record', () => {
   const { config, user } = fixture();
   const { sessionId } = putSession(config, user, 'telegram-42', 'Отчёт для мамы');
   backfillChats(config, user);
@@ -129,14 +129,14 @@ test('ensureChat добавляет Telegram-разговор один раз и
   assert.equal(chats[0]?.id, 'telegram-42');
 });
 
-test('разговор, поднятый в приватном workspace, остаётся в нём и в реестре', () => {
+test('a conversation started in a private workspace stays in it and in the registry', () => {
   const { config, user } = fixture();
   const chat = ensureChat(config, user, 'api-private-1', 'api', 'private');
   assert.equal(chat.workspace, 'private');
   assert.equal(byId(readChats(config, user), 'api-private-1')?.workspace, 'private');
 });
 
-test('заголовок Telegram-разговора берётся из первой реплики и сохраняется', () => {
+test('the Telegram conversation title is taken from the first message and saved', () => {
   const { config, user } = fixture();
   putSession(config, user, 'telegram-42', 'Собери отчёт для мамы');
   ensureChat(config, user, 'telegram-42', 'telegram');
@@ -147,7 +147,7 @@ test('заголовок Telegram-разговора берётся из пер�
   assert.equal(chat?.title, 'Собери отчёт для мамы');
 });
 
-test('канал последней реплики пишется по ходу и переживает чтение реестра', () => {
+test('the channel of the last message is written on the fly and survives reading the registry', () => {
   const { config, user } = fixture();
   ensureChat(config, user, 'telegram-42', 'telegram');
 
@@ -161,16 +161,16 @@ test('канал последней реплики пишется по ходу 
     at: '2026-11-01T12:04:00.000Z',
   });
 
-  // Панель продолжила тот же разговор: шапка должна сказать уже про панель.
+  // The panel continued the same conversation: the header should now say the panel.
   recordTurn(config, user, 'telegram-42', 'web', new Date('2026-11-01T12:10:00.000Z'));
   assert.equal(lastTurnOf(config, user, 'telegram-42')?.channel, 'web');
 
-  // Разговора нет — подписи тоже: реестр не заводит записей задним числом.
+  // No conversation — no signature either: the registry does not create records retroactively.
   assert.equal(recordTurn(config, user, 'telegram-нет', 'web'), null);
   assert.equal(readChats(config, user).length, 1);
 });
 
-test('битый lastTurn не роняет реестр: поле просто не читается', () => {
+test('a broken lastTurn does not bring down the registry: the field is simply not read', () => {
   const { config, user } = fixture();
   fs.mkdirSync(userPaths(config, user).root, { recursive: true });
   fs.writeFileSync(
@@ -195,14 +195,14 @@ test('битый lastTurn не роняет реестр: поле просто 
   assert.equal(chat?.channel, 'telegram', 'остальная запись цела');
 });
 
-test('из панели пишут в веб и Telegram, а в API — только смотрят', () => {
+test('from the panel you can write to web and Telegram, but in the API you only look', () => {
   const base = { title: 'x', createdAt: '2026-11-01T10:00:00.000Z', workspace: 'talk' } as const;
   assert.equal(panelCanWrite({ ...base, channel: 'web' }), true);
   assert.equal(panelCanWrite({ ...base, channel: 'telegram' }), true);
   assert.equal(panelCanWrite({ ...base, channel: 'api' }), false);
 });
 
-test('sessionIdOf знает веб-чат, Telegram и старую session-запись', () => {
+test('sessionIdOf knows the web chat, Telegram and the old session record', () => {
   const { user } = fixture();
   const web: ChatRecord = {
     id: 'web-1',
@@ -233,9 +233,9 @@ test('sessionIdOf знает веб-чат, Telegram и старую session-з�
   assert.equal(sessionIdOf(legacy, user), 'abc');
 });
 
-test('реестр пишет Telegram-разговор в chats.json, когда поднимает сессию', async () => {
+test('the registry writes the Telegram conversation to chats.json when it starts a session', async () => {
   const { config, user } = fixture();
-  // Реестру от сессии нужны занятость и dispose: сам pi в тесте не поднимается.
+  // The registry needs busy and dispose from the session: pi itself is not started in the test.
   const session = { alive: true, generation: 0, busy: false, lastUsed: Date.now(), dispose: () => {} };
   const registry = new SessionRegistry(config, {
     ensureContainer: async () => 'stub',
@@ -255,14 +255,14 @@ test('реестр пишет Telegram-разговор в chats.json, когд�
   }
 });
 
-test('переключение workspace: запись живёт в chats.json, а pi поднимается в новой папке', async () => {
+test('switching workspace: the record lives in chats.json, and pi starts in the new folder', async () => {
   const { config, user } = fixture();
-  // Разговора ещё нет: /workspace — законная первая команда в новом чате.
+  // There is no conversation yet: /workspace is a legitimate first command in a new chat.
   const chat = setChatWorkspace(config, user, 'telegram-42', 'rabota');
   assert.equal(chat.workspace, 'rabota');
   assert.equal(ensureChat(config, user, 'telegram-42', 'telegram').workspace, 'rabota', 'ensureChat папку не откатывает');
 
-  // Сессия поднимается уже в новой папке: старая ушла вместе с процессом.
+  // The session starts already in the new folder: the old one went away with the process.
   let startedIn = '';
   const session = { alive: true, generation: 0, busy: false, lastUsed: Date.now(), dispose: () => {} };
   const registry = new SessionRegistry(config, {
@@ -281,7 +281,7 @@ test('переключение workspace: запись живёт в chats.json,
   }
 });
 
-test('перед миграцией старый chats.json сохраняется как .bak', () => {
+test('before migration the old chats.json is saved as .bak', () => {
   const { config, user } = fixture();
   const root = userPaths(config, user).root;
   const legacy = {
@@ -313,7 +313,7 @@ test('перед миграцией старый chats.json сохраняетс
   ]);
 });
 
-test('битый chats.json откладывается в сторону, а не затирается', () => {
+test('a broken chats.json is set aside instead of being overwritten', () => {
   const { config, user } = fixture();
   const root = userPaths(config, user).root;
   fs.writeFileSync(path.join(root, 'chats.json'), '{"chats": [это не json');
@@ -325,7 +325,7 @@ test('битый chats.json откладывается в сторону, а н�
   assert.ok(fs.existsSync(path.join(root, 'chats.json')), 'реестр собран заново');
 });
 
-test('карта разговоров: по ссылке из панели находится файл сессии pi', () => {
+test('conversation map: the pi session file is found via the panel link', () => {
   const { config, user } = fixture();
   const telegram = putSession(config, user, 'telegram-473232394-163396', 'Первая реплика из телеги');
   const web = putSession(config, user, 'web-mw2nt32t-f06bd6', 'Первая реплика из панели');
@@ -343,8 +343,8 @@ test('карта разговоров: по ссылке из панели на�
   ] as const) {
     const entry = byConversation.get(conversationId);
     assert.ok(entry, `в карте есть ${conversationId}`);
-    // Главное: id сессии и файл истории достаются без знания userId, которого
-    // в контейнере нет. Файл указываем абсолютным — агент идёт по нему напрямую.
+    // The main thing: the session id and the history file are obtained without knowing userId,
+    // which the container does not have. We specify the file as absolute — the agent goes to it directly.
     assert.equal(entry.sessionId, expected.sessionId);
     assert.equal(entry.file, expected.file);
   }
@@ -353,10 +353,10 @@ test('карта разговоров: по ссылке из панели на�
   assert.equal(byConversation.get('web-mw2nt32t-f06bd6')?.channel, 'web');
 });
 
-test('карта разговоров: без файла сессии запись остаётся, но без пути', () => {
+test('conversation map: without a session file the record remains, but without a path', () => {
   const { config, user } = fixture();
-  // Реестр знает о разговоре, а файла истории ещё нет: карта не должна врать,
-  // что путь есть, — иначе агент пойдёт открывать несуществующий файл.
+  // The registry knows about the conversation, but there is no history file yet: the map must not lie
+  // that the path exists — otherwise the agent would go open a nonexistent file.
   ensureChat(config, user, 'web-no-file-yet', 'web');
 
   const map = JSON.parse(renderSessionsMap(config, user)) as {
@@ -367,13 +367,13 @@ test('карта разговоров: без файла сессии запис
   assert.equal(entry.file, undefined, 'пути нет, пока нет файла');
 });
 
-test('карта разговоров: пустой реестр даёт пустую карту, а не падение', () => {
+test('conversation map: an empty registry yields an empty map, not a crash', () => {
   const { config, user } = fixture();
   const map = JSON.parse(renderSessionsMap(config, user)) as { sessions: unknown[] };
   assert.deepEqual(map.sessions, []);
 });
 
-test('архив — это отметка в реестре: файл сессии и запись остаются на месте', () => {
+test('archive is a mark in the registry: the session file and the record stay in place', () => {
   const { config, user } = fixture();
   const { file } = putSession(config, user, 'telegram-42', 'Отчёт для мамы');
   ensureChat(config, user, 'telegram-42', 'telegram');
@@ -385,12 +385,12 @@ test('архив — это отметка в реестре: файл сесс�
   assert.ok(fs.existsSync(file), 'архив не трогает файл разговора');
   assert.equal(readChats(config, user)[0]?.archivedAt, '2026-11-02T12:00:00.000Z');
 
-  // Повторный уход в архив не двигает отметку: порядок в архиве не прыгает.
+  // Archiving again does not move the mark: the order in the archive does not jump.
   setChatArchived(config, user, 'telegram-42', true, new Date('2026-11-03T12:00:00.000Z'));
   assert.equal(readChats(config, user)[0]?.archivedAt, '2026-11-02T12:00:00.000Z');
 });
 
-test('архив переживает пересборку реестра, а возврат снимает отметку', () => {
+test('the archive survives a registry rebuild, and restoring removes the mark', () => {
   const { config, user } = fixture();
   putSession(config, user, 'telegram-42', 'Старый разговор');
   ensureChat(config, user, 'telegram-42', 'telegram');
@@ -405,19 +405,19 @@ test('архив переживает пересборку реестра, а в
   assert.equal(setChatArchived(config, user, 'нет-такого', true), null);
 });
 
-test('место разговора в Telegram лежит в chats.json и переживает перезапуск', () => {
+test('the conversation place in Telegram lives in chats.json and survives a restart', () => {
   const { config, user } = fixture();
   ensureChat(config, user, 'telegram-42-17', 'telegram', 'talk');
 
   setChatTelegram(config, user, 'telegram-42-17', 42, 17);
   setChatTelegram(config, user, 'telegram-42-17', 42, 17);
 
-  // Именно в файле: имя топика и удаление темы иначе не пережили бы перезапуск.
+  // In the file specifically: otherwise the topic name and topic deletion would not survive a restart.
   assert.deepEqual(readChats(config, user)[0]?.telegram, { chatId: 42, threadId: 17 });
   assert.deepEqual(telegramPlaceOf(config, user, 'telegram-42-17'), { chatId: 42, threadId: 17 });
 });
 
-test('архивация Telegram-разговора удаляет топик и забывает место', async () => {
+test('archiving a Telegram conversation deletes the topic and forgets the place', async () => {
   const { config, user } = fixture();
   ensureChat(config, user, 'telegram-42-17', 'telegram', 'talk');
   setChatTelegram(config, user, 'telegram-42-17', 42, 17);
@@ -431,14 +431,14 @@ test('архивация Telegram-разговора удаляет топик �
   assert.deepEqual(deleted, [{ chatId: 42, threadId: 17 }]);
   assert.equal(readChats(config, user)[0]?.telegram, undefined, 'топика больше нет — и места нет');
 
-  // Возврат из архива Telegram не воскрешает: померла так померла.
+  // Restoring from the archive does not resurrect Telegram: dead is dead.
   const restored = await archiveChat(config, user, 'telegram-42-17', false, async () => {
     throw new Error('возврат не должен трогать Telegram');
   });
   assert.equal(restored.chat?.archivedAt, undefined);
 });
 
-test('топик не удалился — архив всё равно состоялся, место осталось', async () => {
+test('the topic was not deleted — the archive still happened, the place remained', async () => {
   const { config, user } = fixture();
   ensureChat(config, user, 'telegram-42-17', 'telegram');
   setChatTelegram(config, user, 'telegram-42-17', 42, 17);
@@ -452,7 +452,7 @@ test('топик не удалился — архив всё равно сост
   assert.deepEqual(readChats(config, user)[0]?.telegram, { chatId: 42, threadId: 17 }, 'топик жив — место нужно');
 });
 
-test('без бота архивация панели просто ставит отметку', async () => {
+test('without a bot, panel archiving just sets the mark', async () => {
   const { config, user } = fixture();
   ensureChat(config, user, 'telegram-42-17', 'telegram');
   setChatTelegram(config, user, 'telegram-42-17', 42, 17);

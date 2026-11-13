@@ -1,10 +1,10 @@
-// Самотест MCP кинозала: Radarr/Sonarr, только чтение и отдельный заказ.
+// Self-test for the movie theater MCP: Radarr/Sonarr, read-only and a separate order.
 //
 //   node tools/arr-mcp/test.mjs
 //
-// Живого Radarr/Sonarr нет и в тестах быть не должно: поднимаем фейковый HTTP
-// на node:http и проверяем, что сервер говорит с ним теми же запросами, что
-// описаны в OpenAPI (X-Api-Key, /api/v3/...), и что lookup ничего не заказывает.
+// There is no live Radarr/Sonarr and there should not be in tests: we start a fake HTTP
+// on node:http and check that the server talks to it with the same requests that
+// are described in the OpenAPI (X-Api-Key, /api/v3/...), and that lookup orders nothing.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import http from 'node:http';
@@ -103,8 +103,8 @@ const SONARR = {
 };
 
 /**
- * Фейковый *arr на node:http: проверяет X-Api-Key, отдаёт ровно те маршруты,
- * которые дергает сервер, и записывает все POST — по ним видно, заказали файл или нет.
+ * Fake *arr on node:http: checks X-Api-Key, serves exactly the routes
+ * that the server calls, and records all POSTs — from them you can see whether a file was ordered or not.
  */
 async function fakeArr(kind, options = {}) {
   const isMovie = kind === 'movie';
@@ -120,7 +120,7 @@ async function fakeArr(kind, options = {}) {
     const url = new URL(req.url ?? '/', 'http://localhost');
     state.requests.push({ method: req.method, path: url.pathname, query: Object.fromEntries(url.searchParams) });
 
-    if (options.hang) return; // ответа не будет — проверяем таймаут
+    if (options.hang) return; // there will be no response — we are checking the timeout
 
     const json = (status, body) => {
       res.writeHead(status, { 'content-type': 'application/json' });
@@ -231,7 +231,7 @@ async function start(extraEnv) {
     }
   });
   child.stderr.on('data', () => {
-    // сервер пишет туда только диагностику; тесты на неё не опираются
+    // the server writes only diagnostics there; the tests do not rely on it
   });
   const call = (message) =>
     new Promise((resolve) => {
@@ -274,7 +274,7 @@ async function withArrs(run, options = {}) {
   }
 }
 
-test('initialize: восемь инструментов и предупреждение о заказе', async () => {
+test('initialize: eight tools and a warning about ordering', async () => {
   await withArrs(async ({ rpc }) => {
     const init = await rpc.call({ method: 'initialize', params: {} });
     assert.equal(init.result.serverInfo.name, 'arr');
@@ -303,7 +303,7 @@ test('initialize: восемь инструментов и предупрежд�
   });
 });
 
-test('lookup показывает каталог, отмечает коллекцию и ничего не заказывает', async () => {
+test('lookup shows the catalog, marks the collection and orders nothing', async () => {
   await withArrs(async ({ rpc, radarr }) => {
     const result = await rpc.tool('arr_lookup', { kind: 'movie', term: 'Дюна' });
     assert.equal(result.isError, false, result.text);
@@ -320,7 +320,7 @@ test('lookup показывает каталог, отмечает коллек�
   });
 });
 
-test('add без confirm отказывает и не ходит в POST', async () => {
+test('add without confirm refuses and does not POST', async () => {
   await withArrs(async ({ rpc, radarr }) => {
     const result = await rpc.tool('arr_add', { kind: 'movie', id: 329865 });
     assert.equal(result.isError, true);
@@ -330,7 +330,7 @@ test('add без confirm отказывает и не ходит в POST', async
   });
 });
 
-test('add с confirm берёт профиль и папку с сервера и заказывает фильм', async () => {
+test('add with confirm takes the profile and folder from the server and orders a movie', async () => {
   await withArrs(async ({ rpc, radarr }) => {
     const result = await rpc.tool('arr_add', { kind: 'movie', id: 329865, confirm: true });
     assert.equal(result.isError, false, result.text);
@@ -350,7 +350,7 @@ test('add с confirm берёт профиль и папку с сервера �
   });
 });
 
-test('add с явными профилем/папкой и search: false только наблюдает', async () => {
+test('add with explicit profile/folder and search: false only monitors', async () => {
   await withArrs(async ({ rpc, radarr }) => {
     const result = await rpc.tool('arr_add', {
       kind: 'movie',
@@ -375,7 +375,7 @@ test('add с явными профилем/папкой и search: false тол�
   });
 });
 
-test('если профилей несколько, add просит выбрать, а не угадывает', async () => {
+test('if there are several profiles, add asks to choose rather than guess', async () => {
   await withArrs(
     async ({ rpc, radarr }) => {
       const result = await rpc.tool('arr_add', { kind: 'movie', id: 329865, confirm: true });
@@ -396,7 +396,7 @@ test('если профилей несколько, add просит выбра�
   );
 });
 
-test('профили качества и корневые папки читаются с сервера', async () => {
+test('quality profiles and root folders are read from the server', async () => {
   await withArrs(async ({ rpc }) => {
     const profiles = await rpc.tool('arr_quality_profiles', { kind: 'movie' });
     assert.equal(profiles.isError, false, profiles.text);
@@ -410,7 +410,7 @@ test('профили качества и корневые папки читаю�
   });
 });
 
-test('сериал: lookup и add в Sonarr по TVDB id', async () => {
+test('series: lookup and add in Sonarr by TVDB id', async () => {
   await withArrs(async ({ rpc, sonarr }) => {
     const found = await rpc.tool('arr_lookup', { kind: 'series', term: 'Светлячок' });
     assert.equal(found.isError, false, found.text);
@@ -431,7 +431,7 @@ test('сериал: lookup и add в Sonarr по TVDB id', async () => {
   });
 });
 
-test('очередь загрузок и диски — человеческим текстом', async () => {
+test('download queue and disks — in human text', async () => {
   await withArrs(async ({ rpc }) => {
     const queue = await rpc.tool('arr_queue', { kind: 'movie' });
     assert.equal(queue.isError, false, queue.text);
@@ -447,7 +447,7 @@ test('очередь загрузок и диски — человеческим
   });
 });
 
-test('401 — честно про ключ, без утечки самого ключа', async () => {
+test('401 — honest about the key, without leaking the key itself', async () => {
   await withArrs(
     async ({ rpc, radarr }) => {
       const status = await rpc.tool('arr_status');
@@ -465,7 +465,7 @@ test('401 — честно про ключ, без утечки самого к�
   );
 });
 
-test('нет ключа — понятная ошибка и ни одного запроса', async () => {
+test('no key — a clear error and not a single request', async () => {
   const radarr = await fakeArr('movie');
   const rpc = await start({ ARR_RADARR_URL: radarr.url });
   try {
@@ -480,7 +480,7 @@ test('нет ключа — понятная ошибка и ни одного �
   }
 });
 
-test('сервер не настроен — это не падение, а объяснение', async () => {
+test('server not configured — not a crash, but an explanation', async () => {
   const rpc = await start({});
   try {
     const result = await rpc.tool('arr_lookup', { term: 'Дюна' });
@@ -498,7 +498,7 @@ test('сервер не настроен — это не падение, а об
   }
 });
 
-test('таймаут — понятный текст, а не вечное ожидание', async () => {
+test('timeout — clear text, not an eternal wait', async () => {
   const radarr = await fakeArr('movie', { hang: true });
   const rpc = await start({
     ARR_RADARR_URL: radarr.url,
@@ -516,7 +516,7 @@ test('таймаут — понятный текст, а не вечное ож�
   }
 });
 
-test('выключенный сервер — «не принял соединение»', async () => {
+test('server down — "did not accept the connection"', async () => {
   const radarr = await fakeArr('movie');
   const url = radarr.url;
   await radarr.close();
@@ -530,7 +530,7 @@ test('выключенный сервер — «не принял соедине
   }
 });
 
-test('status показывает версии обоих серверов', async () => {
+test('status shows the versions of both servers', async () => {
   await withArrs(async ({ rpc }) => {
     const result = await rpc.tool('arr_status');
     assert.equal(result.isError, false, result.text);
@@ -576,7 +576,7 @@ function postRpc(url, message, headers = {}) {
   });
 }
 
-test('HTTP-режим: initialize, уведомление и tools/list', async () => {
+test('HTTP mode: initialize, notification and tools/list', async () => {
   const http = await startHttp({});
   try {
     const init = await postRpc(http.url, {
@@ -601,7 +601,7 @@ test('HTTP-режим: initialize, уведомление и tools/list', async 
   }
 });
 
-test('HTTP наружу — только с ARR_HTTP_TOKEN', async () => {
+test('HTTP externally — only with ARR_HTTP_TOKEN', async () => {
   const http = await startHttp({ ARR_HTTP_TOKEN: 'http-secret' });
   try {
     const denied = await postRpc(http.url, { jsonrpc: '2.0', id: 1, method: 'tools/list' });

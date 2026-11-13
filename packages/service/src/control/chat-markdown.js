@@ -1,11 +1,11 @@
-// Markdown в панели чата: без библиотек и без сборки.
+// Markdown in the chat panel: no libraries and no build.
 //
-// Файл — обычный script: chat-ui.ts вставляет его в страницу раньше chat-client.js,
-// поэтому `markdown` и `inline` видны клиенту как глобальные функции. Отдельным
-// файлом — чтобы правила разметки можно было проверять тестами, не поднимая браузер.
+// The file is an ordinary script: chat-ui.ts inserts it into the page before chat-client.js,
+// so `markdown` and `inline` are visible to the client as global functions. A separate
+// file — so the markup rules can be checked by tests without launching a browser.
 //
-// Сначала экранируем HTML, потом включаем обратно только те конструкции, которые
-// реально нужны в ответах. Сырой HTML от модели не проходит.
+// First we escape HTML, then re-enable only those constructs that are
+// actually needed in answers. Raw HTML from the model doesn't pass.
 /* exported markdown, linkify */
 
 const escapeHtml = (value) =>
@@ -14,7 +14,7 @@ const escapeHtml = (value) =>
     (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char],
   );
 
-/** Локальную картинку отдаёт сервер; внешнюю браузер грузит сам. */
+/** A local image is served by the server; the browser loads an external one itself. */
 function imageSrc(raw) {
   const value = String(raw ?? '').trim();
   if (/^(https?:|data:|\/panel\/api\/)/i.test(value)) return value;
@@ -22,8 +22,8 @@ function imageSrc(raw) {
 }
 
 /**
- * Локальный файл из ответа агента отдаёт сервер скачиванием. Внешнюю ссылку
- * человек откроет сам, а путь внутри контейнера браузеру недоступен.
+ * A local file from the agent's answer is served by the server as a download. The
+ * person opens an external link himself, and a path inside the container is inaccessible to the browser.
  */
 function fileSrc(raw) {
   const value = String(raw ?? '').trim();
@@ -34,8 +34,8 @@ function fileSrc(raw) {
 }
 
 /**
- * Адрес из скобок ссылки. Разметка уже экранирована, поэтому заголовок приходит
- * как `&quot;…&quot;`, а угловые скобки — как `&lt;…&gt;`: срезаем и их.
+ * The address from the link's parentheses. The markup is already escaped, so the title comes
+ * as `&quot;…&quot;`, and angle brackets as `&lt;…&gt;`: we trim those too.
  */
 function hrefOf(inside) {
   return String(inside ?? '')
@@ -45,15 +45,15 @@ function hrefOf(inside) {
     .trim();
 }
 
-/** Что можно поставить в конец адреса, но что адресу не принадлежит. */
+/** What can be put at the end of an address but does not belong to the address. */
 const URL_TAIL = /[?!.,:*_~]/;
-/** Парная скобка: закрывающая остаётся в адресе, только если открывающая тоже есть. */
+/** Paired bracket: a closing one stays in the address only if the opening one is present too. */
 const URL_BRACKETS = { ')': '(', ']': '[', '}': '{' };
 
-/** Сущности вокруг адреса: `«<https://x>»` после экранирования кончается на `&gt;`. */
+/** Entities around an address: `«<https://x>»` after escaping ends with `&gt;`. */
 const URL_ENTITIES = ['&quot;', '&#39;', '&gt;', '&lt;'];
 
-/** Хвостовая пунктуация и лишние скобки — не часть ссылки: `(см. https://x.com.)`. */
+/** Trailing punctuation and extra brackets are not part of the link: `(see https://x.com.)`. */
 function trimUrl(raw) {
   let url = raw;
   for (;;) {
@@ -81,8 +81,8 @@ function count(text, char) {
 }
 
 /**
- * Ссылка без разметки: `https://…` в тексте — тоже ссылка. Готовую ссылку можно
- * спрятать в слот (`hold`) — тогда курсив и звёздочки из самого адреса её не тронут.
+ * A bare link: `https://…` in the text is also a link. A finished link can be
+ * hidden in a slot (`hold`) — then italics and asterisks from the address itself won't touch it.
  */
 function autolink(text, hold) {
   return text.replace(/(^|[^\p{L}\p{N}_/])https?:\/\/[^\s<"\uE000]+/giu, (match, before) => {
@@ -93,18 +93,18 @@ function autolink(text, hold) {
     return (
       before +
       (hold ? hold(anchor) : anchor) +
-      // Срезанная пунктуация возвращается в текст: точка в конце предложения — не адрес.
+      // The trimmed punctuation is returned to the text: a period at the end of a sentence is not an address.
       raw.slice(url.length)
     );
   });
 }
 
-/** Текст без разметки — реплика человека: экранируем и включаем только ссылки. */
+/** Text without markup — the person's message: we escape it and enable only links. */
 function linkify(text) {
   return autolink(escapeHtml(text));
 }
 
-/** Жирный, курсив, зачёркнутый: без кода и ссылок — они уже спрятаны в слоты. */
+/** Bold, italics, strikethrough: without code and links — they are already hidden in slots. */
 function emphasize(text) {
   return text
     .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
@@ -113,10 +113,10 @@ function emphasize(text) {
 }
 
 /**
- * Разметка внутри строки. Готовые куски (картинки, код, ссылки) складываем в слоты:
- * иначе звёздочки из адреса или угловые скобки из примера кода ломали бы соседнюю
- * разметку. Слот — невидимый символ из области частного использования (U+E000)
- * с номером, в конце возвращаем всё на место.
+ * Inline markup. We put ready-made pieces (images, code, links) into slots:
+ * otherwise asterisks from an address or angle brackets from a code example would break the neighboring
+ * markup. A slot is an invisible character from the private use area (U+E000)
+ * with a number; at the end we put everything back in place.
  */
 function inline(raw) {
   const slots = [];
@@ -129,25 +129,25 @@ function inline(raw) {
   text = text.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, src) =>
     hold('<img class="md-image" src="' + imageSrc(hrefOf(src)) + '" alt="' + alt + '">'),
   );
-  // `код` — раньше ссылок: адрес в примере кода ссылкой быть не должен.
+  // `code` — before links: an address in a code example must not be a link.
   text = text.replace(/`([^`\n]+)`/g, (_, code) => hold('<code>' + code + '</code>'));
   text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (whole, label, inside) => {
-    // В именах файлов бывают пробелы: `[смета](…/смета за март.pdf)` — тоже ссылка.
+    // File names can contain spaces: `[estimate](…/estimate for March.pdf)` is also a link.
     const href = hrefOf(inside);
     if (/^https?:\/\/\S+$/.test(href)) {
       return hold(
         '<a href="' + href + '" target="_blank" rel="noopener noreferrer">' + emphasize(label) + '</a>',
       );
     }
-    // Ссылка на файл, который агент сделал руками: отдаём его скачиванием, а не
-    // оставляем в тексте сырой markdown — иначе человек видит скобки и мёртвый путь.
+    // A link to a file the agent made by hand: we serve it as a download instead of
+    // leaving raw markdown in the text — otherwise the person sees brackets and a dead path.
     const local = fileSrc(href);
     if (!local) return whole;
     return hold(
       '<a class="md-file" href="' + local + '" download>📎 ' + emphasize(label) + '</a>',
     );
   });
-  // Голые адреса — тоже в слоты: иначе `_` или `*` внутри адреса станут курсивом.
+  // Bare addresses also go into slots: otherwise `_` or `*` inside an address would become italics.
   text = autolink(text, hold);
 
   text = emphasize(text);
@@ -155,14 +155,14 @@ function inline(raw) {
 }
 
 /**
- * Есть ли в строке граница таблицы. `\|` — это литерал внутри ячейки, а не
- * граница: строка без настоящего `|` таблицей не считается.
+ * Whether the line has a table boundary. `\|` is a literal inside a cell, not a
+ * boundary: a line without a real `|` doesn't count as a table.
  */
 function hasTablePipe(line) {
   return line.replace(/\\\|/g, '').includes('|');
 }
 
-/** Ячейки строки: `\|` возвращается в текст как обычный символ, обрамление срезаем. */
+/** Cells of a line: `\|` is returned to the text as an ordinary character, we trim the framing. */
 function tableCells(line) {
   let text = line.trim();
   if (text.startsWith('|')) text = text.slice(1);
@@ -187,12 +187,12 @@ function tableCells(line) {
   return cells;
 }
 
-/** Между шапкой и телом: `| --- | --- |`, с двоеточиями выравнивания или без. */
+/** Between the header and the body: `| --- | --- |`, with or without alignment colons. */
 function isTableDivider(line) {
   return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
 }
 
-/** Строка короче шапки добивается пустыми ячейками, длиннее — обрезается. */
+/** A row shorter than the header is padded with empty cells, a longer one is truncated. */
 function fitCells(cells, width) {
   const result = cells.slice(0, width);
   while (result.length < width) result.push('');
@@ -252,8 +252,8 @@ function markdown(text) {
       continue;
     }
 
-    // Таблица: строка с `|`, а под ней линия-разделитель. Без разделителя это
-    // обычный абзац — пайп встречается и в тексте, и в командах.
+    // A table: a line with `|`, and a divider line beneath it. Without the divider it's
+    // an ordinary paragraph — a pipe occurs both in text and in commands.
     if (hasTablePipe(line) && index + 1 < lines.length && isTableDivider(lines[index + 1])) {
       flushAll();
       const head = tableCells(line);

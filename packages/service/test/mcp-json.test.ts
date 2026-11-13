@@ -1,5 +1,5 @@
-// mcp.json — единственный мост между config.yaml и pi-mcp-extension: потерянное
-// здесь поле не видно ни в логе, ни в ответе модели — только в «сервер не поднялся».
+// mcp.json is the only bridge between config.yaml and pi-mcp-extension: a field lost
+// here is invisible both in the log and in the model's response — only in "the server did not start".
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -9,7 +9,7 @@ import { createServer } from '../src/mcp/registry.ts';
 import { prepareUser, renderAgentsMd, renderMcpJson, renderSettingsJson } from '../src/workspace.ts';
 import { makeConfig, probe } from './fixtures.ts';
 
-test('HTTP-MCP с ключом уезжает в mcp.json вместе с заголовками', () => {
+test('HTTP-MCP with a key goes into mcp.json together with the headers', () => {
   const config = makeConfig({
     mcp: {
       homeassistant: {
@@ -30,7 +30,7 @@ test('HTTP-MCP с ключом уезжает в mcp.json вместе с заг
   });
 });
 
-test('stdio-сервер остаётся stdio: url и заголовков у него нет', () => {
+test('a stdio server stays stdio: it has no url and no headers', () => {
   const config = makeConfig({ mcp: { echo: { command: 'node', args: ['/opt/echo.mjs'] } } });
 
   const json = JSON.parse(renderMcpJson(config)) as { mcpServers: Record<string, Record<string, unknown>> };
@@ -41,7 +41,7 @@ test('stdio-сервер остаётся stdio: url и заголовков у 
   assert.equal(json.mcpServers.echo?.lifecycle, 'lazy', 'без lifecycle сервер подключается по требованию');
 });
 
-test('description остаётся подсказкой для AGENTS.md, а не полем mcp.json', () => {
+test('description stays a hint for AGENTS.md, not a field of mcp.json', () => {
   const config = makeConfig({
     mcp: {
       homeassistant: {
@@ -56,8 +56,8 @@ test('description остаётся подсказкой для AGENTS.md, а н�
   assert.equal(json.mcpServers.homeassistant?.lifecycle, 'lazy');
 });
 
-// 1.8.0 — первая версия с mcp_connect: без него lazy-сервер из разговора не поднять.
-test('мост pi подключается только тогда, когда есть хоть один MCP-сервер', () => {
+// 1.8.0 is the first version with mcp_connect: without it a lazy server cannot be brought up from a conversation.
+test('the pi bridge is connected only when there is at least one MCP server', () => {
   const empty = JSON.parse(renderSettingsJson(makeConfig())) as { packages?: string[] };
   assert.equal(empty.packages, undefined);
 
@@ -67,9 +67,9 @@ test('мост pi подключается только тогда, когда �
   assert.deepEqual(withServer.packages, ['npm:pi-mcp-extension@1.8.0']);
 });
 
-// Ключ доступа к чужому серверу — такой же секрет, как ключ модели: файл лежит на
-// хосте и монтируется в контейнер, поэтому права те же, что у auth.json.
-test('mcp.json пишется закрытым на чтение', () => {
+// A key to access a third-party server is as much a secret as a model key: the file lies on
+// the host and is mounted into the container, so the permissions are the same as auth.json's.
+test('mcp.json is written with restricted read permissions', () => {
   const config = makeConfig({
     mcp: { homeassistant: { url: 'http://10.0.0.16/api/mcp', headers: { Authorization: 'Bearer llat' } } },
   });
@@ -81,7 +81,7 @@ test('mcp.json пишется закрытым на чтение', () => {
   }
 });
 
-test('AGENTS.md зовёт подключать ленивый MCP только по теме', () => {
+test('AGENTS.md tells you to connect a lazy MCP only on topic', () => {
   const md = renderAgentsMd(
     makeConfig({
       mcp: {
@@ -99,28 +99,28 @@ test('AGENTS.md зовёт подключать ленивый MCP только 
   assert.match(md, /`mcp_status`/);
 });
 
-// Коннект идемпотентен и наружу ничего не меняет — значит и разрешения не требует.
-// Без этого правила модель перестраховывается и начинает каждый разговор с
-// «подключить MCP?», хотя человек уже разрешил, включив сервер в панели.
-test('AGENTS.md не просит разрешения на подключение и требует честной отбивки', () => {
+// Connecting is idempotent and changes nothing outward — so it requires no permission either.
+// Without this rule the model overprotects and starts every conversation with
+// "connect MCP?", even though the person already allowed it by enabling the server in the panel.
+test('AGENTS.md does not ask permission to connect and requires an honest confirmation', () => {
   const md = renderAgentsMd(
     makeConfig({ mcp: { homeassistant: { url: 'http://10.0.0.16/api/mcp', description: 'Умный дом' } } }),
   );
 
   assert.match(md, /Подключение — не действие/);
   assert.match(md, /разрешения на него не спрашивай/);
-  // Отбивка постфактум, а не просьба разрешить.
+  // A confirmation afterwards, not a request for permission.
   assert.match(md, /одна короткая строка в ответе/);
-  // Не поднялся — сказать честно и уйти другим маршрутом, а не выдумывать.
+  // If it did not start, say so honestly and take another route, do not make things up.
   assert.match(md, /Не поднялся — скажи честно/);
   assert.match(md, /другим маршрутом/);
-  // Вход по OAuth — отдельный шаг человека в браузере, а не разрешение модели.
+  // OAuth login is a separate step the person takes in the browser, not a model permission.
   assert.match(md, /делает его человек в браузере/);
 });
 
-// Активация без спроса — только для серверов, у которых доступ уже есть. OAuth без
-// входа в окружение не попадает вовсе: «молча» его не поднять, вход даёт человек.
-test('OAuth-сервер без входа в подсказку не попадает: его поднимает не модель', () => {
+// Activation without asking is only for servers whose access already exists. OAuth without
+// login does not enter the environment at all: it cannot be brought up "silently", the person provides the login.
+test('an OAuth server without login does not appear in the hint: the model does not bring it up', () => {
   const config = makeConfig();
   createServer(config, 'probe', {
     name: 'Black Forest',
@@ -135,7 +135,7 @@ test('OAuth-сервер без входа в подсказку не попад
   assert.doesNotMatch(md, /black-forest/);
 });
 
-test('AGENTS.md не зовёт подключать eager-сервер: его инструменты уже есть', () => {
+test('AGENTS.md does not tell you to connect an eager server: its tools are already there', () => {
   const md = renderAgentsMd(
     makeConfig({ mcp: { echo: { command: 'node', description: 'Эхо', lifecycle: 'eager' } } }),
   );
@@ -144,11 +144,11 @@ test('AGENTS.md не зовёт подключать eager-сервер: его 
   assert.doesNotMatch(md, /`echo`/);
 });
 
-test('без MCP в AGENTS.md нет секции про подключение', () => {
+test('without MCP there is no connection section in AGENTS.md', () => {
   assert.doesNotMatch(renderAgentsMd(makeConfig()), /MCP-инструменты по требованию/);
 });
 
-test('артефакты: в промпте только триггер, полные инструкции — после подключения', () => {
+test('artifacts: only the trigger is in the prompt, full instructions come after connecting', () => {
   const md = renderAgentsMd(
     makeConfig({
       mcp: {
@@ -161,10 +161,10 @@ test('артефакты: в промпте только триггер, пол�
       },
     }),
   );
-  // Триггер виден всегда: иначе модель не узнает, что сервер вообще есть.
+  // The trigger is always visible: otherwise the model would not know the server exists at all.
   assert.match(md, /`artifacts` — Артефакты: готовые страницы и картинки для человека/);
   assert.match(md, /`mcp_connect`/);
-  // А правила про index.ai.md и папку живут в MCP-хендшейке, не в каждом разговоре.
+  // And the rules about index.ai.md and the folder live in the MCP handshake, not in every conversation.
   assert.doesNotMatch(md, /index\.ai\.md/);
   assert.doesNotMatch(md, /artifacts\/<slug>/);
 });

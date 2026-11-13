@@ -1,15 +1,15 @@
-// Сверка истории: якорь — реплики пользователя, дробление ответа ассистента не считается расхождением.
+// History comparison: the anchor is user messages; splitting of the assistant's answer is not considered a divergence.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { compareHistory, normalizeContent, toTurns } from '../src/sessions/divergence.ts';
 
-test('новая сессия не считается расхождением', () => {
+test('a new session is not considered a divergence', () => {
   const result = compareHistory([{ role: 'user', content: 'привет' }], []);
   assert.equal(result.diverged, false);
   assert.equal(result.newUserText, 'привет');
 });
 
-test('продолжение разговора совпадает', () => {
+test('a continuation of the conversation matches', () => {
   const incoming = [
     { role: 'user', content: 'привет' },
     { role: 'assistant', content: 'здорово' },
@@ -24,15 +24,15 @@ test('продолжение разговора совпадает', () => {
   assert.equal(result.newUserText, 'как дела');
 });
 
-test('дробление ответа ассистента тулами — не расхождение', () => {
-  // pi: текст, потом тулы, потом ещё текст — три отдельных сообщения ассистента
+test('splitting the assistant answer by tools is not a divergence', () => {
+  // pi: text, then tools, then more text — three separate assistant messages
   const session = [
     { role: 'user', content: 'что я люблю пить?' },
     { role: 'assistant', content: [{ type: 'text', text: 'Сейчас посмотрю.' }] },
     { role: 'assistant', content: [{ type: 'toolCall', name: 'read' }] },
     { role: 'assistant', content: [{ type: 'text', text: 'Кофе без сахара.' }] },
   ];
-  // Клиент склеил всё в одно сообщение
+  // The client merged everything into one message
   const incoming = [
     { role: 'user', content: 'что я люблю пить?' },
     { role: 'assistant', content: 'Сейчас посмотрю.Кофе без сахара.' },
@@ -42,7 +42,7 @@ test('дробление ответа ассистента тулами — не
   assert.equal(result.diverged, false, 'не должно быть ложного расхождения');
 });
 
-test('правка реплики пользователя ловится', () => {
+test('an edit of a user message is caught', () => {
   const session = [{ role: 'user', content: 'привет' }];
   const incoming = [{ role: 'user', content: 'привет, совсем другой текст' }];
   const result = compareHistory(incoming, session);
@@ -51,7 +51,7 @@ test('правка реплики пользователя ловится', () =
   assert.match(result.diff, /в сессии/);
 });
 
-test('регенерация ответа не ломает согласованность', () => {
+test('regeneration of the answer does not break consistency', () => {
   const session = [
     { role: 'user', content: 'вопрос' },
     { role: 'assistant', content: 'первый вариант' },
@@ -64,7 +64,7 @@ test('регенерация ответа не ломает согласован
   assert.equal(compareHistory(incoming, session).diverged, false);
 });
 
-test('нормализация контента понимает строки, блоки OpenAI и блоки pi', () => {
+test('content normalization understands strings, OpenAI blocks and pi blocks', () => {
   assert.equal(normalizeContent('просто строка'), 'просто строка');
   assert.equal(
     normalizeContent([
@@ -77,7 +77,7 @@ test('нормализация контента понимает строки, �
   assert.equal(normalizeContent([{ type: 'thinking', thinking: 'мысли' }]), '');
 });
 
-test('служебные роли не попадают в реплики', () => {
+test('service roles do not get into messages', () => {
   const turns = toTurns([
     { role: 'system', content: 'ты ассистент' },
     { role: 'user', content: 'привет' },

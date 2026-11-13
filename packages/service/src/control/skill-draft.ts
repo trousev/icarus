@@ -1,13 +1,13 @@
-// «Напиши за меня»: человек описывает идею одной фразой, модель собирает из неё
-// готовый скилл — имя, описание и инструкцию.
+// "Write it for me": the person describes an idea in one phrase, the model builds
+// a ready skill out of it — name, description and instruction.
 //
-// Панель тут только показывает черновик: сохраняет его человек, и только тогда
-// появляется файл и коммит. Поэтому разбор ответа модели нарочно снисходительный —
-// вытащить из болтовни JSON и привести имя к правилам дешевле, чем гонять модель
-// второй раз за тем же.
+// The panel here only shows the draft: the person saves it, and only then
+// does the file and the commit appear. That is why parsing the model's answer is deliberately lenient —
+// pulling JSON out of chatter and normalizing the name to the rules is cheaper than running the model
+// a second time for the same thing.
 //
-// Проверки те же, что у сохранения (control/skills.ts): черновик обязан проходить
-// их, иначе кнопка «Сохранить» упёрлась бы в отказ на ровном месте.
+// The checks are the same as for saving (control/skills.ts): the draft must pass
+// them, otherwise the "Save" button would hit a refusal for no reason.
 import {
   SKILL_DESCRIPTION_LIMIT,
   splitSkillFile,
@@ -15,29 +15,29 @@ import {
   validateSkillName,
 } from './skills.ts';
 
-/** Сколько символов идеи вообще имеет смысл отправлять модели. */
+/** How many characters of the idea it even makes sense to send to the model. */
 export const SKILL_IDEA_LIMIT = 4000;
 
 /**
- * Сколько ждём модель. Разовый вопрос обычно отвечает за секунды, но тут на выходе
- * целая инструкция, да ещё и на «сильной» модели с размышлением — запас нужен.
+ * How long we wait for the model. A one-off question usually answers in seconds, but here the output
+ * is a whole instruction, and on a "strong" reasoning model at that — a margin is needed.
  */
 export const SKILL_DRAFT_TIMEOUT_MS = 90_000;
 
 /**
- * Роль модели. Она заменяет обычную роль разового вопроса («отвечай ровно тем,
- * о чём просят»): тут нужен не ответ, а разбор.
+ * The model role. It replaces the usual one-off question role ("answer exactly what
+ * is asked"): here what is needed is not an answer but a breakdown.
  */
 export const SKILL_DRAFT_SYSTEM =
   'Ты пишешь скиллы для агента. Отвечай одним JSON-объектом и ничем больше.';
 
 /**
- * Задание модели.
+ * The task for the model.
  *
- * Требования к полям — те же, что у спецификации Agent Skills, но сказанные
- * человеческим языком: описание модель видит всегда и решает по нему, звать ли
- * скилл, а тело читает только когда решила звать. Отсюда и «не выдумывай
- * инструменты»: скилл с несуществующими средствами хуже, чем его отсутствие.
+ * The field requirements are the same as in the Agent Skills spec, but said in
+ * plain language: the model always sees the description and decides from it whether to
+ * call the skill, and reads the body only once it has decided to call. Hence "don't invent
+ * tools": a skill with non-existent means is worse than no skill at all.
  */
 export function skillDraftPrompt(idea: string): string {
   return [
@@ -67,16 +67,16 @@ export type SkillDraft = {
   name: string;
   description: string;
   body: string;
-  /** Что панель поправила в ответе модели: человеку это видно в строке состояния. */
+  /** What the panel corrected in the model's answer: the person sees this in the status line. */
   note?: string;
 };
 
 export type SkillDraftResult = { ok: true; draft: SkillDraft } | { ok: false; message: string };
 
 /**
- * Имя скилла из того, что предложила модель: строчные латинские буквы, цифры и
- * дефис. Всё остальное (пробелы, подчёркивания, диакритика, эмодзи) вычищаем —
- * иначе имя не пройдёт проверку, а человек об этом узнает уже после генерации.
+ * Skill name from what the model proposed: lowercase latin letters, digits and
+ * hyphen. Everything else (spaces, underscores, diacritics, emoji) is stripped —
+ * otherwise the name would fail validation, and the person would learn about it only after generation.
  */
 export function slugifySkillName(value: string): string {
   return value
@@ -90,7 +90,7 @@ export function slugifySkillName(value: string): string {
     .replace(/-+$/g, '');
 }
 
-/** Имя, которого ещё нет: к занятому добавляем номер, а не переписываем чужой скилл. */
+/** A name that does not exist yet: append a number to a taken one instead of overwriting someone's skill. */
 export function uniqueSkillName(base: string, taken: ReadonlySet<string>): string {
   if (!taken.has(base)) return base;
   for (let index = 2; index < 100; index += 1) {
@@ -100,7 +100,7 @@ export function uniqueSkillName(base: string, taken: ReadonlySet<string>): strin
   return `${base.slice(0, 50).replace(/-+$/g, '')}-${Date.now().toString(36)}`;
 }
 
-/** JSON из ответа: модели любят заворачивать его в ``` и здороваться до него. */
+/** JSON from the answer: models like to wrap it in ``` and greet before it. */
 function extractJson(answer: string): Record<string, unknown> | null {
   const text = answer
     .trim()
@@ -120,17 +120,17 @@ function extractJson(answer: string): Record<string, unknown> | null {
         return parsed as Record<string, unknown>;
       }
     } catch {
-      /* пробуем следующий вариант */
+      /* try the next variant */
     }
   }
   return null;
 }
 
 /**
- * Ответ файлом вместо JSON: модель выдала готовый `SKILL.md` со frontmatter.
+ * The answer as a file instead of JSON: the model returned a ready `SKILL.md` with frontmatter.
  *
- * Просили JSON, но это обычный дрейф модели, а не повод гонять её второй раз:
- * frontmatter читаем тем же разбором, что и файлы на диске, тело — что осталось.
+ * We asked for JSON, but this is ordinary model drift, not a reason to run it a second time:
+ * we read the frontmatter with the same parser as files on disk, and the body is whatever is left.
  */
 function extractSkillFile(answer: string): Record<string, unknown> | null {
   const text = answer
@@ -145,7 +145,7 @@ function extractSkillFile(answer: string): Record<string, unknown> | null {
   return { ...frontmatter, body };
 }
 
-/** Поле ответа: у модели спрашивали одно имя, но на всякий случай принимаем синонимы. */
+/** Answer field: we asked the model for one name, but accept synonyms just in case. */
 function pick(source: Record<string, unknown>, keys: string[]): string {
   for (const key of keys) {
     const value = source[key];
@@ -154,7 +154,7 @@ function pick(source: Record<string, unknown>, keys: string[]): string {
   return '';
 }
 
-/** Тело без случайного frontmatter и без забора из бэктиков: это уже наш файл. */
+/** Body without an accidental frontmatter and without backtick fences: this is already our file. */
 function cleanBody(value: string): string {
   return value
     .replace(/^```(?:markdown|md)?\s*/i, '')
@@ -163,7 +163,7 @@ function cleanBody(value: string): string {
     .trim();
 }
 
-/** Описание длиннее лимита подрезаем по концу фразы: терять начало обиднее. */
+/** Trim a description longer than the limit at the end of a sentence: losing the beginning hurts more. */
 function trimDescription(value: string): { description: string; trimmed: boolean } {
   if (value.length <= SKILL_DESCRIPTION_LIMIT) return { description: value, trimmed: false };
   const cut = value.slice(0, SKILL_DESCRIPTION_LIMIT);
@@ -172,12 +172,12 @@ function trimDescription(value: string): { description: string; trimmed: boolean
 }
 
 /**
- * Разбор ответа модели в черновик скилла.
+ * Parsing the model's answer into a skill draft.
  *
- * Возвращает отказ только тогда, когда чинить нечего: не разобрался JSON или
- * потерялась инструкция. Имя и описание панель приводит в порядок сама, а если
- * имя не вышло латиницей — отдаёт пустым с пометкой: человек допишет его руками,
- * и сгенерированная инструкция при этом не пропадёт.
+ * Returns a failure only when there is nothing to fix: the JSON did not parse or
+ * the instruction is missing. The panel tidies up the name and description itself, and if
+ * the name did not come out in latin letters — returns it empty with a note: the person will type it by hand,
+ * and the generated instruction is not lost in the process.
  */
 export function parseSkillDraft(answer: string, taken: ReadonlySet<string> = new Set()): SkillDraftResult {
   const parsed = extractJson(answer) ?? extractSkillFile(answer);

@@ -1,23 +1,23 @@
 #!/usr/bin/env node
-// video-blog: MCP-сервер, который превращает видео в блог-пост.
+// video-blog: an MCP server that turns a video into a blog post.
 //
-// Зачем сервер, а не скрипт. Скрипт умеет одно и то же, но пользоваться им может
-// только тот, кто помнит путь и флаги. Здесь та же цепочка объявлена инструментами:
-// человек говорит «сделай пост из этого ролика», модель зовёт video_to_blog, а
-// куда класть файлы, откуда брать ключ и как резать длинное аудио — забота сервера.
+// Why a server instead of a script. A script does the same thing, but only
+// someone who remembers the path and flags can use it. Here the same chain is declared as tools:
+// the person says "make a post from this video", the model calls video_to_blog, and
+// where to put files, where to get the key and how to cut long audio is the server's concern.
 //
-// Цепочка: yt-dlp (звук + метаданные) → DeepInfra Whisper (транскрипт) → DeepInfra
-// DeepSeek (переписать транскрипт в пост). Ключ — тот же, на котором работает сам
-// Икар (DEEPINFRA_API_KEY), ничего отдельного заводить не надо.
+// Chain: yt-dlp (audio + metadata) → DeepInfra Whisper (transcript) → DeepInfra
+// DeepSeek (rewrite the transcript into a post). The key is the same one Icarus itself
+// runs on (DEEPINFRA_API_KEY), nothing separate needs to be set up.
 //
-// Внешние бинарники приезжают в контейнер человека лениво: yt-dlp — статический с
-// GitHub releases, ffmpeg — только когда аудио больше лимита загрузки и его надо
-// резать. Лежат они в VIDEO_BLOG_HOME (по умолчанию <ICARUS_HOME>/tools/video-blog),
-// то есть в примонтированном служебном каталоге: пересоздание контейнера их не
-// сносит, а в образ ничего запекать не надо.
+// External binaries arrive in the person's container lazily: yt-dlp — a static one from
+// GitHub releases, ffmpeg — only when the audio is over the upload limit and needs
+// cutting. They live in VIDEO_BLOG_HOME (by default <ICARUS_HOME>/tools/video-blog),
+// i.e. in the mounted service directory: recreating the container doesn't wipe them,
+// and nothing needs to be baked into the image.
 //
-// HTTP-режима у сервера нет намеренно: он всегда работает там же, где ключи и
-// рабочие папки, — внутри контейнера агента. Выставлять наружу нечего.
+// The server deliberately has no HTTP mode: it always runs where the keys and
+// working folders are — inside the agent container. There is nothing to expose.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -33,16 +33,16 @@ const SERVER_INFO = { name: 'video-blog', version: '1.0.0' };
 const DEFAULT_BASE_URL = 'https://api.deepinfra.com/v1/openai';
 const DEFAULT_ASR_MODEL = 'openai/whisper-large-v3-turbo';
 const DEFAULT_LLM_MODEL = 'deepseek-ai/DeepSeek-V4.1-Flash';
-/** Цена whisper-large-v3-turbo на DeepInfra: $0.0002 за минуту аудио. */
+/** Price of whisper-large-v3-turbo on DeepInfra: $0.0002 per minute of audio. */
 const ASR_USD_PER_MINUTE = 0.0002;
 
-/** Лимит одной загрузки по умолчанию: больше — режем ffmpeg-ом, а не шлём одним куском. */
+/** Default single-upload limit: larger — we cut with ffmpeg instead of sending one piece. */
 const DEFAULT_MAX_UPLOAD_MB = 24;
-/** Длина куска при нарезке по умолчанию, секунды. Whisper работает окнами по 30 с, но с запасом. */
+/** Default chunk length when splitting, seconds. Whisper works in 30 s windows, but with margin. */
 const DEFAULT_SPLIT_SECONDS = 900;
-/** С этого размера транскрипта включается map-reduce, чтобы не превысить контекст. */
+/** From this transcript size map-reduce kicks in, to avoid exceeding the context. */
 const CHARS_PER_CHUNK = 45_000;
-/** Потолок длительности: защита от «а давай весь сезон подкаста». */
+/** Duration ceiling: protection against "let's do the whole podcast season". */
 const DEFAULT_MAX_MINUTES = 240;
 
 const YTDLP_URL = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux';
@@ -63,7 +63,7 @@ const INSTRUCTIONS = `Видео в блог-пост: скачать звук, 
 - Длинный текст лучше не тянуть в разговор: include_text: false вернёт пути и сводку, а файл модель прочитает обычным чтением, когда он понадобится.
 - Ошибка «нет ключа», «yt-dlp не отвечает», «нет речи в аудио» — это не поломка Икара, а состояние: скажи человеку, чего не хватает, и не повторяй вызов наугад.`;
 
-// --- конфигурация ------------------------------------------------------------
+// --- configuration -----------------------------------------------------------
 
 function envText(name) {
   return (process.env[name] ?? '').trim();
@@ -75,8 +75,8 @@ function envNumber(name, fallback) {
 }
 
 /**
- * Настройки читаются на каждом вызове, а не один раз при старте: так тесты
- * поднимают сервер с другим окружением, не перезапуская модуль.
+ * Settings are read on every call, not once at startup: that way tests
+ * bring up the server with a different environment without restarting the module.
  */
 function config() {
   const home =
@@ -99,7 +99,7 @@ function log(message) {
   process.stderr.write(`[video-blog] ${message}\n`);
 }
 
-// --- общее -------------------------------------------------------------------
+// --- common ------------------------------------------------------------------
 
 class ToolError extends Error {}
 
@@ -133,8 +133,8 @@ function slugify(text, maxLength = 60) {
   const slug = String(text ?? '')
     .normalize('NFKD')
     .toLowerCase()
-    // Кириллица в имени файла — не ошибка, но иероглифы и эмодзи в пути мешают,
-    // поэтому оставляем буквы, цифры и дефис, а остальное схлопываем.
+    // Cyrillic in a file name is not an error, but hieroglyphs and emoji in a path get in the way,
+    // so we keep letters, digits and the hyphen, and collapse the rest.
     .replace(/[^\p{L}\p{N}]+/gu, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, maxLength)
@@ -146,7 +146,7 @@ function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
-/** stdout/stderr процесса целиком: цепочка короткая, потоковый разбор не нужен. */
+/** The process's entire stdout/stderr: the chain is short, streaming parsing isn't needed. */
 function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { ...options, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -159,7 +159,7 @@ function run(command, args, options = {}) {
     });
     child.stderr.on('data', (chunk) => {
       stderr += chunk;
-      // yt-dlp пишет прогресс в stderr: без этого хвост ошибки забивает прогрессом.
+      // yt-dlp writes progress to stderr: without this the error tail gets swamped by progress.
       if (stderr.length > 200_000) stderr = stderr.slice(-100_000);
     });
     child.on('error', reject);
@@ -172,7 +172,7 @@ function tail(text, limit = 600) {
   return value.length <= limit ? value : `…${value.slice(-limit)}`;
 }
 
-// --- внешние бинарники -------------------------------------------------------
+// --- external binaries -------------------------------------------------------
 
 async function isExecutable(file) {
   try {
@@ -209,9 +209,9 @@ async function downloadTo(url, target, { gunzip = false } = {}) {
 }
 
 /**
- * Путь к бинарнику. Порядок: переменная окружения (тесты и особые сборки) →
- * уже скачанный в кэше → скачивание. Качаем только то, что действительно нужно:
- * ffmpeg зовётся лишь когда аудио не влезает в лимит загрузки.
+ * Path to the binary. Order: environment variable (tests and special builds) →
+ * already downloaded in the cache → download. We download only what's actually needed:
+ * ffmpeg is called only when the audio doesn't fit the upload limit.
  */
 async function ensureBinary(kind) {
   const override = kind === 'yt-dlp' ? envText('VIDEO_BLOG_YTDLP') : envText('VIDEO_BLOG_FFMPEG');
@@ -279,9 +279,9 @@ async function probe(url) {
 
 async function downloadAudio(url, directory) {
   await fs.promises.mkdir(directory, { recursive: true });
-  // Берём сырой аудиопоток (m4a/opus) и не гоняем его через ffmpeg: Whisper
-  // принимает и webm, и m4a, а лишняя перекодировка — это и время, и лишний
-  // бинарник в зависимостях. ffmpeg нужен только для нарезки длинного файла.
+  // We take the raw audio stream (m4a/opus) and don't run it through ffmpeg: Whisper
+  // accepts both webm and m4a, and an extra re-encode is both time and an extra
+  // binary in the dependencies. ffmpeg is needed only for splitting a long file.
   const result = await ytdlpFetch(
     url,
     ['-f', 'bestaudio[ext=m4a]/bestaudio/best', '-o', path.join(directory, 'audio.%(ext)s')],
@@ -299,7 +299,7 @@ async function downloadAudio(url, directory) {
   return best.file;
 }
 
-// --- расшифровка -------------------------------------------------------------
+// --- transcription -----------------------------------------------------------
 
 async function splitAudio(file, directory) {
   const { maxUploadBytes, splitSeconds } = config();
@@ -377,7 +377,7 @@ async function transcribeAll(files, { language, prompt }) {
     log(`часть ${index + 1}: ${humanTime(part.duration)} за ${Math.round((Date.now() - started) / 1000)} с`);
     if (part.text !== '') {
       texts.push(part.text);
-      // Хвост прошлой части как подсказка следующей: имена и термины не рвутся на стыке.
+      // The tail of the previous part as a hint for the next one: names and terms don't break at the seam.
       carry = part.text.slice(-400);
     }
     detected = part.language ?? detected;
@@ -389,7 +389,7 @@ async function transcribeAll(files, { language, prompt }) {
   return { text: texts.join('\n\n'), segments, duration, language: detected };
 }
 
-// --- переписывание в пост ----------------------------------------------------
+// --- rewriting into a post ---------------------------------------------------
 
 const BLOG_SYSTEM = `Ты — опытный редактор. Ты получаешь сырой транскрипт видео и превращаешь его в блог-пост на языке {lang}.
 
@@ -485,7 +485,7 @@ async function writePost(transcript, meta, { outLang, style }) {
   return { post: answer.content, usage };
 }
 
-// --- файлы результата --------------------------------------------------------
+// --- result files ------------------------------------------------------------
 
 async function resolveOutDir(requested) {
   const candidates = [];
@@ -533,11 +533,11 @@ function costLine(meta) {
   return `Стоимость: расшифровка $${asr.toFixed(4)} + модель $${llm.toFixed(4)} = $${total.toFixed(4)}`;
 }
 
-// --- инструменты -------------------------------------------------------------
+// --- tools -------------------------------------------------------------------
 
 async function statusHandler(args = {}) {
   const outDirDefault = path.join(process.cwd(), 'video-blog');
-  // Ставим бинарники до замера: иначе отчёт скажет «не скачан» сразу после установки.
+  // We install the binaries before measuring: otherwise the report says "not downloaded" right after installation.
   if (args.install === true) {
     for (const kind of ['yt-dlp', 'ffmpeg']) await ensureBinary(kind);
   }
@@ -744,7 +744,7 @@ async function cleanup(workDir, keep) {
   await fs.promises.rm(workDir, { recursive: true, force: true }).catch(() => {});
 }
 
-// --- протокол ----------------------------------------------------------------
+// --- protocol ----------------------------------------------------------------
 
 const TOOLS = [
   {

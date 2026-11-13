@@ -1,4 +1,4 @@
-// Инструмент индекса памяти: список файлов с описаниями и обновление описания.
+// Memory index tool: a list of files with descriptions and description updates.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -11,7 +11,7 @@ fs.mkdirSync(path.join(MEMORY, 'projects'), { recursive: true });
 fs.writeFileSync(path.join(MEMORY, 'identity.md'), '---\ndescription: кто он\n---\n- Зовут Саня\n');
 fs.writeFileSync(path.join(MEMORY, 'projects/arduino.md'), '---\nпро Arduino и диоды\n---\n- Мигает диод\n');
 
-// Переменные читаются на загрузке модуля, поэтому выставляем их до import().
+// The variables are read when the module loads, so we set them before import().
 process.env.ICARUS_HOME = ROOT;
 process.env.ICARUS_MEMORY_DIR = MEMORY;
 
@@ -46,7 +46,7 @@ function tool(): Tool {
   return setup().tool;
 }
 
-test('инструмент отдаёт индекс с описаниями, а не содержимое файлов', async () => {
+test('the tool returns an index with descriptions, not file contents', async () => {
   const index = tool();
   assert.equal(index.name, 'memory_index');
   assert.match(String(index.description), /читай выбранные инструментом read/);
@@ -59,7 +59,7 @@ test('инструмент отдаёт индекс с описаниями, а
   assert.doesNotMatch(text, /Мигает диод/, 'содержимое файла читается отдельно');
 });
 
-test('update_description пишет описание в frontmatter', async () => {
+test('update_description writes the description into frontmatter', async () => {
   const index = tool();
   const result = await index.execute!('call-2', {
     action: 'update_description',
@@ -70,7 +70,7 @@ test('update_description пишет описание в frontmatter', async () =
   assert.match(fs.readFileSync(path.join(MEMORY, 'projects/arduino.md'), 'utf8'), /description: Arduino и мигающие диоды/);
 });
 
-test('один индекс и три чтения памяти на ход — дальше стоп', () => {
+test('one index and three memory reads per turn — then stop', () => {
   const { hooks } = setup();
   const reset = hooks.get('before_agent_start')?.[0];
   const call = hooks.get('tool_call')?.[0];
@@ -92,7 +92,7 @@ test('один индекс и три чтения памяти на ход — 
   assert.equal(call({ toolName: 'read', input: { path: '/tmp/outside.md' } }), undefined, 'чужие файлы не считаем');
 });
 
-test('в приватном режиме описание не меняется', async () => {
+test('in private mode the description does not change', async () => {
   const previous = process.env.ICARUS_PRIVATE;
   process.env.ICARUS_PRIVATE = '1';
   try {

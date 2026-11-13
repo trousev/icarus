@@ -1,5 +1,5 @@
-// Распознавание речи: что уходит провайдеру и что мы делаем с его ответом.
-// Сети тут нет: fetch — заглушка, ключ — выдуманный.
+// Speech recognition: what goes to the provider and what we do with its response.
+// No network here: fetch is a stub, the key is made up.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { audioName, speechTranscriber, transcribe, transcriptFrom } from '../src/speech.ts';
@@ -14,7 +14,7 @@ const SPEECH: SpeechConfig = {
   apiKey: 'secret-key',
 };
 
-/** Провайдер глазами клиента: один ответ на один запрос. */
+/** The provider through the client's eyes: one response per request. */
 function fakeFetch(response: { body?: string; status?: number } = {}) {
   const calls: Array<{ url: string; init: RequestInit }> = [];
   const impl = (async (url: string | URL, init?: RequestInit) => {
@@ -24,7 +24,7 @@ function fakeFetch(response: { body?: string; status?: number } = {}) {
   return { calls, fetch: impl };
 }
 
-test('голосовое уходит провайдеру как multipart с моделью и языком', async () => {
+test('a voice message goes to the provider as multipart with the model and language', async () => {
   const { calls, fetch } = fakeFetch();
 
   const text = await transcribe(SPEECH, Buffer.from('ogg-байты'), 'audio/ogg', { fetch });
@@ -46,7 +46,7 @@ test('голосовое уходит провайдеру как multipart с �
   assert.equal(await file.text(), 'ogg-байты');
 });
 
-test('язык не задан — не подсказываем: пусть распознаватель решит сам', async () => {
+test('no language set — we do not hint: let the recognizer decide itself', async () => {
   const { calls, fetch } = fakeFetch();
   const { language: _language, ...withoutLanguage } = SPEECH;
 
@@ -55,7 +55,7 @@ test('язык не задан — не подсказываем: пусть р�
   assert.equal((calls[0]?.init.body as FormData).get('language'), null);
 });
 
-test('ошибка провайдера приезжает кодом и телом', async () => {
+test('a provider error arrives with its code and body', async () => {
   const { fetch } = fakeFetch({ status: 401, body: '{"error":"Invalid API key"}' });
 
   await assert.rejects(
@@ -64,7 +64,7 @@ test('ошибка провайдера приезжает кодом и тел�
   );
 });
 
-test('таймаут и обрыв сети объясняются человеку по-русски', async () => {
+test('a timeout and a network drop are explained to the person in Russian', async () => {
   const timeout = Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' });
   const slow = (async () => {
     throw timeout;
@@ -83,25 +83,25 @@ test('таймаут и обрыв сети объясняются челове�
   );
 });
 
-test('ответ строкой — тоже расшифровка: провайдер ответил текстом', async () => {
+test('a string response is also a transcript: the provider answered with text', async () => {
   const { fetch } = fakeFetch({ body: '  просто текст  ' });
 
   assert.equal(await transcribe(SPEECH, Buffer.from('ogg'), 'audio/ogg', { fetch }), 'просто текст');
 });
 
-test('разбор ответа: { text }, строка и пустота', () => {
+test('response parsing: { text }, a string and emptiness', () => {
   assert.equal(transcriptFrom({ text: ' раз ' }), 'раз');
   assert.equal(transcriptFrom(' два '), 'два');
   assert.equal(transcriptFrom({}), '');
   assert.equal(transcriptFrom(null), '');
 });
 
-test('распознавание не настроено — расшифровщика нет', () => {
+test('recognition is not configured — there is no transcriber', () => {
   assert.equal(speechTranscriber(makeConfig()), null, 'нет speech — нечем расшифровывать');
   assert.equal(typeof speechTranscriber(makeConfig({ speech: SPEECH })), 'function');
 });
 
-test('имя файла подсказывает формат, а незнакомый mime — OGG', () => {
+test('the file name hints at the format, and an unknown mime — OGG', () => {
   assert.equal(audioName('audio/ogg'), 'voice.ogg');
   assert.equal(audioName('audio/OGG'), 'voice.ogg');
   assert.equal(audioName('audio/mpeg'), 'voice.mp3');

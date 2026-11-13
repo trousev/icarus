@@ -1,14 +1,14 @@
-// Инструмент Икара: создать скилл по-человечески.
+// Icarus tool: create a skill the human way.
 //
-// Обычный `write` тоже умеет создать `SKILL.md`, но он не знает правил раскладки
-// и кладёт файл туда, куда его попросили. Здесь модель называет скилл, описание и
-// инструкцию, а инструмент сам выбирает каталог: личный (его читает панель и pi)
-// или проектный `.pi/skills` текущей папки — если скилл нужен только этому
-// workspace'у, а не всему дому.
+// The ordinary `write` can also create a `SKILL.md`, but it does not know the layout rules
+// and puts the file wherever it was asked to. Here the model names the skill, description and
+// instruction, and the tool chooses the directory itself: personal (the panel and pi read it)
+// or the project `.pi/skills` of the current folder — if the skill is needed only by this
+// workspace and not by the whole home.
 //
-// Панель и pi читают личный каталог при старте сессии, поэтому только что
-// созданный скилл появится в следующем разговоре — об этом инструмент и говорит,
-// чтобы модель не обещала «уже работает».
+// The panel and pi read the personal directory at session start, so a just-created skill
+// appears in the next conversation — this is what the tool says, so that the model does not
+// promise "it already works".
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import path from "node:path";
 import { Type } from "typebox";

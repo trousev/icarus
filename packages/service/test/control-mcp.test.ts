@@ -1,8 +1,8 @@
-// Панель MCP целиком: добавили, поделились, включили, настроили ключ, прошли OAuth.
+// The MCP panel end to end: added, shared, enabled, key configured, OAuth passed.
 //
-// Тест ходит через настоящий HTTP-сервер панели, а не через внутренние функции:
-// человек нажимает кнопки в браузере, и права/видимость должны проверяться там же,
-// где их проверит прод.
+// The test goes through the panel's real HTTP server, not internal functions:
+// a person clicks buttons in the browser, and permissions/visibility must be checked in the same
+// place where prod will check them.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -31,8 +31,8 @@ async function withServer(
   overrides: Parameters<typeof makeConfig>[0] = {},
 ): Promise<void> {
   const config = makeConfig({ users: USERS, ...overrides });
-  // Так делает index.ts на старте: окружение готово у всех людей, а не только у
-  // того, кто первым нажал кнопку в панели.
+  // This is what index.ts does at startup: the environment is ready for all people, not only for
+  // the one who pressed a button in the panel first.
   for (const user of config.users) prepareUser(config, user);
   const registry = {
     bumpResources: () => 0,
@@ -43,7 +43,7 @@ async function withServer(
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address() as AddressInfo;
   const base = `http://127.0.0.1:${port}`;
-  // OAuth redirect_uri и client_id-ссылка строятся из этого адреса.
+  // The OAuth redirect_uri and client_id link are built from this address.
   config.url = base;
   try {
     await run(base, config, registry);
@@ -64,7 +64,7 @@ const add = (base: string, user: string, body: Record<string, unknown>) =>
 const post = (base: string, user: string, route: string, body: Record<string, unknown>) =>
   api(base, user, route, { method: 'POST', body: JSON.stringify(body) });
 
-test('сервер добавляется, попадает в mcp.json и виден только владельцу', async () => {
+test('a server is added, lands in mcp.json and is visible only to the owner', async () => {
   await withServer(async (base, config) => {
     const response = await add(base, 'probe', {
       name: 'Задачи',
@@ -87,7 +87,7 @@ test('сервер добавляется, попадает в mcp.json и ви�
   });
 });
 
-test('поделились — приезжает выключенным; включить можно только себе', async () => {
+test('shared — arrives disabled; only you can enable it for yourself', async () => {
   await withServer(async (base, config) => {
     const created = (await (
       await add(base, 'probe', {
@@ -109,7 +109,7 @@ test('поделились — приезжает выключенным; вкл
 
     await post(base, 'probe2', 'toggle', { id: created.server.id, enabled: true });
     assert.deepEqual(Object.keys(piMcp(config, 'probe2').mcpServers), [created.server.id]);
-    // У владельца от этого ничего не поменялось.
+    // Nothing changed for the owner because of this.
     assert.equal(
       ((await (await api(base, 'probe', 'servers')).json()) as { servers: Array<{ enabled: boolean }> }).servers[0]?.enabled,
       true,
@@ -117,7 +117,7 @@ test('поделились — приезжает выключенным; вкл
   });
 });
 
-test('ключи не копируются вместе с шарингом: второму нужен свой', async () => {
+test('keys are not copied along with sharing: the second person needs their own', async () => {
   await withServer(async (base, config) => {
     const created = (await (
       await add(base, 'probe', {
@@ -142,7 +142,7 @@ test('ключи не копируются вместе с шарингом: в�
   });
 });
 
-test('чужой сервер нельзя переписать, удалить или расшарить', async () => {
+test("someone else's server cannot be rewritten, deleted or shared", async () => {
   await withServer(async (base) => {
     const created = (await (
       await add(base, 'probe', {
@@ -165,7 +165,7 @@ test('чужой сервер нельзя переписать, удалить 
   });
 });
 
-test('общий MCP из config.yaml выключается себе, но не пропадает у других', async () => {
+test('a shared MCP from config.yaml is disabled for oneself but does not disappear for others', async () => {
   await withServer(
     async (base, config) => {
       await post(base, 'probe', 'toggle', { id: 'echo', enabled: false });
@@ -176,7 +176,7 @@ test('общий MCP из config.yaml выключается себе, но не
   );
 });
 
-test('OAuth целиком: старт, callback, токен в mcp.json', async () => {
+test('OAuth end to end: start, callback, token in mcp.json', async () => {
   let tokenBody = '';
   let registered = 0;
   const as = http.createServer((req, res) => {
@@ -252,7 +252,7 @@ test('OAuth целиком: старт, callback, токен в mcp.json', async
       assert.equal(authorize.searchParams.get('redirect_uri'), `${base}/panel/mcp/oauth/callback`);
       assert.equal(registered, 1);
 
-      // Браузер возвращается на callback без заголовка SSO: человека знает state.
+      // The browser returns to the callback without the SSO header: the person is known from state.
       const callback = await fetch(
         `${base}/panel/mcp/oauth/callback?state=${encodeURIComponent(authorize.searchParams.get('state') ?? '')}&code=code-1`,
         { redirect: 'manual' },
@@ -272,7 +272,7 @@ test('OAuth целиком: старт, callback, токен в mcp.json', async
       assert.match(entry.url ?? '', /^http:\/\/icarus:\d+\/mcp-proxy\//, 'OAuth-MCP идёт через локальный прокси');
       assert.equal(entry.headers?.Authorization, undefined, 'токен в mcp.json не уезжает');
 
-      // Прямой вид остаётся для панели и проверки: там Authorization нужен.
+      // The direct view remains for the panel and for checking: Authorization is needed there.
       const direct = effectiveServers(config, readStore(config), 'probe', Date.now(), { proxyBase: null }).servers[
         created.server.id
       ];
@@ -288,7 +288,7 @@ test('OAuth целиком: старт, callback, токен в mcp.json', async
   }
 });
 
-test('мимикрия: вход через loopback завершается вставкой адреса в панель', async () => {
+test('mimicry: loopback login finishes by pasting the address into the panel', async () => {
   let tokenBody = '';
   let registeredRedirects: string[] = [];
   const as = http.createServer((req, res) => {
@@ -369,21 +369,21 @@ test('мимикрия: вход через loopback завершается вс
       const pasted = (redirect: string, state = started.state): string =>
         `${redirect}?code=code-1&state=${encodeURIComponent(state)}`;
 
-      // Чужой человек не завершает чужой вход — даже с валидным адресом.
+      // Another person does not finish someone else's login — even with a valid address.
       const foreign = await post(base, 'probe2', 'oauth/complete', {
         id: created.server.id,
         url: pasted('http://localhost:47821/callback'),
       });
       assert.equal(foreign.status, 403);
 
-      // Адрес без кода не тратит одноразовый state.
+      // An address without a code does not consume the one-time state.
       const junk = await post(base, 'probe', 'oauth/complete', {
         id: created.server.id,
         url: `http://localhost:47821/callback?state=${encodeURIComponent(started.state)}`,
       });
       assert.equal(junk.status, 400);
 
-      // Адрес с другого порта — это не наш вход.
+      // An address from another port is not our login.
       const wrong = await post(base, 'probe', 'oauth/complete', {
         id: created.server.id,
         url: pasted('http://localhost:9999/callback'),
@@ -407,7 +407,7 @@ test('мимикрия: вход через loopback завершается вс
       assert.match(entry.url ?? '', /\/mcp-proxy\//, 'токен уезжает через прокси, как у обычного OAuth');
       assert.equal(entry.headers?.Authorization, undefined);
 
-      // Повторная вставка того же адреса больше не сработает: state одноразовый.
+      // Pasting the same address again will not work: state is one-time.
       const again = await post(base, 'probe', 'oauth/complete', {
         id: created.server.id,
         url: pasted('http://localhost:47821/callback'),
@@ -419,7 +419,7 @@ test('мимикрия: вход через loopback завершается вс
   }
 });
 
-test('публичный документ CIMD отдаётся без SSO-заголовка', async () => {
+test('the public CIMD document is served without the SSO header', async () => {
   await withServer(async (base) => {
     const response = await fetch(`${base}/panel/mcp/oauth/client-metadata.json`);
     assert.equal(response.status, 200);
@@ -429,7 +429,7 @@ test('публичный документ CIMD отдаётся без SSO-за�
   });
 });
 
-test('страница MCP открывается и рисует кнопку добавления', async () => {
+test('the MCP page opens and renders the add button', async () => {
   await withServer(async (base) => {
     const page = await fetch(`${base}/panel/mcp`, { headers: headers('probe') });
     assert.equal(page.status, 200);
@@ -437,8 +437,8 @@ test('страница MCP открывается и рисует кнопку �
     assert.match(html, /Добавить MCP/);
     assert.match(html, /__MCP_CFG__/);
     assert.match(html, /mcp-list/);
-    // Клиентский скрипт — обычный JS, но сломанная кавычка в нём роняет всю
-    // страницу молча: браузер покажет пустой список, а тест этого не увидит.
+    // The client script is ordinary JS, but a broken quote in it silently takes down the whole
+    // page: the browser will show an empty list, and the test would not see it.
     const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
     assert.ok(scripts.length >= 2);
     assert.doesNotThrow(() => new Function(scripts[scripts.length - 1] ?? ''), 'скрипт MCP компилируется');

@@ -1,49 +1,49 @@
-// Язык разговора — дописываем к реплике человека, а не отдельным системным сообщением.
+// Conversation language — we append it to the human message rather than sending a separate system message.
 //
-// Почему не отдельным system-сообщением. Именно так и было задумано сначала, и на
-// голом API это работало (20/20), но в pi сообщение тихо терялось: агент прогоняет
-// историю через convertToLlm, а тот фильтрует всё, кроме user/assistant/toolResult —
+// Why not a separate system message. That's exactly how it was intended at first, and on
+// the bare API it worked (20/20), but in pi the message was silently lost: the agent runs
+// the history through convertToLlm, and that filters out everything except user/assistant/toolResult —
 //
 //   function defaultConvertToLlm(messages){
 //     return messages.filter(m => m.role === "user" || m.role === "assistant" || m.role === "toolResult");
 //   }
 //
-// Системное сообщение из хука context в запрос не попадает: до модели доезжает только
-// системный ПРОМПТ (он едет отдельным полем) и реплики. Поэтому правило языка живёт
-// там же, где метка времени из clock.ts: дописано к последней реплике человека.
-// Так оно доезжает всегда — и не зависит от того, что pi решит отфильтровать.
+// A system message from the context hook doesn't make it into the request: only the
+// system PROMPT (it travels as a separate field) and the messages reach the model. That's why the language
+// rule lives in the same place as the timestamp from clock.ts: appended to the last human message.
+// That way it always arrives — and doesn't depend on what pi decides to filter out.
 //
-// Язык приезжает переменной ICARUS_LANGUAGE (полное имя: English, Russian) — его
-// готовит сервис из профиля человека (см. containerEnv в docker/spec.ts).
+// The language arrives via the ICARUS_LANGUAGE variable (full name: English, Russian) — it's
+// prepared by the service from the person's profile (see containerEnv in docker/spec.ts).
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export type ChatMessage = { role?: string; content?: string | Array<{ type?: string; text?: string }> };
 
 /**
- * Текст требования по имени языка. Экспортируется ради теста: правило — данные,
- * и его форма (имя языка, запрет зеркалить, случай первого ответа) должна быть
- * проверяема. Длина не работает: 894 символа давали 9/10 на голом API, 136 — 10/10.
+ * The requirement text for a language name. Exported for testing: the rule is data,
+ * and its form (the language name, the ban on mirroring, the first-answer case) must be
+ * testable. Length doesn't work: 894 characters gave 9/10 on the bare API, 136 — 10/10.
  *
- * Последняя фраза — про иероглифы — появилась не из осторожности. 08.11.2026 Икар
- * поздоровался так: «Воскресенье, день —理论上 время для подвигов». Это не перевод и
- * не калька, а подстановка китайского слова вместо русского «теоретически»: у
- * DeepSeek китайский — родной, и на редком для него русском слове срывается язык.
- * Явного запрета в правилах не было, а модель, которая думает по-китайски, такой
- * запрет понимает лучше любого «пиши живо» (см. specs/ru-language.md).
+ * The last phrase — about hieroglyphs — didn't appear out of caution. On 08.11.2026 Icarus
+ * greeted like this: «Воскресенье, день —理论上 время для подвигов». That's neither a translation nor
+ * a calque, but a substitution of a Chinese word for the Russian «теоретически»: for
+ * DeepSeek Chinese is native, and on a Russian word rare for it the language slips.
+ * There was no explicit ban in the rules, and a model that thinks in Chinese understands such a
+ * ban better than any "write vividly" (see specs/ru-language.md).
  */
 export function languageOverride(name: string): string {
   return `[Твой язык разговора — ${name}. Не зеркаль язык его реплики: он пишет по-русски, ты отвечаешь на ${name}. Первый ответ — тоже на ${name}. Иероглифов нет: китайское слово или имя — буквами, кроме прямой просьбы.]`;
 }
 
-/** Полное имя языка из переменной контейнера. Пустое — правило не шлём. */
+/** Full language name from the container variable. Empty — we don't send the rule. */
 function languageNameFromEnv(): string | undefined {
   const raw = (process.env.ICARUS_LANGUAGE ?? "").trim();
   return raw.length > 0 ? raw : undefined;
 }
 
 /**
- * Дописать правило к последней реплике человека — как appendMoment в clock.ts.
- * Возвращаем новый массив (pi правит копию) или null, если реплики нет.
+ * Append the rule to the last human message — like appendMoment in clock.ts.
+ * We return a new array (pi edits a copy) or null if there's no message.
  */
 export function appendLanguageOverride<T extends ChatMessage>(messages: T[], name: string): T[] | null {
   const lastUser = messages.map((message) => message?.role).lastIndexOf("user");
@@ -73,7 +73,7 @@ export function appendLanguageOverride<T extends ChatMessage>(messages: T[], nam
 
 export default function (pi: ExtensionAPI) {
   const name = languageNameFromEnv();
-  // Без настройки расширение молчит: английский по умолчанию не навязываем.
+  // Without the setting the extension stays silent: we don't impose English by default.
   if (!name) return;
 
   pi.on("context", (event) => {

@@ -1,17 +1,18 @@
-// Веб-поиск и чтение страниц как инструменты Икара.
+// Web search and page reading as Icarus tools.
 //
-// Провайдер выбирается переменной ICARUS_SEARCH_PROVIDER:
-//   router (по умолчанию, если задан ICARUS_SEARCH_URL) | tavily | brave | searxng | none
-// router — поиск через сервис: он держит ключи всех провайдеров, сам выбирает
-// живого и обходит упавших. Контейнер ходит в сервис по docker-сети, без токена.
-// tavily — поисковый API (https://tavily.com), свой ключ TAVILY_API_KEY. Отдельный
-// провайдер здесь потому, что серверного веб-поиска у DeepInfra нет: её модели умеют
-// только клиентские тулы, а поиск надо чем-то обслуживать. Ключ моделей для поиска не
-// годится, и наоборот.
-// Скрейпинг поисковиков выброшен: DuckDuckGo и Mojeek отдают ботам 403 и капчу, а
-// страница без результатов разбиралась в пустую выдачу — «Ничего не нашлось» вместо
-// причины отказа. Чтение страниц работает всегда и превращает HTML в текст без
-// внешних зависимостей.
+// The provider is chosen by the ICARUS_SEARCH_PROVIDER variable:
+//   router (default if ICARUS_SEARCH_URL is set) | tavily | brave | searxng | none
+// router — search through the service: it holds the keys of all providers, picks a live one
+// itself and skips the fallen ones. The container talks to the service over the docker network,
+// without a token.
+// tavily — search API (https://tavily.com), its own TAVILY_API_KEY. A separate provider is
+// here because DeepInfra has no server-side web search: its models only support client-side
+// tools, and the search needs something to serve it. The models' key does not work for search,
+// and vice versa.
+// Scraping search engines was dropped: DuckDuckGo and Mojeek return 403 and a captcha to bots,
+// and a page without results was parsed into an empty result — "Ничего не нашлось" instead of
+// the reason for the refusal. Page reading always works and turns HTML into text without
+// external dependencies.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
@@ -20,17 +21,17 @@ const PROVIDER = (process.env.ICARUS_SEARCH_PROVIDER ?? (ROUTER_URL ? "router" :
 const TAVILY_KEY = process.env.TAVILY_API_KEY ?? "";
 const BRAVE_KEY = process.env.BRAVE_API_KEY ?? "";
 const SEARXNG_URL = process.env.ICARUS_SEARXNG_URL ?? "";
-/** basic хватает для разговора; advanced ищет глубже и тратит больше кредитов Tavily. */
+/** basic is enough for a conversation; advanced searches deeper and spends more Tavily credits. */
 const TAVILY_DEPTH = (process.env.ICARUS_SEARCH_DEPTH ?? "basic").toLowerCase() === "advanced" ? "advanced" : "basic";
 const TAVILY_URL = "https://api.tavily.com/search";
-/** Выдержка в списке результатов — одна строка: длинную мысль обрезаем. */
+/** Snippet in the result list — one line: we cut a long thought. */
 const SNIPPET_LIMIT = 500;
 const USER_AGENT =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36";
 
 export type SearchResult = { title: string; url: string; snippet?: string };
 
-/** Грубое, но предсказуемое превращение HTML в читаемый текст. */
+/** Crude but predictable conversion of HTML into readable text. */
 export function htmlToText(html: string): string {
   return html
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
@@ -54,17 +55,17 @@ export function htmlToText(html: string): string {
     .trim();
 }
 
-/** Выдержка одной строкой: в списке результатов переводы строк только путают. */
+/** One-line snippet: in the result list line breaks only confuse. */
 function snippet(text: string): string {
   const squashed = text.replace(/\s+/g, " ").trim();
   return squashed.length > SNIPPET_LIMIT ? `${squashed.slice(0, SNIPPET_LIMIT - 1)}…` : squashed;
 }
 
 /**
- * Разбирает выдачу Tavily.
- * @param payload - разобранное тело ответа /search.
- * @param limit - сколько результатов отдать.
- * @returns результаты; пустой массив, если тело не той формы.
+ * Parses the Tavily response.
+ * @param payload - parsed body of the /search response.
+ * @param limit - how many results to return.
+ * @returns results; an empty array if the body is of the wrong shape.
  */
 export function parseTavily(payload: unknown, limit = 6): SearchResult[] {
   const results = (payload as { results?: Array<{ title?: string; url?: string; content?: string }> })?.results;
@@ -111,7 +112,7 @@ function format(results: SearchResult[]): string {
     .join("\n\n");
 }
 
-/** Причина отказа сети: у fetch под сообщением «fetch failed» спрятана настоящая ошибка. */
+/** Reason for a network failure: under the "fetch failed" message, fetch hides the real error. */
 function networkErrorText(error: unknown): string {
   if (!(error instanceof Error)) return String(error);
   const cause = (error as { cause?: unknown }).cause;
@@ -120,7 +121,7 @@ function networkErrorText(error: unknown): string {
   return `${error.message}${detail}`;
 }
 
-/** Отказ HTTP: статус плюс текст ошибки сервиса, если он там есть. */
+/** HTTP failure: status plus the service error text, if there is one. */
 async function httpError(response: Response, what = "Поиск"): Promise<string> {
   let message = `${what} не удался: HTTP ${response.status}`;
   try {
@@ -137,7 +138,7 @@ async function httpError(response: Response, what = "Поиск"): Promise<strin
           (typeof parsed?.detail === "string" ? parsed.detail : (parsed?.detail?.error ?? parsed?.detail?.message)));
     if (detail) message += `: ${detail}`;
   } catch {
-    // тело может быть не JSON — тогда хватит одного статуса
+    // the body may not be JSON — then the status alone is enough
   }
   return message;
 }
@@ -151,7 +152,7 @@ async function searchTavily(query: string, limit: number, signal?: AbortSignal):
       headers: {
         "content-type": "application/json",
         accept: "application/json",
-        // Ключ в заголовке, а не в теле: тело запроса оседает в логах охотнее.
+        // Key in the header, not in the body: the request body settles into logs more readily.
         authorization: `Bearer ${TAVILY_KEY}`,
         "user-agent": USER_AGENT,
       },
@@ -173,7 +174,7 @@ async function searchTavily(query: string, limit: number, signal?: AbortSignal):
   return format(parseTavily(payload, limit));
 }
 
-/** Выдача сервисного роутера: { results: [{ title, url, snippet }] }. */
+/** Response of the service router: { results: [{ title, url, snippet }] }. */
 export function parseRouter(payload: unknown, limit = 6): SearchResult[] {
   const results = (payload as { results?: Array<{ title?: unknown; url?: unknown; snippet?: unknown }> })?.results;
   if (!Array.isArray(results)) return [];
@@ -187,7 +188,7 @@ export function parseRouter(payload: unknown, limit = 6): SearchResult[] {
     }));
 }
 
-/** Кто на самом деле ответил и кого пришлось обойти — из ответа сервиса. */
+/** Who actually answered and who had to be skipped — from the service response. */
 export function parseRouterMeta(payload: unknown): { upstream?: string; tried?: Array<{ provider: string; reason: string }> } {
   const root = payload as { provider?: unknown; tried?: unknown } | null;
   const upstream = typeof root?.provider === "string" ? root.provider : undefined;
@@ -202,7 +203,7 @@ export function parseRouterMeta(payload: unknown): { upstream?: string; tried?: 
   return { ...(upstream ? { upstream } : {}), ...(tried.length > 0 ? { tried } : {}) };
 }
 
-/** Что вернул поиск: текст для модели и, если знаем, кто ответил. */
+/** What the search returned: text for the model and, if known, who answered. */
 type SearchOutcome = {
   text: string;
   upstream?: string;
@@ -273,7 +274,7 @@ async function fetchPage(url: string, signal?: AbortSignal): Promise<string> {
   return text.length > 20_000 ? `${text.slice(0, 20_000)}\n… (обрезано)` : text || "На странице не нашлось текста.";
 }
 
-/** Ответ сервисного /fetch: текст страницы плюс кто её прочитал. */
+/** Response of the service /fetch: page text plus who read it. */
 export function parseFetchRouter(payload: unknown): {
   text: string;
   title?: string;
@@ -355,9 +356,9 @@ export default function (pi: ExtensionAPI) {
       url: Type.String({ description: "Адрес страницы" }),
     }),
     async execute(_toolCallId, params, signal) {
-      // Через сервис — когда он есть: там свой роутер извлечения (Exa, Tavily,
-      // Linkup, You.com), свои карантины и отдельный «текущий». Без сервиса
-      // остаётся прежний прямой поход из контейнера.
+      // Through the service — when it exists: it has its own extraction router (Exa, Tavily,
+      // Linkup, You.com), its own quarantines and a separate "current" one. Without the service,
+      // the previous direct trip from the container remains.
       const outcome = ROUTER_URL
         ? await fetchViaRouter(String(params.url), signal)
         : { text: await fetchPage(String(params.url), signal) };

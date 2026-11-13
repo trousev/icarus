@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Проверки Icarus: типы, линтер и bash-скрипты. Сборки нет — код исполняется как есть.
+# Icarus checks: types, linter and bash scripts. There is no build — the code runs as is.
 #
-#   ./script/lint          всё перечисленное (то же гоняет CI)
-#   ./script/lint tsc      только типы
-#   ./script/lint eslint   только линтер
-#   ./script/lint shell    только shellcheck по script/*
+#   ./script/lint          everything listed (what CI runs too)
+#   ./script/lint tsc      types only
+#   ./script/lint eslint   linter only
+#   ./script/lint shell    shellcheck over script/* only
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -35,15 +35,15 @@ if [ "$what" = all ] || [ "$what" = eslint ]; then
 fi
 
 if [ "$what" = all ] || [ "$what" = shell ]; then
-  # bash в проекте — тоже код: script/* собирает compose, ставит зависимости и правит
-  # конфиги. Берём severity=warning: style/info у shellcheck слишком шумные для наших
-  # осознанных приёмов (${arr[@]+"${arr[@]}"} и одинарные кавычки с node -e).
+  # bash in the project is code too: script/* builds compose, installs dependencies and edits
+  # configs. We take severity=warning: shellcheck's style/info are too noisy for our
+  # deliberate tricks (${arr[@]+"${arr[@]}"} and single quotes with node -e).
   if command -v shellcheck >/dev/null 2>&1; then
     echo '==> shellcheck'
     shellcheck --severity=warning script/*
   elif [ -n "${CI:-}" ]; then
-    # На ubuntu-образе GitHub shellcheck есть из коробки, так что в CI это не «нет
-    # инструмента», а сломанный раннер: молча пропускать проверку нельзя.
+    # On the GitHub ubuntu image shellcheck is present out of the box, so in CI this is not "no
+    # tool" but a broken runner: silently skipping the check is not allowed.
     echo '[x] в CI нет shellcheck — проверка script/* обязательна' >&2
     exit 1
   else

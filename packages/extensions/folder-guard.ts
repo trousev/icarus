@@ -1,13 +1,13 @@
-// Страж прав на папки для файловых инструментов агента.
+// Folder permission guard for the agent's file tools.
 //
-// Это generic-слой: он не знает про артефакты, он знает про корни с
-// `.folder-acl.json`. Сегодня корень один — /artifacts, завтра можно добавить
-// ещё через ICARUS_ACL_ROOTS=... Общий формат ACL живёт в lib/folder-access.ts.
+// This is a generic layer: it knows nothing about artifacts, it knows about roots with
+// `.folder-acl.json`. Today there's one root — /artifacts, tomorrow more can be added
+// via ICARUS_ACL_ROOTS=... The common ACL format lives in lib/folder-access.ts.
 //
-// Ограничение честное: это блокировка read/write/edit/grep/find/ls и запрет
-// bash по защищённым путям. MCP-серверы проверяют права сами; чужой MCP,
-// которому разрешено ходить в /artifacts, — дыра, которую закроет отдельный
-// allow-list MCP, когда появится.
+// The limitation is honest: this blocks read/write/edit/grep/find/ls and forbids
+// bash on protected paths. MCP servers check permissions themselves; a foreign MCP
+// allowed to reach /artifacts is a hole that a separate MCP allow-list will close
+// when it appears.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { aclRoots, folderVerdict, type AccessLevel } from "./lib/folder-access.ts";
 
@@ -20,8 +20,8 @@ export type GuardOptions = {
 };
 
 /**
- * Решение стража для одного вызова. undefined — пропустить.
- * Вынесено из pi.on, чтобы проверялось тестом без живого агента.
+ * The guard's decision for a single call. undefined — pass through.
+ * Taken out of pi.on so it can be tested without a live agent.
  */
 export function guardToolCall(
   toolName: string,
@@ -31,7 +31,7 @@ export function guardToolCall(
   if (options.roots.length === 0) return undefined;
   if (toolName.startsWith("mcp_")) return undefined;
 
-  // bash обошёл бы любой path-based страж: запрещаем в защищённых путях целиком.
+  // bash would bypass any path-based guard: we forbid it entirely in protected paths.
   if (toolName === "bash" || toolName === "powershell") {
     const command = String(input.command ?? "");
     const hit = options.roots.find((root) => command.includes(root));
@@ -63,8 +63,8 @@ export function guardToolCall(
     return { block: true, reason: "Права и ссылка артефакта меняются через artifact_new или панель, не файлом." };
   }
   if (verdict.rootOnly) {
-    // Имена артефактов — глобальный листинг, его смотреть можно. Содержимое —
-    // только с указанием конкретной папки.
+    // Artifact names are a global listing, they may be viewed. Contents —
+    // only with a specific folder specified.
     if (toolName === "ls") return undefined;
     return { block: true, reason: "Уточни артефакт: /artifacts сам по себе — только список имён." };
   }

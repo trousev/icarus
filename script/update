@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Подготовка окружения Icarus: поставить зависимости и разложить локальные конфиги.
-# Запускается после `git clone` и после каждого `git pull`.
+# Icarus environment setup: install dependencies and lay out local configs.
+# Runs after `git clone` and after every `git pull`.
 #
 #   ./script/update
 #
-# В CI (CI=true) установка идёт строго по lockfile: если package.json и pnpm-lock.yaml
-# разъехались, шаг падает, а не тихо переписывает lockfile.
+# In CI (CI=true) installation goes strictly by the lockfile: if package.json and pnpm-lock.yaml
+# have diverged, the step fails instead of quietly rewriting the lockfile.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -16,7 +16,7 @@ warn() { printf '\033[33m[!]\033[0m %s\n' "$*" >&2; }
 die() { printf '\033[31m[x]\033[0m %s\n' "$*" >&2; exit 1; }
 
 # --- node ---------------------------------------------------------------------
-# Код запускается напрямую как TypeScript (`node file.ts`), это умеет node >= 22.19.
+# The code is run directly as TypeScript (`node file.ts`), node >= 22.19 can do that.
 if ! command -v node >/dev/null 2>&1; then
   die 'не нашёл node. Нужен node >= 22.19 (см. .nvmrc / engines в package.json)'
 fi
@@ -27,7 +27,7 @@ node -e 'const [maj, min] = process.versions.node.split(".").map(Number);
   }' || exit 1
 
 # --- pnpm ---------------------------------------------------------------------
-# Версия pnpm прибита полем packageManager в package.json; corepack её подхватит.
+# The pnpm version is pinned by the packageManager field in package.json; corepack picks it up.
 if ! command -v pnpm >/dev/null 2>&1; then
   if command -v corepack >/dev/null 2>&1; then
     say 'pnpm не найден — включаю через corepack'
@@ -37,7 +37,7 @@ fi
 command -v pnpm >/dev/null 2>&1 \
   || die 'не нашёл pnpm. Поставь его: `corepack enable pnpm` или `npm install -g pnpm`'
 
-# --- зависимости --------------------------------------------------------------
+# --- dependencies -------------------------------------------------------------
 if [ -n "${CI:-}" ]; then
   say "pnpm install --frozen-lockfile (node $(node -v), pnpm $(pnpm -v))"
   pnpm install --frozen-lockfile
@@ -46,15 +46,15 @@ else
   pnpm install
 fi
 
-# --- локальные конфиги --------------------------------------------------------
-# Примеры копируем только если файла ещё нет: настроенное не перетираем.
+# --- local configs ------------------------------------------------------------
+# We copy the samples only if the file does not exist yet: we do not overwrite what is configured.
 if [ ! -f config.yaml ]; then
   cp config.example.yaml config.yaml
   warn 'создал config.yaml из примера — поправь людей, модели и пути'
 fi
 
-# Ключи живут в .env в корне. Файла нет — берём образец, а если остался старый
-# packages/service/.env, переносим ключи оттуда: до переезда он был рабочим местом ключей.
+# Keys live in .env in the root. No file — take the sample, and if an old
+# packages/service/.env is left, move the keys from there: before the move it was the working place of the keys.
 if [ ! -f .env ]; then
   if [ -f packages/service/.env ]; then
     cp packages/service/.env .env
@@ -70,7 +70,7 @@ if [ -f packages/service/.env ]; then
   warn 'packages/service/.env больше не читается: ключи берутся из .env в корне — старый можно удалить'
 fi
 
-# --- что дальше ---------------------------------------------------------------
+# --- what next ----------------------------------------------------------------
 cat <<'EOF'
 
 Готово. Дальше:

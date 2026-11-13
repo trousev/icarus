@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# Локальная панель управления: посмотреть её на своих данных, без сборки стека.
+# Local control panel: look at it on your own data, without building the stack.
 #
-#   ./script/panel                          панель на config.yaml, первый человек из users
-#   ./script/panel --user probe2            посмотреть другого человека
-#   ./script/panel --port 8099              другой порт (по умолчанию 8099: 8081 занят сервисом)
-#   ./script/panel --config /path/config.yaml   другой конфиг — например, копия с другим dataDir
-#   ./script/panel --with-model             ещё и «напиши за меня»: разовый вопрос уходит
-#                                           в контейнер человека
+#   ./script/panel                          panel on config.yaml, the first person from users
+#   ./script/panel --user probe2            look at another person
+#   ./script/panel --port 8099              another port (default 8099: 8081 is taken by the service)
+#   ./script/panel --config /path/config.yaml   another config — for example, a copy with a different dataDir
+#   ./script/panel --with-model             also "write it for me": a one-off question goes
+#                                           into the person's container
 #
-# Панель работает с файлами и git: пишет память и скиллы туда же, куда настоящий
-# сервис, и коммитит их. Чат работает, если контейнеры людей уже подняты: панель
-# говорит с теми же сессиями pi, что и сервис, но сама контейнеры не создаёт.
+# The panel works with files and git: it writes memory and skills to the same place as the real
+# service, and commits them. Chat works if people's containers are already up: the panel
+# talks to the same pi sessions as the service, but it does not create containers itself.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

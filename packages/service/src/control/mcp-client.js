@@ -1,11 +1,11 @@
-/* Панель MCP: список серверов, переключатели, форма и OAuth-подключение.
-   Данные приезжают с /panel/mcp/*; страница не хранит секретов и не рисует их. */
+/* MCP panel: server list, toggles, form and OAuth connection.
+   Data arrives from /panel/mcp/*; the page stores no secrets and does not render them. */
 (function () {
   const cfg = window.__MCP_CFG__ || {};
   const ui = cfg.ui || {};
   const el = (id) => document.getElementById(id);
-  // Адрес «мёртвого» loopback приходит со страницы: порт живёт в oauth.ts.
-  // Запасное значение — на случай страницы из кэша, отданной старым сервисом.
+  // The address of the "dead" loopback comes from the page: the port lives in oauth.ts.
+  // The fallback value is for a page from the cache served by an old service.
   const MIMIC_CALLBACK =
     (window.__MCP_CFG__ && window.__MCP_CFG__.mimicCallback) || 'http://localhost:47821/callback';
 
@@ -27,7 +27,7 @@
   const esc = (s) =>
     String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-  /** Подстановка в шаблон словаря: «{n} {word}» и подобные. */
+  /** Substitution into a dictionary template: "{n} {word}" and the like. */
   const fill = (template, values) =>
     Object.entries(values).reduce((text, [key, value]) => text.split('{' + key + '}').join(String(value)), template);
 
@@ -52,7 +52,7 @@
         if (node && typeof value === 'number') node.textContent = String(value);
       }
     } catch {
-      /* счётчик — украшение; раздел важнее */
+      /* the counter is decoration; the section matters more */
     }
   }
 
@@ -128,12 +128,12 @@
     add('Проверить', 'test');
     if (!server.global && server.auth === 'oauth') {
       add(server.ready ? 'Переподключить' : 'Подключить', 'connect', 'primary');
-      // Готовому серверу секрет клиента нужен только если authorization server
-      // его требует; для DCR-серверов этой кнопкой не пользуются.
+      // A ready server needs the client secret only if the authorization server
+      // requires it; for DCR servers this button is not used.
       add('Секрет клиента', 'credentials');
-      // Кнопка есть всегда: если authorization server отверг сохранённую
-      // регистрацию (invalid_client), человеку нужен способ её сбросить, а не
-      // только ждать, когда сервер «сам починится».
+      // The button is always there: if the authorization server rejected the saved
+      // registration (invalid_client), the person needs a way to reset it, not
+      // just to wait for the server to "fix itself".
       add('Сбросить доступ', 'disconnect');
     }
     if (!server.global && server.auth === 'headers') add('Настроить доступ', 'credentials', server.ready ? '' : 'primary');
@@ -170,8 +170,8 @@
     return node;
   }
 
-  // Ссылка из чата/Telegram: ?server=<id> — подсветить карточку, к которой
-  // человеку идти за «Переподключить».
+  // Link from chat/Telegram: ?server=<id> — highlight the card the person
+  // should go to for "Reconnect".
   function focusRequestedServer() {
     const id = new URLSearchParams(location.search).get('server');
     if (!id) return;
@@ -202,13 +202,13 @@
     } catch (error) {
       box.innerHTML = '<p class="mcp-empty">Не удалось прочитать список: ' + esc(error.message) + '</p>';
     }
-    // Счётчик в сайдбаре — часть того же состояния: после добавления/удаления
-    // он должен совпадать со списком, а не жить до перезагрузки.
+    // The sidebar counter is part of the same state: after adding/removing
+    // it must match the list, not live until a reload.
     void loadCounts();
   }
 
   function plural(n, one, few, many) {
-    // Старый вызов передаёт три строки, новый — формы из словаря.
+    // The old call passes three strings, the new one — forms from the dictionary.
     const words = typeof one === 'string' ? { one, few, many } : one;
     if (ui.lang && ui.lang !== 'ru') return n === 1 ? words.one : words.many;
     const tens = n % 100;
@@ -252,20 +252,20 @@
     try {
       const data = await post('oauth/start', { id: server.id });
       if (!data.url) throw new Error('сервер не вернул адрес авторизации');
-      // Мимикрия: браузер уйдёт на мёртвый loopback, поэтому вкладку панели не
-      // трогаем — человек вернётся сюда и вставит адрес руками.
+      // Mimicry: the browser will go to a dead loopback, so we do not touch the panel
+      // tab — the person returns here and pastes the address by hand.
       if (data.mimic) {
         openMimicDialog(server, data);
         return;
       }
-      // В чате настройки открыты iframe'ом, а authorization server обычно
-      // запрещает показ в рамке (X-Frame-Options). Уводим верхнюю вкладку:
-      // после callback человек попадёт на полноценную страницу MCP.
+      // In the settings chat the page is opened as an iframe, and the authorization server
+      // usually forbids being shown in a frame (X-Frame-Options). We send the top tab away:
+      // after the callback the person lands on a full MCP page.
       const target = window.self !== window.top ? window.top : window;
       target.location.href = data.url;
     } catch (error) {
-      // Самая частая причина отказа — белый список redirect_uri у сервера.
-      // Подсказываем галочку, но только если она ещё не включена.
+      // The most common reason for refusal is the server's redirect_uri allowlist.
+      // We suggest the checkbox, but only if it is not yet enabled.
       const hint =
         !server.mimic && /redirect/i.test(error.message)
           ? '\n\nПохоже, сервер пускает только свои адреса возврата. Открой «Изменить» и включи «Мимикрировать под Claude».'
@@ -277,9 +277,9 @@
   }
 
   /**
-   * Ручной вход для серверов с белым списком redirect_uri. Браузер вернётся на
-   * http://localhost:<порт>/callback, где намеренно никто не слушает: покажет
-   * ошибку соединения, но код останется в строке браузера.
+   * Manual login for servers with a redirect_uri allowlist. The browser will return to
+   * http://localhost:<port>/callback, where intentionally nobody is listening: it will show
+   * a connection error, but the code will remain in the browser address bar.
    */
   function openMimicDialog(server, started) {
     const callback = started.redirectUri || MIMIC_CALLBACK;
@@ -328,7 +328,7 @@
         const text = await navigator.clipboard.readText();
         if (text.trim()) paste.value = text.trim();
       } catch {
-        // Браузер мог не дать буфер (нет разрешения или http): тогда Ctrl+V.
+        // The browser may not have given access to the clipboard (no permission or http): then Ctrl+V.
       }
       paste.focus();
     });
@@ -396,9 +396,9 @@
     }
   }
 
-  // ── формы ────────────────────────────────────────────────────────────────
-  // Стопка окон: Escape закрывает только верхнее. Иначе confirm, открытый из
-  // формы, закрывал бы вместе с собой и форму, из которой его позвали.
+  // ── forms ──────────────────────────────────────────────────────────────
+  // A stack of windows: Escape closes only the topmost. Otherwise a confirm opened from
+  // a form would close the form that called it along with itself.
   const dialogStack = [];
   function dialog(html, onClose) {
     const backdrop = document.createElement('div');
@@ -441,8 +441,8 @@
     return out;
   };
 
-  // Постоянные заголовки показываем со значениями (они часть описания), а
-  // секреты — только именами: значения в браузер не уезжают.
+  // We show permanent headers with values (they are part of the description), and
+  // secrets — only by name: values do not go to the browser.
   const mapToLines = (map, withValues) =>
     Object.entries(map || {})
       .map(([name, value]) => name + ': ' + (withValues ? String(value) : ''))
@@ -468,11 +468,11 @@
       issuer: auth === 'oauth' ? el('f-issuer').value.trim() : '',
       mimic: auth === 'oauth' && el('f-mimic').checked,
       shared: el('f-shared').checked,
-      // Поля скрытых веток не отправляем: иначе переключение с «ключа» на OAuth
-      // утащило бы в новый сервер старый заголовок, а он там уже ни к чему.
+      // We do not send the fields of hidden branches: otherwise switching from "key" to OAuth
+      // would drag the old header into the new server, where it is no longer needed.
       headers: stdio ? {} : linesToMap(el('f-headers').value),
-      // Постоянные переменные stdio — часть описания, а не секрет: порты, адреса,
-      // режимы. Рецепты кладут сюда то, что человеку не надо придумывать.
+      // Permanent stdio variables are part of the description, not a secret: ports, addresses,
+      // modes. Recipes put here what the person should not have to invent.
       env: stdio ? linesToMap(el('f-env').value) : {},
       credentialHeaders: auth === 'headers' && !stdio ? linesToMap(el('f-credential-headers').value) : {},
       credentialEnv: auth === 'headers' && stdio ? linesToMap(el('f-credential-env').value) : {},
@@ -480,8 +480,8 @@
     };
   }
 
-  // Что человеку важно знать до сохранения: условия, порядок действий и куда
-  // смотреть, если сервер не поднялся. В карточке каталога это не помещается.
+  // What matters for the person to know before saving: conditions, order of actions, and where
+  // to look if the server did not come up. It does not fit in a catalog card.
   function recipeBrief(recipe) {
     const list = (items) => '<ul>' + items.map((item) => '<li>' + esc(item) + '</li>').join('') + '</ul>';
     return '<div class="recipe-brief">' +
@@ -497,8 +497,8 @@
 
   function formHtml(editor, recipe) {
     const server = editor ? editor.server : null;
-    // Рецепт приезжает в форме редактора, но это не сохранённый сервер: заголовок
-    // и кнопка должны говорить «добавить», иначе человек испугается, что перепишет чужое.
+    // The recipe arrives in the editor form, but it is not a saved server: the heading
+    // and the button must say "add", otherwise the person will be afraid of overwriting someone else's.
     const isEdit = Boolean(server) && !recipe;
     const transport = server ? server.transport : 'streamable-http';
     const auth = server ? server.auth : 'none';
@@ -577,7 +577,7 @@
   }
 
   async function openForm(id, preset) {
-    // preset — рецепт в форме редактора: команда и настройки заполнены, ключи пустые.
+    // preset — a recipe in editor form: command and settings are filled in, keys are empty.
     let editor = preset || null;
     if (id && !editor) {
       try {
@@ -588,8 +588,8 @@
       }
     }
     const recipe = editor && editor.recipe ? editor.recipe : null;
-    // Что сервер ждёт от человека: пригодится и после сохранения, чтобы
-    // «Настроить доступ» открылся с нужными именами, а не пустым полем.
+    // What the server expects from the person: useful also after saving, so that
+    // "Configure access" opens with the right names, not an empty field.
     const expects = recipe
       ? { expectsEnv: editor.expectsEnv || [], expectsHeaders: editor.expectsHeaders || [] }
       : {};
@@ -684,7 +684,7 @@
   function askConfirm(message, confirmLabel) {
     return new Promise((resolve) => {
       let answered = false;
-      // Закрытие крестиком/фоном/Escape — это «нет», а не вечное ожидание.
+      // Closing with the cross/background/Escape is a "no", not an eternal wait.
       const opened = dialog(
         '<p style="white-space:pre-wrap">' + esc(message) + '</p>' +
         '<div class="row"><button type="button" data-no>отмена</button>' +
@@ -707,10 +707,10 @@
     });
   }
 
-  // ── рецепты ──────────────────────────────────────────────────────────────
-  // Каталог общий и ничего не знает о человеке: карточка показывает, когда сервер
-  // нужен и что понадобится снаружи. Кнопка открывает обычную форму, где пустыми
-  // остаются только значения ключей.
+  // ── recipes ─────────────────────────────────────────────────────────────
+  // The catalog is shared and knows nothing about the person: the card shows when the server
+  // is needed and what is required from outside. The button opens the usual form, where only
+  // the key values remain empty.
   function recipeCard(recipe) {
     const node = document.createElement('article');
     node.className = 'recipe-card';
@@ -751,8 +751,8 @@
     if (!box) return;
     try {
       const data = await api('/panel/mcp/recipes');
-      // Правило — подпись интерфейса, а не содержимое рецепта: она уже пришла
-      // из словаря страницы и переключается вместе с языком.
+      // The rule is an interface label, not the recipe content: it has already arrived
+      // from the page's dictionary and switches together with the language.
       if (data.checkedAt) el('mcp-checked').textContent = fill(ui.mcpChecked, { date: data.checkedAt });
       if (data.skipped) {
         el('mcp-skipped').textContent = data.skipped;
@@ -765,7 +765,7 @@
     }
   }
 
-  // ── запуск ───────────────────────────────────────────────────────────────
+  // ── startup ─────────────────────────────────────────────────────────────
   el('mcp-add').addEventListener('click', () => openForm(null));
   loadRecipes();
   load();

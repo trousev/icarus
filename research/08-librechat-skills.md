@@ -1,329 +1,316 @@
-# 08 — Скиллы LibreChat и pi: почему не доходили и как доехали
+# 08 — LibreChat and pi skills: why they didn't arrive and how they did
 
-**Статус:** разбор. Реализованный вариант B1 (синхронизация через Management API) **убран из кода** —
-файлов, которые здесь упомянуты (`packages/service/src/skills/**`, `docker/librechat/oidc-stub`,
-`script/librechat-skills-bind`, `skills.sync` в конфиге), в репозитории больше нет. Причина — в конце §7;
-на смену синхронизации идёт панель правки скиллов. Остальное — история решений и карта чужого API,
-она полезна, если к теме вернёмся. **Дата:** 21.09.2026.
-**Метод.** Цепочку проследил по нашему коду (`packages/service/src/**`, `packages/extensions/**`,
-`docker/librechat/*`) и по исходникам pi 0.85.1 в `node_modules/@earendil-works/pi-coding-agent/dist/**`.
-Поведение LibreChat — по официальным докам и по исходникам LibreChat на GitHub (ссылки в конце);
-что взято из исходников, а не из документации, помечено отдельно. Что именно сделано — в §9.
+**Status:** a write-up. The implemented variant B1 (sync via the Management API) has been **removed from the code** — the files mentioned here (`packages/service/src/skills/**`, `docker/librechat/oidc-stub`, `script/librechat-skills-bind`, `skills.sync` in the config) are no longer in the repository. The reason is at the end of §7; a skill-editing panel is replacing sync. The rest is the history of the decisions and a map of someone else's API, useful if we ever come back to this. **Date:** 21.09.2026.
+**Method.** I traced the chain through our own code (`packages/service/src/**`, `packages/extensions/**`, `docker/librechat/*`) and through the pi 0.85.1 sources in `node_modules/@earendil-works/pi-coding-agent/dist/**`. LibreChat's behaviour is from the official docs and from the LibreChat sources on GitHub (links at the end); anything taken from the sources rather than the docs is marked separately. What exactly was done is in §9.
 
 ---
 
-## Короткий ответ
+## Short answer
 
-1. **До pi не доходило не только системного промпта — до него не доходило ничего, кроме текста
-   последней реплики пользователя** (и картинок). Это не поломка: icarus сознательно берёт из запроса
-   LibreChat только новую реплику, а всю историю, персону и тулы держит на стороне pi.
-2. **Для кастомного эндпоинта (`Icarus` в `librechat.yaml`) LibreChat скиллы вообще не посылает.**
-   Skills — способность эндпоинта **Agents**; в custom-чате их неоткуда взять.
-3. Даже если разговор идёт через Agent, всё, что несёт скилл, отбрасывалось на входе в icarus:
-   каталог скиллов едет в **system**-промпте агента, тело `SKILL.md` — отдельным **user**-сообщением
-   (`isMeta`) **перед** последней репликой, а инструменты `skill` / `read_file` — в поле `tools`.
-   icarus читает только последнюю пользовательскую реплику, `system` и `tools` не читает вообще.
-4. **pi ищет скиллы в `~/.pi/agent/skills` и `<cwd>/.pi/skills`** (то есть `/home/node/.pi/agent/skills`
-   и `/workspace/.pi/skills`), а icarus не заводил ни один из этих каталогов. «Внутренние скиллы pi» —
-   это буквально пустые каталоги, отсюда и «ищет свои скиллы и не находит».
-5. Формат скилла у LibreChat и у pi **один и тот же** (`SKILL.md` + frontmatter Agent Skills), поэтому
-   починка — не мост протокола, а доставка файлов туда, где pi их видит. Сделали вариант B1:
-   скиллы пишутся в UI LibreChat и синхронизируются в `~/.pi/agent/skills` (см. §9).
+1. **Not only did the system prompt not reach pi — nothing reached it except the text of the user's latest turn** (and images). This is not a breakdown: icarus deliberately takes only the new turn from the LibreChat request, and keeps the whole history, persona, and tools on the pi side.
+2. **For a custom endpoint (`Icarus` in `librechat.yaml`) LibreChat doesn't send skills at all.**
+   Skills are a capability of the **Agents** endpoint; in a custom chat there's nowhere to take them from.
+3. Even if the conversation goes through an Agent, everything a skill carries was discarded at icarus's input:
+   the skill catalog travels in the agent's **system** prompt, the body of `SKILL.md` as a separate **user** message
+   (`isMeta`) **before** the latest turn, and the `skill` / `read_file` tools in the `tools` field.
+   icarus reads only the latest user turn and does not read `system` or `tools` at all.
+4. **pi looks for skills in `~/.pi/agent/skills` and `<cwd>/.pi/skills`** (that is, `/home/node/.pi/agent/skills`
+   and `/workspace/.pi/skills`), and icarus set up neither of these directories. "pi's built-in skills" are
+   literally empty directories — hence "it looks for its skills and doesn't find them".
+5. The skill format in LibreChat and in pi is **exactly the same** (`SKILL.md` + Agent Skills frontmatter), so
+   the fix isn't a protocol bridge but delivering files to where pi can see them. We did variant B1:
+   skills are written in the LibreChat UI and synced into `~/.pi/agent/skills` (see §9).
 
 ---
 
-## 1. Что такое Skills в LibreChat и на каком эндпоинте они живут
+## 1. What Skills are in LibreChat and which endpoint they live on
 
-Скиллы — «переиспользуемые инструкции» для **LibreChat Agents**: `SKILL.md` с frontmatter
+Skills are "reusable instructions" for **LibreChat Agents**: `SKILL.md` with frontmatter
 (`name`, `description`, `always-apply`, `user-invocable`, `disable-model-invocation`, `allowed-tools`),
-тело — процедура/правила. Авторство: UI (написать/загрузить), runtime-авторинг агентом, файлы из
-`DEPLOYMENT_SKILLS_DIR`, синк из GitHub. ([docs][skills], [changelog v0.8.6][v086])
+the body being a procedure/rules. Authorship: the UI (write/upload), runtime authoring by the agent, files from
+`DEPLOYMENT_SKILLS_DIR`, sync from GitHub. ([docs][skills], [changelog v0.8.6][v086])
 
-Активация: capability `skills` на эндпоинте `agents` → у агента включён **Enable skills** → выбран
-скоуп (весь каталог / отдельные скиллы / только авторинг) → в разговоре скилл может быть выбран
-вручную (`$`), выбран моделью (каталог) или применён всегда (`always-apply`).
+Activation: the capability `skills` on the `agents` endpoint → the agent has **Enable skills** turned on → a scope is chosen (the whole catalog / individual skills / authoring only) → in a conversation a skill can be picked
+manually (`$`), chosen by the model (catalog), or always applied (`always-apply`).
 
-Из этого следует важное: **скиллы подключены к цепочке Agents** (agnostic-каталог в
-`api/server/services/Endpoints/agents/initialize.js`, регистрация тулов и обработчиков в
-`packages/api/src/agents/*`). Custom-эндпоинт (наш `Icarus`) в этой цепочке не участвует — в его
-запрос скиллы просто не попадают. *(Вывод из исходников LibreChat: PR #12649 меняет только
-`agents`-ветку; в доках скиллы описаны исключительно через Agent Builder. Если у тебя в чате с
-«Икар» есть панель Skills и `$` — значит, разговор идёт через Agent, и работает §3.)*
+An important consequence follows from this: **skills are wired into the Agents chain** (the agnostic catalog in
+`api/server/services/Endpoints/agents/initialize.js`, tool and handler registration in
+`packages/api/src/agents/*`). A custom endpoint (our `Icarus`) doesn't take part in this chain — skills simply
+don't get into its request. *(Inference from the LibreChat sources: PR #12649 changes only the `agents` branch; the docs describe skills exclusively through the Agent Builder. If your chat with
+"Icarus" has a Skills panel and `$`, then the conversation goes through an Agent, and §3 applies.)*
 
-При этом **Agent может использовать кастомный эндпоинт как модель** — в `initialize.js` основная
-конфигурация агента резолвится через `getCustomEndpointConfig` для не-`agents` эндпоинтов, и
-«custom-endpoint agents» отдельно упомянуты в комментарии про цены. То есть сценарий «Agent с моделью
-Icarus» возможен, и именно в нём до icarus доедет системный промпт со скиллами.
+That said, **an Agent can use a custom endpoint as its model** — in `initialize.js` the agent's main
+config is resolved via `getCustomEndpointConfig` for non-`agents` endpoints, and
+"custom-endpoint agents" are mentioned separately in a comment about pricing. So the "Agent with the Icarus model"
+scenario is possible, and it is exactly the one in which a system prompt with skills reaches icarus.
 
-## 2. Что именно LibreChat кладёт в запрос
+## 2. What exactly LibreChat puts into the request
 
-| Что | Как едет в `POST /v1/chat/completions` | Кем описано |
+| What | How it travels in `POST /v1/chat/completions` | Documented by |
 |---|---|---|
-| Каталог скиллов (model-invoked) | секция `## Available Skills` приклеена к `additional_instructions` агента → **system-сообщение**; только `name` + `description` (≤100 скиллов, ~250 символов на запись) | `injectSkillCatalog` в [packages/api/src/agents/skills.ts][skills-src] |
-| Ручной (`$`) и `always-apply` вызов | **полное тело `SKILL.md`** как `HumanMessage` с `additional_kwargs.isMeta = true`, вставляется **перед последней репликой пользователя** (`injectSkillPrimes`, `insertIdx = length - 1`) → в запросе это **user-сообщение** перед настоящей репликой | там же, `injectSkillPrimes` |
-| Инструменты скиллов | `tools`: `skill` (всегда при включённых скиллах), `read_file` (всегда), `bash_tool` (если настроен code env) | PR #12649 |
-| Файлы бандла | `references/…`, `scripts/…` в хранилище LibreChat под `skills/<name>/…`; при Code Interpreter монтируются в `/mnt/data/skills/<name>/…` | [docs][skills] |
+| Skill catalog (model-invoked) | the `## Available Skills` section appended to the agent's `additional_instructions` → a **system message**; only `name` + `description` (≤100 skills, ~250 characters per entry) | `injectSkillCatalog` in [packages/api/src/agents/skills.ts][skills-src] |
+| Manual (`$`) and `always-apply` invocation | the **full body of `SKILL.md`** as a `HumanMessage` with `additional_kwargs.isMeta = true`, inserted **before the user's latest turn** (`injectSkillPrimes`, `insertIdx = length - 1`) → in the request this is a **user message** before the real turn | same place, `injectSkillPrimes` |
+| Skill tools | `tools`: `skill` (always when skills are on), `read_file` (always), `bash_tool` (if a code env is configured) | PR #12649 |
+| Bundle files | `references/…`, `scripts/…` in LibreChat's storage under `skills/<name>/…`; with the Code Interpreter they're mounted into `/mnt/data/skills/<name>/…` | [docs][skills] |
 
-Полезные лимиты: тела праймов — до 10 ручных и 20 always-apply за ход; каталог — до 100 записей.
-Для модели это выглядит как «системный промпт + виртуальное user-сообщение + тул `skill`», а не как
-файл на диске (файлы лежат в песочнице LibreChat, а не в контейнере человека).
+Useful limits: prime bodies — up to 10 manual and 20 always-apply per turn; the catalog — up to 100 entries.
+To the model this looks like "a system prompt + a virtual user message + the `skill` tool", not like a file on
+disk (the files live in LibreChat's sandbox, not in the person's container).
 
-## 3. Что делает icarus с этим запросом
+## 3. What icarus does with this request
 
 `handleChatCompletions` ([openai.ts:223](packages/service/src/http/openai.ts)):
 
-1. `const messages = body.messages` — [openai.ts:246](packages/service/src/http/openai.ts). Дальше
-   `body.tools` **не читается нигде** (проверил grep'ом: поля `tools` в коде сервиса нет).
+1. `const messages = body.messages` — [openai.ts:246](packages/service/src/http/openai.ts). After that
+   `body.tools` is **read nowhere** (I checked with grep: there's no `tools` field in the service code).
 2. `extractLatestUserMessage(messages, incoming)` — [openai.ts:264](packages/service/src/http/openai.ts):
-   берёт `[...messages].reverse().find(m => m.role === 'user')` — [openai.ts:160](packages/service/src/http/openai.ts) —
-   и из него только текстовые блоки и `image_url` с data-URI —
-   [openai.ts:170-192](packages/service/src/http/openai.ts). Всё остальное (`system`, предыдущие
-   `user`, `assistant`, `tool`) не используется.
-3. Сверка истории `compareHistory` тоже смотрит только роли `user`/`assistant` —
-   «системные сообщения и служебное не считаем» ([divergence.ts:38-49](packages/service/src/sessions/divergence.ts)).
-   То есть system-промпт не только не доезжает, но и в дифф не попадает.
-4. Сессия pi поднимается с аргументами
+   it takes `[...messages].reverse().find(m => m.role === 'user')` — [openai.ts:160](packages/service/src/http/openai.ts) —
+   and from it only text blocks and `image_url` with a data URI —
+   [openai.ts:170-192](packages/service/src/http/openai.ts). Everything else (`system`, previous
+   `user`, `assistant`, `tool`) is unused.
+3. The history comparison `compareHistory` also looks only at the `user`/`assistant` roles —
+   "we don't count system messages and service stuff" ([divergence.ts:38-49](packages/service/src/sessions/divergence.ts)).
+   So the system prompt not only fails to arrive, it doesn't even make it into the diff.
+4. The pi session is brought up with the arguments
    `--mode rpc --session-dir /workspace/.sessions --session-id … --model … --thinking …` —
-   [pi-session.ts:15-28](packages/service/src/sessions/pi-session.ts). Ни `--system-prompt`,
-   ни `--append-system-prompt`, ни `--skill` там нет.
-5. Окружение человека готовит `prepareUser` — [workspace.ts:206](packages/service/src/workspace.ts):
-   `AGENTS.md`, `icarus.md`, `auth.json`, `settings.json`, `mcp.json`, `models.json` и каталог
-   `extensions` (копируется с очисткой, [workspace.ts:253-255](packages/service/src/workspace.ts)).
-   **Каталога `skills` там нет** — слово `skills` в коде сервиса не встречается ни разу (кроме
-   `--no-skills` в `one-shot.ts:34` и в `memory-extractor.ts:406`).
-6. `runtime/users/<id>/pi-agent` монтируется в `/home/node/.pi/agent` —
-   [compose.ts:90](packages/service/src/docker/compose.ts), `cwd` контейнера — `/workspace`
+   [pi-session.ts:15-28](packages/service/src/sessions/pi-session.ts). There's no `--system-prompt`,
+   no `--append-system-prompt`, no `--skill` there.
+5. The person's environment is prepared by `prepareUser` — [workspace.ts:206](packages/service/src/workspace.ts):
+   `AGENTS.md`, `icarus.md`, `auth.json`, `settings.json`, `mcp.json`, `models.json`, and the directory
+   `extensions` (copied with cleanup, [workspace.ts:253-255](packages/service/src/workspace.ts)).
+   **There's no `skills` directory there** — the word `skills` never occurs in the service code (except for
+   `--no-skills` in `one-shot.ts:34` and in `memory-extractor.ts:406`).
+6. `runtime/users/<id>/pi-agent` is mounted at `/home/node/.pi/agent` —
+   [compose.ts:90](packages/service/src/docker/compose.ts), the container's `cwd` is `/workspace`
    ([docker/user/Dockerfile](docker/user/Dockerfile)).
 
-Итог по слоям:
+Layer-by-layer summary:
 
-| Пришло от LibreChat | Что стало |
+| Came in from LibreChat | What became of it |
 |---|---|
-| system: инструкции агента + `## Available Skills` | выброшено (никто не читает `role: "system"`) |
-| user (isMeta): тело `SKILL.md` | выброшено (берём только последнюю user-реплику) |
-| user: настоящая реплика | уехало в pi как `prompt` |
-| `tools`: `skill`, `read_file`, `bash_tool` | выброшено (pi живёт своими тулами и расширениями) |
-| файлы скилла `/mnt/data/skills/…` | недоступны: это песочница LibreChat, не контейнер человека |
-| вложения (картинки/файлы) | картинки — в модель, файлы — в `incoming/` (работает) |
+| system: agent instructions + `## Available Skills` | discarded (nobody reads `role: "system"`) |
+| user (isMeta): the body of `SKILL.md` | discarded (we take only the latest user turn) |
+| user: the real turn | went to pi as the `prompt` |
+| `tools`: `skill`, `read_file`, `bash_tool` | discarded (pi lives on its own tools and extensions) |
+| skill files `/mnt/data/skills/…` | unavailable: this is LibreChat's sandbox, not the person's container |
+| attachments (images/files) | images — to the model, files — to `incoming/` (works) |
 
-**Ответ на «может, до pi вообще системный промпт LibreChat не доходит?» — да, не доходит, и это
-принципиально.** Персона Икара живёт в `icarus.md` (+ `AGENTS.md`), история — в сессии pi, а промпт
-LibreChat считается чужой копией разговора, нужной только для сверки расхождений.
+**The answer to "maybe LibreChat's system prompt doesn't reach pi at all?" is: right, it doesn't, and that's
+by design.** Icarus's persona lives in `icarus.md` (+ `AGENTS.md`), the history lives in the pi session, and the
+LibreChat prompt is treated as a foreign copy of the conversation, needed only for divergence checking.
 
-> **Риск на будущее.** Сегодня спасает то, что прайм скилла (`isMeta`-сообщение) вставляется *перед*
-> последней репликой. Это не контракт, а деталь реализации LibreChat: если прайм когда-нибудь
-> окажется последним user-сообщением, icarus примет тело `SKILL.md` за реплику пользователя и
-> «ответит на скилл». Стоит либо зафиксировать этот инвариант тестом на нашей стороне (игнорировать
-> `isMeta`-подобные user-сообщения), либо не завязываться на него вовсе (вариант A).
+> **A risk for the future.** What saves us today is that the skill prime (the `isMeta` message) is inserted
+> *before* the latest turn. That's not a contract but an implementation detail of LibreChat: if the prime ever
+> ends up as the last user message, icarus will take the body of `SKILL.md` for the user's turn and
+> "answer the skill". It's worth either pinning this invariant down with a test on our side (ignore
+> `isMeta`-like user messages) or not relying on it at all (variant A).
 
-## 4. Что ищет pi и почему находит пустоту
+## 4. What pi looks for and why it finds emptiness
 
-pi 0.85.1, каталог конфига `.pi`, агентский каталог `~/.pi/agent`
+pi 0.85.1, config directory `.pi`, agent directory `~/.pi/agent`
 (`dist/config.js:403`, `CONFIG_DIR_NAME`/`getAgentDir`):
 
-- скиллы по умолчанию ищутся в **`~/.pi/agent/skills`** (user scope) и **`<cwd>/.pi/skills`**
+- by default skills are looked for in **`~/.pi/agent/skills`** (user scope) and **`<cwd>/.pi/skills`**
   (project scope) — `dist/core/resource-loader.js:623,629`;
-- project scope загружается **только если проект «доверенный»** (`dist/core/resource-loader.js:811,822`);
-  в RPC-режиме UI нет, поэтому `resolveProjectTrusted` при `defaultProjectTrust: "ask"` возвращает
-  `false` (`dist/core/project-trust.js`). То есть `/workspace/.pi/skills` сам по себе не заработает —
-  нужен `--approve`, запись в trust store или `defaultProjectTrust: "always"` в настройках pi;
-- явный флаг **`--skill <path>`** (повторяемый; файл или каталог) и **`--no-skills`** —
-  `dist/cli/args.js:142,164`, справка `dist/cli/args.js:295`;
-- модель видит скиллы как `<available_skills>` (name, description, **location**) в системном промпте,
-  и **сама читает `SKILL.md` своим `read`-тулом** — отдельного «skill tool» у pi нет
+- project scope is loaded **only if the project is "trusted"** (`dist/core/resource-loader.js:811,822`);
+  in RPC mode there's no UI, so `resolveProjectTrusted` with `defaultProjectTrust: "ask"` returns
+  `false` (`dist/core/project-trust.js`). So `/workspace/.pi/skills` won't work on its own —
+  you need `--approve`, an entry in the trust store, or `defaultProjectTrust: "always"` in pi's settings;
+- an explicit flag **`--skill <path>`** (repeatable; a file or directory) and **`--no-skills`** —
+  `dist/cli/args.js:142,164`, help at `dist/cli/args.js:295`;
+- the model sees skills as `<available_skills>` (name, description, **location**) in the system prompt,
+  and **reads `SKILL.md` itself with its own `read` tool** — pi has no separate "skill tool"
   (`formatSkillsForPrompt`, `dist/core/skills.js:275-298`).
 
-У нас `~/.pi/agent` = `runtime/users/<id>/pi-agent`, и каталога `skills` там нет — как и
-`/workspace/.pi/skills`. Оба источника пусты, поэтому pi честно отвечает, что скиллов нет.
-Отдельно: `one-shot` (заголовки) и memory-экстрактор зовут pi с `--no-skills` — там это осознанно.
+In our case `~/.pi/agent` = `runtime/users/<id>/pi-agent`, and there's no `skills` directory there — nor
+`/workspace/.pi/skills`. Both sources are empty, so pi honestly answers that there are no skills.
+Separately: `one-shot` (titles) and the memory extractor call pi with `--no-skills` — there that's deliberate.
 
-## 5. Почему это не «баг icarus»
+## 5. Why this isn't an "icarus bug"
 
-LibreChat Skills спроектированы под **модель без рук**: LibreChat сам крутит tool-loop (`skill`,
-`read_file`, `bash_tool`, code env), сам подкладывает каталог в промпт и сам исполняет вызов скилла.
-pi — **сам себе агент**: у него свой цикл, свои тулы, своя память, своя персона.
+LibreChat Skills are designed for a **model without hands**: LibreChat itself runs the tool loop (`skill`,
+`read_file`, `bash_tool`, code env), itself slips the catalog into the prompt, and itself executes
+the skill invocation. pi is **its own agent**: it has its own loop, its own tools, its own memory, its own persona.
 
-Если попытаться «пробросить» скиллы LibreChat внутрь pi как есть, получится двойной агентский цикл:
-LibreChat ждёт от icarus `tool_calls` (`skill`/`read_file`), icarus их не отдаёт и не должен — он
-отдаёт готовый текст pi. Единственное, что физически переживает границу, — **текст** (промпт и
-праймы), и именно его icarus сейчас сознательно выбрасывает.
+If you try to "pass through" LibreChat skills into pi as they are, you get a double agent loop:
+LibreChat expects `tool_calls` (`skill`/`read_file`) from icarus, icarus doesn't return them and shouldn't — it
+returns pi's finished text. The only thing that physically survives the boundary is **text** (the prompt and the
+primes), and that's exactly what icarus deliberately throws away right now.
 
-## 6. Варианты
+## 6. Options
 
-### A. Файловые скиллы там, где их видит pi (рекомендую)
+### A. File-based skills where pi can see them (I recommend this)
 
-- **A1. Общий каталог + копирование в pi.** Завести `skills/` в репозитории (или `config.skills.dir`),
-  в `prepareUser` копировать в `~/.pi/agent/skills` — ровно тем же приёмом, что уже применён к
-  `extensions` ([workspace.ts:253-255](packages/service/src/workspace.ts)). Каталог LibreChat-стенда
-  получает тот же каталог через `DEPLOYMENT_SKILLS_DIR` (read-only, нужен рестарт LibreChat).
-  *Плюсы:* один источник правды для обеих сторон, ноль изменений протокола, работает даже без
-  `agents`-эндпоинта, user scope — без возни с project trust. *Минусы:* авторство в git, а не в UI;
-  новый скилл подхватится при следующем старте сессии pi (сессии живут до `sessionIdleMinutes`,
-  по умолчанию 30 минут; перезапуск — `docker compose restart`/пересборка окружения).
-- **A2. `--skill /opt/icarus/skills` без копирования.** Монтируем общий каталог ro в контейнер
-  человека и добавляем флаг в `piArgsFor`. *Плюсы:* дешевле (нет копии на человека).
-  *Минусы:* каталог обязан существовать (иначе pi ругается ошибкой пути), содержимое не меняется
-  без рестарта; для каждого человека всё равно свой маунт.
+- **A1. A shared directory + copying into pi.** Set up `skills/` in the repository (or `config.skills.dir`),
+  and in `prepareUser` copy it into `~/.pi/agent/skills` — using exactly the same trick already applied to
+  `extensions` ([workspace.ts:253-255](packages/service/src/workspace.ts)). The LibreChat stand's directory
+  gets the same directory via `DEPLOYMENT_SKILLS_DIR` (read-only, requires restarting LibreChat).
+  *Pros:* a single source of truth for both sides, zero protocol changes, works even without the
+  `agents` endpoint, user scope — no fussing with project trust. *Cons:* authorship in git rather than in the UI;
+  a new skill is picked up on the next start of the pi session (sessions live up to `sessionIdleMinutes`,
+  30 minutes by default; restart — `docker compose restart`/rebuilding the environment).
+- **A2. `--skill /opt/icarus/skills` without copying.** We mount the shared directory ro into the person's
+  container and add the flag in `piArgsFor`. *Pros:* cheaper (no per-person copy).
+  *Cons:* the directory must exist (otherwise pi complains with a path error), the contents don't change
+  without a restart; each person still gets their own mount anyway.
 
-### B. Синхронизация скиллов, написанных в UI LibreChat
+### B. Syncing skills written in the LibreChat UI
 
-- **B1. Management API (выбрано и реализовано — см. §7).** В v0.8.6 есть `GET /api/agents/v1/skills`,
-  `GET /api/agents/v1/skills/{id}`, `GET …/{id}/files[/{path}]`; аутентификация — OIDC machine token,
-  привязанный к пользователю ([docs][agents-api]). Синк (по расписанию или при старте) забирает
-  `SKILL.md` и файлы бандла и раскладывает их в каталог pi. *Плюсы:* UI остаётся местом авторства,
-  ACL и версии уважаются. *Минусы:* нужен OIDC-провайдер и `endpoints.agents.managementApi` в конфиге
-  LibreChat; клиент, креды, расписание; для удалённого инстанса — сеть наружу.
-- **B2. Чтение Mongo** (`skills` + `skillfiles`). Без OIDC, но жёстко завязано на схему LibreChat и
-  на доступ к его БД; для внешнего инстанса (память/прод) — самый хрупкий путь.
+- **B1. Management API (chosen and implemented — see §7).** v0.8.6 has `GET /api/agents/v1/skills`,
+  `GET /api/agents/v1/skills/{id}`, `GET …/{id}/files[/{path}]`; authentication is an OIDC machine token
+  bound to a user ([docs][agents-api]). The sync (on a schedule or at startup) pulls
+  `SKILL.md` and the bundle files and lays them out in pi's directory. *Pros:* the UI remains the place of
+  authorship, ACLs and versions are respected. *Cons:* you need an OIDC provider and `endpoints.agents.managementApi` in the LibreChat config;
+  a client, credentials, a schedule; for a remote instance — outbound network.
+- **B2. Reading Mongo** (`skills` + `skillfiles`). No OIDC, but tightly coupled to LibreChat's schema and
+  to access to its DB; for an external instance (memory/prod) — the most fragile path.
 
-### C. Проброс системного контекста LibreChat в pi (патч icarus)
+### C. Passing LibreChat's system context through to pi (an icarus patch)
 
-Собрать из входящего запроса то, что не является репликами (`system`-сообщения; опционально
-`isMeta`-user-праймы) и отдать pi:
-- стабильную часть — `--append-system-prompt` при старте сессии (сессия поднимается один раз на
-  разговор, значит содержимое первого запроса зафиксируется до конца разговора);
-- нестабильную — префиксом к очередной реплике («контекст из LibreChat: …»).
+Collect from the incoming request what isn't turns (`system` messages; optionally
+`isMeta` user primes) and give it to pi:
+- the stable part — `--append-system-prompt` at session start (the session is brought up once per
+  conversation, so the contents of the first request get fixed until the end of the conversation);
+- the unstable part — as a prefix to the next turn ("context from LibreChat: …").
 
-*Плюсы:* чинит не только скиллы — сейчас молча теряются `modelSpecs.promptPrefix` и инструкции
-агента (всё, что LibreChat положил в system). *Минусы:* праймы LibreChat повторяются каждый ход
-(sticky-семантика), каталог в промпте без tool-loop всё равно бесполезен, возможна путаница между
-персоной `icarus.md` и чужим промптом, и это надо делать флагом конфига, а не по умолчанию.
+*Pros:* fixes not only skills — right now `modelSpecs.promptPrefix` and the agent instructions (everything
+LibreChat put into system) are silently lost. *Cons:* LibreChat's primes repeat every turn
+(sticky semantics), a catalog in the prompt without a tool loop is useless anyway, confusion is possible
+between the `icarus.md` persona and a foreign prompt, and this should be done behind a config flag, not by default.
 
-### D. Осознанно не поддерживать LibreChat Skills
+### D. Deliberately not supporting LibreChat Skills
 
-LibreChat = UI + история + панель памяти, агент и его скиллы = pi. Дешевле всего, но авторство
-скиллов остаётся за git.
+LibreChat = UI + history + the memory panel, the agent and its skills = pi. The cheapest option, but skill
+authorship stays with git.
 
-**Выбрали B1** — скиллы пишутся в UI LibreChat, icarus забирает их через Management API и
-раскладывает в каталог pi. Ниже — как это сделано и что проверено.
+**We chose B1** — skills are written in the LibreChat UI, icarus pulls them via the Management API and
+lays them out in pi's directory. Below is how it was done and what was verified.
 
-## 7. Как это сделано (B1)
+## 7. How it was done (B1)
 
-### Сторона icarus
+### The icarus side
 
-| Место | Что делает |
+| Place | What it does |
 |---|---|
-| `packages/service/src/skills/librechat.ts` | Клиент Management API: `GET /api/agents/v1/skills`, `/{id}`, `/{id}/files[/{path}]`; токен статикой (`token`) или по client_credentials (`tokenUrl`+`clientId`+`clientSecret`) с кэшем до `exp`. |
-| `packages/service/src/skills/sync.ts` | Материализация: `SKILL.md` (frontmatter из `name`/`description`/чужих ключей + `disable-model-invocation`) и текстовые файлы бандла; манифест `.icarus-skills.json` хранит `id`/`version`/`updatedAt`/`hash` и работает кэшем: тела перечитываются только у скиллов с изменившейся версией или датой, поэтому **обычный проход — ровно один запрос к LibreChat, за списком**; удаление того, что убрали в LibreChat; идемпотентно — одинаковый набор не пишет ничего. |
-| `packages/service/src/skills/service.ts` | Расписание (сразу при старте и раз в `intervalSeconds`, по умолчанию 300 с), авторизация по людям (`accounts`), лог, и главное — `registry.bumpResources(user)` только когда набор реально изменился. |
-| `packages/service/src/sessions/registry.ts` + `pi-session.ts` | Поколение ресурсов: у сессии есть `generation`, при `acquire` устаревшая (и не занятая) сессия пересоздаётся. Идущий ход не рвём — он доигрывает на старом каталоге, а следующий запрос поднимает свежий pi. История не теряется: она в `/workspace/.sessions` и открывается по `--session-id`. |
-| `packages/service/src/config.ts` | Секция `skills.sync` (`url`, `intervalSeconds`, `audience`, `token`/`tokenUrl`/`clientId`/`clientSecret`, `accounts`). Пустой `url` (не подставилась переменная) = синхронизация выключена. |
-| `packages/extensions/persona.ts` + `lib/skills-core.ts` | **Важно.** Персона заменяет системный промпт pi целиком, а pi добавляет каталог скиллов только в свой сборщик промпта — то есть до правки каталог терялся. Теперь персона дописывает блок `<available_skills>` сама (тот же формат, что у pi: имя, описание, путь; только если есть `read`/`bash`). |
+| `packages/service/src/skills/librechat.ts` | Management API client: `GET /api/agents/v1/skills`, `/{id}`, `/{id}/files[/{path}]`; the token either static (`token`) or via client_credentials (`tokenUrl`+`clientId`+`clientSecret`) with a cache until `exp`. |
+| `packages/service/src/skills/sync.ts` | Materialisation: `SKILL.md` (frontmatter from `name`/`description`/foreign keys + `disable-model-invocation`) and the text bundle files; the manifest `.icarus-skills.json` stores `id`/`version`/`updatedAt`/`hash` and acts as a cache: bodies are re-read only for skills whose version or date changed, so **an ordinary pass is exactly one request to LibreChat, for the list**; deletion of what was removed in LibreChat; idempotent — an identical set writes nothing. |
+| `packages/service/src/skills/service.ts` | The schedule (immediately at startup and once per `intervalSeconds`, 300 s by default), per-person authorisation (`accounts`), logging, and most importantly `registry.bumpResources(user)` only when the set has actually changed. |
+| `packages/service/src/sessions/registry.ts` + `pi-session.ts` | Resource generation: a session has a `generation`; on `acquire` a stale (and not busy) session is recreated. We don't cut off an in-flight turn — it finishes on the old directory, and the next request brings up a fresh pi. The history isn't lost: it's in `/workspace/.sessions` and is opened via `--session-id`. |
+| `packages/service/src/config.ts` | The `skills.sync` section (`url`, `intervalSeconds`, `audience`, `token`/`tokenUrl`/`clientId`/`clientSecret`, `accounts`). An empty `url` (a variable didn't get substituted) = sync is off. |
+| `packages/extensions/persona.ts` + `lib/skills-core.ts` | **Important.** The persona replaces pi's system prompt entirely, and pi only adds the skill catalog in its own prompt builder — that is, before the fix the catalog was lost. Now the persona appends the `<available_skills>` block itself (the same format as pi: name, description, path; only if `read`/`bash` are available). |
 
-### Сторона стенда
+### The stand's side
 
-- `docker/librechat/librechat.yaml`: включён `endpoints.agents.managementApi` (OIDC `http://localhost:9100`,
-  audience `icarus-skills`, привязка `clientId: icarus-sync` → `userId`/`tenantId` пользователя стенда).
-  Сам блок — **не наша выдумка**: его валидирует LibreChat (`packages/data-provider/src/config.ts`,
-  `managementApiSchema` → `managementApiAuthSchema` → `managementClientBindingSchema`), читает
+- `docker/librechat/librechat.yaml`: `endpoints.agents.managementApi` is enabled (OIDC `http://localhost:9100`, audience `icarus-skills`, binding `clientId: icarus-sync` → the stand user's `userId`/`tenantId`).
+  The block itself is **not our invention**: LibreChat validates it (`packages/data-provider/src/config.ts`,
+  `managementApiSchema` → `managementApiAuthSchema` → `managementClientBindingSchema`), reads it in
   `packages/api/src/middleware/management.ts` (`config.endpoints?.agents?.managementApi?.auth`),
-  а поля `userId` (ObjectId), `tenantId` (не `__SYSTEM__`), `subject`, `enabled` — его схемы, и обе
-  схемы `.strict()`, то есть опечатка в ключе не «тихо проигнорируется», а не пройдёт валидацию.
-  Наше здесь только содержимое: адрес заглушки, `audience` и ObjectId человека.
-- `docker/librechat/oidc-stub/server.mjs`: OIDC-заглушка для локального стенда (JWKS + discovery +
-  `POST /token` по client_credentials, ключ генерируется сам в `docker/librechat/oidc-data/`).
-  В бою вместо неё — настоящий провайдер.
-- `compose.ts`: заглушка поднимается двумя экземплярами с одним ключом подписи — внутри контейнера
-  LibreChat (тот видит её как `http://localhost:9100`: по http LibreChat пускает только к localhost,
-  и заодно заглушка переживает пересоздание LibreChat) и обычным сервисом `oidc` в сети compose
-  (у него icarus берёт токен). Сервис icarus получает переменные `ICARUS_LIBRECHAT_URL`,
-  `ICARUS_SKILLS_*`, на которые ссылается `skills.sync` в `config.yaml`.
-- `script/librechat-skills-bind`: подставляет в рабочую копию конфига ObjectId и тенант пользователя
-  стенда; зовётся сам из `./script/server --with-librechat` до `up` и после него (в git лежит только
-  шаблон с заглушкой — ObjectId живёт в томе Mongo).
-- `script/server`: заранее создаёт `docker/librechat/oidc-data` (иначе docker сделает каталог
-  root-овым) и предупреждает, пока привязка не заполнена.
+  and the fields `userId` (ObjectId), `tenantId` (not `__SYSTEM__`), `subject`, `enabled` are its schemas, and both
+  schemas are `.strict()`, i.e. a typo in a key isn't "silently ignored" but fails validation.
+  All ours here is the contents: the stub's address, the `audience`, and the person's ObjectId.
+- `docker/librechat/oidc-stub/server.mjs`: an OIDC stub for the local stand (JWKS + discovery +
+  `POST /token` via client_credentials, the key is generated by itself in `docker/librechat/oidc-data/`).
+  In production a real provider takes its place.
+- `compose.ts`: the stub is brought up as two instances with a single signing key — inside the LibreChat
+  container (which sees it as `http://localhost:9100`: over http LibreChat only reaches localhost,
+  and the stub also survives LibreChat being recreated) and as an ordinary `oidc` service on the compose network
+  (from which icarus gets the token). The icarus service receives the variables `ICARUS_LIBRECHAT_URL`,
+  `ICARUS_SKILLS_*`, which `skills.sync` in `config.yaml` refers to.
+- `script/librechat-skills-bind`: substitutes the stand user's ObjectId and tenant into the working copy of the
+  config; it's called on its own from `./script/server --with-librechat` before `up` and after it (only the
+  template with a placeholder is in git — the ObjectId lives in the Mongo volume).
+- `script/server`: creates `docker/librechat/oidc-data` in advance (otherwise docker would make the directory
+  root-owned) and warns while the binding isn't filled in.
 
-### Как проверить на стенде
+### How to check on the stand
 
-1. `./script/server --with-librechat -d` — стек вместе со стендом и заглушкой.
-2. Завести пользователя LibreChat (регистрация в UI или `POST /api/auth/register`), при желании
-   сменить пароль: `./script/regenerate_user_passwords <пароль>`.
-3. Ничего привязывать руками не нужно: `./script/server --with-librechat` делает это сам.
-   Стенд монтирует не шаблон `docker/librechat/librechat.yaml`, а его рабочую копию
-   `librechat.local.yaml` (в git не попадает): её заводит `compose-write` из шаблона, а скрипт
-   `script/librechat-skills-bind` подставляет в неё `userId`/`tenantId` — берёт первого человека
-   из `users` в `config.yaml` (можно позвать и вручную: `./script/librechat-skills-bind [имя|ObjectId]`,
-   флаги `--file/--ensure/--quiet/--no-restart`). Привязка ставится до `up`, а если Mongo на тот
-   момент ещё не поднят — сразу после: LibreChat перезапускается, потому что читает конфиг только
-   на старте (иначе привязка лежит в файле, а в памяти остаётся старая, и Management API отвечает 401).
-   Тенант `__SYSTEM__` Management API запрещает явно, а `${VAR}` в `managementApi` не
-   подставляется — только литеральный ObjectId, поэтому и рабочая копия, а не переменные.
-4. Написать скилл в UI (Skills → «+» → Write skill instructions) или через API
-   `POST /api/skills` с браузерным JWT (`POST /api/auth/login`).
-5. Через один проход (по умолчанию до 5 минут; после неудачного прохода сервис повторяет через
-   15 секунд, так что гонка на старте стека рассасывается сама) в логе icarus появится `скиллы обновлены`, а на хосте —
-   `runtime/users/<id>/pi-agent/skills/<name>/SKILL.md`. Дальше Икар читает скилл сам.
+1. `./script/server --with-librechat -d` — the stack together with the stand and the stub.
+2. Create a LibreChat user (register in the UI or `POST /api/auth/register`), optionally
+   change the password: `./script/regenerate_user_passwords <password>`.
+3. Nothing needs to be bound by hand: `./script/server --with-librechat` does it itself.
+   The stand mounts not the template `docker/librechat/librechat.yaml` but its working copy
+   `librechat.local.yaml` (not committed to git): `compose-write` creates it from the template, and the script
+   `script/librechat-skills-bind` substitutes `userId`/`tenantId` into it — taking the first person
+   from `users` in `config.yaml` (you can also call it by hand: `./script/librechat-skills-bind [name|ObjectId]`,
+   flags `--file/--ensure/--quiet/--no-restart`). The binding is set before `up`, and if Mongo isn't
+   up at that moment — right after: LibreChat restarts because it reads the config only
+   at startup (otherwise the binding sits in the file while the old one stays in memory, and the Management API answers 401).
+   The `__SYSTEM__` tenant is explicitly forbidden by the Management API, and `${VAR}` isn't
+   substituted in `managementApi` — only a literal ObjectId, which is also why there's a working copy rather than variables.
+4. Write a skill in the UI (Skills → "+" → Write skill instructions) or via the API
+   `POST /api/skills` with a browser JWT (`POST /api/auth/login`).
+5. After one pass (up to 5 minutes by default; after a failed pass the service retries in
+   15 seconds, so the race at stack startup resolves itself) `skills updated` appears in the icarus log, and on the host —
+   `runtime/users/<id>/pi-agent/skills/<name>/SKILL.md`. After that Icarus reads the skill itself.
 
-### Что проверено живьём (21.09.2026, стенд в этом worktree)
+### What was verified live (21.09.2026, the stand in this worktree)
 
-- Скилл, созданный в LibreChat, доехал до `~/.pi/agent/skills` внутри контейнера человека
-  (и до `pi.getSkills()` — без диагностик).
-- Кэш живёт как задумано: проход без изменений не пишет ни файлов скиллов, ни манифеста
-  (проверено по mtime и md5), правка скилла в UI (`version` 2 → 3 → 4) перечитывается и
-  доезжает, а пропавший с диска `SKILL.md` восстанавливается, даже если версия не менялась.
-- В системном промпте pi появился блок `<available_skills>` с именем, описанием и путём.
-- Икар на вопрос «какое кодовое слово у скилла pirate-mode» прочитал `SKILL.md`
-  (`read` на `/home/node/.pi/agent/skills/pirate-mode/SKILL.md` виден в сессии pi) и ответил
-  кодовым словом, которое существует только внутри файла; требование скилла «заканчивать ответ
-  строкой 🏴☠️ Йо-хо-хо, сухопутный!» выполнено.
-- Правка скилла в UI (version 1 → 2) доехала и перезапустила сессию; удаление скилла убрало
-  каталог из pi; повторный проход с тем же набором ничего не переписывает (сессии не дёргаются).
-- `./script/test` — 284 теста, включая `skills-sync.test.ts` и `skills-prompt.test.ts`;
-  `./script/lint` (tsc + eslint) чисто.
+- A skill created in LibreChat reached `~/.pi/agent/skills` inside the person's container
+  (and reached `pi.getSkills()` — with no diagnostics).
+- The cache works as intended: a pass with no changes writes neither skill files nor the manifest
+  (checked by mtime and md5), a skill edit in the UI (`version` 2 → 3 → 4) is re-read and
+  arrives, and a `SKILL.md` that vanished from disk is restored even if the version didn't change.
+- The block `<available_skills>` with name, description, and path appeared in pi's system prompt.
+- Asked "what's the codeword for the pirate-mode skill", Icarus read `SKILL.md`
+  (`read` on `/home/node/.pi/agent/skills/pirate-mode/SKILL.md` is visible in the pi session) and answered
+  with the codeword that exists only inside the file; the skill's requirement to "end the reply
+  with the line 🏴☠️ Yo-ho-ho, landlubber!" was met.
+- A skill edit in the UI (version 1 → 2) arrived and restarted the session; deleting the skill removed
+  the directory from pi; a repeated pass with the same set rewrites nothing (sessions aren't disturbed).
+- `./script/test` — 284 tests, including `skills-sync.test.ts` and `skills-prompt.test.ts`;
+  `./script/lint` (tsc + eslint) clean.
 
-### Почему в итоге убрали (07.10.2026)
+### Why it was ultimately removed (07.10.2026)
 
-Разбор на стенде был верный, но на боевом хосте синхронизация не могла заработать, и выяснилось это
-только при живом разборе прода:
+The analysis on the stand was correct, but on the production host the sync couldn't work, and this only came out
+during a live analysis of prod:
 
-- **Management API принимает только OIDC machine-токены** (`getEnabledAuth` требует
-  `managementApi.auth.oidc.enabled` + `issuer` + `audience`; API-ключи управленческие роуты не смотрят
-  вообще). Значит нужен настоящий OIDC-провайдер с клиентом, привязанным к пользователю и тенанту.
-- **Issuer обязан быть `https://`**, http LibreChat пускает только к `localhost`, `127.0.0.1`, `[::1]`
-  и `*.localhost`. Наш стендовый трюк (заглушка внутри контейнера LibreChat, issuer `http://localhost:9100`)
-  на проде означал бы правку его compose и нашу самоделку в роли провайдера.
-- **Тенант.** У прод-пользователей и у скилла `tenantId` не было, а биндинг требует непустой тенант,
-  запрещает `__SYSTEM__` и ищет пользователя как `findUser({_id, tenantId})`; скилл отдаётся только
-  если `skill.tenantId === req.user.tenantId`.
-- **Версия.** На проде стоял `v0.8.6-rc1`, где `managementApi` и роута `/api/agents/v1/skills` нет
-  вообще; фича появилась только в v0.8.8 (`#15545` контракт, `#15555` M2M-аутентификация,
-  `#15561` чтение, `#15642` скиллы).
-- **Молчание.** Проход с пустым списком скиллов не писал в лог ничего: снаружи это выглядело как
-  «синхронизация сломана», и именно так и выглядело.
+- **The Management API accepts only OIDC machine tokens** (`getEnabledAuth` requires
+  `managementApi.auth.oidc.enabled` + `issuer` + `audience`; management routes don't look at API keys at all).
+  So you need a real OIDC provider with a client bound to the user and tenant.
+- **The issuer must be `https://`**; over http LibreChat only reaches `localhost`, `127.0.0.1`, `[::1]`,
+  and `*.localhost`. Our stand trick (a stub inside the LibreChat container, issuer `http://localhost:9100`)
+  in production would have meant editing its compose and putting our homemade thing in the provider role.
+- **Tenant.** The prod users and the skill had no `tenantId`, and the binding requires a non-empty tenant,
+  forbids `__SYSTEM__`, and looks up the user as `findUser({_id, tenantId})`; a skill is returned only
+  if `skill.tenantId === req.user.tenantId`.
+- **Version.** Prod was running `v0.8.6-rc1`, where `managementApi` and the `/api/agents/v1/skills` route don't
+  exist at all; the feature only appeared in v0.8.8 (`#15545` contract, `#15555` M2M authentication,
+  `#15561` read, `#15642` skills).
+- **Silence.** A pass with an empty skill list wrote nothing to the log: from the outside this looked like
+  "sync is broken", and that's exactly how it looked.
 
-Плюс сеть: `icarus`, `LibreChat` и `authelia` живут в разных docker-сетях, а публичный https из
-контейнеров на этом хосте не проходит (hairpin, `unsafe legacy renegotiation disabled`) — понадобились
-бы ещё и маршруты. Цена всей обвязки оказалась выше пользы, поэтому синхронизацию убрали вместе со
-стендовой OIDC-заглушкой, `script/librechat-skills-bind` и секцией `skills.sync`; скиллы pi остаются
-файлами в `~/.pi/agent/skills`, а редактирование придёт панелью.
+Plus the network: `icarus`, `LibreChat`, and `authelia` live on different docker networks, and public https out of
+containers on this host doesn't work (hairpin, `unsafe legacy renegotiation disabled`) — routes would have been needed as well. The cost of the whole contraption turned out to be higher than the benefit, so sync was removed along with the
+stand OIDC stub, `script/librechat-skills-bind`, and the `skills.sync` section; pi's skills remain
+files in `~/.pi/agent/skills`, and editing will come via a panel.
 
-## 8. Что осталось за кадром
+## 8. What was left out of scope
 
-- **Боевой LibreChat.** Нужен `managementApi` с настоящим OIDC-провайдером (issuer/audience + привязка
-  клиента к пользователю LibreChat). Скиллы появляются в UI с v0.8.6; на стенде стоит `v0.8.8-rc3`.
-- **Один токен = один набор скиллов.** Если `accounts` пуст, все люди получают набор того
-  пользователя LibreChat, к которому привязан машинный клиент. Личные наборы — через `accounts`.
-- **`always-apply` не переносится.** В LibreChat это «праймить скилл каждый ход»; в pi каталог
-  работает иначе — модель читает `SKILL.md`, когда задача совпала с описанием. Ключ
-  `always-apply` остаётся в frontmatter как справка, но поведения не меняет.
-- **Файлы бандла** переносятся только текстовые: бинарные (`assets/*.png`) API не отдаёт,
-  синхронизация их пропускает с предупреждением в логе.
-- **Горячая перезагрузка** делается перезапуском сессии pi (см. `generation`), а не перечитыванием
-  каталога на лету: pi читает скиллы при старте процесса.
-- Точная версия и раскладка твоего боевого LibreChat (Agents включены? тенантность есть?) —
-  проверяется на месте по §7.
+- **Production LibreChat.** You need a `managementApi` with a real OIDC provider (issuer/audience + binding
+  the client to the LibreChat user). Skills appear in the UI starting with v0.8.6; the stand runs `v0.8.8-rc3`.
+- **One token = one set of skills.** If `accounts` is empty, everyone gets the set of that
+  LibreChat user the machine client is bound to. Personal sets — via `accounts`.
+- **`always-apply` doesn't carry over.** In LibreChat it means "prime the skill every turn"; in pi the catalog
+  works differently — the model reads `SKILL.md` when the task matches the description. The key
+  `always-apply` stays in the frontmatter as a reference but doesn't change behaviour.
+- **Bundle files** are carried over only if textual: the API doesn't return binary ones (`assets/*.png`),
+  and sync skips them with a warning in the log.
+- **Hot reload** is done by restarting the pi session (see `generation`), not by re-reading the
+  directory on the fly: pi reads skills at process start.
+- The exact version and layout of your production LibreChat (Agents enabled? tenancy present?) —
+  is checked on site per §7.
 
-## Источники
+## Sources
 
-- [LibreChat Skills (docs)][skills] — режимы вызова, frontmatter, лимиты, deployment skills, sync.
-- [LibreChat v0.8.6 changelog][v086] — «Agent Skills» в релизе.
-- [PR #12649, Skill runtime integration][pr] — каталог в `additional_instructions`, тулы
-  `skill`/`read_file`/`bash_tool`, праймы как `isMeta` HumanMessage, файлы в code env.
-- [Agent Management API][agents-api] — skill-роуты `GET /api/agents/v1/skills…`.
-- [LibreChat Agents (docs)][agents] — скиллы включаются у агента; [Compatibility Matrix][compat] —
-  «Agents» как самый полный эндпоинт.
-- pi 0.85.1 (`node_modules/@earendil-works/pi-coding-agent/dist/**`) — пути поиска скиллов,
+- [LibreChat Skills (docs)][skills] — invocation modes, frontmatter, limits, deployment skills, sync.
+- [LibreChat v0.8.6 changelog][v086] — "Agent Skills" in the release.
+- [PR #12649, Skill runtime integration][pr] — the catalog in `additional_instructions`, the
+  `skill`/`read_file`/`bash_tool` tools, primes as `isMeta` HumanMessage, files in the code env.
+- [Agent Management API][agents-api] — the skill routes `GET /api/agents/v1/skills…`.
+- [LibreChat Agents (docs)][agents] — skills are enabled on the agent; [Compatibility Matrix][compat] —
+  "Agents" as the most complete endpoint.
+- pi 0.85.1 (`node_modules/@earendil-works/pi-coding-agent/dist/**`) — skill search paths,
   `--skill`/`--no-skills`, project trust, `formatSkillsForPrompt`.
 
 [skills]: https://www.librechat.ai/docs/features/skills

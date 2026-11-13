@@ -1,15 +1,15 @@
 #!/usr/bin/env node
-// Кинозал: Radarr и Sonarr через MCP.
+// Movie theater: Radarr and Sonarr via MCP.
 //
-// Задача сервера — разговор о кино, а не «качай по интонации». Поэтому чтение
-// (поиск по каталогу, коллекция, очередь, диски, профили и корневые папки) и
-// заказ файла разведены: первые инструменты ничего не меняют, последний —
-// arr_add — требует confirm: true и явного «да» от человека. Профили качества и
-// root folders не выдумываются: они читаются с уже настроенного Radarr/Sonarr,
-// иначе заказ уедет не туда.
+// The server's job is a conversation about movies, not "download by intonation". That is why reading
+// (catalog search, collection, queue, disks, profiles and root folders) and
+// ordering a file are separated: the first tools change nothing, the last one —
+// arr_add — requires confirm: true and an explicit "yes" from the person. Quality profiles and
+// root folders are not invented: they are read from the already configured Radarr/Sonarr,
+// otherwise the order would go to the wrong place.
 //
-// Ключи — только из окружения (ARR_RADARR_KEY / ARR_SONARR_KEY): в конфиг-файл
-// и git они не попадают. Адрес — ARR_RADARR_URL / ARR_SONARR_URL.
+// Keys — only from the environment (ARR_RADARR_KEY / ARR_SONARR_KEY): they do not end up in a config file
+// or git. Address — ARR_RADARR_URL / ARR_SONARR_URL.
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -44,8 +44,8 @@ const SERVICE_LIST = [
   },
 ];
 
-// Оба сервера не обязаны быть настроены: можно держать только Radarr или только
-// Sonarr. Не настроен — это не ошибка старта, а честный ответ инструмента.
+// Both servers do not have to be configured: you can keep only Radarr or only
+// Sonarr. Not configured is not a startup error, but an honest answer from the tool.
 const SERVICES = new Map(SERVICE_LIST.map((service) => [service.kind, service]));
 const TIMEOUT_MS = timeoutFromEnv(process.env.ARR_TIMEOUT_MS);
 
@@ -66,7 +66,7 @@ const INSTRUCTIONS = `Кинозал: Radarr (фильмы) и Sonarr (сери�
 function normalizeUrl(raw) {
   const value = (raw ?? '').trim().replace(/\/+$/, '');
   if (!value) return '';
-  // Адрес копируют из браузера вместе с /api/v3 — это не база API, а её хвост.
+  // The address is copied from the browser together with /api/v3 — that is not the API base, but its tail.
   return value.replace(/\/api\/v3$/i, '');
 }
 
@@ -113,7 +113,7 @@ function ensureConfigured(service) {
   }
 }
 
-/** Ответ *arr с ошибкой валидации — массив { propertyName, errorMessage }. */
+/** *arr response with a validation error — an array of { propertyName, errorMessage }. */
 function describeFailure(text) {
   const raw = String(text ?? '').trim();
   if (!raw) return 'пустой ответ';
@@ -128,7 +128,7 @@ function describeFailure(text) {
     const message = String(parsed?.message ?? parsed?.error ?? '').trim();
     if (message !== '') return message;
   } catch {
-    // не JSON — покажем начало тела: там обычно HTML-страница входа или 404 прокси
+    // not JSON — show the beginning of the body: usually an HTML login page or a proxy 404
   }
   return raw.replace(/\s+/g, ' ').slice(0, 180);
 }
@@ -312,8 +312,8 @@ async function lookup(args) {
     return `${service.title}: по запросу «${term}» ничего не найдено. Уточни название или добавь год.`;
   }
 
-  // Проверка «уже в коллекции» — отдельный запрос, и он не должен ломать поиск:
-  // если каталог не отдался, честно скажем об этом, но результаты покажем.
+  // The "already in collection" check is a separate request, and it must not break the search:
+  // if the catalog did not respond, we honestly say so, but still show the results.
   let collection = new Map();
   let collectionError = '';
   try {
@@ -385,7 +385,7 @@ async function collection(args) {
       sections.push(collectionSection(service, items, query, limit));
     } catch (caught) {
       if (kind !== 'all') throw caught;
-      // Текст ошибки уже начинается с имени сервиса — второй раз не добавляем.
+      // The error text already begins with the service name — do not add it a second time.
       sections.push(String(caught?.message ?? caught));
     }
   }
@@ -439,7 +439,7 @@ async function queue(args) {
       sections.push(lines.join('\n'));
     } catch (caught) {
       if (kind !== 'all') throw caught;
-      // Текст ошибки уже начинается с имени сервиса — второй раз не добавляем.
+      // The error text already begins with the service name — do not add it a second time.
       sections.push(String(caught?.message ?? caught));
     }
   }
@@ -474,7 +474,7 @@ async function disk(args) {
       sections.push(diskSection(service, disks));
     } catch (caught) {
       if (kind !== 'all') throw caught;
-      // Текст ошибки уже начинается с имени сервиса — второй раз не добавляем.
+      // The error text already begins with the service name — do not add it a second time.
       sections.push(String(caught?.message ?? caught));
     }
   }
@@ -520,7 +520,7 @@ async function qualityProfiles(args) {
       sections.push(profileSection(service, await request(service, 'qualityprofile')));
     } catch (caught) {
       if (kind !== 'all') throw caught;
-      // Текст ошибки уже начинается с имени сервиса — второй раз не добавляем.
+      // The error text already begins with the service name — do not add it a second time.
       sections.push(String(caught?.message ?? caught));
     }
   }
@@ -554,7 +554,7 @@ async function rootFolders(args) {
       sections.push(folderSection(service, await request(service, 'rootfolder')));
     } catch (caught) {
       if (kind !== 'all') throw caught;
-      // Текст ошибки уже начинается с имени сервиса — второй раз не добавляем.
+      // The error text already begins with the service name — do not add it a second time.
       sections.push(String(caught?.message ?? caught));
     }
   }
@@ -569,7 +569,7 @@ async function status() {
       const info = await request(service, 'system/status');
       lines.push(`${service.title}: OK · ${String(info?.appName ?? service.title)} ${String(info?.version ?? '?')} · ${service.url}`);
     } catch (caught) {
-      // В сообщении об ошибке имя сервиса уже есть.
+      // The error message already contains the service name.
       lines.push(String(caught?.message ?? caught));
     }
   }
@@ -666,7 +666,7 @@ async function add(args) {
     throw new Error(`нужен числовой id (${service.itemId}) из arr_lookup, пришло «${String(rawId)}».`);
   }
 
-  // Профиль и папку не изобретаем: читаем те, что уже настроены на сервере.
+  // We do not invent the profile and folder: we read the ones already configured on the server.
   const [profiles, folders] = await Promise.all([
     request(service, 'qualityprofile'),
     request(service, 'rootfolder'),
@@ -679,7 +679,7 @@ async function add(args) {
   try {
     existing = (await collectionIndex(service)).get(id) ?? null;
   } catch {
-    // Проверка «уже есть» — подсказка, а не условие заказа: сервер сам откажет.
+    // The "already exists" check is a hint, not a condition of the order: the server itself will refuse.
   }
   if (existing !== null) {
     throw new Error(
@@ -963,10 +963,10 @@ function readRequestBody(req) {
 }
 
 /**
- * Streamable HTTP: тот же JSON-RPC, но по POST /mcp. Нужен, когда сервер живёт
- * отдельным контейнером рядом с arr-стеком, а не внутри контейнера агента.
- * Слушаем только localhost, пока явно не попросили другой адрес; наружу — только
- * с ARR_HTTP_TOKEN, иначе кто угодно в сети смог бы заказывать файлы.
+ * Streamable HTTP: the same JSON-RPC, but over POST /mcp. Needed when the server lives
+ * as a separate container next to the arr stack, rather than inside the agent's container.
+ * We listen only on localhost until another address is explicitly requested; externally — only
+ * with ARR_HTTP_TOKEN, otherwise anyone on the network could order files.
  */
 async function serveHttp(port, host) {
   const token = (process.env.ARR_HTTP_TOKEN ?? '').trim();
@@ -1019,7 +1019,7 @@ async function serveHttp(port, host) {
         const response = await dispatch(item);
         if (response) responses.push(response);
       }
-      // Уведомления (например, notifications/initialized) ответа не требуют.
+      // Notifications (for example, notifications/initialized) do not require a response.
       if (responses.length === 0) {
         res.writeHead(202);
         res.end();

@@ -1,4 +1,4 @@
-// Панель управления, раздел памяти: git-история — то, что делает откат честным.
+// Control panel, memory section: git history — what makes rollback honest.
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -6,9 +6,9 @@ import path from 'node:path';
 export type Commit = { hash: string; date: string; subject: string };
 
 /**
- * Коммит в истории одного файла: кто и когда его тронул и насколько.
- * added/removed — строки по этому файлу, а не по всему коммиту: в панели рядом с
- * записью памяти важно, что случилось именно с ней, а не со всем репозиторием.
+ * A commit in the history of a single file: who touched it, when, and how much.
+ * added/removed are lines for this file, not for the whole commit: in the panel,
+ * next to a memory entry, what matters is what happened to it, not the whole repo.
  */
 export type FileCommit = {
   hash: string;
@@ -64,7 +64,7 @@ export async function show(dir: string, commit: string): Promise<{ stat: string;
   return { stat: stat.stdout, patch: patch.stdout.slice(0, 20_000) };
 }
 
-/** Откат коммита разбора. Не переписываем историю: делаем обратный коммит. */
+/** Revert a parsing commit. We don't rewrite history: we make a reverse commit. */
 export async function revert(dir: string, commit: string): Promise<{ ok: boolean; message: string }> {
   if (!/^[0-9a-f]{7,40}$/i.test(commit)) return { ok: false, message: 'не похоже на хеш коммита' };
   const result = await git(dir, ['revert', '--no-edit', commit]);
@@ -76,13 +76,14 @@ export async function revert(dir: string, commit: string): Promise<{ ok: boolean
 }
 
 /**
- * История коммитов и строк по ним: с путём — по одному файлу, без пути — по всему
- * репозиторию (так живёт раздел скиллов: скилл это каталог, а не файл).
+ * Commit history and line counts per commit: with a path — for one file, without a
+ * path — for the whole repository (that's how the skills section lives: a skill is a
+ * directory, not a file).
  *
- * Формат `--numstat` печатает «+N\t−M\tпуть» между строкой коммита и следующим
- * коммитом, поэтому разбираем блоками. Хеш и дату берём в одном формате с log(),
- * чтобы даты в панели читались одинаково, а TZ фиксируем: иначе день на границе
- * суток у автора и на сервере разошлись бы.
+ * The `--numstat` format prints «+N\t−M\tпуть» between a commit line and the next
+ * commit, so we parse it in blocks. We take the hash and date in the same format as
+ * log() so dates in the panel read the same, and we pin the TZ: otherwise the day on
+ * the boundary between author and server would differ.
  */
 export async function fileHistory(dir: string, relative: string, limit = 30): Promise<FileCommit[]> {
   if (relative.includes('\u0000') || relative.startsWith('-')) return [];
@@ -109,7 +110,7 @@ export async function fileHistory(dir: string, relative: string, limit = 30): Pr
     }
     const stat = /^(\d+|-)\t(\d+|-)\t/.exec(line);
     if (!stat || !current) continue;
-    // «-» вместо числа git печатает для бинарного файла: строк там не считают.
+    // git prints "-" instead of a number for a binary file: lines aren't counted there.
     current.added += stat[1] === '-' ? 0 : Number(stat[1]);
     current.removed += stat[2] === '-' ? 0 : Number(stat[2]);
   }
@@ -117,12 +118,12 @@ export async function fileHistory(dir: string, relative: string, limit = 30): Pr
 }
 
 /**
- * Что за коммит добавил или изменил каждую строку файла: «дата записи» для панели.
+ * Which commit added or changed each line of the file: the "entry date" for the panel.
  *
- * Даты берём не из текста памяти (там дата есть только у строк состояния), а из
- * истории: память — git-репозиторий, и возраст записи честно живёт в коммите.
- * Возвращаем по индексу строки (0-based), а не по номеру: так вызывающему коду не
- * нужно помнить про сдвиг на единицу.
+ * We take dates not from the memory text (there a date exists only on state lines),
+ * but from history: memory is a git repository, and an entry's age honestly lives in
+ * the commit. We return by line index (0-based), not by number: that way the caller
+ * doesn't need to remember the off-by-one shift.
  */
 export async function blameLines(dir: string, relative: string): Promise<(string | null)[]> {
   if (!relative || relative.includes('\u0000') || relative.startsWith('-')) return [];
@@ -130,8 +131,8 @@ export async function blameLines(dir: string, relative: string): Promise<(string
   if (result.code !== 0) return [];
 
   const dates: (string | null)[] = [];
-  // В porcelain за строку файла отвечает строка, начатая табуляцией. Дата идёт
-  // раньше неё, в заголовке блока: запоминаем её и отдаём по факту строки.
+  // In porcelain, the line for a file line is the one starting with a tab. The date
+  // comes before it, in the block header: we remember it and hand it out per line.
   let stamp: number | null = null;
   for (const line of result.stdout.split('\n')) {
     if (line.startsWith('author-time ')) {
@@ -140,7 +141,7 @@ export async function blameLines(dir: string, relative: string): Promise<(string
       continue;
     }
     if (line.startsWith('\t')) {
-      // Незакоммиченная строка (хеш из нулей) приезжает без author-time — даты нет.
+      // An uncommitted line (all-zero hash) arrives without author-time — no date.
       dates.push(stamp === null ? null : dayOf(stamp));
       stamp = null;
     }
@@ -148,7 +149,7 @@ export async function blameLines(dir: string, relative: string): Promise<(string
   return dates;
 }
 
-/** День в UTC: в панели дата — это «когда запись появилась», без часов и минут. */
+/** Day in UTC: in the panel a date is "when the entry appeared", without hours or minutes. */
 function dayOf(unixSeconds: number): string {
   return new Date(unixSeconds * 1000).toISOString().slice(0, 10);
 }
@@ -161,11 +162,12 @@ export async function commitAll(dir: string, message: string): Promise<boolean> 
 }
 
 /**
- * Есть ли в этом месте незакоммиченное: правки или новые файлы.
+ * Whether there is anything uncommitted in this place: edits or new files.
  *
- * Нужно перед удалением: файлы бандла человек мог положить руками и не закоммитить,
- * а `commitAll` их не увидит — untracked-файл в истории не появится, и откат
- * удаления его не вернёт. Поэтому перед удалением спрашиваем и фиксируем.
+ * Needed before deletion: the person could have put bundle files there by hand and
+ * not committed them, and `commitAll` won't see them — an untracked file won't appear
+ * in history, and reverting the deletion won't bring it back. So before deleting we
+ * ask and record.
  */
 export async function hasChanges(dir: string, relative: string): Promise<boolean> {
   if (!relative || relative.includes('\u0000')) return false;

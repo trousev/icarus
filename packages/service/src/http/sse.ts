@@ -1,4 +1,4 @@
-// Упаковка ответов в формат OpenAI Chat Completions (JSON и SSE).
+// Packing responses into the OpenAI Chat Completions format (JSON and SSE).
 export type Usage = { prompt_tokens: number; completion_tokens: number; total_tokens: number };
 
 export function completionId(): string {
@@ -36,9 +36,9 @@ export function usageChunk(id: string, model: string, usage: Usage): string {
 export const DONE = 'data: [DONE]\n\n';
 
 /**
- * Ответ одним куском. `reasoning` (мысли модели и активность тулов) уходит
- * отдельным полем `message.reasoning_content` и никогда не подмешивается в
- * `content` — та же граница каналов, что и в стриме.
+ * Response in one piece. `reasoning` (model thoughts and tool activity) goes
+ * as a separate field `message.reasoning_content` and is never mixed into
+ * `content` — the same channel boundary as in the stream.
  */
 export function completion(
   id: string,

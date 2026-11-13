@@ -1,5 +1,5 @@
-// Telegram-бот: кто получает ответ, что отвечаем на команды и как ответ доезжает
-// до чата. Сети и докера тут нет: Bot API, реестр сессий и сессия pi — заглушки.
+// Telegram bot: who gets the reply, what we answer to commands, and how the reply reaches
+// the chat. There is no network or Docker here: Bot API, session registry and pi session are stubs.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -45,7 +45,7 @@ import { broadcast } from '../src/control/chat-live.ts';
 import { createWorkspace } from '../src/workspaces.ts';
 import { makeConfig, probe } from './fixtures.ts';
 
-/** Байты, которые «скачались» из Telegram: содержимое в тестах не важно. */
+/** Bytes that were "downloaded" from Telegram: the content does not matter in tests. */
 const JPEG = Buffer.from('не-совсем-jpeg');
 
 // --- Bot API ----------------------------------------------------------------
@@ -63,7 +63,7 @@ function fakeFetch(responses: Array<Record<string, unknown> | Error>): { calls: 
   return { calls, fetch: impl };
 }
 
-test('Bot API: длинный опрос подтверждает апдейты и забирает только сообщения', async () => {
+test('Bot API: long polling confirms updates and fetches only messages', async () => {
   const { calls, fetch } = fakeFetch([{ ok: true, result: [{ update_id: 7, message: { message_id: 1 } }] }]);
   const api = new TelegramApi('TOKEN', { fetch, baseUrl: 'https://tg.test' });
 
@@ -76,7 +76,7 @@ test('Bot API: длинный опрос подтверждает апдейты
   assert.deepEqual(calls[0]?.body.allowed_updates, ['message']);
 });
 
-test('Bot API: ошибка приезжает с кодом и описанием', async () => {
+test('Bot API: an error arrives with a code and description', async () => {
   const { fetch } = fakeFetch([{ ok: false, error_code: 400, description: 'chat not found' }]);
   const api = new TelegramApi('TOKEN', { fetch, baseUrl: 'https://tg.test' });
 
@@ -88,7 +88,7 @@ test('Bot API: ошибка приезжает с кодом и описание
   });
 });
 
-test('Bot API: режим разметки уезжает в запрос, без него — не уезжает', async () => {
+test('Bot API: the markup mode goes into the request, without it — it does not', async () => {
   const { calls, fetch } = fakeFetch([
     { ok: true, result: { message_id: 1 } },
     { ok: true, result: { message_id: 2 } },
@@ -101,12 +101,12 @@ test('Bot API: режим разметки уезжает в запрос, бе�
   await api.editMessageText(1, 2, '<b>жирный</b>', { parseMode: 'HTML' });
 
   assert.equal(calls[0]?.body.parse_mode, 'HTML');
-  // Сообщения служебок (приветствие, команды) — голый текст: разметку в них никто не чистил.
+  // Service messages (greeting, commands) are plain text: nobody cleans markup in them.
   assert.equal(calls[1]?.body.parse_mode, undefined);
   assert.equal(calls[2]?.body.parse_mode, 'HTML', 'правка тоже размеченная');
 });
 
-test('Bot API: 429 ждём и повторяем, а не теряем ответ', async () => {
+test('Bot API: on 429 we wait and retry instead of losing the reply', async () => {
   const { calls, fetch } = fakeFetch([
     { ok: false, error_code: 429, description: 'Too Many Requests', parameters: { retry_after: 2 } },
     { ok: true, result: { message_id: 3 } },
@@ -124,15 +124,15 @@ test('Bot API: 429 ждём и повторяем, а не теряем отве
   assert.equal(calls.length, 2);
 });
 
-test('Bot API: «message is not modified» — не ошибка', async () => {
+test('Bot API: "message is not modified" is not an error', async () => {
   const { fetch } = fakeFetch([{ ok: false, error_code: 400, description: 'Bad Request: message is not modified' }]);
   const api = new TelegramApi('TOKEN', { fetch, baseUrl: 'https://tg.test' });
   await api.editMessageText(1, 2, 'то же самое');
 });
 
-test('Bot API: видно, когда сообщение легло не в топик', () => {
-  // В личке с топиками Telegram умеет ответить ok и положить сообщение в общую ленту:
-  // это выдаёт ответ — в нём нет номера топика и флага топика.
+test('Bot API: it is visible when a message did not land in the topic', () => {
+  // In a private chat with topics Telegram can reply ok and put the message into the general feed:
+  // the response reveals it — it has no topic id and no topic flag.
   assert.equal(landedInThread({ message_id: 1, message_thread_id: 17 }, 17), true);
   assert.equal(landedInThread({ message_id: 1, is_topic_message: true }, 17), true);
   assert.equal(landedInThread({ message_id: 1, message_thread_id: null }, 17), false);
@@ -140,7 +140,7 @@ test('Bot API: видно, когда сообщение легло не в то
   assert.equal(landedInThread({ message_id: 1 }, 17), false);
 });
 
-test('Bot API: отбитый топик повторяем ответом-якорем', async () => {
+test('Bot API: a rejected topic is retried with an anchor reply', async () => {
   const { calls, fetch } = fakeFetch([
     { ok: false, error_code: 400, description: 'Bad Request: message thread not found' },
     { ok: true, result: { message_id: 5, message_thread_id: 17, is_topic_message: true } },
@@ -154,7 +154,7 @@ test('Bot API: отбитый топик повторяем ответом-як�
   assert.deepEqual(calls[1]?.body.reply_parameters, { message_id: 99 });
 });
 
-test('Bot API: без якоря отбитый топик — ошибка, а не тихая отправка в корень', async () => {
+test('Bot API: without an anchor a rejected topic is an error, not a quiet send to the root', async () => {
   const { fetch } = fakeFetch([{ ok: false, error_code: 400, description: 'Bad Request: message thread not found' }]);
   const api = new TelegramApi('TOKEN', { fetch, baseUrl: 'https://tg.test' });
 
@@ -165,7 +165,7 @@ test('Bot API: без якоря отбитый топик — ошибка, а 
   });
 });
 
-// --- бот --------------------------------------------------------------------
+// --- bot --------------------------------------------------------------------
 
 type Step = Record<string, unknown>;
 
@@ -181,7 +181,7 @@ function fakeSession(steps: Step[] = ANSWER_STEPS) {
   return {
     busy: false,
     prompts: [] as string[],
-    /** Что уехало модели картинками: base64 и mime, ровно как ждёт pi. */
+    /** What went to the model as images: base64 and mime, exactly as pi expects. */
     images: [] as Array<Array<{ data: string; mimeType: string }>>,
     async prompt(text: string, images: Array<{ data: string; mimeType: string }> = []) {
       this.prompts.push(text);
@@ -195,7 +195,7 @@ function fakeSession(steps: Step[] = ANSWER_STEPS) {
   };
 }
 
-/** Чат глазами Telegram: сообщения заводятся отправкой и меняются правками. */
+/** Chat through Telegram's eyes: messages are created by sending and changed by edits. */
 function fakeApi(files: Record<string, Buffer> = {}) {
   const state = {
     messages: [] as Array<{
@@ -203,29 +203,29 @@ function fakeApi(files: Record<string, Buffer> = {}) {
       id: number;
       text: string;
       threadId: number | null;
-      /** С какой разметкой сообщение легло в Telegram: null — как голый текст. */
+      /** With what markup the message landed in Telegram: null — as plain text. */
       parseMode: string | null;
     }>,
     nextId: 1,
-    /** Действия Telegram по порядку: чем бот показывал, что он занят. */
+    /** Telegram actions in order: how the bot showed it was busy. */
     actions: [] as Array<{ action: string; threadId: number | null }>,
     files: new Map(Object.entries(files)),
     downloaded: [] as string[],
-    /** Threaded Mode: в бою это флаги getMe, в тестах — переключатель. */
+    /** Threaded Mode: in production these are getMe flags, in tests a toggle. */
     topicsEnabled: false,
-    /** Переименования: chatId, топик, новое имя. */
+    /** Renames: chatId, topic, new name. */
     renames: [] as Array<{ chatId: number; threadId: number; name: string }>,
-    /** Удалённые топики: так архивация выносит разговор из Telegram. */
+    /** Deleted topics: this is how archiving takes a conversation out of Telegram. */
     deletedTopics: [] as Array<{ chatId: number; threadId: number }>,
-    /** Отправленные вложения: фотографии и документы — отдельно, как в Telegram. */
+    /** Sent attachments: photos and documents separately, as in Telegram. */
     photos: [] as Array<{ chatId: number; threadId: number | null; name: string; bytes: Buffer; caption?: string }>,
     documents: [] as Array<{ chatId: number; threadId: number | null; name: string; bytes: Buffer; caption?: string }>,
-    /** Telegram отбивает отправку в топик: так выглядит «ответ не доехал». */
+    /** Telegram rejects sending into a topic: this is what a "reply did not arrive" looks like. */
     failTopics: false,
-    /** Telegram отбивает разметку: так выглядит наш промах в HTML. */
+    /** Telegram rejects markup: this is what our HTML mistake looks like. */
     rejectMarkup: false,
   };
-  /** Разметку Telegram разбирает до сохранения: отказал — значит, сообщения нет. */
+  /** Telegram parses markup before saving: if it refused, the message does not exist. */
   const rejectMarkup = (parseMode?: string) => {
     if (!state.rejectMarkup || !parseMode) return;
     throw new TelegramError(`Bad Request: can't parse entities: Unsupported start tag "b" at byte offset 0`, 400);
@@ -279,7 +279,7 @@ function fakeApi(files: Record<string, Buffer> = {}) {
       if (!file) throw new TelegramError('файл не скачался', 404);
       return file;
     },
-    /** Вложения: файл уезжает байтами, а не строкой — так же, как в Bot API. */
+    /** Attachments: the file goes as bytes, not a string — just like in the Bot API. */
     async sendPhoto(
       chatId: number,
       file: { bytes: Buffer; name: string },
@@ -302,7 +302,7 @@ function fakeApi(files: Record<string, Buffer> = {}) {
   return { api, state };
 }
 
-/** Что уехало в корень чата: сообщения топиков сюда не попадают. */
+/** What went to the chat root: topic messages do not end up here. */
 function chatText(state: ReturnType<typeof fakeApi>['state'], chatId: number): string {
   return state.messages
     .filter((message) => message.chatId === chatId && message.threadId === null)
@@ -310,14 +310,14 @@ function chatText(state: ReturnType<typeof fakeApi>['state'], chatId: number): s
     .join('\n');
 }
 
-/** Последнее действие Telegram: чем бот показал, что он занят, в самый последний раз. */
+/** The last Telegram action: how the bot showed it was busy, most recently. */
 function lastAction(state: ReturnType<typeof fakeApi>['state']): { action: string; threadId: number | null } {
   const last = state.actions.at(-1);
   assert.ok(last, 'бот должен показать, что он занят');
   return last;
 }
 
-/** Только то, что уехало в конкретный топик: в корне чата ответа быть не должно. */
+/** Only what went to a specific topic: there must be no reply in the chat root. */
 function topicText(state: ReturnType<typeof fakeApi>['state'], chatId: number, threadId: number): string {
   return state.messages
     .filter((message) => message.chatId === chatId && message.threadId === threadId)
@@ -330,23 +330,23 @@ function makeBot(
     steps?: Step[];
     config?: ReturnType<typeof makeConfig>;
     compact?: unknown;
-    /** Чем кончились команды бота: по умолчанию всё хорошо. */
+    /** How the bot commands ended: all good by default. */
     stop?: unknown;
     stats?: unknown;
     clear?: unknown;
     rename?: unknown;
     skills?: unknown;
-    /** Чем расшифровывать голосовые: как в бою, но без сети; null — нечем. */
+    /** What to transcribe voice with: like in production, but without network; null — nothing. */
     transcribe?: ((audio: Uint8Array, mimeType: string) => Promise<string>) | null;
-    /** Файлы, которые «лежат» в Telegram: id → байты. */
+    /** Files "stored" in Telegram: id → bytes. */
     files?: Record<string, Buffer>;
-    /** Threaded Mode у бота: с ним /rename правит имя топика, без него — только chats.json. */
+    /** Threaded Mode on the bot: with it /rename changes the topic name, without it only chats.json. */
     topics?: boolean;
-    /** Сколько живёт «свежий топик» (первое сообщение заведённого из ленты топика). */
+    /** How long a "fresh topic" lives (the first message of a topic created from the feed). */
     freshTopicWindowMs?: number;
-    /** Своя сессия: тесту про прерывание нужен долгий ход, а не мгновенный. */
+    /** Custom session: the interruption test needs a long turn, not an instant one. */
     session?: ReturnType<typeof fakeSession>;
-    /** Чем отвечает дешёвая модель на запрос заголовка (реестр `oneShot`). */
+    /** What the cheap model answers the title request (the `oneShot` registry). */
     oneShot?: (prompt: string) => Promise<string>;
   } = {},
 ) {
@@ -416,13 +416,13 @@ function makeBot(
   };
   const { api, state } = fakeApi(options.files ?? { IMAGE: JPEG, VOICE: JPEG });
   state.topicsEnabled = options.topics ?? false;
-  // Расшифровка по умолчанию рабочая: тест про «распознавания нет» задаёт null явно.
+  // Transcription works by default: the "no recognition" test sets null explicitly.
   const transcribe =
     'transcribe' in options ? options.transcribe : async () => 'привет из голосового';
   const bot = new TelegramBot(config, registry as never, {
     api,
     editIntervalMs: 0,
-    // Действие показать сразу, а повторять не чаще раза в час: тесту не нужны тики.
+    // Show the action right away and repeat at most once an hour: the test does not need ticks.
     actionGapMs: 0,
     actionIntervalMs: 3_600_000,
     transcribe,
@@ -449,8 +449,8 @@ function messageUpdate(
 }
 
 /**
- * Служебное сообщение: топик завёл клиент Telegram (кнопка «All Messages»). Бот
- * по нему только понимает, куда отнести первое сообщение из общей ленты.
+ * Service message: the Telegram client created a topic (the "All Messages" button). The bot
+ * only uses it to figure out where to put the first message from the general feed.
  */
 function topicCreatedUpdate(name: string, threadId: number, chatId = 42): TelegramUpdate {
   return {
@@ -466,7 +466,7 @@ function topicCreatedUpdate(name: string, threadId: number, chatId = 42): Telegr
   };
 }
 
-/** Фото: Telegram шлёт один кадр лестницей размеров, от мелкого к крупному. */
+/** Photo: Telegram sends one frame as a ladder of sizes, from small to large. */
 function photoUpdate(
   options: { caption?: string; sizes?: TelegramPhotoSize[]; fileId?: string; messageId?: number } = {},
 ): TelegramUpdate {
@@ -501,7 +501,7 @@ function voiceUpdate(options: { duration?: number; fileId?: string } = {}): Tele
   };
 }
 
-/** Вложение, которое бот не разбирает: видео, стикер, документ не-картинка. */
+/** An attachment the bot does not handle: video, sticker, non-image document. */
 function otherUpdate(kind: 'video' | 'sticker' | 'audio' | 'document' | 'video_note'): TelegramUpdate {
   return {
     update_id: 1,
@@ -514,7 +514,7 @@ function otherUpdate(kind: 'video' | 'sticker' | 'audio' | 'document' | 'video_n
   };
 }
 
-test('знакомого человека бот слушает и отвечает его словами', async () => {
+test('the bot listens to a known person and answers in their words', async () => {
   const { bot, session, state } = makeBot();
 
   await bot.handleUpdate(messageUpdate('привет, Икар'));
@@ -529,7 +529,7 @@ test('знакомого человека бот слушает и отвеча�
   );
 });
 
-test('ошибка авторизации MCP даёт в ответе ссылку на переподключение', async () => {
+test('an MCP authorization error yields a reconnection link in the reply', async () => {
   const steps: Step[] = [
     {
       type: 'tool_execution_start',
@@ -570,10 +570,10 @@ test('ошибка авторизации MCP даёт в ответе ссыл�
   assert.match(text, /https:\/\/chat\.example\/panel\/mcp\?server=black-forest/);
 });
 
-test('Telegram предупреждает: в контексте есть реплики из панели', async () => {
-  // Так выглядит «начал в панели → продолжил в телеге»: сессия одна, история
-  // общая. Молча подмешивать панельные реплики в ответ нельзя, иначе Telegram
-  // тихо становится окном в личные файлы, — поэтому бот говорит об этом до ответа.
+test('Telegram warns: the context contains utterances from the panel', async () => {
+  // This is what "started in the panel → continued in Telegram" looks like: one session, shared
+  // history. Silently mixing panel utterances into the reply is not allowed, otherwise Telegram
+  // quietly becomes a window into personal files, — so the bot says this before the reply.
   const { bot, state, config } = makeBot();
   ensureChat(config, probe('probe'), 'telegram-42', 'telegram');
   recordTurn(config, probe('probe'), 'telegram-42', 'web', new Date('2026-11-01T12:04:00.000Z'));
@@ -588,7 +588,7 @@ test('Telegram предупреждает: в контексте есть реп
   assert.ok(text.indexOf('Продолжаю') < text.indexOf('Привет'), 'отбивка стоит до ответа');
 });
 
-test('отбивки нет, если разговор идёт только в Telegram', async () => {
+test('no warning if the conversation happens only in Telegram', async () => {
   const { bot, state, config } = makeBot();
   ensureChat(config, probe('probe'), 'telegram-42', 'telegram');
   recordTurn(config, probe('probe'), 'telegram-42', 'telegram', new Date('2026-11-01T12:04:00.000Z'));
@@ -598,7 +598,7 @@ test('отбивки нет, если разговор идёт только в 
   assert.doesNotMatch(chatText(state, 42), /Продолжаю разговор/);
 });
 
-test('незнакомцу бот не открывает чужую память', async () => {
+test('the bot does not open someone else\'s memory to a stranger', async () => {
   const { bot, session, state } = makeBot();
 
   await bot.handleUpdate(messageUpdate('привет', { username: 'чужой' }));
@@ -607,7 +607,7 @@ test('незнакомцу бот не открывает чужую памят�
   assert.match(chatText(state, 42), /Не знаю тебя: @чужой/);
 });
 
-test('без username в телеграме человека не узнать — так и говорим', async () => {
+test('without a username in Telegram a person cannot be identified — so we say', async () => {
   const { bot, session, state } = makeBot();
 
   await bot.handleUpdate(messageUpdate('привет', { username: '' }));
@@ -616,7 +616,7 @@ test('без username в телеграме человека не узнать �
   assert.equal(chatText(state, 42), NO_USERNAME);
 });
 
-test('фото уезжает в pi нативно, а сам файл ложится в incoming', async () => {
+test('a photo goes to pi natively, and the file itself lands in incoming', async () => {
   const { bot, session, config } = makeBot();
 
   await bot.handleUpdate(photoUpdate({ caption: 'что на фото?' }));
@@ -632,7 +632,7 @@ test('фото уезжает в pi нативно, а сам файл ложи�
   assert.deepEqual(fs.readFileSync(path.join(userPaths(config, probe()).incoming, saved[0] ?? '')), JPEG);
 });
 
-test('из лестницы размеров берём самый крупный кадр', async () => {
+test('from the ladder of sizes we take the largest frame', async () => {
   const { bot, session, state } = makeBot({ files: { small: JPEG, big: JPEG } });
 
   await bot.handleUpdate(
@@ -649,7 +649,7 @@ test('из лестницы размеров берём самый крупны�
   assert.equal(session.images[0]?.length, 1);
 });
 
-test('фото без подписи всё равно доезжает — с одним лишь путём', async () => {
+test('a photo without a caption still arrives — with just a path', async () => {
   const { bot, session } = makeBot();
 
   await bot.handleUpdate(photoUpdate());
@@ -660,7 +660,7 @@ test('фото без подписи всё равно доезжает — с �
   assert.equal(session.images[0]?.length, 1, 'картинка при этом уехала');
 });
 
-test('картинка документом — тоже картинка, с человеческим именем файла', async () => {
+test('an image sent as a document is still an image, with a human file name', async () => {
   const { bot, session, config } = makeBot({
     files: { SHOT: JPEG },
     steps: ANSWER_STEPS,
@@ -680,7 +680,7 @@ test('картинка документом — тоже картинка, с ч
   assert.deepEqual(fs.readdirSync(userPaths(config, probe()).incoming), ['telegram-42-21-скриншот.png']);
 });
 
-test('голосовое расшифровывается и уезжает репликой с пометкой', async () => {
+test('a voice message is transcribed and goes as an utterance with a marker', async () => {
   const heard: Array<{ bytes: number; mime: string }> = [];
   const { bot, session, state } = makeBot({
     transcribe: async (audio, mimeType) => {
@@ -698,7 +698,7 @@ test('голосовое расшифровывается и уезжает ре
   assert.equal(state.actions[0]?.action, 'record_voice', 'пока идёт расшифровка — «записывает голосовое»');  assert.equal(chatText(state, 42), 'Привет, Саня');
 });
 
-test('распознавания нет — говорим об этом, а не молчим', async () => {
+test('no recognition — we say so instead of staying silent', async () => {
   const { bot, session, state } = makeBot({ transcribe: null });
 
   await bot.handleUpdate(voiceUpdate());
@@ -707,7 +707,7 @@ test('распознавания нет — говорим об этом, а н�
   assert.equal(chatText(state, 42), VOICE_NO_SPEECH);
 });
 
-test('пустая расшифровка не превращается в ход', async () => {
+test('an empty transcript does not become a turn', async () => {
   const { bot, session, state } = makeBot({ transcribe: async () => '   ' });
 
   await bot.handleUpdate(voiceUpdate());
@@ -716,7 +716,7 @@ test('пустая расшифровка не превращается в хо�
   assert.equal(chatText(state, 42), VOICE_EMPTY);
 });
 
-test('сбой распознавания человек видит ответом', async () => {
+test('a recognition failure is shown to the person as a reply', async () => {
   const { bot, session, state } = makeBot({
     transcribe: async () => {
       throw new Error('распознавание не удалось (код 401)');
@@ -729,12 +729,12 @@ test('сбой распознавания человек видит ответо
   assert.match(chatText(state, 42), /Не разобрал голосовое: распознавание не удалось \(код 401\)/);
 });
 
-test('пометка о голосовом: с длительностью и без', () => {
+test('the voice marker: with and without duration', () => {
   assert.equal(voicePrompt('привет', 12), '[голосовое, 12 с] привет');
   assert.equal(voicePrompt('привет', null), '[голосовое] привет');
 });
 
-test('видео, стикер и документ бот честно не разбирает', async () => {
+test('the bot honestly does not handle video, stickers and documents', async () => {
   for (const [kind, name] of [
     ['video', 'видео'],
     ['video_note', 'видеосообщение'],
@@ -750,7 +750,7 @@ test('видео, стикер и документ бот честно не ра
   }
 });
 
-test('вложение не скачалось — человек видит причину, а не тишину', async () => {
+test('an attachment failed to download — the person sees the reason, not silence', async () => {
   const { bot, session, state } = makeBot({ files: {} });
 
   await bot.handleUpdate(photoUpdate());
@@ -759,7 +759,7 @@ test('вложение не скачалось — человек видит п�
   assert.equal(chatText(state, 42), attachmentFailed('telegram: file not found (код 400)'));
 });
 
-test('слишком большой файл не качаем вовсе', async () => {
+test('we do not download a too-large file at all', async () => {
   const { bot, state } = makeBot({ files: { IMAGE: JPEG } });
 
   await bot.handleUpdate(
@@ -770,7 +770,7 @@ test('слишком большой файл не качаем вовсе', asyn
   assert.match(chatText(state, 42), /не больше 20 МБ/);
 });
 
-test('пустое сообщение разбирать нечего — так и говорим', async () => {
+test('an empty message has nothing to parse — so we say', async () => {
   const { bot, session, state } = makeBot();
 
   await bot.handleUpdate({ update_id: 1, message: { message_id: 30, chat: { id: 42, type: 'private' }, from: { id: 7, username: 'trousev' } } });
@@ -779,7 +779,7 @@ test('пустое сообщение разбирать нечего — так
   assert.equal(chatText(state, 42), NOTHING_TO_READ);
 });
 
-test('подпись к фото может быть командой', async () => {
+test('a photo caption can be a command', async () => {
   const { bot, state, calls } = makeBot();
 
   await bot.handleUpdate(photoUpdate({ caption: '/compact' }));
@@ -788,7 +788,7 @@ test('подпись к фото может быть командой', async ()
   assert.match(chatText(state, 42), /Подвёл итог/);
 });
 
-test('/start и /help рассказывают, что бот умеет, и в разговор не лезут', async () => {
+test('/start and /help tell what the bot can do and do not intrude into the conversation', async () => {
   const { bot, session, state } = makeBot();
 
   await bot.handleUpdate(messageUpdate('/start'));
@@ -802,19 +802,19 @@ test('/start и /help рассказывают, что бот умеет, и в 
   assert.deepEqual(session.prompts, [], 'команды в разговор не уезжают');
 });
 
-test('незнакомая команда без аргументов — подсказка, с аргументами — реплика для pi', async () => {
+test('an unknown command without arguments is a hint, with arguments it is an utterance for pi', async () => {
   const { bot, session, state } = makeBot();
 
   await bot.handleUpdate(messageUpdate('/summarize'));
   assert.match(chatText(state, 42), new RegExp(UNKNOWN_COMMAND));
   assert.deepEqual(session.prompts, [], 'выдуманную команду модели не показываем');
 
-  // У pi есть свои команды (шаблоны, скиллы) — их бот не отбирает.
+  // pi has its own commands (templates, skills) — the bot does not take them away.
   await bot.handleUpdate(messageUpdate('/fix-tests прогони'));
   assert.deepEqual(session.prompts, ['/fix-tests прогони']);
 });
 
-test('/compact сжимает разговор этого чата и рассказывает цифры', async () => {
+test('/compact compacts this chat\'s conversation and reports the numbers', async () => {
   const { bot, state, calls } = makeBot();
 
   await bot.handleUpdate(messageUpdate('/compact'));
@@ -823,7 +823,7 @@ test('/compact сжимает разговор этого чата и расск
   assert.match(chatText(state, 42), /Подвёл итог: 1[\s\u00a0]?200 → 300 токенов/);
 });
 
-test('/compact с пожеланием передаёт его pi: человек решает, что важно сохранить', async () => {
+test('/compact with a wish passes it to pi: the person decides what is important to keep', async () => {
   const { bot, calls } = makeBot();
 
   await bot.handleUpdate(messageUpdate('/compact сохрани про математику'));
@@ -833,7 +833,7 @@ test('/compact с пожеланием передаёт его pi: челове�
   ]);
 });
 
-test('/stop прерывает ход и говорит об этом', async () => {
+test('/stop interrupts the turn and says so', async () => {
   const { bot, state, calls } = makeBot();
 
   await bot.handleUpdate(messageUpdate('/stop'));
@@ -842,7 +842,7 @@ test('/stop прерывает ход и говорит об этом', async ()
   assert.match(chatText(state, 42), /Остановился/);
 });
 
-test('/stop, когда бот и так молчит, не делает вид, что остановил', async () => {
+test('/stop, when the bot is already silent, does not pretend it stopped something', async () => {
   const { bot, state } = makeBot({ stop: { status: 'idle' } });
 
   await bot.handleUpdate(messageUpdate('/stop'));
@@ -850,11 +850,11 @@ test('/stop, когда бот и так молчит, не делает вид,
   assert.match(chatText(state, 42), /ничего не делаю/);
 });
 
-test('/stop идёт мимо очереди: ход, который он отменяет, ещё в работе', async () => {
+test('/stop bypasses the queue: the turn it cancels is still running', async () => {
   const { bot, session, calls } = makeBot();
   let release: () => void = () => {};
   const answer = session.prompt.bind(session);
-  // Ход, который «думает» до особого разрешения: ровно то, что человек хочет прервать.
+  // A turn that "thinks" until a special permission: exactly what a person wants to interrupt.
   session.prompt = async (text: string) => {
     await new Promise<void>((resolve) => {
       release = resolve;
@@ -876,7 +876,7 @@ test('/stop идёт мимо очереди: ход, который он отм
   await turn;
 });
 
-test('/stats рассказывает цифры разговора, а не сырой ответ pi', async () => {
+test('/stats reports the conversation numbers, not pi\'s raw output', async () => {
   const { bot, state, calls } = makeBot();
 
   await bot.handleUpdate(messageUpdate('/stats'));
@@ -889,7 +889,7 @@ test('/stats рассказывает цифры разговора, а не с�
   assert.match(text, /Потрачено: \$0\.450/);
 });
 
-test('/clear начинает разговор заново и честно говорит про память', async () => {
+test('/clear starts the conversation over and honestly mentions memory', async () => {
   const { bot, state, calls } = makeBot();
 
   await bot.handleUpdate(messageUpdate('/clear'));
@@ -899,7 +899,7 @@ test('/clear начинает разговор заново и честно го
   assert.match(chatText(state, 42), /Память не трогал/);
 });
 
-test('/skills перечисляет, что можно позвать в чате', async () => {
+test('/skills lists what can be invoked in the chat', async () => {
   const { bot, state, calls } = makeBot();
 
   await bot.handleUpdate(messageUpdate('/skills'));
@@ -910,7 +910,7 @@ test('/skills перечисляет, что можно позвать в чат
   assert.match(text, /\/fix-tests — починить тесты/);
 });
 
-test('/workspace показывает текущую папку и список, а приватного в списке нет', async () => {
+test('/workspace shows the current folder and the list, and private is not in the list', async () => {
   const config = makeConfig({ telegram: { token: 'bot-token', mapping: { trousev: 'probe' } } });
   const { bot, state } = makeBot({ config });
   createWorkspace(config, probe(), 'Работа');
@@ -924,7 +924,7 @@ test('/workspace показывает текущую папку и список,
   assert.doesNotMatch(text, /Приватный/, 'приватный в переключателе не участвует');
 });
 
-test('/workspace переключает разговор и запоминает папку в chats.json', async () => {
+test('/workspace switches the conversation and remembers the folder in chats.json', async () => {
   const config = makeConfig({ telegram: { token: 'bot-token', mapping: { trousev: 'probe' } } });
   const { bot, state, calls, session } = makeBot({ config });
   const work = createWorkspace(config, probe(), 'Работа');
@@ -936,27 +936,27 @@ test('/workspace переключает разговор и запоминает
   assert.deepEqual(calls, [], 'переключение не тратит ход модели');
   assert.deepEqual(session.prompts, [], 'и не уезжает в pi репликой');
 
-  // По slug тоже можно: в панели папка называется «Работа», а на диске — rabota.
+  // By slug works too: in the panel the folder is called "Работа" but on disk it is rabota.
   await bot.handleUpdate(messageUpdate('/workspace talk'));
   assert.equal(chatText(state, 42), ['Переключил на «Работа».', 'Переключил на «Разговор».'].join('\n'));
   assert.equal(workspaceForConversation(config, probe(), 'telegram-42'), 'talk');
 });
 
-test('привязка workspace переживает перезапуск бота: её читают из chats.json', async () => {
+test('the workspace binding survives a bot restart: it is read from chats.json', async () => {
   const config = makeConfig({ telegram: { token: 'bot-token', mapping: { trousev: 'probe' } } });
   createWorkspace(config, probe(), 'Работа');
 
   const first = makeBot({ config });
   await first.bot.handleUpdate(messageUpdate('/workspace Работа'));
 
-  // Новый процесс помнит только chats.json: ни очередей, ни живых сессий у него нет.
+  // A new process remembers only chats.json: it has no queues or live sessions.
   const second = makeBot({ config });
   await second.bot.handleUpdate(messageUpdate('/workspace'));
 
   assert.match(chatText(second.state, 42), /^Сейчас: Работа$/m);
 });
 
-test('в топиках у каждого разговора своя папка, а корень чата не переключается', async () => {
+test('in topics each conversation has its own folder, and the chat root does not switch', async () => {
   const config = makeConfig({ telegram: { token: 'bot-token', mapping: { trousev: 'probe' } } });
   createWorkspace(config, probe(), 'Работа');
   const { bot } = makeBot({ config });
@@ -967,7 +967,7 @@ test('в топиках у каждого разговора своя папка
   assert.equal(workspaceForConversation(config, probe(), 'telegram-42'), undefined, 'корень живёт своей папкой');
 });
 
-test('в приватный workspace переключиться нельзя — ни по slug, ни по имени', async () => {
+test('you cannot switch to the private workspace — neither by slug nor by name', async () => {
   const config = makeConfig({ telegram: { token: 'bot-token', mapping: { trousev: 'probe' } } });
   const { bot, state } = makeBot({ config });
 
@@ -981,7 +981,7 @@ test('в приватный workspace переключиться нельзя �
   assert.deepEqual(readChats(config, probe()), [], 'неприкосновенный workspace не заводит привязку');
 });
 
-test('/workspace с неизвестным именем не выдумывает папку', async () => {
+test('/workspace with an unknown name does not invent a folder', async () => {
   const config = makeConfig({ telegram: { token: 'bot-token', mapping: { trousev: 'probe' } } });
   const { bot, state } = makeBot({ config });
 
@@ -991,18 +991,18 @@ test('/workspace с неизвестным именем не выдумывае�
   assert.deepEqual(readChats(config, probe()), []);
 });
 
-test('/workspace без единой папки говорит об этом, а не показывает пустоту', () => {
+test('/workspace with no folders at all says so instead of showing emptiness', () => {
   assert.equal(workspacesText('Разговор', []), 'Переключать некуда: рабочих папок нет.');
 });
 
-test('в группе у каждого человека свой разговор', () => {
+test('in a group each person has their own conversation', () => {
   const group = messageUpdate('привет', { chatId: 99, type: 'supergroup' });
   assert.equal(conversationIdFor(group.message!, 'probe'), 'telegram-99-probe');
   const priv = messageUpdate('привет', { chatId: 99, type: 'private' });
   assert.equal(conversationIdFor(priv.message!, 'probe'), 'telegram-99');
 });
 
-test('команда — это «/слово [аргументы]», а не «/etc/hosts»', () => {
+test('a command is "/word [arguments]", not "/etc/hosts"', () => {
   assert.deepEqual(parseCommand('/compact'), { name: 'compact', args: '' });
   assert.deepEqual(parseCommand('/compact@the_icarus_bot'), { name: 'compact', args: '' });
   assert.deepEqual(parseCommand('/compact сохрани про математику'), {
@@ -1014,14 +1014,14 @@ test('команда — это «/слово [аргументы]», а не «
   assert.equal(parseCommand('/skill:brave-search'), null, 'команды pi бот не разбирает');
 });
 
-test('что отвечаем на каждый исход сжатия', () => {
+test('what we reply to each compaction outcome', () => {
   assert.match(compactText({ status: 'nothing' }), /нечего/);
   assert.match(compactText({ status: 'no-session' }), /уже сжат/);
   assert.match(compactText({ status: 'busy' }), /когда договорю/);
   assert.match(compactText({ status: 'failed', error: 'нет ключа' }), /нет ключа/);
 });
 
-test('что отвечаем на исходы /stop, /clear и /skills', () => {
+test('what we reply to the /stop, /clear and /skills outcomes', () => {
   assert.match(stopText({ status: 'stopped' }), /Остановился/);
   assert.match(stopText({ status: 'idle' }), /ничего не делаю/);
   assert.match(stopText({ status: 'no-session' }), /нечего/);
@@ -1039,12 +1039,12 @@ test('что отвечаем на исходы /stop, /clear и /skills', () =>
   assert.match(skillsText({ status: 'failed', error: 'нет связи' }), /нет связи/);
 });
 
-test('/stats без цифр не выдумывает их', () => {
+test('/stats without numbers does not invent them', () => {
   assert.match(statsText({ status: 'ok', stats: {} }), /пустой/);
   assert.match(statsText({ status: 'failed', error: 'pi молчит' }), /pi молчит/);
 });
 
-test('длинный ответ доезжает целиком и по границам', async () => {
+test('a long reply arrives in full and along boundaries', async () => {
   const paragraph = 'Слово '.repeat(200).trim();
   const long = `${paragraph}\n\n${paragraph}\n\n${paragraph}\n\n${paragraph}`;
   const { bot, state } = makeBot({
@@ -1065,14 +1065,14 @@ test('длинный ответ доезжает целиком и по гран
   assert.equal(joined.replace(/\s+/g, ' '), long.replace(/\s+/g, ' '), 'ни один кусок не потерялся');
 });
 
-test('точка разреза ищется во второй половине, а не в первом абзаце', () => {
+test('the split point is sought in the second half, not in the first paragraph', () => {
   const text = `${'a'.repeat(50)}\n\n${'b'.repeat(3000)}`;
   const cut = splitPoint(text, 1000);
   assert.ok(cut > 500 && cut <= 1000, `cut=${cut}`);
   assert.equal(splitPoint('безграниц'.repeat(200), 100), 100, 'нет границ — режем по пределу');
 });
 
-test('ответ уезжает с HTML-разметкой: модель пишет markdown, человек видит жирный', async () => {
+test('the reply goes with HTML markup: the model writes markdown, the person sees bold', async () => {
   const { bot, state } = makeBot({
     steps: [
       {
@@ -1090,14 +1090,14 @@ test('ответ уезжает с HTML-разметкой: модель пиш�
   assert.equal(message?.text, '<b>Токены</b> в <code>client_uid</code>');
 });
 
-test('Telegram не принял разметку — ответ доезжает, только без неё', async () => {
+test('Telegram did not accept the markup — the reply arrives, just without it', async () => {
   const { bot, state } = makeBot({
     steps: [
       { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: '**Токены** и `код`' } },
       { type: 'agent_settled' },
     ],
   });
-  // Так Telegram отвечает, когда разметку не понял: наш промах не должен съесть ответ.
+  // This is how Telegram replies when it did not understand the markup: our mistake must not eat the reply.
   state.rejectMarkup = true;
 
   await bot.handleUpdate(messageUpdate('как там токены?'));
@@ -1107,7 +1107,7 @@ test('Telegram не принял разметку — ответ доезжае�
   assert.equal(message?.parseMode, null);
 });
 
-test('пустой ответ не оставляет висящее многоточие', async () => {
+test('an empty reply does not leave a dangling ellipsis', async () => {
   const { bot, state } = makeBot({
     steps: [
       { type: 'tool_execution_start', toolName: 'bash', args: { command: 'ls' } },
@@ -1122,7 +1122,7 @@ test('пустой ответ не оставляет висящее много�
   assert.equal(text, 'Готово.', 'молчаливый ход закрыт коротким словом, а не пустым сообщением');
 });
 
-test('чем занят ход, видно действием Telegram, а не строкой в ответе', async () => {
+test('what the turn is busy with is visible as a Telegram action, not a line in the reply', async () => {
   const { bot, state } = makeBot({
     steps: [
       {
@@ -1149,7 +1149,7 @@ test('чем занят ход, видно действием Telegram, а не 
   assert.equal(chatText(state, 42), 'Смета на месте', 'служебных строк в ответе нет');
 });
 
-test('сбой хода человек видит ответом, а не тишиной', async () => {
+test('a turn failure is shown to the person as a reply, not silence', async () => {
   const { bot, state, session } = makeBot();
   session.prompt = async () => {
     throw new Error('pi завершился');
@@ -1160,7 +1160,7 @@ test('сбой хода человек видит ответом, а не тиш
   assert.match(chatText(state, 42), /Ход сорвался: pi завершился/);
 });
 
-test('очередь: сообщения одного чата идут по очереди, а разные чаты не ждут', async () => {
+test('queue: messages of one chat go in order, while different chats do not wait', async () => {
   const queue = new KeyedQueue();
   const order: string[] = [];
   const task = (name: string, ms: number) => async () => {
@@ -1180,7 +1180,7 @@ test('очередь: сообщения одного чата идут по о�
   assert.equal(order.at(-1), 'кончил a2');
 });
 
-test('очередь: сбой одной задачи не рвёт следующие', async () => {
+test('queue: a failure of one task does not break the next ones', async () => {
   const queue = new KeyedQueue();
   const order: string[] = [];
 
@@ -1197,9 +1197,9 @@ test('очередь: сбой одной задачи не рвёт следу�
   assert.deepEqual(order, ['после сбоя']);
 });
 
-// --- топики: разговор = чат + топик -----------------------------------------
+// --- topics: conversation = chat + topic ------------------------------------
 
-test('разговор — это чат и топик: у каждого топика своя сессия', () => {
+test('a conversation is a chat and a topic: each topic has its own session', () => {
   assert.equal(conversationIdFor(messageUpdate('привет').message!, 'probe'), 'telegram-42');
   assert.equal(
     conversationIdFor(messageUpdate('привет', { threadId: 1 }).message!, 'probe'),
@@ -1209,19 +1209,19 @@ test('разговор — это чат и топик: у каждого топ
   assert.equal(conversationIdFor(messageUpdate('привет', { threadId: 17 }).message!, 'probe'), 'telegram-42-17');
 });
 
-test('в группе топик разделяет и людей', () => {
+test('in a group the topic separates people too', () => {
   const topic = messageUpdate('привет', { chatId: 99, type: 'supergroup', threadId: 5 });
   assert.equal(conversationIdFor(topic.message!, 'probe'), 'telegram-99-probe-5');
   assert.equal(conversationIdFor(messageUpdate('привет', { chatId: 99, type: 'supergroup' }).message!, 'probe'), 'telegram-99-probe');
 });
 
-test('topicThreadId: корень и General — одно место, топик — другое', () => {
+test('topicThreadId: root and General are the same place, a topic is a different one', () => {
   assert.equal(topicThreadId(messageUpdate('привет').message!), null);
   assert.equal(topicThreadId(messageUpdate('привет', { threadId: 1 }).message!), null);
   assert.equal(topicThreadId(messageUpdate('привет', { threadId: 17 }).message!), 17);
 });
 
-test('команду с остатком разбираем, а «а /rename» — не команда', () => {
+test('we parse a command with a remainder, while "а /rename" is not a command', () => {
   assert.deepEqual(parseCommand('/rename Письмо из налоговой'), {
     name: 'rename',
     args: 'Письмо из налоговой',
@@ -1231,7 +1231,7 @@ test('команду с остатком разбираем, а «а /rename» �
 });
 
 
-test('убранные /topic и /topics объясняют это, а не уходят в pi', async () => {
+test('the removed /topic and /topics explain it instead of going to pi', async () => {
   const { bot, session, state } = makeBot();
 
   await bot.handleUpdate(messageUpdate('/topic Работа'));
@@ -1241,7 +1241,7 @@ test('убранные /topic и /topics объясняют это, а не ух
   assert.match(chatText(state, 42), /больше нет/);
 });
 
-test('ответ в топике уезжает в топик, а не в корень', async () => {
+test('a reply in a topic goes to the topic, not to the root', async () => {
   const { bot, session, state } = makeBot({ topics: true });
 
   await bot.handleUpdate(messageUpdate('привет', { threadId: 17 }));
@@ -1252,12 +1252,12 @@ test('ответ в топике уезжает в топик, а не в кор
   assert.equal(lastAction(state).threadId, 17, 'действие — в том же топике');
 });
 
-test('первое сообщение топика из общей ленты уезжает в топик, а не в корень', async () => {
+test('the first message of a topic from the general feed goes to the topic, not to the root', async () => {
   const { bot, state } = makeBot({ topics: true });
 
-  // Человек начал печатать в общей ленте: Telegram завёл топик и прислал служебку…
+  // The person started typing in the general feed: Telegram created a topic and sent the service message...
   await bot.enqueue(topicCreatedUpdate('New Topic', 17));
-  // …а само сообщение приехало как сообщение корня: номера топика в нём нет.
+  // ...and the message itself arrived as a root message: it has no topic id.
   await bot.enqueue(messageUpdate('привет из нового топика'));
 
   assert.equal(chatText(state, 42), '', 'в корне чата пусто');
@@ -1265,7 +1265,7 @@ test('первое сообщение топика из общей ленты у
   assert.equal(lastAction(state).threadId, 17, 'действие — в том же топике');
 });
 
-test('разговор свежего топика считается по номеру топика, а не по корню', async () => {
+test('a fresh topic\'s conversation is counted by the topic id, not by the root', async () => {
   const { bot, calls } = makeBot({ topics: true });
 
   await bot.enqueue(topicCreatedUpdate('New Topic', 17));
@@ -1274,7 +1274,7 @@ test('разговор свежего топика считается по но�
   assert.deepEqual(calls, [{ command: 'stats', user: 'probe', conversationId: 'telegram-42-17' }]);
 });
 
-test('свежий топик живёт окно, а не вечно', async () => {
+test('a fresh topic lives for a window, not forever', async () => {
   const { bot, state } = makeBot({ topics: true, freshTopicWindowMs: -1 });
 
   await bot.enqueue(topicCreatedUpdate('New Topic', 17));
@@ -1284,11 +1284,11 @@ test('свежий топик живёт окно, а не вечно', async ()
   assert.equal(topicText(state, 42, 17), '', 'опоздавшее сообщение в топик не тащим');
 });
 
-test('настоящий номер топика гасит свежий слот: корень остаётся корнем', async () => {
+test('a real topic id clears the fresh slot: the root stays the root', async () => {
   const { bot, state } = makeBot({ topics: true });
 
   await bot.enqueue(topicCreatedUpdate('New Topic', 17));
-  // Клиент справился сам: сообщение пришло с номером топика — свежий слот больше не нужен.
+  // The client handled it itself: the message came with a topic id — the fresh slot is no longer needed.
   await bot.enqueue(messageUpdate('в топике', { threadId: 17 }));
   await bot.enqueue(messageUpdate('а это уже в корне'));
 
@@ -1298,7 +1298,7 @@ test('настоящий номер топика гасит свежий сло�
 
 
 
-test('если ответ в топик не уехал, бот говорит об этом в корне', async () => {
+test('if a reply did not reach the topic, the bot says so in the root', async () => {
   const { bot, state } = makeBot({ topics: true });
   state.failTopics = true;
 
@@ -1309,7 +1309,7 @@ test('если ответ в топик не уехал, бот говорит �
   assert.match(chatText(state, 42), /message thread not found/);
 });
 
-test('ответ на команду в топик тоже не теряется молча', async () => {
+test('a reply to a command in a topic is not lost silently either', async () => {
   const { bot, state } = makeBot({ topics: true });
   state.failTopics = true;
 
@@ -1319,7 +1319,7 @@ test('ответ на команду в топик тоже не теряетс�
   assert.match(chatText(state, 42), /Не смог ответить в топик/);
 });
 
-test('/compact сжимает разговор того топика, где написали', async () => {
+test('/compact compacts the conversation of the topic where it was written', async () => {
   const { bot, calls } = makeBot({ topics: true });
 
   await bot.handleUpdate(messageUpdate('/compact', { threadId: 17 }));
@@ -1329,7 +1329,7 @@ test('/compact сжимает разговор того топика, где н�
 
 
 
-test('/rename переименовывает разговор и топик, в котором он идёт', async () => {
+test('/rename renames the conversation and the topic it runs in', async () => {
   const { bot, state, calls } = makeBot({ topics: true });
 
   await bot.handleUpdate(messageUpdate('/rename Налоги', { threadId: 17 }));
@@ -1341,7 +1341,7 @@ test('/rename переименовывает разговор и топик, в 
   assert.match(topicText(state, 42, 17), /называется «Налоги»/);
 });
 
-test('/rename из корня меняет имя разговора в реестре, не трогая топик', async () => {
+test('/rename from the root changes the conversation name in the registry without touching the topic', async () => {
   const { bot, state, calls } = makeBot({ topics: true });
 
   await bot.handleUpdate(messageUpdate('/rename Налоги'));
@@ -1352,7 +1352,7 @@ test('/rename из корня меняет имя разговора в реес
 });
 
 
-test('/rename без имени подсказывает форму', async () => {
+test('/rename without a name suggests the form', async () => {
   const { bot, state } = makeBot({ topics: true });
 
   await bot.handleUpdate(messageUpdate('/rename', { threadId: 17 }));
@@ -1362,7 +1362,7 @@ test('/rename без имени подсказывает форму', async () =
 });
 
 
-test('реплика поверх идущего хода прерывает его и становится новым ходом', async () => {
+test('an utterance on top of a running turn interrupts it and becomes a new turn', async () => {
   const listeners = new Set<(event: Record<string, unknown>) => void>();
   let release: () => void = () => {};
 
@@ -1379,8 +1379,8 @@ test('реплика поверх идущего хода прерывает е�
     listeners.add(listener);
     return () => listeners.delete(listener);
   };
-  // Первый ход висит, пока его не прервут: ровно как настоящий, который держит
-  // субагентов. Второй отвечает сразу.
+  // The first turn hangs until it is interrupted: exactly like a real one holding
+  // subagents. The second answers immediately.
   session.prompt = async (text) => {
     session.prompts.push(text);
     session.busy = true;
@@ -1401,8 +1401,8 @@ test('реплика поверх идущего хода прерывает е�
   }
   assert.deepEqual(session.prompts, ['первое'], 'первый ход должен начаться');
 
-  // Второе сообщение — скилл с аргументами: для бота это не команда, а реплика,
-  // и она тоже должна прервать ход, а не встать за ним.
+  // The second message is a skill with arguments: for the bot it is not a command but an utterance,
+  // and it must also interrupt the turn rather than queue behind it.
   const second = bot.enqueue(messageUpdate('/skill:demo второе'));
   await Promise.all([first, second]);
 
@@ -1413,12 +1413,12 @@ test('реплика поверх идущего хода прерывает е�
     calls.some((call) => call.command === 'interrupt'),
     'прерывание идёт через реестр, а не мимо него',
   );
-  // Кнопок в Telegram нет, поэтому операция одна — «сейчас». Но человек должен
-  // видеть, что прошлый ответ оборван, а не потерялся.
+  // There are no buttons in Telegram, so there is one operation — "now". But a person must
+  // see that the previous reply was cut off rather than lost.
   assert.match(chatText(state, 42), /Прервал прошлый ответ/, 'об прерывании сказано честно');
 });
 
-test('ссылка на файл в ответе уезжает вложением, а путь пропадает из текста', async () => {
+test('a file link in the reply goes as an attachment, and the path disappears from the text', async () => {
   const config = makeConfig({ telegram: { token: 'bot-token', mapping: { trousev: 'probe' } } });
   const talk = path.join(userPaths(config, probe()).workspaces, 'talk');
   fs.mkdirSync(talk, { recursive: true });
@@ -1452,7 +1452,7 @@ test('ссылка на файл в ответе уезжает вложение
   assert.equal(state.documents[0]?.bytes.toString(), 'PDF-байты');
 });
 
-test('файл из ответа не теряется молча: бот говорит, почему его нет', async () => {
+test('a file from the reply is not lost silently: the bot says why it is missing', async () => {
   const config = makeConfig({ telegram: { token: 'bot-token', mapping: { trousev: 'probe' } } });
   fs.mkdirSync(path.join(userPaths(config, probe()).workspaces, 'talk'), { recursive: true });
   const steps: Step[] = [
@@ -1471,9 +1471,9 @@ test('файл из ответа не теряется молча: бот гов
   assert.match(chatText(state, 42), /файл не найден/);
 });
 
-// --- заголовок разговора и имя топика ----------------------------------------
+// --- // --- conversation title and topic name --------------------------------------- ----------------------------------------
 
-/** Файл сессии pi: `<когда создан>_<id>.jsonl`, как его кладёт pi. */
+/** pi session file: `<created when>_<id>.jsonl`, as pi lays it down. */
 function putSession(
   config: ReturnType<typeof makeConfig>,
   conversationId: string,
@@ -1494,12 +1494,12 @@ function putSession(
   fs.writeFileSync(file, entries.map((entry) => JSON.stringify(entry)).join('\n'));
 }
 
-/** Заголовок считается после ответа: даём фоновой работе доиграть. */
+/** The title is computed after the reply: let the background work finish. */
 async function titlesSettled(): Promise<void> {
   for (let i = 0; i < 5; i += 1) await new Promise((resolve) => setImmediate(resolve));
 }
 
-/** Служебное: человек переименовал топик в клиенте Telegram. */
+/** Service: a person renamed the topic in the Telegram client. */
 function topicEditedUpdate(name: string, threadId: number, chatId = 42): TelegramUpdate {
   return {
     update_id: 3,
@@ -1514,7 +1514,7 @@ function topicEditedUpdate(name: string, threadId: number, chatId = 42): Telegra
   };
 }
 
-/** Разговор в топике — с записью в реестре и файлом сессии. */
+/** A conversation in a topic — with a registry record and a session file. */
 function topicChat(): ReturnType<typeof makeConfig> {
   const config = makeConfig({ telegram: { token: 'bot-token', mapping: { trousev: 'probe' } } });
   ensureChat(config, probe(), 'telegram-42-17', 'telegram', 'talk');
@@ -1525,7 +1525,7 @@ function topicChat(): ReturnType<typeof makeConfig> {
   return config;
 }
 
-test('ИИ называет разговор в топике и переименовывает сам топик', async () => {
+test('the AI names the conversation in the topic and renames the topic itself', async () => {
   const config = topicChat();
   const { bot, state } = makeBot({ config, topics: true, oneShot: async () => 'Знакомство с Икаром' });
 
@@ -1539,7 +1539,7 @@ test('ИИ называет разговор в топике и переимен
   assert.equal(chat?.topicTitle, 'Знакомство с Икаром', 'имя топика записано, чтобы не слать его дважды');
 });
 
-test('уточнение заголовка не переименовывает топик тем же именем дважды', async () => {
+test('refining the title does not rename the topic with the same name twice', async () => {
   const config = topicChat();
   const { bot, state } = makeBot({ config, topics: true, oneShot: async () => 'Знакомство с Икаром' });
 
@@ -1551,13 +1551,13 @@ test('уточнение заголовка не переименовывает 
   assert.equal(state.renames.length, 1, 'топик переименован один раз');
 });
 
-test('имя топика, выбранное человеком, бот не переписывает и уносит в заголовок разговора', async () => {
+test('a topic name chosen by a person is not overwritten and is carried into the conversation title', async () => {
   const config = topicChat();
   const { bot, state } = makeBot({ config, topics: true, oneShot: async () => 'Знакомство с Икаром' });
 
   await bot.handleUpdate(messageUpdate('привет', { threadId: 17 }));
   await titlesSettled();
-  // Человек переименовал топик в клиенте: это его имя, спорить с ним нечем.
+  // The person renamed the topic in the client: it is their name, there is nothing to argue with.
   await bot.handleUpdate(topicEditedUpdate('Налоги', 17));
 
   const renamed = findChatRecord(config, probe(), 'telegram-42-17');
@@ -1571,7 +1571,7 @@ test('имя топика, выбранное человеком, бот не п
   assert.deepEqual(state.renames, [{ chatId: 42, threadId: 17, name: 'Знакомство с Икаром' }]);
 });
 
-test('имя, поправленное в панели, доезжает до топика Telegram', async () => {
+test('a name corrected in the panel reaches the Telegram topic', async () => {
   const config = topicChat();
   const { bot, state } = makeBot({ config, topics: true, oneShot: async () => 'Знакомство с Икаром' });
   const off = bot.watchTitles();
@@ -1590,7 +1590,7 @@ test('имя, поправленное в панели, доезжает до т
   }
 });
 
-test('место разговора в Telegram бот кладёт в chats.json, а не только в память', async () => {
+test('the bot stores the conversation place in Telegram into chats.json, not just memory', async () => {
   const config = topicChat();
   const { bot } = makeBot({ config, topics: true });
 
@@ -1603,7 +1603,7 @@ test('место разговора в Telegram бот кладёт в chats.jso
   );
 });
 
-test('/archive убирает разговор в архив и удаляет топик вместе с сообщениями', async () => {
+test('/archive moves the conversation to the archive and deletes the topic along with its messages', async () => {
   const config = topicChat();
   const { bot, state } = makeBot({ config, topics: true, oneShot: async () => 'Знакомство с Икаром' });
 
@@ -1615,12 +1615,12 @@ test('/archive убирает разговор в архив и удаляет �
   const chat = findChatRecord(config, probe(), 'telegram-42-17');
   assert.equal(chat?.archivedAt !== undefined, true, 'разговор в архиве');
   assert.equal(chat?.telegram, undefined, 'топика больше нет — место забыто');
-  // Топик удалён — подтверждение уходит в корень чата, а не в никуда.
+  // The topic is deleted — the confirmation goes to the chat root, not into the void.
   assert.match(chatText(state, 42), /Убрал «/);
   assert.match(chatText(state, 42), /вернуть его Telegram не умеет/);
 });
 
-test('/archive без топика архивирует, но в Telegram удалять нечего', async () => {
+test('/archive without a topic archives, but there is nothing to delete in Telegram', async () => {
   const config = makeConfig({ telegram: { token: 'bot-token', mapping: { trousev: 'probe' } } });
   ensureChat(config, probe(), 'telegram-42', 'telegram', 'talk');
   const { bot, state } = makeBot({ config, topics: true });
@@ -1633,14 +1633,14 @@ test('/archive без топика архивирует, но в Telegram уда
   assert.match(chatText(state, 42), /Топика здесь нет/);
 });
 
-test('/archive: панель и бот делают одно действие — топик уезжает вместе с архивом', async () => {
+test('/archive: panel and bot do the same action — the topic leaves along with the archive', async () => {
   const config = topicChat();
   const { bot, state } = makeBot({ config, topics: true, oneShot: async () => 'Знакомство с Икаром' });
 
   await bot.handleUpdate(messageUpdate('привет', { threadId: 17 }));
   await titlesSettled();
 
-  // Так панель зовёт бота при архивации: тем же removeTopic, без реплик.
+  // This is how the panel calls the bot on archiving: with the same removeTopic, without utterances.
   const chat = findChatRecord(config, probe(), 'telegram-42-17');
   assert.ok(chat?.telegram);
   await bot.removeTopic(probe(), chat);

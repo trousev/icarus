@@ -1,10 +1,10 @@
-// Команды человека, общие для всех входов: разбор строки с косой черты и тексты
-// ответов. Сами действия живут в реестре сессий, а «что сказать человеку» —
-// здесь, чтобы Telegram и веб-чат отвечали одинаково.
+// The person's commands, shared across all inputs: slash-string parsing and response
+// texts. The actions themselves live in the session registry, while "what to tell the
+// person" lives here, so that Telegram and the web chat reply the same way.
 //
-// Разбор нарочно узкий: команда — это вся реплика целиком. `/skill:имя` и
-// `/fix-tests прогони` сюда не попадают и уезжают в pi как обычный текст: у него
-// свои команды, и отбирать их у человека незачем.
+// Parsing is deliberately narrow: a command is the entire message. `/skill:имя` and
+// `/fix-tests прогони` don't land here and travel to pi as regular text: it has its own
+// commands, and there's no reason to take them away from the person.
 import type {
   AbortOutcome,
   ClearOutcome,
@@ -14,12 +14,12 @@ import type {
   StatsOutcome,
 } from './registry.ts';
 
-/** Разобранная команда: имя без «/» и без «@бота», и всё, что человек написал после. */
+/** A parsed command: the name without «/» and without «@бота», and everything the person wrote after. */
 export type ParsedCommand = { name: string; args: string };
 
 /**
- * `/compact`, `/compact@the_icarus_bot`, `/compact пожелание` — команда; `/etc/hosts`
- * и «а /compact потом» — реплика.
+ * `/compact`, `/compact@the_icarus_bot`, `/compact пожелание` are a command; `/etc/hosts`
+ * and «а /compact потом» are a message.
  */
 export function parseCommand(text: string): ParsedCommand | null {
   const match = /^\/([a-zA-Z0-9_]+)(?:@[a-zA-Z0-9_]+)?(?:\s+([\s\S]*))?$/.exec(text.trim());
@@ -28,7 +28,7 @@ export function parseCommand(text: string): ParsedCommand | null {
   return { name: name.toLowerCase(), args: (match?.[2] ?? '').trim() };
 }
 
-/** Команды, которые веб-чат разбирает сам, а не отправляет репликой в pi. */
+/** Commands the web chat parses itself rather than sending as a message to pi. */
 export const WEB_COMMANDS: { name: string; description: string }[] = [
   { name: 'help', description: 'что я умею' },
   { name: 'compact', description: 'подвести итог разговора' },
@@ -39,12 +39,12 @@ export const WEB_COMMANDS: { name: string; description: string }[] = [
   { name: 'skills', description: 'скиллы, шаблоны и команды pi' },
 ];
 
-/** Имена, которые веб-чат берёт себе: всё остальное с косой черты — реплика для pi. */
+/** Names the web chat claims: everything else with a slash is a message for pi. */
 export const WEB_COMMAND_NAMES = new Set(WEB_COMMANDS.map((command) => command.name));
 
 /**
- * Команды, которые мы убрали. Отвечаем прямо, а не отправляем их в pi репликой:
- * иначе `/topic Работа` уехало бы модели как обычный текст.
+ * Commands we removed. We answer directly rather than sending them to pi as a message:
+ * otherwise `/topic Работа` would travel to the model as regular text.
  */
 export const REMOVED_COMMANDS = new Set(['topic', 'topics']);
 export const TOPICS_REMOVED =
@@ -52,7 +52,7 @@ export const TOPICS_REMOVED =
 
 export const UNKNOWN_COMMAND = 'Такой команды не знаю. /help — что я умею.';
 
-/** Что показать на /help в вебе: те же команды, что в палитре, но с объяснением. */
+/** What to show on /help in the web: the same commands as in the palette, but with explanations. */
 export const WEB_HELP = [
   'Что я умею в чате:',
   '',
@@ -75,17 +75,17 @@ function tokens(value: number): string {
   return Math.round(value).toLocaleString('ru-RU');
 }
 
-/** Число из ответа pi: там всё необязательное, и падать на пропуске незачем. */
+/** A number from pi's answer: everything there is optional, and there's no point failing on a miss. */
 function count(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
-/** Деньги в отчёте: у разговора на день копейки и есть цена, округлять их жалко. */
+/** Money in the report: for a day's conversation pennies are a real cost, it's a shame to round them. */
 function money(value: number): string {
   return `$${value < 1 ? value.toFixed(3) : value.toFixed(2)}`;
 }
 
-/** Что ответить на /compact: решает не вход, а реестр сессий. */
+/** What to reply to /compact: it's decided not by the input but by the session registry. */
 export function compactText(outcome: CompactOutcome): string {
   switch (outcome.status) {
     case 'compacted':
@@ -101,7 +101,7 @@ export function compactText(outcome: CompactOutcome): string {
   }
 }
 
-/** Что ответить на /stop. */
+/** What to reply to /stop. */
 export function stopText(outcome: AbortOutcome, dropped = 0): string {
   const base = ((): string => {
     switch (outcome.status) {
@@ -115,11 +115,11 @@ export function stopText(outcome: AbortOutcome, dropped = 0): string {
         return `Не получилось остановиться: ${outcome.error}`;
     }
   })();
-  // Очередь снимается вместе с ходом: не молчим об этом, реплики человек писал сам.
+  // The queue is dropped along with the turn: we don't stay silent about it, the person wrote those messages themselves.
   return dropped > 0 ? `${base}\nИз очереди снял: ${dropped}.` : base;
 }
 
-/** Что ответить на /stats: цифры разговора человеческими словами. */
+/** What to reply to /stats: the conversation's numbers in human words. */
 export function statsText(outcome: StatsOutcome): string {
   if (outcome.status === 'failed') return `Не смог посчитать: ${outcome.error}`;
 
@@ -159,7 +159,7 @@ export function statsText(outcome: StatsOutcome): string {
   return lines.length > 0 ? lines.join('\n') : 'Разговор пока пустой: ни реплик, ни токенов.';
 }
 
-/** Что ответить на /clear. */
+/** What to reply to /clear. */
 export function clearText(outcome: ClearOutcome): string {
   switch (outcome.status) {
     case 'started':
@@ -173,7 +173,7 @@ export function clearText(outcome: ClearOutcome): string {
   }
 }
 
-/** /rename без имени: подсказываем форму, а не угадываем. */
+/** /rename without a name: we suggest the form rather than guess. */
 export const RENAME_NEEDS_NAME = 'Напиши так: /rename Письмо из налоговой.';
 
 export function renamed(name: string): string {
@@ -184,7 +184,7 @@ export function renameFailed(reason: string): string {
   return `Не получилось переименовать: ${reason}`;
 }
 
-/** Что ответить на /rename: имя разговора живёт в реестре, а не в сессии pi. */
+/** What to reply to /rename: the conversation name lives in the registry, not in the pi session. */
 export function renameText(outcome: RenameOutcome): string {
   switch (outcome.status) {
     case 'renamed':
@@ -196,14 +196,14 @@ export function renameText(outcome: RenameOutcome): string {
   }
 }
 
-/** Порядок в списке команд: сначала скиллы человека, потом шаблоны и команды. */
+/** Order in the command list: the person's skills first, then templates and commands. */
 function commandRank(source: string | undefined): number {
   if (source === 'skill') return 0;
   if (source === 'prompt') return 1;
   return 2;
 }
 
-/** Что ответить на /skills: что человек может позвать сам. */
+/** What to reply to /skills: what the person can call themselves. */
 export function skillsText(outcome: CommandsOutcome): string {
   if (outcome.status === 'failed') return `Не смог спросить у pi: ${outcome.error}`;
   if (outcome.commands.length === 0) {

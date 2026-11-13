@@ -1,32 +1,32 @@
-// Активность тулов превращается в человеческие фразы для reasoning_content.
+// Tool activity is turned into human phrases for reasoning_content.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { phraseForToolEnd, phraseForToolStart, subagentStatus } from '../src/reasoning.ts';
 
-test('чтение файла', () => {
+test('reading a file', () => {
   assert.equal(phraseForToolStart('read', { path: '/workspaces/.icarus/memory/identity.md' }), 'читаю memory/identity.md');
 });
 
-test('правка файла', () => {
+test('editing a file', () => {
   assert.equal(phraseForToolStart('edit', { path: '/workspaces/.icarus/memory/preferences.md' }), 'правлю memory/preferences.md');
 });
 
-test('команда обрезается', () => {
+test('a command is truncated', () => {
   const phrase = phraseForToolStart('bash', { command: 'x'.repeat(200) });
   assert.ok(phrase && phrase.length < 90, 'фраза должна быть короткой');
   assert.match(phrase, /^выполняю: /);
 });
 
-test('неизвестный тул не молчит', () => {
+test('an unknown tool does not stay silent', () => {
   assert.match(String(phraseForToolStart('mystery', {})), /mystery/);
 });
 
-test('итог различает успех и ошибку', () => {
+test('the summary distinguishes success from error', () => {
   assert.equal(phraseForToolEnd('write', false), 'записал');
   assert.match(phraseForToolEnd('write', true), /не получилось/);
 });
 
-test('субагенты: в статусе видно, сколько задач и кто из детей чем занят', () => {
+test('subagents: the status shows how many tasks there are and what each child is doing', () => {
   assert.match(String(phraseForToolStart('subagent', { tasks: [{}, {}, {}] })), /субагентам: 3/);
   assert.equal(phraseForToolEnd('subagent', false), 'субагенты закончили');
 

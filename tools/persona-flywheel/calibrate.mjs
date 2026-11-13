@@ -1,4 +1,4 @@
-// Калибровка судьи: заранее написанные диалоги с известным приговором.
+// Judge calibration: pre-written dialogues with a known verdict.
 // node calibrate.mjs
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

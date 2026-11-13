@@ -1,74 +1,74 @@
-// Панель управления, раздел скиллов: каталог `~/.pi/agent/skills` человека.
+// Control panel, skills section: the person's `~/.pi/agent/skills` directory.
 //
-// Это тот самый каталог, который pi читает при старте сессии (`core/skills.ts`,
-// user scope), поэтому «сохранил в панели» и «Икар знает» — одно и то же действие:
-// писать скиллы в стороне и синхронизировать их сюда больше не нужно.
+// This is the very directory that pi reads at session start (`core/skills.ts`,
+// user scope), so "saved in the panel" and "Icarus knows it" are the same action:
+// there's no longer any need to write skills elsewhere and sync them here.
 //
-// Раскладку панель держит канонической: скилл — это каталог с `SKILL.md` внутри
-// (`pirate-mode/SKILL.md`), рядом лежат его файлы бандла. Плоские `*.md` в корне
-// каталога pi тоже считает скиллами, но только если у них есть описание во
-// frontmatter, — такие панель показывает и правит. Файл без описания она тоже
-// покажет, но помеченным: pi его пропустит, и человеку об этом лучше узнать здесь,
-// а не из молчания модели. Новые скиллы панель заводит каталогом: в каталоге
-// помещаются скрипты и справки, на которые скилл ссылается.
+// The panel keeps the layout canonical: a skill is a directory with `SKILL.md` inside
+// (`pirate-mode/SKILL.md`), with its bundle files alongside. pi also counts flat `*.md`
+// files in the root as skills, but only if they have a description in frontmatter —
+// the panel shows and edits those too. A file without a description is also shown, but
+// marked: pi will skip it, and the person had better learn that here rather than from
+// the model's silence. New skills are created by the panel as a directory: a directory
+// can hold the scripts and docs the skill references.
 //
-// Сам каталог — git-репозиторий (его заводит панель): у скиллов та же история и
-// тот же откат, что у памяти. Служебные каталоги вроде `.git` pi пропускает, так
-// что соседство с репозиторием скиллу не мешает.
+// The directory itself is a git repository (the panel sets it up): skills have the
+// same history and the same rollback as memory. pi skips service directories like
+// `.git`, so being next to a repository doesn't bother the skill.
 import fs from 'node:fs';
 import path from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { resolveInside } from './memory.ts';
 
-/** Имя файла, который делает каталог скиллом: так велит Agent Skills. */
+/** The file name that makes a directory a skill: that's what Agent Skills says. */
 const SKILL_FILE = 'SKILL.md';
 
 /**
- * Куда панель убирает выключенный скилл: pi не обходит скрытые каталоги, поэтому
- * файл остаётся под git и на виду у панели, но в разговор не попадает.
+ * Where the panel moves a disabled skill: pi doesn't traverse hidden directories, so
+ * the file stays under git and visible to the panel, but doesn't get into the conversation.
  *
- * Это именно переезд, а не флаг в настройках: каталог скиллов — единственный
- * источник правды для pi, и «выключен» в нём значит «здесь его нет».
+ * It's a move, not a flag in settings: the skills directory is the only source of truth
+ * for pi, and "disabled" in it means "it isn't here".
  */
 export const SKILLS_DISABLED_DIR = '.disabled';
 
-/** Ограничения спецификации: те же числа, что у pi в core/skills.ts. */
+/** Spec limits: the same numbers as in pi's core/skills.ts. */
 export const SKILL_NAME_LIMIT = 64;
 export const SKILL_DESCRIPTION_LIMIT = 1024;
 
-/** В каталоге скиллов правим только markdown; всё прочее — файлы бандла. */
+/** In the skills directory we only edit markdown; everything else is bundle files. */
 export const skillExtensions = new Set(['.md']);
 
 export type SkillFile = { path: string; size: number };
 
 export type SkillSummary = {
-  /** Путь файла скилла от корня каталога: `pirate-mode/SKILL.md` или `notes.md`. */
+  /** Skill file path from the directory root: `pirate-mode/SKILL.md` or `notes.md`. */
   id: string;
-  /** Как скилл зовётся: имя из frontmatter, иначе имя каталога. */
+  /** What the skill is called: the name from frontmatter, otherwise the directory name. */
   name: string;
   description: string;
-  /** Скрыт от модели: pi зовёт такой скилл только командой `/skill:имя`. */
+  /** Hidden from the model: pi only invokes such a skill via the `/skill:имя` command. */
   hidden: boolean;
-  /** Включён: файл лежит там, где pi его читает. Выключенный — в `.disabled/`. */
+  /** Enabled: the file is where pi reads it. A disabled one is in `.disabled/`. */
   enabled: boolean;
-  /** Сколько файлов в бандле, включая сам SKILL.md. */
+  /** How many files are in the bundle, including SKILL.md itself. */
   files: number;
   size: number;
   modified: string;
-  /** Почему pi этот скилл не возьмёт или возьмёт с оговоркой. Пусто — всё хорошо. */
+  /** Why pi won't take this skill or will take it with a caveat. Empty means all is well. */
   problem?: string;
 };
 
 export type SkillDetail = SkillSummary & {
   body: string;
-  /** Frontmatter целиком: чужие ключи панель при сохранении не теряет. */
+  /** The whole frontmatter: the panel doesn't lose other keys when saving. */
   frontmatter: Record<string, unknown>;
   bundle: SkillFile[];
 };
 
-/** Что панель собирает в редакторе. */
+/** What the panel collects in the editor. */
 export type SkillDraft = {
-  /** Что правим: путь от корня каталога. Пусто — заводим новый скилл. */
+  /** What we're editing: path from the directory root. Empty means we're creating a new skill. */
   id?: string;
   name: string;
   description: string;
@@ -78,7 +78,7 @@ export type SkillDraft = {
 
 export type SkillResult = { ok: true; id: string; message: string } | { ok: false; message: string };
 
-/** Имя скилла по правилам Agent Skills. Возвращает текст ошибки или null. */
+/** Skill name per Agent Skills rules. Returns an error message or null. */
 export function validateSkillName(name: string): string | null {
   const value = name.trim();
   if (!value) return 'имя не может быть пустым';
@@ -89,7 +89,7 @@ export function validateSkillName(name: string): string | null {
   return null;
 }
 
-/** Описание — то, по чему модель решает, когда скилл звать. Пустое нельзя. */
+/** The description is what the model uses to decide when to call the skill. It can't be empty. */
 export function validateSkillDescription(description: string): string | null {
   const value = description.trim();
   if (!value) return 'без описания pi пропустит скилл: напиши, когда его применять';
@@ -100,14 +100,14 @@ export function validateSkillDescription(description: string): string | null {
 }
 
 /**
- * Разбор файла скилла: frontmatter и тело.
+ * Parse a skill file: frontmatter and body.
  *
- * Формат тот же, что читает pi (`utils/frontmatter.ts`): YAML между двумя `---`.
- * Битый frontmatter — не повод прятать скилл: человек должен видеть, что лежит в
- * файле, и починить это руками, поэтому отдаём и `problem`.
+ * The format is the same one pi reads (`utils/frontmatter.ts`): YAML between two `---`.
+ * A broken frontmatter isn't a reason to hide the skill: the person should see what's
+ * in the file and fix it by hand, so we also return `problem`.
  *
- * Наружу отдаётся ещё и затем, чтобы «напиши за меня» умело прочитать ответ
- * модели, если она прислала готовый файл вместо JSON (control/skill-draft.ts).
+ * It's exposed too so that "write it for me" can parse the model's answer if it sent a
+ * ready file instead of JSON (control/skill-draft.ts).
  */
 export function splitSkillFile(content: string): {
   frontmatter: Record<string, unknown>;
@@ -131,40 +131,40 @@ export function splitSkillFile(content: string): {
 }
 
 /**
- * Файл скилла из того, что собрал редактор.
+ * A skill file from what the editor collected.
  *
- * Тело всегда отделяем пустой строкой, а YAML отдаём сериализатору: описание с
- * двоеточием или кавычкой иначе превратилось бы в другой YAML, и pi прочитал бы
- * не то, что человек написал.
+ * We always separate the body with a blank line, and hand the YAML to the serializer:
+ * a description with a colon or quote would otherwise turn into different YAML, and pi
+ * would read something other than what the person wrote.
  */
 export function renderSkillFile(frontmatter: Record<string, unknown>, body: string): string {
   return `---\n${stringifyYaml(frontmatter).trimEnd()}\n---\n\n${body.trim()}\n`;
 }
 
-/** Путь от корня в том виде, в каком его понимает и панель, и git. */
+/** A path from the root in the form that both the panel and git understand. */
 function relativeId(root: string, file: string): string {
   return path.relative(root, file).split(path.sep).join('/');
 }
 
-/** Каталог выключенных скиллов: лежит внутри репозитория, но pi его не видит. */
+/** The disabled-skills directory: it's inside the repository, but pi doesn't see it. */
 export function disabledSkillsRoot(root: string): string {
   return path.join(root, SKILLS_DISABLED_DIR);
 }
 
-/** Файл скилла лежит в `.disabled/`: значит, он выключен. */
+/** The skill file is in `.disabled/`: that means it's disabled. */
 function isDisabledFile(root: string, file: string): boolean {
   const disabled = `${path.resolve(disabledSkillsRoot(root))}${path.sep}`;
   return path.resolve(file).startsWith(disabled);
 }
 
-/** База, относительно которой скилл лежит: корень каталога или `.disabled/`. */
+/** The base the skill is under: the directory root or `.disabled/`. */
 function baseRootOf(root: string, file: string): string {
   return isDisabledFile(root, file) ? disabledSkillsRoot(root) : root;
 }
 
 /**
- * id, который видит панель и человек: у выключенного скилла служебный префикс
- * `.disabled/` не показываем — статус и так стоит отдельным полем.
+ * The id that the panel and the person see: for a disabled skill we don't show the
+ * service prefix `.disabled/` — the status is already a separate field.
  */
 function effectiveId(root: string, file: string): string {
   const id = relativeId(root, file);
@@ -173,8 +173,8 @@ function effectiveId(root: string, file: string): string {
 }
 
 /**
- * Человеческое имя скилла по адресу его файла: `pirate-mode/SKILL.md` → `pirate-mode`.
- * Им подписаны коммиты и подтверждения, поэтому оно короткое, а не путь целиком.
+ * A human name of the skill from its file path: `pirate-mode/SKILL.md` → `pirate-mode`.
+ * It labels commits and confirmations, so it's short rather than the whole path.
  */
 export function skillLabel(id: string): string {
   if (id.endsWith(`/${SKILL_FILE}`)) return id.slice(0, -(SKILL_FILE.length + 1));
@@ -183,8 +183,9 @@ export function skillLabel(id: string): string {
 }
 
 /**
- * Что считать «всем скиллом» в git: у канонического скилла это каталог с бандлом,
- * у плоского — сам файл. По этому пути и спрашивают про незакоммиченное.
+ * What counts as "the whole skill" in git: for a canonical skill it's the directory
+ * with the bundle, for a flat one it's the file itself. This is the path asked about
+ * for uncommitted changes.
  */
 export function skillScope(id: string): string {
   if (id !== SKILL_FILE && id.endsWith(`/${SKILL_FILE}`)) return id.slice(0, -(SKILL_FILE.length + 1));
@@ -192,12 +193,12 @@ export function skillScope(id: string): string {
 }
 
 /**
- * Какие скиллы лежат в каталоге — обход ровно как у pi.
+ * Which skills are in the directory — traversal exactly like pi's.
  *
- * Каталог с `SKILL.md` — скилл, и глубже в него не смотрим; остальные каталоги
- * обходим рекурсивно; плоские `.md` в корне тоже скиллы (но только в корне —
- * вложенные файлы в чужих каталогах pi скиллами не считает). Скрытое и
- * `node_modules` пропускаем: в `.git` живёт история, и скиллом она быть не может.
+ * A directory with `SKILL.md` is a skill, and we don't look deeper into it; other
+ * directories are traversed recursively; flat `.md` files in the root are also skills
+ * (but only in the root — pi doesn't count nested files in other directories as skills).
+ * We skip hidden entries and `node_modules`: history lives in `.git`, and it can't be a skill.
  */
 function discover(root: string): Array<{ id: string; file: string }> {
   const found: Array<{ id: string; file: string }> = [];
@@ -231,16 +232,16 @@ function discover(root: string): Array<{ id: string; file: string }> {
   return found.sort((a, b) => a.id.localeCompare(b.id));
 }
 
-/** Скиллы из `.disabled/`: те же правила обхода, но пометка «выключен». */
+/** Skills from `.disabled/`: the same traversal rules, but marked "disabled". */
 function discoverDisabled(root: string): Array<{ id: string; file: string }> {
   return discover(disabledSkillsRoot(root));
 }
 
 /**
- * Где лежит скилл с таким id: сначала включённый, потом выключенный.
+ * Where the skill with this id lives: first the enabled one, then the disabled one.
  *
- * Наружу отдаётся абсолютный путь, но id остаётся публичным (`pirate-mode/SKILL.md`),
- * поэтому панели и человеку не нужно знать про `.disabled/`.
+ * An absolute path is returned, but the id stays public (`pirate-mode/SKILL.md`),
+ * so neither the panel nor the person needs to know about `.disabled/`.
  */
 export function resolveSkillFile(root: string, id: string): string | null {
   if (!id || id === '/' || id.startsWith(`${SKILLS_DISABLED_DIR}/`)) return null;
@@ -252,7 +253,7 @@ export function resolveSkillFile(root: string, id: string): string | null {
   return null;
 }
 
-/** Файлы бандла: всё, что лежит рядом со скиллом, — и есть его бандл. */
+/** Bundle files: everything lying next to the skill is its bundle. */
 function bundleOf(root: string, file: string): SkillFile[] {
   const dir = path.dirname(file);
   const isCanonical = path.basename(file) === SKILL_FILE;
@@ -275,10 +276,10 @@ function bundleOf(root: string, file: string): SkillFile[] {
 }
 
 /**
- * Сводка по файлу скилла.
+ * A summary of a skill file.
  *
- * `base` — каталог, относительно которого считаются пути бандла: у выключенного
- * скилла это `.disabled/`, поэтому человек и панель не видят служебный префикс.
+ * `base` is the directory relative to which bundle paths are computed: for a disabled
+ * skill it's `.disabled/`, so neither the person nor the panel sees the service prefix.
  */
 function summaryOf(base: string, id: string, file: string, enabled: boolean): SkillSummary {
   const stat = fs.statSync(file);
@@ -290,9 +291,9 @@ function summaryOf(base: string, id: string, file: string, enabled: boolean): Sk
   const name = typeof frontmatter.name === 'string' && frontmatter.name.trim() ? frontmatter.name.trim() : fallbackName;
   const description = typeof frontmatter.description === 'string' ? frontmatter.description.trim() : '';
 
-  // Порядок проверок — по тяжести: не разобранный frontmatter важнее пропавшего
-  // описания, а то, в свою очередь, важнее имени не по правилам: с таким именем
-  // pi скилл всё равно загрузит, только поругается в диагностику.
+  // The order of checks is by severity: an unparsed frontmatter matters more than a
+  // missing description, which in turn matters more than a non-conforming name: pi
+  // will load the skill with such a name anyway, just grumbling into diagnostics.
   let trouble = problem;
   if (!trouble && !description) trouble = 'нет описания — pi пропустит этот скилл';
   if (!trouble) trouble = validateSkillName(name) ?? undefined;
@@ -311,10 +312,10 @@ function summaryOf(base: string, id: string, file: string, enabled: boolean): Sk
 }
 
 /**
- * Все скиллы человека: то, что панель показывает списком слева.
+ * All of the person's skills: what the panel shows in the list on the left.
  *
- * Включённые и выключенные лежат в одном репозитории, но в разных каталогах:
- * выключенный скилл виден в панели и правится, а pi его просто не находит.
+ * Enabled and disabled ones live in the same repository but in different directories:
+ * a disabled skill is visible in the panel and editable, but pi simply doesn't find it.
  */
 export function listSkills(root: string): SkillSummary[] {
   const summaries: SkillSummary[] = [];
@@ -323,7 +324,7 @@ export function listSkills(root: string): SkillSummary[] {
       try {
         summaries.push(summaryOf(base, entry.id, entry.file, enabled));
       } catch {
-        // Файл пропал между обходом и чтением — не повод ронять раздел.
+        // The file vanished between traversal and reading — no reason to bring down the section.
       }
     }
   };
@@ -333,7 +334,7 @@ export function listSkills(root: string): SkillSummary[] {
   return summaries.sort((a, b) => a.id.localeCompare(b.id));
 }
 
-/** Один скилл целиком: frontmatter, тело и файлы бандла. */
+/** One skill in full: frontmatter, body, and bundle files. */
 export function readSkill(root: string, id: string): SkillDetail | null {
   const full = resolveSkillFile(root, id);
   if (!full) return null;
@@ -346,7 +347,7 @@ export function readSkill(root: string, id: string): SkillDetail | null {
   return { ...summary, body, frontmatter, bundle: bundleOf(base, full) };
 }
 
-/** Ключи, которые панель пишет сама: остальное во frontmatter — чужое, не трогаем. */
+/** Keys the panel writes itself: the rest of the frontmatter is foreign, we don't touch it. */
 function frontmatterFor(
   existing: Record<string, unknown>,
   name: string,
@@ -360,26 +361,25 @@ function frontmatterFor(
 }
 
 /**
- * Новый путь файла после переименования.
+ * The new file path after a rename.
  *
- * Имя скилла — это его каталог (или файл у плоского скилла), поэтому переименование
- * в панели — это `git mv` по смыслу: содержимое остаётся, меняется адрес. Переезжает
- * скилл рядом с прежним местом: скиллы можно раскладывать по полкам
- * (`группа/скилл/SKILL.md`), и переименование не должно вытаскивать скилл наверх,
- * ломая чужую раскладку.
+ * A skill's name is its directory (or file, for a flat skill), so renaming in the panel
+ * is `git mv` in spirit: the content stays, the address changes. The skill moves next to
+ * its former location: skills can be arranged on shelves (`group/skill/SKILL.md`), and a
+ * rename must not pull the skill up top and break someone's layout.
  */
 function renamedPath(current: string, base: string, name: string): { id: string; file: string } | string {
   const isCanonical = path.basename(current) === SKILL_FILE;
   const currentDir = path.dirname(current);
-  // У корневого SKILL.md каталога скилла нет — его собственный каталог и есть корень,
-  // поэтому «рядом» для него значит «в корне»: скилл становится обычным каталогом.
+  // A root SKILL.md has no skill directory — its own directory is the root itself,
+  // so "next to" for it means "in the root": the skill becomes a regular directory.
   const parent = currentDir === base ? base : path.dirname(currentDir);
   const targetDir = isCanonical ? path.join(parent, name) : currentDir;
   const target = isCanonical ? path.join(targetDir, SKILL_FILE) : path.join(currentDir, `${name}.md`);
 
   if (target !== current && fs.existsSync(target)) return `скилл «${name}» уже есть — выбери другое имя`;
-  // Такое же имя могло остаться у выключенного скилла: две записи с одним id
-  // панель бы показала, а pi оставил бы только одну.
+  // The same name could remain on a disabled skill: the panel would show two entries
+  // with the same id, while pi would keep only one.
   const otherBase = path.basename(base) === SKILLS_DISABLED_DIR ? path.dirname(base) : disabledSkillsRoot(base);
   if (target !== current && fs.existsSync(path.join(otherBase, relativeId(base, target)))) {
     return `скилл «${name}» уже есть — выбери другое имя`;
@@ -390,7 +390,7 @@ function renamedPath(current: string, base: string, name: string): { id: string;
   return { id: relativeId(base, target), file: target };
 }
 
-/** Заводит или переписывает скилл. Коммит и перезапуск сессий — на стороне маршрута. */
+/** Creates or rewrites a skill. Committing and restarting sessions is the route's job. */
 export function writeSkill(root: string, draft: SkillDraft): SkillResult {
   const name = draft.name.trim();
   const description = draft.description.trim();
@@ -405,8 +405,8 @@ export function writeSkill(root: string, draft: SkillDraft): SkillResult {
 
   if (!draft.id) {
     file = path.join(root, name, SKILL_FILE);
-    // Выключенный скилл с тем же именем — тоже занятое имя: иначе в панели
-    // появились бы две записи с одним id, а pi видел бы только включённую.
+    // A disabled skill with the same name is also a taken name: otherwise two entries
+    // with the same id would appear in the panel, while pi would see only the enabled one.
     if (
       fs.existsSync(file) ||
       fs.existsSync(path.join(root, name)) ||
@@ -429,14 +429,14 @@ export function writeSkill(root: string, draft: SkillDraft): SkillResult {
 
     if (file !== current) {
       fs.mkdirSync(path.dirname(file), { recursive: true });
-      // Канонический скилл — это каталог: переезжает он целиком, вместе с файлами
-      // бандла. Плоский файл переезжает сам. Выключенный скилл переезжает внутри
-      // `.disabled/` — включённым он от переименования не становится.
+      // A canonical skill is a directory: it moves whole, along with its bundle files.
+      // A flat file moves by itself. A disabled skill moves within `.disabled/` —
+      // a rename doesn't make it enabled.
       if (path.basename(file) === SKILL_FILE && path.dirname(current) !== base) {
         fs.renameSync(path.dirname(current), path.dirname(file));
       } else {
-        // Корневой SKILL.md — не каталог: его «каталог» и есть весь каталог скиллов,
-        // и переносить его целиком значило бы унести все скиллы в подпапку.
+        // A root SKILL.md isn't a directory: its "directory" is the whole skills
+        // directory, and moving it whole would carry all skills into a subfolder.
         fs.renameSync(current, file);
       }
     }
@@ -448,11 +448,11 @@ export function writeSkill(root: string, draft: SkillDraft): SkillResult {
 }
 
 /**
- * Включает или выключает скилл: это переезд между корнем каталога и `.disabled/`.
+ * Enables or disables a skill: it's a move between the directory root and `.disabled/`.
  *
- * Для pi «выключен» значит «файла нет»: каталог скиллов он читает один раз при
- * старте, а флага «пропусти этот» в Agent Skills нет. Зато переезд остаётся
- * видимым в git — в истории скилла будет и выключение, и включение.
+ * For pi, "disabled" means "the file isn't there": it reads the skills directory once at
+ * startup, and Agent Skills has no "skip this one" flag. But the move stays visible in
+ * git — the skill's history will contain both the disabling and the enabling.
  */
 export function setSkillEnabled(root: string, id: string, enabled: boolean): SkillResult {
   if (id === SKILL_FILE) {
@@ -462,8 +462,8 @@ export function setSkillEnabled(root: string, id: string, enabled: boolean): Ski
     return { ok: false, message: 'такой скилл трогать нельзя' };
   }
 
-  // При включении смотрим сначала в `.disabled/`: если в корне уже лежит скилл с
-  // тем же id, это не «уже включён», а занятое место, и перетирать его нельзя.
+  // When enabling, we look in `.disabled/` first: if a skill with the same id already
+  // lies in the root, that's not "already enabled" but a taken spot, and it can't be overwritten.
   const bases = enabled ? [disabledSkillsRoot(root), root] : [root, disabledSkillsRoot(root)];
   let current: string | null = null;
   for (const base of bases) {
@@ -494,11 +494,11 @@ export function setSkillEnabled(root: string, id: string, enabled: boolean): Ski
 }
 
 /**
- * Удаляет скилл вместе с бандлом — это и есть «удалить» в панели.
+ * Deletes a skill along with its bundle — that's what "delete" in the panel means.
  *
- * Корневой `SKILL.md` — особый случай: его каталог и есть каталог скиллов, и
- * снести его целиком значило бы унести все скиллы разом. Такой файл удаляем
- * поштучно, а бандл рядом оставляем человеку.
+ * A root `SKILL.md` is a special case: its directory is the skills directory, and
+ * wiping it whole would carry off all skills at once. We delete such a file on its
+ * own, leaving the bundle next to it to the person.
  */
 export function removeSkill(root: string, id: string): { ok: boolean; message: string } {
   const full = resolveSkillFile(root, id);
@@ -519,7 +519,7 @@ export function removeSkill(root: string, id: string): { ok: boolean; message: s
 
 export type SkillHit = { id: string; name: string; line: number; text: string };
 
-/** Поиск по скиллам: та же строка поиска в панели, что ищет по памяти. */
+/** Skill search: the same search box in the panel that searches memory. */
 export function searchSkills(root: string, query: string, limit = 50): SkillHit[] {
   const needle = query.trim().toLowerCase();
   if (needle.length < 2) return [];

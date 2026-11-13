@@ -1,8 +1,8 @@
-// Один разговор на Telegram и панель: транспорт — труба, разговор живёт у нас.
+// One conversation for Telegram and the panel: the transport is a pipe, the conversation lives with us.
 //
-// Сессия pi у разговора одна, её ключ — (человек, conversationId), а не канал.
-// Здесь проверяется, что панель пишет в ту же сессию, что и бот, не заводит
-// вторую и не начинает второй ход, пока в разговоре отвечает Telegram.
+// A conversation has a single pi session, its key is (human, conversationId), not the channel.
+// Here we check that the panel writes to the same session as the bot, does not create
+// a second one and does not start a second turn while Telegram is answering in the conversation.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -19,9 +19,9 @@ import { makeConfig, PANEL_USER_HEADER, probe } from './fixtures.ts';
 type Listener = (event: Record<string, unknown>) => void;
 
 /**
- * Заглушка pi на разговор: помнит, сколько реплик ей прислали и из какого входа.
- * Ход висит, пока тест не отпустит (`autoRelease: false`), — так видно, что
- * второй вход не начинает второй ход.
+ * pi stub per conversation: it remembers how many replies were sent to it and from which entry point.
+ * A turn hangs until the test releases it (`autoRelease: false`) — this way one can see that
+ * a second entry point does not start a second turn.
  */
 class StubSession {
   alive = true;
@@ -82,7 +82,7 @@ class StubSession {
 
 const CONVERSATION = 'telegram-4242';
 
-/** Разговор, начатый в Telegram: запись в реестре и файл истории на диске. */
+/** A conversation started in Telegram: an entry in the registry and a history file on disk. */
 function fixture(options: { autoRelease?: boolean } = {}) {
   const config = makeConfig({ users: [probe('probe')] });
   const user = probe('probe');
@@ -122,7 +122,7 @@ function fixture(options: { autoRelease?: boolean } = {}) {
   return { config, user, registry, created };
 }
 
-/** HTTP-сервер панели на случайном порту: маршруты и ход настоящие. */
+/** The panel's HTTP server on a random port: the routes and the turn are real. */
 async function withServer<T>(
   fixtureValue: ReturnType<typeof fixture>,
   run: (base: string, send: (body: unknown) => Promise<Response>) => Promise<T>,
@@ -145,7 +145,7 @@ async function withServer<T>(
   }
 }
 
-/** Читает NDJSON-поток хода по строкам, пока сервер его не закроет. */
+/** Reads the NDJSON stream of a turn line by line until the server closes it. */
 async function lines(response: Response): Promise<Array<Record<string, unknown>>> {
   const reader = response.body!.getReader();
   const decoder = new TextDecoder();
@@ -166,9 +166,9 @@ async function lines(response: Response): Promise<Array<Record<string, unknown>>
   return out;
 }
 
-test('панель продолжает Telegram-разговор в той же сессии pi, а не в новой', async () => {
+test('the panel continues a Telegram conversation in the same pi session, not a new one', async () => {
   const value = fixture();
-  // Бот поднимает сессию разговора — ровно так, как это делает telegram/bot.ts.
+  // The bot lifts the conversation's session — exactly as telegram/bot.ts does.
   await value.registry.acquire(value.user, CONVERSATION);
   assert.equal(value.created.length, 1);
 
@@ -179,11 +179,11 @@ test('панель продолжает Telegram-разговор в той же
     assert.equal(events.at(-1)?.type, 'done', 'ход доехал до конца');
   });
 
-  // Одна сессия на разговор: панель взяла ту же, что бот, и не подняла вторую.
+  // One session per conversation: the panel took the same one as the bot and did not lift a second.
   assert.equal(value.created.length, 1, 'вторая сессия pi не завелась');
   assert.equal(value.created[0]?.conversationId, CONVERSATION);
   assert.deepEqual(value.created[0]?.prompts, ['продолжи'], 'реплика ушла в общий процесс');
-  // Ход из панели подписан панелью: шапка скажет, кто говорил последним.
+  // A turn from the panel is signed by the panel: the header will say who spoke last.
   assert.equal(lastTurnOf(value.config, value.user, CONVERSATION)?.channel, 'web');
 
   const history = readHistory(value.config, value.user, CONVERSATION);
@@ -192,16 +192,16 @@ test('панель продолжает Telegram-разговор в той же
   assert.equal(history?.messages.length, 2, 'история та же, что была в Telegram');
   assert.match(history?.messages[0]?.text ?? '', /отчёт для мамы/);
 
-  // Запись остаётся одна: канал разговора не переписывается на «веб».
+  // The record remains single: the conversation's channel is not rewritten to "web".
   const [chat] = readChats(value.config, value.user);
   assert.equal(chat?.channel, 'telegram', 'разговор по-прежнему telegram-разговор');
   assert.equal(chat?.conversationId, CONVERSATION);
 });
 
-test('ход в Telegram: реплика из панели встаёт в очередь, а не начинает второй ход', async () => {
+test('a turn in Telegram: a reply from the panel is queued instead of starting a second turn', async () => {
   const value = fixture();
   const session = (await value.registry.acquire(value.user, CONVERSATION)) as unknown as StubSession;
-  // Ответ сейчас печатается в Telegram: сессия занята, а потока в панели нет.
+  // The answer is being typed in Telegram right now: the session is busy, and there is no stream in the panel.
   session.busy = true;
   recordTurn(value.config, value.user, CONVERSATION, 'telegram');
 
@@ -214,7 +214,7 @@ test('ход в Telegram: реплика из панели встаёт в оч�
     assert.equal(body.live, false, 'прицепиться к чужому потоку некуда');
     assert.deepEqual(session.prompts, [], 'реплика из панели не ушла вторым ходом');
 
-    // «Стоп» снимает и очередь: иначе реплика доехала бы без спроса.
+    // "Stop" removes the queue too: otherwise the reply would arrive unasked.
     const stopped = await fetch(`${base}/panel/api/chat/abort`, {
       method: 'POST',
       headers: { [PANEL_USER_HEADER]: 'probe', 'content-type': 'application/json' },
@@ -228,7 +228,7 @@ test('ход в Telegram: реплика из панели встаёт в оч�
   assert.deepEqual(session.prompts, [], 'второго хода в pi не было');
 });
 
-test('два окна панели: реплика второго встаёт в очередь и доезжает после первого хода', async () => {
+test('two panel windows: the second reply is queued and arrives after the first turn', async () => {
   const value = fixture({ autoRelease: false });
 
   await withServer(value, async (_base, send) => {
@@ -247,7 +247,7 @@ test('два окна панели: реплика второго встаёт �
     const events = await lines(first);
     assert.equal(events.at(-1)?.type, 'done');
 
-    // Очередь досылается сама, без второго HTTP-запроса от панели.
+    // The queue is flushed on its own, without a second HTTP request from the panel.
     for (let i = 0; i < 100 && value.created[0]!.prompts.length < 2; i += 1) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }

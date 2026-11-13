@@ -1,5 +1,5 @@
-// Минимальный MCP-сервер по stdio. Нужен, чтобы проверять мост pi → MCP,
-// не завися от внешних сервисов и ключей.
+// Minimal MCP server over stdio. Needed to test the pi → MCP bridge
+// without depending on external services and keys.
 import readline from 'node:readline';
 
 const tools = [

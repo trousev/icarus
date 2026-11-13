@@ -1,21 +1,21 @@
-// smoke-language.mjs — воспроизведение бага «настройка English, человек пишет по-русски».
+// smoke-language.mjs — reproduces the bug "setting English, person writes Russian".
 //
-// Почему отдельный стенд, а не probe-language.mjs. probe-language собирает промпт
-// сам (persona + languageRule) и играет человека моделью, которой ВЕЛЕНО писать
-// по-английски. Именно поэтому он и не ловил баг: в нём не было главного случая —
-// человек САМ открывает чат по-русски, и в контексте нет ни слова по-английски.
+// Why a separate rig and not probe-language.mjs. probe-language assembles the prompt
+// itself (persona + languageRule) and plays the person with a model that is ORDERED
+// to write in English. That is exactly why it didn't catch the bug: it lacked the main case —
+// the person OPENS the chat in Russian themselves, and there isn't a word of English in the context.
 //
-// Этот стенд берёт РЕАЛЬНЫЙ системный промпт из боевой сессии (`.prompt-dump.txt`),
-// без правок и без сборки — ровно те байты, что уезжают в модель в бою. Затем
-// прогоняет N разговоров, где первая реплика человека всегда русская, и требует
-// английского ответа. Это и есть регрессия, которую надо закрыть.
+// This rig takes the REAL system prompt from a production session (`.prompt-dump.txt`),
+// without edits and without assembly — exactly the bytes that ship to the model in production. Then
+// it runs N conversations where the person's first turn is always Russian, and demands
+// an English reply. This is the regression that needs to be closed.
 //
-//   node smoke-language.mjs                 # 10 разговоров, боевой промпт
-//   node smoke-language.mjs --runs 20       # больше прогонов (дороже)
-//   node smoke-language.mjs --prompt ./x.md # другой промпт (для проверки патча)
-//   node smoke-language.mjs --model pro     # жирная модель
+//   node smoke-language.mjs                 # 10 conversations, production prompt
+//   node smoke-language.mjs --runs 20       # more runs (more expensive)
+//   node smoke-language.mjs --prompt ./x.md # a different prompt (to test a patch)
+//   node smoke-language.mjs --model pro     # the fat model
 //
-// Выход: 0 — все ответы на английском; 1 — есть русские ответы (баг воспроизведён).
+// Exit: 0 — all replies in English; 1 — there are Russian replies (bug reproduced).
 
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -31,17 +31,17 @@ const arg = (name, fallback) => {
 const RUNS = Number(arg("runs", 10));
 const PROMPT_PATH = resolve(arg("prompt", "/workspaces/.icarus/.prompt-dump.txt"));
 const MODEL = arg("model", "flash") === "pro" ? MODELS.judge : MODELS.icarus;
-// --fix: правило языка отдельным системным сообщением (как расширение language в бою).
+// --fix: the language rule as a separate system message (like the language extension in production).
 const FIX = args.includes("--fix");
 const FIX_LANG = arg("lang", "English");
 
 const SYSTEM = readFileSync(PROMPT_PATH, "utf8");
-// Метка времени — часть боевого промпта; в стенде она фиксирована, чтобы прогоны
-// были сравнимы между собой (и чтобы «ночь» не влияла на язык ответа).
+// The timestamp is part of the production prompt; in the rig it's fixed so that runs
+// are comparable to each other (and so that "night" doesn't affect the reply language).
 const STAMP = "[Сейчас: среда, 4 ноября 2026, ночь]";
 
-// ── первая реплика человека: всегда по-русски ────────────────────────────────
-// Ровно те, что были в бою: короткое «Привет», бытовое, рабочее, «куку».
+// ── the person's first turn: always in Russian ──────────────────────────────
+// Exactly the ones seen in production: a short "Привет", domestic, work, "куку".
 const OPENERS = [
   "Привет",
   "Привет!",
@@ -55,9 +55,9 @@ const OPENERS = [
   "Привет, Икар. Ну что, поговорим?",
 ];
 
-// ── определение языка ответа: правило по буквам, как в probe-language ────────
-// Перевес, а не первое слово: термины и имена не считаем. Кириллица больше —
-// ответ русский; латиница больше — английский.
+// ── detecting the reply language: a letter-based rule, as in probe-language ──
+// The margin, not the first word: we don't count terms and names. More Cyrillic —
+// the reply is Russian; more Latin — English.
 export function languageOf(text) {
   const ru = (text.match(/[А-Яа-яЁё]/g) ?? []).length;
   const en = (text.match(/[A-Za-z]/g) ?? []).length;
@@ -66,8 +66,8 @@ export function languageOf(text) {
 }
 
 async function runOnce(opener, index) {
-  // Патч: правило дописывается к реплике человека — ровно так его шлёт расширение
-  // (packages/extensions/language.ts), и ровно так его переживает convertToLlm в pi.
+  // Patch: the rule is appended to the person's turn — exactly how the extension sends it
+  // (packages/extensions/language.ts), and exactly how convertToLlm in pi survives it.
   const content = FIX ? `${STAMP}\n\n${opener}\n\n${languageOverride(FIX_LANG)}` : `${STAMP}\n\n${opener}`;
   const messages = [{ role: "user", content }];
   const reply = await chat({

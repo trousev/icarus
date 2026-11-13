@@ -1,10 +1,10 @@
-// Сайд-панель файлов в чате: дерево рабочей папки, поиск и предпросмотр файла.
+// File sidebar in chat: working folder tree, search and file preview.
 //
-// Панель смотрит только в текущий workspace человека — тот же каталог, в котором
-// работает pi (`/workspaces/<slug>`). Служебное (`/workspaces/.icarus`) и чужие
-// workspace'ы сюда не попадают: имя workspace'а из запроса сверяется с реестром,
-// а относительный путь не может вывести за корень. Символические ссылки не
-// раскрываются — иначе файл воркспейса мог бы показать весь хост.
+// The panel looks only into the person's current workspace — the same directory
+// where pi works (`/workspaces/<slug>`). Service data (`/workspaces/.icarus`) and
+// other people's workspaces don't get here: the workspace name from the request is
+// checked against the registry, and a relative path cannot escape the root.
+// Symlinks are not resolved — otherwise a workspace file could expose the whole host.
 import fs from 'node:fs';
 import path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -16,34 +16,34 @@ import { displayPath } from './workspaces.ts';
 
 const BASE = '/panel/api/workspace-files';
 
-/** Сколько строк отдаём за один заход: дерево листается лениво, по папкам. */
+/** How many entries we return per request: the tree is paged lazily, folder by folder. */
 const MAX_ENTRIES = 500;
-/** Потолок разбора каталога: огромную папку не сортируем целиком. */
+/** Directory scan ceiling: we don't sort a huge folder in full. */
 const SCAN_LIMIT = 2000;
-/** Сколько текста показываем в предпросмотре. Больше — только скачать. */
+/** How much text we show in the preview. Anything more — download only. */
 const PREVIEW_BYTES = 256 * 1024;
-/** По этому куску понятно, текст это или двоичный файл. */
+/** This chunk is enough to tell whether it's text or a binary file. */
 const SNIFF_BYTES = 8192;
 
 /**
- * Поиск по workspace. Панель шлёт его на каждый ввод, поэтому у запроса есть
- * потолки: один поиск не должен гулять по гигабайтам и вешать панель.
+ * Search across the workspace. The panel sends it on every keystroke, so the
+ * request has ceilings: a single search must not roam over gigabytes and hang the panel.
  */
 export const SEARCH_MIN_QUERY = 2;
 const SEARCH_MAX_QUERY = 200;
 const SEARCH_MAX_HITS = 50;
-/** Сколько строк показываем из одного файла: остальные только шумят. */
+/** How many lines we show from a single file: the rest is just noise. */
 const SEARCH_HITS_PER_FILE = 3;
 const SEARCH_MAX_FILES = 4000;
 const SEARCH_MAX_BYTES = 1024 * 1024;
 const SEARCH_MAX_TOTAL_BYTES = 32 * 1024 * 1024;
-/** Максимальная глубина вложенности: защита от папок-матрёшек. */
+/** Maximum nesting depth: protection against matryoshka folders. */
 const SEARCH_MAX_DEPTH = 16;
-/** Куски строки до и после совпадения: видно контекст, но не весь минифицированный файл. */
+/** Line chunks before and after the match: context is visible, but not the whole minified file. */
 const SEARCH_BEFORE = 60;
 const SEARCH_AFTER = 120;
 
-/** Служебный мусор, который в дереве файлов только мешает. */
+/** Service clutter that only gets in the way in the file tree. */
 const SKIPPED = new Set(['.git', 'node_modules', '.DS_Store']);
 
 const TYPE_LABELS: Record<string, string> = {
@@ -105,35 +105,35 @@ const MARKDOWN_EXT = new Set(['.md', '.markdown', '.mdx']);
 
 export type WorkspaceFileEntry = {
   name: string;
-  /** Путь внутри workspace, всегда через `/`. */
+  /** Path inside the workspace, always with `/`. */
   path: string;
   dir: boolean;
   size: number;
   mtime: string;
-  /** Подпись для правого края строки: MARKDOWN, PNG… У папок пусто. */
+  /** Label for the right edge of the row: MARKDOWN, PNG… Empty for folders. */
   type: string;
   image: boolean;
-  /** Можно ли удалить из панели. Корневой AGENTS.md — нет: это карта workspace'а. */
+  /** Whether it can be removed from the panel. The root AGENTS.md — no: it's the workspace map. */
   removable: boolean;
 };
 
 export type WorkspaceFileList = {
   path: string;
   entries: WorkspaceFileEntry[];
-  /** В папке больше файлов, чем отрисовано: список обрезан. */
+  /** The folder has more files than rendered: the list is truncated. */
   truncated: boolean;
 };
 
 export type WorkspaceFilePreview = {
   file: WorkspaceFileEntry;
   kind: 'markdown' | 'text' | 'image' | 'binary';
-  /** Текст для markdown и обычного текста. */
+  /** Text for markdown and plain text. */
   text?: string;
-  /** Текст не влез целиком: показано начало. */
+  /** The text didn't fit in full: the beginning is shown. */
   truncated?: boolean;
-  /** Адрес картинки: грузится отдельным запросом, а не строкой JSON. */
+  /** Image URL: loaded by a separate request, not as a JSON string. */
   url?: string;
-  /** Ссылка на скачивание — есть у любого файла. */
+  /** Download link — every file has one. */
   download: string;
 };
 
@@ -144,32 +144,32 @@ export type WorkspaceFileTarget = {
 
 export type RawWorkspaceFile = { file: string; name: string; type: string; size: number };
 
-/** Одно совпадение поиска: файл, строка и кусок текста вокруг находки. */
+/** A single search hit: file, line and a text chunk around the find. */
 export type WorkspaceSearchHit = {
   file: WorkspaceFileEntry;
-  /** Строка с совпадением, с единицы. 0 — совпало только имя файла. */
+  /** Line with the match, 1-based. 0 — only the file name matched. */
   line: number;
-  /** Кусок строки вокруг совпадения; пустой, если совпало только имя. */
+  /** A line chunk around the match; empty if only the name matched. */
   text: string;
-  /** Где в `text` стоит совпадение: панель подсвечивает именно его. */
+  /** Where the match sits in `text`: the panel highlights exactly it. */
   match: { start: number; length: number } | null;
 };
 
 export type WorkspaceSearchResult = {
   query: string;
   hits: WorkspaceSearchHit[];
-  /** Сколько файлов успели посмотреть: по числу видно, что поиск шёл по папке. */
+  /** How many files we managed to look at: the number shows the search walked the folder. */
   scanned: number;
-  /** Упёрлись в потолок: совпадений может быть больше, чем показано. */
+  /** We hit the ceiling: there may be more matches than shown. */
   truncated: boolean;
 };
 
-/** Что именно удалили: панель по этим данным убирает строку из дерева. */
+/** What exactly was removed: the panel uses this data to drop the row from the tree. */
 export type RemovedWorkspaceEntry = {
   path: string;
   name: string;
   dir: boolean;
-  /** Папка была не пуста и удалена вместе с содержимым. */
+  /** The folder was non-empty and was removed along with its contents. */
   recursive: boolean;
 };
 
@@ -183,7 +183,7 @@ export class FilesError extends Error {
   }
 }
 
-/** Подпись типа файла для панели: расширение вроде `MARKDOWN` или `PNG`. */
+/** File type label for the panel: an extension like `MARKDOWN` or `PNG`. */
 export function typeLabelOf(name: string): string {
   const ext = path.extname(name).toLowerCase();
   if (TYPE_LABELS[ext]) return TYPE_LABELS[ext];
@@ -196,8 +196,8 @@ export function isImageName(name: string): boolean {
 }
 
 /**
- * Workspace из запроса и его корень на диске. Незнакомый slug — не ошибка пути,
- * а отсутствие папки: пусть вызывающий ответит 404.
+ * The workspace from the request and its root on disk. An unknown slug is not a path
+ * error but a missing folder: let the caller respond 404.
  */
 export function workspaceTarget(
   config: IcarusConfig,
@@ -213,7 +213,7 @@ export function workspaceTarget(
   };
 }
 
-/** Путь внутри корня. `..`, абсолютные пути и NUL отсекаются до похода на диск. */
+/** Path inside the root. `..`, absolute paths and NUL are rejected before touching the disk. */
 function resolveIn(root: string, relative: string): string | null {
   if (relative.includes('\u0000')) return null;
   const full = path.resolve(root, relative);
@@ -222,7 +222,7 @@ function resolveIn(root: string, relative: string): string | null {
   return full;
 }
 
-/** Настоящий путь не выходит за корень даже через символические ссылки. */
+/** The real path does not escape the root even through symlinks. */
 function realInside(root: string, full: string): boolean {
   try {
     const realRoot = fs.realpathSync(root);
@@ -238,9 +238,9 @@ function toPosix(relative: string): string {
 }
 
 /**
- * Корневой AGENTS.md — карта workspace'а: pi читает его перед каждым ходом, и
- * панель не должна оставлять workspace без инструкций. Вложенные AGENTS.md
- * (например, `projects/AGENTS.md`) — обычные файлы проекта, их удалять можно.
+ * The root AGENTS.md is the workspace map: pi reads it before every turn, and
+ * the panel must not leave the workspace without instructions. Nested AGENTS.md
+ * (e.g. `projects/AGENTS.md`) are ordinary project files and can be deleted.
  */
 export function isProtectedWorkspacePath(relative: string): boolean {
   return toPosix(relative) === 'AGENTS.md';
@@ -261,8 +261,8 @@ function entryOf(file: string, relative: string, dir: boolean, stats: fs.Stats):
   };
 }
 
-/** Содержимое одной папки. Файлы идут перед папками — так корень сразу показывает
- *  AGENTS.md и другие рабочие файлы, как в макете панели. */
+/** Contents of a single folder. Files come before folders — that way the root immediately
+ *  shows AGENTS.md and other working files, as in the panel mockup. */
 export function listWorkspaceEntries(root: string, relative = ''): WorkspaceFileList {
   const dir = resolveIn(root, relative);
   if (!dir || !realInside(root, dir)) throw new FilesError('путь ведёт за пределы workspace', 400);
@@ -295,8 +295,8 @@ export function listWorkspaceEntries(root: string, relative = ''): WorkspaceFile
       continue;
     }
     collected.push(entryOf(file, nested, dirent.isDirectory(), stats));
-    // Папку с десятком тысяч файлов не сортируем целиком: панель всё равно
-    // показывает только первые MAX_ENTRIES.
+    // We don't sort a folder with tens of thousands of files in full: the panel
+    // only shows the first MAX_ENTRIES anyway.
     if (collected.length >= SCAN_LIMIT) break;
   }
 
@@ -319,8 +319,8 @@ function rawUrl(slug: string, relative: string, download = false): string {
 }
 
 /**
- * Один вход в дерево: путь внутри workspace и его stat. Корень workspace'а
- * сюда не пускаем — панель показывает и удаляет содержимое, а не саму папку.
+ * A single tree entry: the path inside the workspace and its stat. We don't let the
+ * workspace root in here — the panel shows and deletes contents, not the folder itself.
  */
 function resolveEntry(
   root: string,
@@ -349,9 +349,9 @@ function fileEntry(root: string, relative: string): { full: string; entry: Works
 }
 
 /**
- * Удаляет файл или папку. Непустую папку без явного `force` не трогаем: клиент
- * сначала спрашивает подтверждение, и только потом повторяет запрос. Пустая
- * папка удаляется сразу — предупреждать в ней не о чем.
+ * Removes a file or folder. We don't touch a non-empty folder without an explicit
+ * `force`: the client first asks for confirmation and only then repeats the request.
+ * An empty folder is deleted at once — there is nothing to warn about.
  */
 export function removeWorkspaceEntry(
   root: string,
@@ -388,8 +388,8 @@ export function removeWorkspaceEntry(
 }
 
 /**
- * Начало файла как текст. Общий для предпросмотра и поиска: оба решают по
- * первым байтам, текст это или двоичный файл, и оба не читают больше потолка.
+ * The beginning of a file as text. Shared by preview and search: both decide from
+ * the first bytes whether it's text or a binary file, and neither reads beyond the ceiling.
  */
 function readTextHead(
   full: string,
@@ -401,8 +401,8 @@ function readTextHead(
     const read = fs.readSync(fd, buffer, 0, buffer.length, 0);
     const bytes = buffer.subarray(0, Math.min(read, limit));
     const head = bytes.subarray(0, Math.min(bytes.length, SNIFF_BYTES));
-    // NUL в начале файла — достаточный признак двоичного: так выглядят архивы,
-    // картинки неизвестного формата и всё, что не стоит показывать текстом.
+    // A NUL at the start of the file is a sufficient sign of a binary file: that's how
+    // archives, images of unknown format and anything not worth showing as text look.
     return { text: bytes.toString('utf8'), truncated: read > limit, binary: head.includes(0) };
   } finally {
     fs.closeSync(fd);
@@ -410,9 +410,9 @@ function readTextHead(
 }
 
 /**
- * Предпросмотр файла: markdown и текст — строкой, картинки — адресом, всё
- * остальное честно называется двоичным. Большой текст отдаём началом, а не
- * ошибкой: человек чаще хочет заглянуть, чем скачать целиком.
+ * File preview: markdown and text as a string, images as a URL, everything else
+ * is honestly called binary. Large text is returned as its beginning rather than an
+ * error: a person more often wants a peek than a full download.
  */
 export function previewWorkspaceFile(root: string, slug: string, relative: string): WorkspaceFilePreview {
   const { full, entry } = fileEntry(root, relative);
@@ -432,13 +432,13 @@ export function previewWorkspaceFile(root: string, slug: string, relative: strin
   return { file: entry, kind, text: head.text, truncated: head.truncated, download };
 }
 
-/** Литерал для регулярки: запрос — текст, а не шаблон. */
+/** Literal for the regexp: the query is text, not a pattern. */
 function queryPattern(query: string): string {
   return query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/** Кусок строки вокруг совпадения с многоточиями. Смещение считается уже внутри
- *  куска: панель подсвечивает ровно найденное, а не первую попавшуюся букву. */
+/** A line chunk around the match with ellipses. The offset is counted inside the
+ *  chunk already: the panel highlights exactly the find, not the first letter it hits. */
 function lineSnippet(line: string, index: number, length: number): { text: string; start: number } {
   const from = Math.max(0, index - SEARCH_BEFORE);
   const to = Math.min(line.length, index + length + SEARCH_AFTER);
@@ -450,7 +450,7 @@ function lineSnippet(line: string, index: number, length: number): { text: strin
   };
 }
 
-/** Совпадения в тексте: не больше `limit` строк, каждая — с номером и куском. */
+/** Matches in the text: no more than `limit` lines, each with a number and a chunk. */
 function textHits(
   entry: WorkspaceFileEntry,
   text: string,
@@ -473,8 +473,8 @@ function textHits(
         text: snippet.text,
         match: { start: snippet.start, length: match[0].length },
       });
-      // Пустое совпадение зациклило бы exec; минимальная длина запроса его и так
-      // отсекает, но последний рубеж дешёвый.
+      // An empty match would loop exec; the minimum query length already cuts it
+      // off, but the last line of defense is cheap.
       if (!match[0]) break;
     }
   }
@@ -482,10 +482,9 @@ function textHits(
 }
 
 /**
- * Поиск по всем файлам workspace: по имени и по содержимому. Идёт тем же
- * обходом, что и дерево: служебные папки и символические ссылки пропускаются,
- * картинки и двоичные файлы проверяются только по имени — их содержимое
- * показывать нечем.
+ * Search across all workspace files: by name and by content. It walks the same way
+ * as the tree: service folders and symlinks are skipped, images and binary files are
+ * checked by name only — there is nothing to show of their content.
  */
 export function searchWorkspaceFiles(root: string, rawQuery: string): WorkspaceSearchResult {
   const query = rawQuery.trim();
@@ -501,7 +500,7 @@ export function searchWorkspaceFiles(root: string, rawQuery: string): WorkspaceS
   let bytes = 0;
   let truncated = false;
 
-  /** Обход в том же порядке, что дерево: сначала файлы, потом папки. */
+  /** Walk in the same order as the tree: files first, then folders. */
   const walk = (relative: string, depth: number): void => {
     if (hits.length >= SEARCH_MAX_HITS || scanned >= SEARCH_MAX_FILES) {
       truncated = true;
@@ -551,8 +550,8 @@ export function searchWorkspaceFiles(root: string, rawQuery: string): WorkspaceS
           return;
         }
       }
-      // Содержимое ищем только у текста: у картинки и двоичного файла его нет,
-      // а огромный файл не должен съесть весь бюджет запроса.
+      // We search content only in text: an image and a binary file have none,
+      // and a huge file must not eat the whole request budget.
       if (entry.image || entry.size > SEARCH_MAX_BYTES) continue;
       const budget = Math.min(SEARCH_MAX_BYTES, SEARCH_MAX_TOTAL_BYTES - bytes);
       if (budget <= 0) {
@@ -581,13 +580,13 @@ export function searchWorkspaceFiles(root: string, rawQuery: string): WorkspaceS
     query,
     hits,
     scanned,
-    // Достигнутый потолок ещё не значит, что совпадений больше, но обещать
-    // «это всё» в таком случае нельзя: пусть панель честно скажет про потолок.
+    // Reaching the ceiling doesn't mean there are more matches, but we can't promise
+    // «that's all» in that case: let the panel honestly report the ceiling.
     truncated: truncated || hits.length >= SEARCH_MAX_HITS,
   };
 }
 
-/** Файл для отдачи браузеру: картинки — как есть, остальное — на скачивание. */
+/** File to hand to the browser: images as-is, the rest for download. */
 export function rawWorkspaceFile(root: string, relative: string): RawWorkspaceFile | null {
   try {
     const { full, entry } = fileEntry(root, relative);
@@ -602,7 +601,7 @@ export function rawWorkspaceFile(root: string, relative: string): RawWorkspaceFi
   }
 }
 
-/** Имя для `content-disposition`: ASCII-запасной вариант и честный UTF-8. */
+/** Name for `content-disposition`: an ASCII fallback and honest UTF-8. */
 export function downloadHeader(name: string): string {
   const fallback = name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
   const encoded = encodeURIComponent(name).replace(/['()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
@@ -692,12 +691,12 @@ export async function handleWorkspaceFilesApi(
       const inline = !download && raw.type.startsWith('image/');
       res.writeHead(200, {
         'content-type': inline ? raw.type : 'application/octet-stream',
-        // Тот же человек только что видел файл в дереве: ему можно закэшировать
-        // картинку ненадолго. Общий кэш панели тут ни при чём.
+        // The same person just saw the file in the tree: they may cache the image
+        // for a short while. The panel's shared cache has nothing to do with this.
         'cache-control': 'private, max-age=60',
         'x-content-type-options': 'nosniff',
-        // SVG — это документ: открытый напрямую, он мог бы исполнить скрипт в
-        // origin панели. Sandbox оставляет картинке только картинку.
+        // SVG is a document: opened directly, it could execute a script in the
+        // panel origin. Sandbox leaves the image nothing but the image.
         ...(inline ? { 'content-security-policy': 'sandbox' } : {}),
         ...(inline ? {} : { 'content-disposition': downloadHeader(raw.name) }),
       });

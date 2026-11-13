@@ -1,5 +1,5 @@
-// Панель управления за SSO-прокси: человека называет заголовок, чужого он не открывает,
-// а без заголовка панель объясняет, что обязана стоять за прокси.
+// Control panel behind an SSO proxy: the header names the person, it doesn't open someone else's data,
+// and without a header the panel explains that it must stand behind a proxy.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -18,7 +18,7 @@ function seed(root: string, files: Record<string, string>): void {
   }
 }
 
-/** Так выглядит запрос, дошедший до сервиса через Authelia: он и назвал человека. */
+/** This is what a request that reached the service through Authelia looks like: it named the person. */
 function asUser(userId?: string): Record<string, string> {
   return userId === undefined ? {} : { [PANEL_USER_HEADER]: userId };
 }
@@ -55,7 +55,7 @@ function api(base: string, userId: string | undefined, route: string, init: Requ
   });
 }
 
-test('без заголовка прокси панель не пускает и объясняет, где искать причину', async () => {
+test('without the proxy header the panel denies access and explains where to look for the cause', async () => {
   await withServer(async (base) => {
     const page = await fetch(`${base}/panel`);
     assert.equal(page.status, 401);
@@ -71,10 +71,10 @@ test('без заголовка прокси панель не пускает и
   });
 });
 
-test('человека называет заголовок: панель открывается со своим именем', async () => {
+test('the header names the person: the panel opens under one\'s own name', async () => {
   await withServer(async (base) => {
-    // Корень панели — чат: это главный экран. Старые ссылки на файл памяти
-    // по-прежнему ведут в память.
+    // The panel root is chat: that's the main screen. Old links to a memory file
+    // still lead to memory.
     const root = await fetch(`${base}/panel`, { headers: asUser('probe'), redirect: 'manual' });
     assert.equal(root.status, 302);
     assert.equal(root.headers.get('location'), '/panel/chat');
@@ -97,7 +97,7 @@ test('человека называет заголовок: панель отк�
   });
 });
 
-test('корень домена уводит в панель', async () => {
+test('the domain root redirects to the panel', async () => {
   await withServer(async (base) => {
     const response = await fetch(base, { redirect: 'manual' });
     assert.equal(response.status, 302);
@@ -105,11 +105,11 @@ test('корень домена уводит в панель', async () => {
   });
 });
 
-test('раздел решает, что за область: скиллы не притворяются памятью и наоборот', async () => {
+test('the section decides the scope: skills don\'t pretend to be memory and vice versa', async () => {
   await withServer(async (base) => {
-    // Область слушается не вперёд раздела: `/panel/memory?scope=maple` раньше
-    // открывал чужой каталог под заголовком памяти. Теперь незнакомая область —
-    // это личная память, и никакой пятый корень она не открывает.
+    // The scope is not honored before the section: `/panel/memory?scope=maple` used
+    // to open someone else's catalog under the memory heading. Now an unfamiliar scope
+    // is personal memory, and it doesn't open any fifth root.
     const personalInMemory = (await (
       await fetch(`${base}/panel/memory/files?scope=maple`, { headers: asUser('probe') })
     ).json()) as { scope: string; mode: string; files: Array<{ path: string }> };
@@ -117,8 +117,8 @@ test('раздел решает, что за область: скиллы не �
     assert.equal(personalInMemory.mode, 'memory');
     assert.deepEqual(personalInMemory.files.map((file) => file.path).sort(), ['identity.md', 'people/barsik.md']);
 
-    // У скиллов области нет вовсе: что бы ни стояло в scope, раздел отдаёт скиллы,
-    // а не чужой каталог. Своей областью скиллы тоже не объявить.
+    // Skills have no scope at all: whatever is in scope, the section returns skills,
+    // not someone else's catalog. Skills also can't declare a scope of their own.
     const skills = (await (
       await fetch(`${base}/panel/skills/files?scope=maple`, { headers: asUser('probe') })
     ).json()) as { scope: string; mode: string; skills: unknown[] };
@@ -131,9 +131,9 @@ test('раздел решает, что за область: скиллы не �
   });
 });
 
-test('незнакомого человека панель не пускает, а не показывает пустую память', async () => {
+test('the panel denies access to a stranger instead of showing empty memory', async () => {
   await withServer(async (base) => {
-    // Человек есть в LDAP, но его нет в users: config.yaml — сказать надо именно это.
+    // The person exists in LDAP, but not in users: config.yaml — that's exactly what we must say.
     const page = await fetch(`${base}/panel`, { headers: asUser('stranger') });
     assert.equal(page.status, 403);
     assert.match(await page.text(), /«stranger» не заведён в Icarus/);
@@ -145,9 +145,9 @@ test('незнакомого человека панель не пускает, 
   });
 });
 
-test('адрес раздела с хвостовым слэшем открывается, а битое тело — отказ, не падение', async () => {
+test('a section URL with a trailing slash opens, and a broken body is a rejection, not a crash', async () => {
   await withServer(async (base) => {
-    // Браузер и человек дописывают слэш просто так: раздел от этого не должен пропадать.
+    // A browser or a person appends a trailing slash just because: the section must not disappear because of it.
     const slash = await fetch(`${base}/panel/memory/`, { headers: asUser('probe') });
     assert.equal(slash.status, 200);
     assert.match(await slash.text(), /Icarus Control Panel/);
@@ -161,25 +161,25 @@ test('адрес раздела с хвостовым слэшем открыв�
   });
 });
 
-test('страница не зовёт нативные confirm и её скрипт компилируется', async () => {
+test('the page doesn\'t call native confirm and its script compiles', async () => {
   await withServer(async (base) => {
     const html = await (await fetch(`${base}/panel/memory`, { headers: asUser('probe') })).text();
 
-    // Нативные модалки браузер глушит, если вкладка не активна, и confirm() молча
-    // возвращает false — кнопки «забыть»/«откатить» перестают работать. Свой диалог
-    // обязателен, а window.confirm в коде — регресс.
+    // The browser suppresses native modals if the tab is not active, and confirm() silently
+    // returns false — the "forget"/"revert" buttons stop working. A custom dialog
+    // is required, and window.confirm in the code is a regression.
     assert.doesNotMatch(html, /[^.\w]confirm\(/, 'нативный confirm вернулся');
     assert.match(html, /askConfirm/, 'своего диалога подтверждения нет');
 
-    // Скрипт собирается из template literal с экранированием: опечатка в бэкслешах
-    // ломает всю страницу, а тесты её не видят. Компиляция ловит такое сразу.
+    // The script is assembled from a template literal with escaping: a typo in the backslashes
+    // breaks the whole page, and the tests don't see it. Compilation catches this immediately.
     const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
     assert.ok(script, 'в странице нет скрипта');
     assert.doesNotThrow(() => new Function(script), 'скрипт панели не компилируется');
   });
 });
 
-test('панель показывает только память своего человека', async () => {
+test('the panel shows only the person\'s own memory', async () => {
   await withServer(async (base) => {
     const state = (await (await api(base, 'probe', 'state')).json()) as {
       sections: Array<{ id: string; label: string }>;
@@ -197,7 +197,7 @@ test('панель показывает только память своего �
       ],
       'разделы панели приходят из сервиса',
     );
-    // Областей памяти ровно две: скиллы — отдельный раздел со своим корнем.
+    // There are exactly two memory scopes: skills are a separate section with their own root.
     assert.deepEqual(state.scopes, ['personal', 'shared'], 'скиллы не область памяти');
     assert.deepEqual(state.modes, { personal: 'memory', shared: 'memory' });
 
@@ -209,16 +209,16 @@ test('панель показывает только память своего �
     const paths = files.files.map((file) => file.path).sort();
     assert.deepEqual(paths, ['identity.md', 'people/barsik.md']);
 
-    // Чужого файла не достать: человека задаёт заголовок, а не запрос.
+    // Someone else's file can't be fetched: the person is set by the header, not by the request.
     const alien = await api(base, 'probe', 'file?scope=personal&path=secret.md');
     assert.equal(alien.status, 404);
   });
 });
 
-test('записи памяти приезжают с датами из истории, а пачка удаляется одним коммитом', async () => {
+test('memory entries come with dates from the history, and a batch is removed with a single commit', async () => {
   await withServer(async (base, config) => {
     const memory = userPaths(config, probe('probe')).memory;
-    // Память живёт в git: даты записей — это даты коммитов, которые их тронули.
+    // Memory lives in git: entry dates are the dates of the commits that touched them.
     assert.equal(await commitAll(memory, 'memory: разбор разговора'), true);
 
     const data = (await (await api(base, 'probe', 'entries?scope=personal&path=identity.md')).json()) as {
@@ -235,7 +235,7 @@ test('записи памяти приезжают с датами из исто
     );
     assert.match(String(data.entries[1].date), /^\d{4}-\d{2}-\d{2}$/, 'у записи есть дата коммита');
 
-    // Заголовок — не запись: снести его значит снести весь раздел вместе с записями.
+    // A heading is not an entry: removing it means removing the whole section along with its entries.
     const heading = await api(base, 'probe', 'forget-many', {
       method: 'POST',
       body: JSON.stringify({ scope: 'personal', path: 'identity.md', lines: [1] }),
@@ -251,7 +251,7 @@ test('записи памяти приезжают с датами из исто
     assert.equal(((await removal.json()) as { removed: number }).removed, 1);
     assert.doesNotMatch(String(fs.readFileSync(path.join(memory, 'identity.md'))), /Москве/, 'запись убрана');
 
-    // Удаление пачки — тоже правка памяти, а значит коммит, который видно в истории.
+    // Removing a batch is also a memory edit, and therefore a commit visible in the history.
     const commits = (await (await api(base, 'probe', 'history?scope=personal')).json()) as {
       commits: Array<{ subject: string }>;
     };
@@ -259,7 +259,7 @@ test('записи памяти приезжают с датами из исто
   });
 });
 
-test('история файла показывает коммиты с числом строк, а чужие пути не читает', async () => {
+test('file history shows commits with line counts, and does not read someone else\'s paths', async () => {
   await withServer(async (base, config) => {
     const memory = userPaths(config, probe('probe')).memory;
     assert.equal(await commitAll(memory, 'memory: разбор разговора'), true);
@@ -274,7 +274,7 @@ test('история файла показывает коммиты с числ�
     assert.equal(history.commits[0].added, 1, 'в панели видно, сколько строк прибавил коммит');
     assert.ok(history.commits[0].hash.length >= 40);
 
-    // Историю чужого файла не показываем: путь проверяется так же, как при чтении.
+    // We don't show the history of someone else's file: the path is checked the same way as on read.
     const alien = (await (
       await api(base, 'probe', 'file-history?scope=personal&path=secret.md')
     ).json()) as { commits: unknown[] };
@@ -282,11 +282,11 @@ test('история файла показывает коммиты с числ�
   });
 });
 
-test('файл скачивается как файл: имя в заголовке, байты как есть', async () => {
+test('the file downloads as a file: name in the header, bytes as is', async () => {
   await withServer(async (base, config) => {
     const memory = userPaths(config, probe('probe')).memory;
-    // Кириллица в имени — не редкость (projects/здоровье.md), а в ASCII-варианте
-    // заголовка её быть не может: имя обязано уехать дважды.
+    // Cyrillic in a name is not uncommon (projects/здоровье.md), and it can't be in the ASCII
+    // variant of the header: the name must be sent twice.
     fs.writeFileSync(path.join(memory, 'projects.md'), '- Проверка\n');
     fs.mkdirSync(path.join(memory, 'projects'), { recursive: true });
     fs.writeFileSync(path.join(memory, 'projects', 'здоровье.md'), '- По состоянию на 21.09.2026 — всё хорошо\n');
@@ -306,7 +306,7 @@ test('файл скачивается как файл: имя в заголов�
     assert.match(disposition, /filename="________\.md"/, 'ASCII-вариант без кириллицы');
     assert.match(disposition, /filename\*=UTF-8''%D0%B7%D0%B4%D0%BE%D1%80%D0%BE%D0%B2%D1%8C%D0%B5\.md/, 'имя целиком — в UTF-8');
 
-    // Скачивание — это чтение, а не правка: проверки пути тут те же.
+    // Downloading is a read, not an edit: the path checks here are the same.
     const alien = await fetch(`${base}/panel/memory/file?scope=personal&path=secret.md&download=1`, {
       headers: asUser('probe'),
     });
@@ -321,7 +321,7 @@ test('файл скачивается как файл: имя в заголов�
   });
 });
 
-test('подмена user в запросе игнорируется — человека задаёт только заголовок', async () => {
+test('user spoofing in the request is ignored — only the header sets the person', async () => {
   await withServer(async (base) => {
     const response = await api(base, 'probe', 'files?scope=personal&user=probe2');
     assert.equal(response.status, 200);
@@ -335,16 +335,16 @@ test('подмена user в запросе игнорируется — чел�
   });
 });
 
-test('старый личный пропуск в ссылке не нужен и ничего не ломает', async () => {
+test('the old personal pass in the link is not needed and breaks nothing', async () => {
   await withServer(async (base) => {
-    // Ссылки из чата остались у людей в закладках: параметр t просто игнорируется,
-    // а человека по-прежнему называет прокси.
+    // Links from the chat remain in people's bookmarks: the t parameter is simply ignored,
+    // and the proxy still names the person.
     const page = await fetch(`${base}/panel?t=probe%3A123%3Adeadbeef`, { headers: asUser('probe') });
     assert.equal(page.status, 200);
   });
 });
 
-test('panel.devUser пускает без прокси, но слово прокси сильнее', async () => {
+test('panel.devUser grants access without a proxy, but the proxy word is stronger', async () => {
   const config = { panel: { userHeader: PANEL_USER_HEADER, devUser: 'probe' } };
   await withServer(async (base, _config) => {
     const local = await fetch(`${base}/panel/api/state`);
@@ -356,7 +356,7 @@ test('panel.devUser пускает без прокси, но слово прок
   }, config);
 });
 
-test('семейная память доступна, но остаётся общей', async () => {
+test('family memory is accessible but remains shared', async () => {
   await withServer(async (base) => {
     const shared = await api(base, 'probe', 'file?scope=shared&path=family.md');
     assert.equal(shared.status, 200);
@@ -365,12 +365,12 @@ test('семейная память доступна, но остаётся об
   });
 });
 
-test('файл памяти удаляется целиком коммитом и возвращается откатом', async () => {
+test('a memory file is deleted entirely by a commit and returned by a revert', async () => {
   await withServer(async (base, config) => {
     const memory = userPaths(config, probe('probe')).memory;
     const barsik = path.join(memory, 'people/barsik.md');
-    // Память живёт в git: к моменту удаления файл уже в истории разбора — иначе
-    // возвращать откатом было бы нечего, и удаление оказалось бы необратимым.
+    // Memory lives in git: by the time of deletion the file is already in the parsing history —
+    // otherwise there would be nothing to return with a revert, and the deletion would be irreversible.
     assert.equal(await commitAll(memory, 'memory: разбор разговора'), true);
 
     const deletion = await api(base, 'probe', 'delete', {
@@ -382,7 +382,7 @@ test('файл памяти удаляется целиком коммитом �
     assert.equal(body.ok, true);
     assert.equal(fs.existsSync(barsik), false, 'файл удалён с диска');
 
-    // Удаление — обычная правка памяти: коммит видно в истории, и он откатывается.
+    // Deletion is an ordinary memory edit: the commit is visible in the history, and it can be reverted.
     const commits = (await (await api(base, 'probe', 'history?scope=personal')).json()) as {
       commits: Array<{ hash: string; subject: string }>;
     };
@@ -396,7 +396,7 @@ test('файл памяти удаляется целиком коммитом �
   });
 });
 
-test('удаление файла: чужое, не-markdown и выход из каталога не проходят', async () => {
+test('file deletion: someone else\'s, non-markdown and directory escape are rejected', async () => {
   await withServer(async (base) => {
     const attempt = (body: Record<string, unknown>) =>
       api(base, 'probe', 'delete', { method: 'POST', body: JSON.stringify(body) });
@@ -408,9 +408,9 @@ test('удаление файла: чужое, не-markdown и выход из 
   });
 });
 
-test('старая ссылка «настройки поверх чата» ведёт на страницу раздела', async () => {
-  // Настройки больше не открываются в iframe: у них своя страница и своё меню
-  // в левой панели. Закладки со `?settings=` не должны упираться в пустой чат.
+test('the old "settings over chat" link leads to the section page', async () => {
+  // Settings are no longer opened in an iframe: they have their own page and their own menu
+  // in the left panel. Bookmarks with `?settings=` must not hit an empty chat.
   await withServer(async (base) => {
     const legacy = await fetch(`${base}/panel/chat?settings=memory`, {
       headers: asUser('probe'),

@@ -1,7 +1,7 @@
-// Одноразовый вызов дешёвой модели в контейнере пользователя: без тулов, без
-// сессии и без персоны Икара — спрашиваем ровно то, что нужно, и забираем stdout.
-// Так же зовёт модель расширение-экстрактор памяти, только оттуда — изнутри
-// контейнера, а отсюда — через `docker exec`.
+// A one-shot call to a cheap model in the user's container: no tools, no session, and
+// no Icarus persona — we ask exactly what's needed and take stdout. The memory-extractor
+// extension calls the model the same way, only from there — from inside the container,
+// while from here — via `docker exec`.
 import type { ChildProcess } from 'node:child_process';
 import { spawnDockerOnce } from '../docker/manager.ts';
 import { redact } from '../log.ts';
@@ -11,21 +11,21 @@ export type OneShotOptions = {
   timeoutMs?: number;
   signal?: AbortSignal;
   /**
-   * Чем задать роль. По умолчанию — «отвечай ровно тем, о чём просят»: разовый
-   * вопрос затем и задают. Другая роль нужна там, где ответ читает код, а не
-   * человек (например, панель просит скилл в виде JSON).
+   * What sets the role. The default is «отвечай ровно тем, о чём просят»: that's what a
+   * one-shot question is for. A different role is needed where the answer is read by code
+   * rather than a person (for example, the panel asks for a skill as JSON).
    */
   systemPrompt?: string;
 };
 
-/** Сколько ждём ответ по умолчанию: дешёвая модель отвечает за секунды. */
+/** How long we wait for an answer by default: a cheap model answers in seconds. */
 export const ONE_SHOT_TIMEOUT_MS = 12_000;
 
-/** Персона и правила памяти тут только мешают: нужен ответ, а не разговор. */
+/** Persona and memory rules only get in the way here: we need an answer, not a conversation. */
 export const ONE_SHOT_SYSTEM_PROMPT =
   'Отвечай ровно тем, о чём просят, без пояснений, без Markdown и без лишних слов.';
 
-/** Аргументы pi для разового вопроса: ничего не читает, ничего не сохраняет. */
+/** pi arguments for a one-shot question: reads nothing, saves nothing. */
 export function oneShotArgs(model: ModelConfig, prompt: string, systemPrompt: string): string[] {
   return [
     '-p',
@@ -46,10 +46,11 @@ export function oneShotArgs(model: ModelConfig, prompt: string, systemPrompt: st
 }
 
 /**
- * Спрашивает модель и отдаёт её stdout как есть.
+ * Asks the model and returns its stdout as is.
  *
- * Бросает, если модель не ответила вовремя, pi упал или запрос отменили: решение,
- * чем заменить ответ, остаётся за вызывающим (заголовок падает обратно на эвристику).
+ * Throws if the model didn't answer in time, pi crashed, or the request was cancelled:
+ * the decision of what to replace the answer with is left to the caller (the title falls
+ * back to a heuristic).
  */
 export function runOneShot(
   config: IcarusConfig,
@@ -77,8 +78,8 @@ export function runOneShot(
     let stdout = '';
     let stderr = '';
     let settled = false;
-    // Таймер поднимаем до обработчиков: finish и колбэк ниже ссылаются на него,
-    // а const честно говорит, что переприсваивать его не собираются.
+    // We set the timer before the handlers: finish and the callback below reference it,
+    // and const honestly says there's no intent to reassign it.
     const timer: NodeJS.Timeout = setTimeout(() => {
       child.kill('SIGTERM');
       finish(new Error(`модель не ответила за ${timeoutMs} мс`));

@@ -1,51 +1,51 @@
-// Разметка ответа для Telegram: markdown модели → HTML, который понимает Bot API.
+// Response markup for Telegram: model markdown → HTML that the Bot API understands.
 //
-// Telegram сам markdown не разбирает. Без `parse_mode` он честно показывает то, что
-// прислали, — звёздочки, решётки и обратные кавычки. Именно это и видит человек в
-// чате, когда просит «сделай красиво».
+// Telegram itself does not parse markdown. Without `parse_mode` it honestly shows what
+// was sent — asterisks, hashes and backticks. That is exactly what a person sees in the
+// chat when asking to "make it pretty".
 //
-// Режима три. Legacy `Markdown` не умеет ни жирного из двух звёздочек, ни цитат.
-// `MarkdownV2` умеет всё, но требует экранировать полтора десятка знаков — модель
-// этого не делает никогда, и одна «2+2=4» в ответе роняет отправку целиком:
-// «can't parse entities». `HTML` добрее: экранировать нужно ровно `<`, `>`, `&`,
-// набор тегов маленький и не меняется годами. Поэтому разметку собираем сами.
+// There are three modes. Legacy `Markdown` can do neither bold from two asterisks nor quotes.
+// `MarkdownV2` can do everything, but requires escaping a dozen and a half characters — the model
+// never does this, and one "2+2=4" in the answer brings the whole send down:
+// "can't parse entities". `HTML` is kinder: exactly `<`, `>`, `&` need escaping,
+// the set of tags is small and has not changed for years. That's why we build the markup ourselves.
 //
-// Заголовков, списков и таблиц в HTML-режиме Telegram нет. Рисуем их тем, что есть:
-// заголовок — жирной строкой, список — буллетами, таблица — моноширинным блоком с
-// выровненными колонками: иначе на телефоне строки таблицы разъезжаются в кашу.
+// There are no headings, lists and tables in Telegram's HTML mode. We draw them with what we have:
+// a heading — with a bold line, a list — with bullets, a table — with a monospaced block with
+// aligned columns: otherwise on a phone the table rows fall apart into mush.
 //
-// Модель отдаёт ответ кусками («**Токе», «ны**»), и каждый кусок уезжает в Telegram
-// правкой. Поэтому разбор обязан переживать недописанную разметку: незакрытая пара
-// маркеров — не ошибка, а обычный текст; незакрытый блок кода закрывается в конце.
-// Худшее, что может случиться, — человек на секунду увидит звёздочки. Сообщение,
-// которое Telegram отказался принять, — хуже.
+// The model gives the answer in pieces ("**Токе", "ны**"), and each piece goes to Telegram as an
+// edit. Therefore the parser must survive unfinished markup: an unclosed pair of
+// markers is not an error but ordinary text; an unclosed code block is closed at the end.
+// The worst that can happen is a person seeing asterisks for a second. A message that
+// Telegram refused to accept is worse.
 
-/** Что модели пишут как разметку: обратный слеш перед этим — штатное экранирование. */
+/** What models write as markup: a backslash before this is standard escaping. */
 const MARKDOWN_PUNCTUATION = new Set([
   '\\', '`', '*', '_', '~', '|', '[', ']', '(', ')', '#', '-', '+', '.', '!',
 ]);
 
-/** Заборка кода: ``` или ~~~, с языком или без (язык — первое слово в хвосте). */
+/** Code fence: ``` or ~~~, with or without a language (the language is the first word in the tail). */
 const FENCE = /^ {0,3}(`{3,}|~{3,})\s*(.*)$/;
-/** Заголовок: `#`, `##`, … — в Telegram их нет, изображаем жирной строкой. */
+/** Heading: `#`, `##`, … — Telegram has none, we depict them with a bold line. */
 const HEADING = /^ {0,3}#{1,6}\s+(.*)$/;
-/** Горизонтальная черта: `---`, `***`, `___` в начале строки. */
+/** Horizontal rule: `---`, `***`, `___` at the beginning of a line. */
 const DIVIDER = /^ {0,3}(?:[-*_]\s*){3,}$/;
-/** Цитата: строка начинается с `>`. */
+/** Quote: the line starts with `>`. */
 const QUOTE = /^ {0,3}>\s?/;
-/** Пункт списка: `- `, `* `, `+ ` или `1. ` / `1) ` — с отступом и без. */
+/** List item: `- `, `* `, `+ ` or `1. ` / `1) ` — with and without indentation. */
 const LIST_ITEM = /^([ \t]*)([-*+]|\d{1,3}[.)])\s+(.*)$/;
-/** Ячейка правила под шапкой таблицы: `---`, `:--`, `--:`, `:-:`. */
+/** Rule cell under the table header: `---`, `:--`, `--:`, `:-:`. */
 const TABLE_CELL_RULE = /^:?-{1,}:?$/;
-/** Чем заменить `---`: черты в HTML-режиме нет, а строка нужна. */
+/** What to replace `---` with: there is no rule in HTML mode, but the line is needed. */
 const DIVIDER_TEXT = '──────────';
 
-/** Разметка внутри маркеров: пара символов и то, во что она превращается. */
+/** Markup inside markers: a pair of characters and what it turns into. */
 type Emphasis = { marker: string; open: string; close: string };
 
 /**
- * Порядок важен: двухсимвольные маркеры разбираются раньше односимвольных, иначе
- * `**жирный**` стал бы курсивом с лишними звёздочками внутри.
+ * Order matters: two-character markers are parsed before one-character ones, otherwise
+ * `**bold**` would become italic with extra asterisks inside.
  */
 const EMPHASIS: Emphasis[] = [
   { marker: '**', open: '<b>', close: '</b>' },
@@ -59,14 +59,14 @@ const EMPHASIS: Emphasis[] = [
 const HTML_ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;' };
 
 /**
- * Экранирование текста под HTML-режим. Telegram понимает только `&lt;`, `&gt;`,
- * `&amp;` и `&quot;` — остальные именованные сущности он не знает.
+ * Escaping text for HTML mode. Telegram understands only `&lt;`, `&gt;`,
+ * `&amp;` and `&quot;` — other named entities it does not know.
  */
 export function escapeHtml(text: string): string {
   return text.replace(/[&<>]/g, (char) => HTML_ESCAPES[char] ?? char);
 }
 
-/** Текст из готового HTML: им подменяем сообщение, если Telegram отверг разметку. */
+/** Text from ready HTML: we substitute it into the message if Telegram rejected the markup. */
 export function htmlToPlain(html: string): string {
   return html
     .replace(/<[^>]*>/g, '')
@@ -77,9 +77,9 @@ export function htmlToPlain(html: string): string {
 }
 
 /**
- * Главный вход: markdown → HTML для `parse_mode: HTML`. Функция тотальна — на любом
- * входе возвращает строку, которую Telegram примет или (в крайнем случае) отвергнет,
- * но не бросает исключение посреди ответа.
+ * Main entry: markdown → HTML for `parse_mode: HTML`. The function is total — on any
+ * input it returns a string that Telegram will accept or (in the worst case) reject,
+ * but never throws an exception in the middle of the answer.
  */
 export function renderHtml(markdown: string): string {
   const lines = markdown.replace(/\r\n?/g, '\n').split('\n');
@@ -131,7 +131,7 @@ export function renderHtml(markdown: string): string {
       continue;
     }
 
-    // Пустую строку оставляем пустой: это разделитель абзацев, а не текст.
+    // We leave an empty line empty: it is a paragraph separator, not text.
     out.push(line.trim() === '' ? '' : inline(line));
     index += 1;
   }
@@ -139,22 +139,22 @@ export function renderHtml(markdown: string): string {
   return out.join('\n');
 }
 
-/** Блок кода. Незакрытая заборка — это ещё не дописанный ответ, а не ошибка. */
+/** Code block. An unclosed fence is an answer not yet finished, not an error. */
 function takeCode(lines: string[], start: number, marker: string, language: string): { html: string; next: number } {
   const body: string[] = [];
   let index = start + 1;
   while (index < lines.length) {
     const line = lines[index] ?? '';
     const close = FENCE.exec(line);
-    // Закрывающая заборка — тот же знак, без языка: «```» после «```python».
+    // The closing fence is the same sign, without a language: "```" after "```python".
     if (close && close[1]?.startsWith(marker[0] ?? '`') && (close[2] ?? '') === '') break;
     body.push(line);
     index += 1;
   }
 
   const code = escapeHtml(body.join('\n'));
-  // Язык подсветки — первое слово хвоста, и только правдоподобное: Telegram ждёт
-  // имя языка, а не фразу вроде «не язык».
+  // The highlighting language is the first word of the tail, and only a plausible one: Telegram
+  // expects a language name, not a phrase like "not a language".
   const name = language.trim().split(/\s+/)[0] ?? '';
   const tag = /^[\w+#.-]+$/.test(name)
     ? `<pre><code class="language-${name}">${code}</code></pre>`
@@ -163,7 +163,7 @@ function takeCode(lines: string[], start: number, marker: string, language: stri
   return { html: tag, next: index < lines.length ? index + 1 : index };
 }
 
-/** Цитата: подряд идущие строки с `>`. Внутри разметку разбираем как обычно. */
+/** Quote: consecutive lines with `>`. Inside, markup is parsed as usual. */
 function takeQuote(lines: string[], start: number): { html: string; next: number } {
   const body: string[] = [];
   let index = start;
@@ -177,8 +177,8 @@ function takeQuote(lines: string[], start: number): { html: string; next: number
 }
 
 /**
- * Список: подряд идущие пункты. Своего тега у Telegram нет, поэтому пункт — это
- * буллет (или номер, если человек писал нумерованный список) и отступ.
+ * List: consecutive items. Telegram has no tag of its own, so an item is a
+ * bullet (or a number, if the person wrote a numbered list) and indentation.
  */
 function takeList(lines: string[], start: number): { html: string; next: number } {
   const out: string[] = [];
@@ -191,7 +191,7 @@ function takeList(lines: string[], start: number): { html: string; next: number 
     const marker = item[2] ?? '-';
     const body = item[3] ?? '';
 
-    // Флажок задачи: `- [ ]` / `- [x]`. Своего тега тоже нет — рисуем знаком.
+    // Task checkbox: `- [ ]` / `- [x]`. There is no tag either — we draw it with a sign.
     const task = /^\[( |x|X)\]\s+(.*)$/.exec(body);
     const bullet = /^\d/.test(marker) ? `${marker.replace(/[.)]$/, '')}.` : '•';
     const text = task ? `${task[1] === ' ' ? '☐' : '☑'} ${inline(task[2] ?? '')}` : inline(body);
@@ -202,7 +202,7 @@ function takeList(lines: string[], start: number): { html: string; next: number 
   return { html: out.join('\n'), next: index };
 }
 
-/** Таблица ли это: строка с `|`, под ней линейка из `---`. */
+/** Is this a table: a line with `|`, under it a ruler of `---`. */
 function isTable(lines: string[], index: number): boolean {
   const head = lines[index] ?? '';
   const rule = lines[index + 1] ?? '';
@@ -212,8 +212,8 @@ function isTable(lines: string[], index: number): boolean {
 }
 
 /**
- * Таблица → моноширинный блок с выровненными колонками. Так она хотя бы остаётся
- * таблицей: в обычном тексте на телефоне колонки разъезжаются в кашу.
+ * Table → monospaced block with aligned columns. This way it at least remains a
+ * table: in ordinary text on a phone the columns fall apart into mush.
  */
 function takeTable(lines: string[], start: number): { html: string; next: number } {
   const body: string[] = [];
@@ -225,7 +225,7 @@ function takeTable(lines: string[], start: number): { html: string; next: number
     index += 1;
   }
 
-  // Внутри `<pre>` другая разметка не работает, поэтому из ячеек берём голый текст.
+  // Inside `<pre>` other markup does not work, so from the cells we take bare text.
   const grid = [lines[start] ?? '', ...body].map((line) =>
     splitRow(line).map((cell) => htmlToPlain(inline(cell))),
   );
@@ -245,7 +245,7 @@ function takeTable(lines: string[], start: number): { html: string; next: number
     widths.push(Math.min(28, Math.max(3, ...grid.map((row) => (row[column] ?? '').length))));
   }
 
-  // Широкая таблица в предпросмотре всё равно не влезет в экран: не растягиваем.
+  // A wide table will not fit the screen in the preview anyway: we do not stretch it.
   const total = widths.reduce((sum, width) => sum + width, 0) + 3 * (columns - 1);
   const rendered = total <= 72 ? padGrid(grid, widths, align) : grid.map((row) => row.join(' │ '));
 
@@ -273,13 +273,13 @@ function padGrid(grid: string[][], widths: number[], align: string[]): string[] 
   );
 }
 
-/** Ячейки строки таблицы: `| a | b |` → ['a', 'b']; пустые края отбрасываем. */
+/** Table row cells: `| a | b |` → ['a', 'b']; we drop empty edges. */
 function splitRow(line: string): string[] {
   const cells = line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|');
   return cells.map((cell) => cell.trim());
 }
 
-/** Разметка в строке: код, ссылки, жирный, курсив, зачёркнутый, спойлер. */
+/** Markup in a line: code, links, bold, italic, strikethrough, spoiler. */
 function inline(text: string, links = true): string {
   let out = '';
   let index = 0;
@@ -287,7 +287,7 @@ function inline(text: string, links = true): string {
   while (index < text.length) {
     const char = text[index] ?? '';
 
-    // Обратный слеш — штатное экранирование markdown: `\*` — это звёздочка, не курсив.
+    // A backslash is standard markdown escaping: `\*` is an asterisk, not italic.
     const next = text[index + 1];
     if (char === '\\' && next !== undefined && MARKDOWN_PUNCTUATION.has(next)) {
       out += escapeHtml(next);
@@ -304,8 +304,8 @@ function inline(text: string, links = true): string {
       }
     }
 
-    // Внутри подписи ссылки вторую ссылку не открываем: вложенные `<a>` Telegram
-    // не принимает и отвергает разметку целиком.
+    // Inside a link label we do not open a second link: Telegram does not accept
+    // nested `<a>` and rejects the markup entirely.
     if (links && char === '[') {
       const link = linkAt(text, index);
       if (link) {
@@ -338,7 +338,7 @@ function inline(text: string, links = true): string {
   return out;
 }
 
-/** Ссылка `[текст](адрес)`. Прочие схемы не пропускаем: `javascript:` в чате не нужен. */
+/** Link `[text](address)`. We do not allow other schemes: `javascript:` is not needed in chat. */
 function linkAt(text: string, index: number): { html: string; next: number } | null {
   const label = text.indexOf(']', index + 1);
   if (label === -1 || text[label + 1] !== '(') return null;
@@ -352,18 +352,18 @@ function linkAt(text: string, index: number): { html: string; next: number } | n
   return { html: `<a href="${href}">${inline(text.slice(index + 1, label), false)}</a>`, next: end + 1 };
 }
 
-/** Что можно поставить в конец адреса, но что адресу не принадлежит. */
+/** What can be placed at the end of an address but does not belong to it. */
 const URL_TAIL = /[?!.,:*_~]/;
-/** Парная скобка: закрывающая остаётся в адресе, только если открывающая тоже есть. */
+/** Paired bracket: the closing one stays in the address only if the opening one is also there. */
 const URL_BRACKETS: Record<string, string> = { ')': '(', ']': '[', '}': '{' };
 
 /**
- * Голый адрес в тексте: `https://…` — это ссылка, даже если модель забыла про
- * `[текст](…)`. Без этого человек видит адрес, по которому нельзя кликнуть.
+ * A bare address in the text: `https://…` is a link, even if the model forgot about
+ * `[text](…)`. Without this a person sees an address that cannot be clicked.
  */
 function urlAt(text: string, index: number): { html: string; next: number } | null {
   if (!/^https?:\/\//i.test(text.slice(index, index + 8))) return null;
-  // Внутри слова (`foohttps://…`, `field_https://…`) адрес не начинается.
+  // Inside a word (`foohttps://…`, `field_https://…`) an address does not begin.
   const before = text[index - 1];
   if (before !== undefined && /[\p{L}\p{N}_]/u.test(before)) return null;
 
@@ -377,7 +377,7 @@ function urlAt(text: string, index: number): { html: string; next: number } | nu
   return { html: `<a href="${href}">${escapeHtml(url)}</a>`, next: index + url.length };
 }
 
-/** Хвостовая пунктуация и лишние скобки — не часть ссылки: `см. https://x.com.` */
+/** Trailing punctuation and extra brackets are not part of the link: `see https://x.com.` */
 function trimUrl(raw: string): string {
   let url = raw;
   for (;;) {
@@ -399,11 +399,11 @@ function countChar(text: string, char: string): number {
   return text.split(char).length - 1;
 }
 
-/** Пара маркеров вокруг текста — если она в этой строке закрыта. */
+/** A pair of markers around text — if it is closed in this line. */
 function emphasisAt(text: string, index: number, links: boolean): { html: string; next: number } | null {
   for (const { marker, open, close } of EMPHASIS) {
     if (!text.startsWith(marker, index)) continue;
-    // `**` разбирается раньше `*`: одиночный маркер не должен открывать половину пары.
+    // `**` is parsed before `*`: a single marker must not open half a pair.
     if (marker.length === 1 && text.startsWith(marker + marker, index)) continue;
     if (!canOpen(text, index, marker)) continue;
 
@@ -418,8 +418,8 @@ function emphasisAt(text: string, index: number, links: boolean): { html: string
 }
 
 /**
- * Может ли маркер открыть разметку: за ним идёт текст, а перед ним — не буква.
- * Второе правило бережёт `snake_case` и `x_y_z` от превращения в курсив.
+ * Whether a marker can open markup: after it there is text, and before it — not a letter.
+ * The second rule saves `snake_case` and `x_y_z` from turning into italic.
  */
 function canOpen(text: string, index: number, marker: string): boolean {
   const after = text[index + marker.length];
@@ -429,14 +429,14 @@ function canOpen(text: string, index: number, marker: string): boolean {
   return true;
 }
 
-/** Может ли маркер закрыть разметку: перед ним текст, а не пробел. */
+/** Whether a marker can close markup: before it there is text, not a space. */
 function canClose(text: string, index: number): boolean {
   const before = text[index - 1];
   if (before === undefined || /\s/.test(before)) return false;
   return true;
 }
 
-/** Ищем закрывающий маркер в той же строке: код и экранирование внутри не считаем. */
+/** We look for the closing marker in the same line: we do not count code and escaping inside. */
 function findClose(text: string, from: number, marker: string): number {
   let index = from;
   while (index < text.length) {
@@ -451,7 +451,7 @@ function findClose(text: string, from: number, marker: string): number {
       continue;
     }
     if (text.startsWith(marker, index)) {
-      // Одиночный маркер не должен съесть половину двойного: `**a**` — это жирный.
+      // A single marker must not eat half of a double one: `**a**` is bold.
       const doubled = marker.length === 1 && (text[index + 1] === marker || text[index - 1] === marker);
       if (!doubled && canClose(text, index)) return index;
     }

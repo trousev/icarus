@@ -1,43 +1,43 @@
-// Панель управления: файл памяти, разобранный на записи.
+// Control panel: a memory file parsed into entries.
 //
-// Память — markdown-конспект агента, а не таблица: заголовки задают разделы, пункты
-// («- …») и есть записи, а пустые строки держат ритм. Панель показывает записи
-// строками с галочками, поэтому здесь текст превращается в список: у каждой записи
-// есть номер строки в файле (по нему её и удаляют) и дата коммита, которая эту
-// строку добавила или изменила.
+// Memory is the agent's markdown outline, not a table: headings define sections, bullets
+// («- …») are the entries, and blank lines hold the rhythm. The panel shows entries as
+// lines with checkboxes, so here the text is turned into a list: each entry has
+// a line number in the file (by which it is deleted) and the commit date that
+// added or changed that line.
 //
-// Порядок записей — как в файле. Память пишется по смыслу: сверху устойчивое, ниже
-// подробности, и пересортировка по дате разорвала бы этот порядок на глазах
-// человека, который файл и писал. Даты при этом видно — по ним и понятно, что
-// устарело.
+// The order of entries is as in the file. Memory is written by meaning: the stable stuff is
+// on top, the details below, and re-sorting by date would tear this order apart in front of
+// the person who wrote the file. The dates are still visible — from them it's clear what
+// is outdated.
 import { blameLines } from './git.ts';
 
-/** Что за строка: запись с галочкой, заголовок раздела или просто текст. */
+/** What kind of line this is: an entry with a checkbox, a section heading, or just text. */
 export type EntryKind = 'note' | 'heading' | 'text';
 
 export type MemoryEntry = {
-  /** Номер строки в файле, с единицы: по нему запись удаляют. */
+  /** Line number in the file, one-based: the entry is deleted by it. */
   line: number;
   kind: EntryKind;
-  /** Текст как в файле, вместе с ведущим «- »: в панели он читается привычно. */
+  /** Text as in the file, together with the leading «- »: in the panel it reads familiarly. */
   text: string;
-  /** День коммита, который тронул строку, — «когда запись появилась». */
+  /** Day of the commit that touched the line — «when the entry appeared». */
   date: string | null;
 };
 
 export type FileEntries = {
   path: string;
   entries: MemoryEntry[];
-  /** Сколько записей в файле всего: список в панели может быть показан не весь. */
+  /** How many entries the file has in total: the list in the panel may not show all of them. */
   total: number;
-  /** Показали не все записи — в панели об этом надо сказать, а не молчать. */
+  /** Not all entries were shown — the panel must say so instead of staying silent. */
   capped: boolean;
 };
 
-/** Сколько записей отдаём за раз: больше в панели всё равно не прочитать. */
+/** How many entries we return at once: more can't be read in the panel anyway. */
 export const ENTRIES_LIMIT = 500;
 
-/** Строка-пункт: и «- », и «* », и «+ » — markdown считает их одним и тем же. */
+/** A bullet line: both «- » and «* » and «+ » are the same to markdown. */
 const BULLET = /^\s*[-*+]\s+/;
 const HEADING = /^#{1,6}\s+/;
 
@@ -48,11 +48,11 @@ function kindOf(line: string): EntryKind {
 }
 
 /**
- * Разбирает содержимое файла на записи, подставляя даты из истории.
+ * Parses the file content into entries, substituting dates from the history.
  *
- * Даты приходят отдельным списком по индексу строки: blame — это git, а не файл, и
- * смешивать их в одной функции значило бы тащить git туда, где нужно просто чтение.
- * Нет даты (строку ещё не коммитили, файла нет в истории) — так и говорим: null.
+ * Dates arrive as a separate list by line index: blame is git, not the file, and
+ * mixing them in one function would mean dragging git where simple reading is needed.
+ * No date (the line isn't committed yet, the file isn't in the history) — we say so: null.
  */
 export function parseEntries(content: string, dates: (string | null)[] = []): {
   entries: MemoryEntry[];
@@ -60,8 +60,8 @@ export function parseEntries(content: string, dates: (string | null)[] = []): {
 } {
   const lines = content.split('\n');
   const entries: MemoryEntry[] = [];
-  // Пустой хвост от последнего \n записью не считается, но и не теряется: он просто
-  // не рисуется, как и в любом редакторе.
+  // An empty tail from the last \n doesn't count as an entry, but it isn't lost either: it just
+  // isn't drawn, as in any editor.
   const lastMeaningful = content.endsWith('\n') ? lines.length - 1 : lines.length;
 
   for (let index = 0; index < lastMeaningful; index += 1) {
@@ -75,7 +75,7 @@ export function parseEntries(content: string, dates: (string | null)[] = []): {
   return { entries, total: notes };
 }
 
-/** То же, но с датами из git: единственное место, где панель ходит в историю за текстом. */
+/** The same, but with dates from git: the only place where the panel goes into history for text. */
 export async function readEntries(dir: string, path: string, content: string): Promise<FileEntries> {
   const dates = await blameLines(dir, path);
   const parsed = parseEntries(content, dates);
@@ -88,7 +88,7 @@ export async function readEntries(dir: string, path: string, content: string): P
   };
 }
 
-/** Дата коммита как её показывает панель: 08.02.2026. В файлах даты пишут так же. */
+/** Commit date as the panel shows it: 08.02.2026. In files dates are written the same way. */
 export function formatDay(iso: string): string {
   const [year, month, day] = iso.split('-');
   return year && month && day ? `${day}.${month}.${year}` : iso;

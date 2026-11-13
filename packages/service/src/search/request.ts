@@ -1,9 +1,9 @@
-// Один HTTP-вызов провайдера: сеть, статус, тело ответа.
+// A single HTTP call to a provider: network, status, response body.
 //
-// Одинаково нужен поиску, извлечению страниц и MCP-клиенту: отличаются только
-// классификация статуса (у извлечения 404 — свойство страницы, а не поломка
-// ключа) и то, что делать с телом — разобрать как JSON или отдать строкой:
-// MCP-сервер отвечает потоком SSE.
+// Equally needed by search, page extraction and the MCP client: only the status
+// classification differs (for extraction, 404 is a property of the page, not a broken
+// key) and what to do with the body — parse it as JSON or return it as a string:
+// an MCP server replies with an SSE stream.
 import { SearchFailure, classifyFailure, type FailureKind } from './types.ts';
 
 export type RequestContext = {
@@ -11,12 +11,12 @@ export type RequestContext = {
   signal?: AbortSignal;
 };
 
-/** Как понимать HTTP-статус. По умолчанию — общие правила роутера. */
+/** How to interpret an HTTP status. By default, the router's general rules. */
 export type StatusClassifier = (status: number, body: string) => FailureKind;
 
 /**
- * Тело ответа строкой. Не-2xx — SearchFailure с куском тела: по нему роутер
- * решает, банить на пять минут или на сутки, а панель показывает причину.
+ * Response body as a string. Non-2xx means a SearchFailure with a piece of the body: from it the router
+ * decides whether to ban for five minutes or for a day, and the panel shows the reason.
  */
 export async function requestText(
   url: string,
@@ -39,7 +39,7 @@ export async function requestText(
   try {
     body = await response.text();
   } catch {
-    // Тело не дочиталось — статус уже всё сказал.
+    // The body was not fully read — the status has already said everything.
   }
   if (!response.ok) {
     throw new SearchFailure(classify(response.status, body), `HTTP ${response.status}`, {
@@ -50,7 +50,7 @@ export async function requestText(
   return body;
 }
 
-/** То же, но тело обязано быть JSON: иначе это отказ, а не пустая выдача. */
+/** The same, but the body must be JSON: otherwise it is a refusal, not an empty result. */
 export async function requestJson(
   url: string,
   init: RequestInit,

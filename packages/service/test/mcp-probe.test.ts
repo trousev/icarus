@@ -1,5 +1,5 @@
-// Проверка MCP из панели: сервер должен уметь initialize и tools/list, а 401
-// должен приезжать человеку как «нужна авторизация», а не как «сломалось».
+// MCP probe from the panel: the server must support initialize and tools/list, and a 401
+// must come to the person as "authorization needed", not as "broken".
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -38,7 +38,7 @@ function json(res: http.ServerResponse, value: unknown, headers: Record<string, 
   res.end(body);
 }
 
-test('streamable HTTP: initialize, initialized и tools/list', async () => {
+test('streamable HTTP: initialize, initialized and tools/list', async () => {
   await withMcp(
     (req, res, seen) => {
       const message = JSON.parse(seen[seen.length - 1]?.body || '{}') as { id?: number; method?: string };
@@ -86,7 +86,7 @@ test('streamable HTTP: initialize, initialized и tools/list', async () => {
   );
 });
 
-test('401 превращается в «нужна авторизация» с подсказкой resource_metadata', async () => {
+test('a 401 turns into "authorization needed" with a resource_metadata hint', async () => {
   await withMcp(
     (_req, res) => {
       res.writeHead(401, {
@@ -104,7 +104,7 @@ test('401 превращается в «нужна авторизация» с �
   );
 });
 
-test('сервер, отвечающий JSON-RPC ошибкой, не выдаёт себя за рабочий', async () => {
+test('a server responding with a JSON-RPC error does not pass itself off as working', async () => {
   await withMcp(
     (_req, res) => {
       json(res, { jsonrpc: '2.0', id: 1, error: { message: 'unsupported protocol' } });
@@ -117,7 +117,7 @@ test('сервер, отвечающий JSON-RPC ошибкой, не выда�
   );
 });
 
-test('legacy SSE: endpoint из потока, initialize и tools/list по нему', async () => {
+test('legacy SSE: endpoint from the stream, initialize and tools/list through it', async () => {
   let stream: http.ServerResponse | null = null;
   await withMcp(
     (req, res, seen) => {
@@ -161,7 +161,7 @@ test('legacy SSE: endpoint из потока, initialize и tools/list по не
   );
 });
 
-test('stdio не проверяется из сервиса: это код в контейнере', async () => {
+test('stdio is not probed from the service: it is code in the container', async () => {
   const result = await probeMcp({ server: { transport: 'stdio', command: 'node', args: ['/opt/server.mjs'] } });
   assert.equal(result.ok, false);
   assert.equal(result.unsupported, true);

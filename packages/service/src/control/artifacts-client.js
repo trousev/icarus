@@ -1,21 +1,21 @@
-// Клиент раздела «Артефакты».
+// Client of the "Artifacts" section.
 //
-// Артефакты глобальные: список один, без workspace'ов. Сервер отдаёт каркас,
-// данные приезжают сюда; состояние (открытый артефакт) живёт в адресе.
-// Права: none — не видит ничего, read — смотреть, write — менять файлы,
-// admin — права/удаление/ссылка. По умолчанию семья не видит новый артефакт.
+// Artifacts are global: a single list, no workspaces. The server serves the skeleton,
+// data arrives here; state (the open artifact) lives in the address.
+// Rights: none — sees nothing, read — view, write — change files,
+// admin — rights/delete/link. By default the family doesn't see a new artifact.
 /* global artifactMarkdown, artChatClose */
 
 const artCfg = window.__ARTIFACTS_CFG__;
 const artEl = (id) => document.getElementById(id);
 
-// Иконка «копировать» приезжает из разметки: на успех подменяем её галочкой и
-// возвращаем обратно — кнопка остаётся одной и той же.
+// The "copy" icon comes from the markup: on success we swap it for a checkmark and
+// put it back — the button stays the same.
 const ART_ICON_COPY = artEl('acl-copy')?.innerHTML ?? '';
 const ART_ICON_CHECK = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4.5 4.5L19 7"/></svg>';
 
-// Чат правки живёт отдельным скриптом и грузится следом. До него функция
-// закрытия ещё не объявлена — тогда закрывать и нечего, поэтому проверяем.
+// The edit chat lives in a separate script and loads afterwards. Before it the close
+// function isn't declared yet — then there's nothing to close, so we check.
 const closeArtifactChat = () => {
   if (typeof artChatClose === 'function') artChatClose();
 };
@@ -79,8 +79,8 @@ const artState = {
   selected: null,
   preview: null,
   deleteArmed: false,
-  // Режим выбора элемента в HTML-предпросмотре и отпечаток исходника, на
-  // котором размечены адреса: по нему сервер понимает, что ссылка устарела.
+  // Element-pick mode in the HTML preview and the fingerprint of the source on
+  // which addresses were marked up: by it the server knows the link is stale.
   pick: false,
   refsBase: null,
   selection: null,
@@ -166,16 +166,16 @@ function artMetaText(item) {
 }
 
 /**
- * Состояние панели действий. Кнопок-надписей больше нет: подпись объясняет
- * только title, поэтому доступность каждого знака считается здесь.
+ * State of the action panel. There are no text buttons anymore: the caption explains
+ * only the title, so the availability of each icon is computed here.
  */
 function artSyncActions(item, preview = false) {
   const selected = Boolean(item);
   const manage = selected && !preview && Boolean(item.canManage);
   const write = selected && Boolean(item.canWrite);
 
-  // Выбор элемента — только у HTML и только тому, кто может писать: у ссылки
-  // без права записи нет адресата, а у картинки нет элементов.
+  // Element pick — only for HTML and only for those who can write: a link
+  // without write rights has no target, and an image has no elements.
   const pick = artEl('art-pick');
   const canPick = selected && !preview && item.type === 'html' && Boolean(item.canWrite);
   pick.disabled = !canPick;
@@ -234,7 +234,7 @@ function artSyncActions(item, preview = false) {
       : 'Удалить артефакт';
 }
 
-/** Ответ сервера о новых правах: обновляем шапку и знаки, не перерисовывая просмотр. */
+/** The server's response about new rights: we update the header and icons without redrawing the view. */
 function artApplyArtifact(item) {
   if (!item) return;
   artState.selected = item;
@@ -277,15 +277,15 @@ function artRenderView(data, preview = null) {
     ? 'Версия от ' + artStamp(preview.date)
     : 'Обновлено ' + artStamp(item.updatedAt);
   artSyncActions(item, Boolean(preview));
-  // Чат правки — только тому, кто может писать: остальным он обещал бы
-  // изменение, которого сервер всё равно не разрешит.
+  // The edit chat — only for those who can write: for others it would promise a
+  // change that the server wouldn't allow anyway.
   if (!item.canWrite) closeArtifactChat();
   artCrumbs(item.title);
 
   const view = artEl('art-view');
   if (item.type === 'html') {
-    // В режиме выбора элемента тот же файл отдаётся с `?pick=1`: сервер
-    // добавляет в ответ скрипт выбора, а исходник на диске не меняется.
+    // In element-pick mode the same file is served with `?pick=1`: the server
+    // adds the pick script to the response, and the source on disk stays unchanged.
     const raw = String(item.urls.raw || '');
     const source = artState.pick && !preview
       ? raw + (raw.includes('?') ? '&' : '?') + 'pick=1'
@@ -331,9 +331,9 @@ async function artOpen(name, push = true, keepHistory = false) {
   }
   artState.artifact = name;
   artResetDelete();
-  // Другой артефакт — другие адреса: старый выбор элемента больше не годится.
+  // A different artifact — different addresses: the old element pick is no longer valid.
   artPickReset();
-  // Панели исключают друг друга: чат правки и история занимают одно место.
+  // The panels are mutually exclusive: the edit chat and history occupy the same place.
   closeArtifactChat();
   if (keepHistory) artHidePreview();
   else artHideHistory();
@@ -384,7 +384,7 @@ function artSetShareBusy(busy) {
   }
 }
 
-/** Кнопка копирования — иконка: сбрасываем её в исходный вид после показа галочки. */
+/** The copy button is an icon: we reset it to its original look after showing the checkmark. */
 function artResetCopy() {
   const button = artEl('acl-copy');
   if (!button) return;
@@ -393,7 +393,7 @@ function artResetCopy() {
   button.setAttribute('aria-label', 'Копировать ссылку');
 }
 
-/** Ссылка есть только у публичного чтения: публично писать нельзя. */
+/** A link exists only for public read: public write is not allowed. */
 function artRenderShareLink() {
   const item = artState.selected;
   const url = item?.publicId ? item.urls.public || '' : '';
@@ -428,7 +428,7 @@ function artCloseShare() {
   artEl('art-share-modal').hidden = true;
 }
 
-/** Права изменились настолько, что артефакт больше не наш: закрываем и чистим. */
+/** The rights changed so much that the artifact is no longer ours: we close and clear. */
 function artLostAccess() {
   artCloseShare();
   artState.artifact = null;
@@ -517,7 +517,7 @@ async function artCopyLink() {
   }, 2000);
 }
 
-/** Удаление без confirm(): первый клик взводит корзину, второй — удаляет. */
+/** Deletion without confirm(): the first click arms the trash, the second deletes. */
 function artResetDelete() {
   artState.deleteArmed = false;
   const button = artEl('art-delete');
@@ -561,7 +561,7 @@ async function artDelete() {
   }
 }
 
-/** Выключить выбор элемента: режим живёт только пока открыт HTML-предпросмотр. */
+/** Turn off element pick: the mode lives only while the HTML preview is open. */
 function artPickReset() {
   artState.pick = false;
   artState.refsBase = null;
@@ -569,7 +569,7 @@ function artPickReset() {
   if (button) button.setAttribute('aria-pressed', 'false');
 }
 
-/** Перечитать открытый артефакт, не закрывая чат и историю. */
+/** Re-read the open artifact without closing the chat and history. */
 async function artRefresh() {
   const name = artState.artifact;
   if (!name) return;
@@ -578,9 +578,9 @@ async function artRefresh() {
 }
 
 /**
- * Выбор элемента: перед включением просим сервер разметить исходник.
- * Разметка идемпотентна, а `refsBase` — отпечаток ровно того файла, который
- * сейчас в предпросмотре: с ним правка не затрёт чужую, более новую версию.
+ * Element pick: before enabling it we ask the server to mark up the source.
+ * The markup is idempotent, and `refsBase` is the fingerprint of exactly the file
+ * currently in the preview: with it an edit won't overwrite someone else's newer version.
  */
 async function artTogglePick() {
   const item = artState.selected;
@@ -611,7 +611,7 @@ async function artTogglePick() {
   }
 }
 
-/** Ответ из iframe: выбран элемент или человек поправил его текст. */
+/** Response from the iframe: an element was picked or the person fixed its text. */
 function artPickHandle(data) {
   if (!data || typeof data !== 'object') return;
   if (data.type === 'ref' && typeof data.ref === 'string') {
@@ -635,7 +635,7 @@ function artPickHandle(data) {
   }
 }
 
-/** Сказать iframe, что сохранить не вышло: он вернёт текст, который был. */
+/** Tell the iframe that saving failed: it will restore the text that was there. */
 function artPickRestore(message) {
   const frame = document.querySelector('.art-frame');
   if (!frame || !frame.contentWindow) return;
@@ -646,8 +646,8 @@ function artPickRestore(message) {
 }
 
 /**
- * Сохранить текст элемента в исходник. Пишет сервер: файл и коммит в истории
- * делает он же, чтобы панель не держала второй путь записи артефактов.
+ * Save the element text into the source. The server writes: it makes the file and
+ * the commit in history, so the panel doesn't hold a second artifact-write path.
  */
 async function artSaveText(ref, text) {
   const name = artState.artifact;
@@ -675,9 +675,9 @@ function artPickListen(event) {
   artPickHandle(data);
 }
 
-// Скрипт раздела — классический script, поэтому функции и так глобальные.
-// Явное присваивание нужно тестам и странице: по нему видно, что это вход
-// из iframe, а не случайная утечка.
+// The section script is a classic script, so the functions are global anyway.
+// The explicit assignment is needed by tests and the page: it shows that this is
+// an entry point from the iframe, not an accidental leak.
 window.artPickHandle = artPickHandle;
 
 function artHistoryLabel(subject) {
@@ -838,7 +838,7 @@ async function artRestorePreview() {
   }
 }
 
-/** Числа у остальных разделов приходят с сервера: клиент их только расставляет. */
+/** The numbers for the other sections come from the server: the client only places them. */
 function artFillCounts() {
   for (const [id, value] of Object.entries(artCfg.counts || {})) {
     const node = artEl('count-' + (id === 'personal' ? 'memory' : id));

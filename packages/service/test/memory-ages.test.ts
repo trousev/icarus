@@ -1,6 +1,6 @@
-// Возраст факта при чтении: ядро памяти помечает пункты месяцем из git-истории
-// памяти (`- [2026-03] текст`). Проверяем на временном git-репозитории: месяц берётся
-// у автора строки, текст не меняется, а без git память читается как раньше.
+// Age of a fact at read time: the memory core marks items with the month from the memory's
+// git history (`- [2026-03] text`). We check on a temporary git repository: the month is taken
+// from the line's author, the text does not change, and without git the memory is read as before.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -11,7 +11,7 @@ import { annotateAges, buildMemoryCore, clearMemoryAges } from '../../extensions
 
 const hasGit = spawnSync('git', ['--version'], { encoding: 'utf8' }).status === 0;
 
-/** Тесты про git пропускаем только там, где git действительно нет. */
+/** We skip git tests only where git really is absent. */
 function ageTest(name: string, fn: () => void): void {
   test(name, { skip: hasGit ? false : 'git недоступен' }, fn);
 }
@@ -29,13 +29,13 @@ function tempRepo(): string {
   return dir;
 }
 
-/** Коммит с заданной датой автора и коммиттера — так blame отдаёт нужный месяц. */
+/** A commit with the given author and committer date — this is how blame returns the needed month. */
 function commitAt(root: string, iso: string, message: string): void {
   git(root, ['add', '-A']);
   git(root, ['commit', '-m', message], { GIT_AUTHOR_DATE: iso, GIT_COMMITTER_DATE: iso });
 }
 
-ageTest('ядро помечает пункты месяцем из git-истории', () => {
+ageTest('the core marks items with the month from git history', () => {
   const root = tempRepo();
   fs.writeFileSync(path.join(root, 'identity.md'), '# Кто это\n- Зовут Саня\n- Работает в банке\n');
   commitAt(root, '2026-03-15T12:00:00+00:00', 'memory: март');
@@ -47,7 +47,7 @@ ageTest('ядро помечает пункты месяцем из git-исто
   assert.doesNotMatch(core, /\[2026-03\] Кто это/, 'заголовки не пункты — метки у них нет');
 });
 
-ageTest('текст пункта при аннотации не меняется', () => {
+ageTest('the text of an item does not change during annotation', () => {
   const root = tempRepo();
   const original = '- Пьёт сенчу (его слова: «пью сенчу»)\n';
   fs.writeFileSync(path.join(root, 'identity.md'), original);
@@ -58,11 +58,11 @@ ageTest('текст пункта при аннотации не меняется
     .split('\n')
     .find((row) => row.includes('сенчу'));
   assert.equal(line, '- [2026-03] Пьёт сенчу (его слова: «пью сенчу»)');
-  // Снимаем метку — получаем исходный текст строки до символа.
+  // Remove the mark — get the original text of the line down to the character.
   assert.equal(line?.replace(/^(\s*[-*]\s+)\[\d{4}-\d{2}\] /, '$1'), original.trim());
 });
 
-ageTest('месяц берётся у каждой строки своя', () => {
+ageTest('the month is taken per line, its own for each', () => {
   const root = tempRepo();
   fs.writeFileSync(path.join(root, 'identity.md'), '- Зовут Саня\n- Работает в банке\n');
   commitAt(root, '2026-03-15T12:00:00+00:00', 'memory: март');
@@ -75,7 +75,7 @@ ageTest('месяц берётся у каждой строки своя', () =>
   assert.match(core, /- \[2026-06\] Работает в банке, в IT/);
 });
 
-ageTest('люди и проекты тоже получают метку, когда их читают', () => {
+ageTest('people and projects also get a mark when they are read', () => {
   const root = tempRepo();
   fs.mkdirSync(path.join(root, 'people'), { recursive: true });
   fs.mkdirSync(path.join(root, 'projects'), { recursive: true });
@@ -84,14 +84,14 @@ ageTest('люди и проекты тоже получают метку, ког
   commitAt(root, '2026-03-15T12:00:00+00:00', 'memory: март');
   clearMemoryAges();
 
-  // В ядре их нет — их читают по индексу. Метка всё равно считается по git-истории.
+  // They are not in the core — they are read by index. The mark is still computed from git history.
   const people = annotateAges(path.join(root, 'people/маша.md'), fs.readFileSync(path.join(root, 'people/маша.md'), 'utf8'));
   const projects = annotateAges(path.join(root, 'projects/дом.md'), fs.readFileSync(path.join(root, 'projects/дом.md'), 'utf8'));
   assert.match(people, /- \[2026-03\] Сестра, живёт в Порту/);
   assert.match(projects, /- \[2026-03\] Строит дом/);
 });
 
-ageTest('незакоммиченная строка остаётся без метки, соседние — с меткой', () => {
+ageTest('an uncommitted line stays without a mark, the neighbouring ones — with a mark', () => {
   const root = tempRepo();
   fs.writeFileSync(path.join(root, 'identity.md'), '- Зовут Саня\n');
   commitAt(root, '2026-03-15T12:00:00+00:00', 'memory: март');
@@ -103,7 +103,7 @@ ageTest('незакоммиченная строка остаётся без м�
   assert.match(core, /^- Любит собак$/m, 'у незакоммиченной строки даты нет');
 });
 
-ageTest('память меняется — метки обновляются, промпт пересобирается', () => {
+ageTest('memory changes — the marks update, the prompt is rebuilt', () => {
   const root = tempRepo();
   fs.writeFileSync(path.join(root, 'identity.md'), '- Зовут Саня\n');
   commitAt(root, '2026-03-15T12:00:00+00:00', 'memory: март');
@@ -116,7 +116,7 @@ ageTest('память меняется — метки обновляются, п
   assert.match(updated, /- \[2026-06\] Любит собак/, 'новый факт получил свой месяц');
 });
 
-ageTest('пока память не менялась, ядро отдаёт то же самое', () => {
+ageTest('while the memory has not changed, the core returns the same thing', () => {
   const root = tempRepo();
   fs.writeFileSync(path.join(root, 'identity.md'), '- Зовут Саня\n');
   commitAt(root, '2026-03-15T12:00:00+00:00', 'memory: март');
@@ -125,7 +125,7 @@ ageTest('пока память не менялась, ядро отдаёт то
   assert.equal(buildMemoryCore(root), buildMemoryCore(root), 'метка не должна «плыть» между ходами');
 });
 
-test('без git-репозитория текст читается без метки', () => {
+test('without a git repository the text is read without a mark', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-nogit-'));
   fs.writeFileSync(path.join(root, 'identity.md'), '- Зовут Саня\n');
   clearMemoryAges();
@@ -135,7 +135,7 @@ test('без git-репозитория текст читается без ме�
   assert.doesNotMatch(core, /\[\d{4}-\d{2}\]/, 'метку выдумывать не из чего');
 });
 
-test('аннотация не трогает заголовки и строки без списка', () => {
+test('annotation does not touch headings and non-list lines', () => {
   const root = tempRepo();
   fs.writeFileSync(path.join(root, 'identity.md'), '# Кто это\nЗовут Саня\n- Работает в банке\n');
   commitAt(root, '2026-03-15T12:00:00+00:00', 'memory: март');

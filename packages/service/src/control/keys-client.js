@@ -1,5 +1,5 @@
-// Клиент раздела «Ключи». Живёт отдельным файлом, как MCP: в TypeScript не нужно
-// экранировать бэктики и скобки, а браузер получает тот же JS и локально, и на проде.
+// Client of the "Keys" section. Lives in a separate file, like MCP: in TypeScript there is no need
+// to escape backticks and braces, and the browser gets the same JS both locally and in prod.
 (function () {
   'use strict';
   const cfg = window.__KEYS_CFG__ || {};
@@ -8,7 +8,7 @@
   const esc = (value) =>
     String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 
-  // Русское склонение: «1 отказ», «2 отказа», «5 отказов».
+  // Russian plural form: "1 отказ", "2 отказа", "5 отказов".
   const plural = (n, one, few, many) => {
     const mod10 = n % 10;
     const mod100 = n % 100;
@@ -68,10 +68,10 @@
     return '<span class="pill ' + cls + '">' + esc(text) + '</span>';
   }
 
-  // --- поисковый роутер -------------------------------------------------------
-  // Над списком ключей — короткая сводка: кто сейчас отвечает, кто в карантине
-  // и у кого «ключ сломан». Кнопка «Проверить» делает настоящий поиск: успех
-  // снимает карантин, отказ ставит заново.
+  // --- search router -----------------------------------------------------------
+  // Above the key list — a short summary: who is answering now, who is in quarantine,
+  // and who has a "broken key". The "Check" button does a real search: success
+  // clears the quarantine, a failure sets it again.
 
   function untilText(iso) {
     const stamp = new Date(iso).getTime();
@@ -84,14 +84,14 @@
   }
 
   function searchPill(provider) {
-    // Бесплатный провайдер: «без ключа» уже написано в колонке ключа, статус
-    // должен говорить о работе, а не повторять это же слово.
+    // Free provider: "keyless" is already written in the key column, the status
+    // should talk about work, not repeat the same word.
     if (provider.keyless) {
       return provider.present
         ? '<span class="pill own">работает</span>'
         : '<span class="pill none">выключен</span>';
     }
-    // Ключа нет, но его отсутствие ничего не ломает — есть бесплатный двойник.
+    // No key, but its absence breaks nothing — there is a free twin.
     if (provider.optional) return '<span class="pill env">необязателен</span>';
     if (!provider.present) return '<span class="pill none">нет ключа</span>';
     if (provider.broken) return '<span class="pill off">ключ сломан</span>';
@@ -99,7 +99,7 @@
     return '<span class="pill own">работает</span>';
   }
 
-  /** Сколько ключ отдал за окно статистики: успехи и отказы. */
+  /** How much the key gave over the stats window: successes and failures. */
   function usageLine(provider) {
     const usage = provider.usage || { ok: 0, fail: 0 };
     const days = (data && data.search && data.search.usage && data.search.usage.days) || 7;
@@ -123,7 +123,7 @@
     const fails = provider.fails > 0
       ? '<span class="keys-apply">отказов подряд: ' + provider.fails + '</span>'
       : '';
-    // Провайдеру без ключа нечего задавать: вместо кнопки — только проверка.
+    // A keyless provider has nothing to set: instead of a button — only a check.
     const edit = provider.keyless
       ? ''
       : '<button class="btn primary" data-edit-key="' + esc(provider.keyName) + '">' +
@@ -149,9 +149,9 @@
   }
 
   /**
-   * Сводка роутера: заголовок, вступление и строки провайдеров.
-   * Одна и та же разметка для поиска и для извлечения страниц: отличаются
-   * только набор провайдеров, рейтинг и текст вступления.
+   * Router summary: title, intro and provider rows.
+   * The same markup for search and for page extraction: only the set of
+   * providers, the ranking and the intro text differ.
    */
   function routingSection(title, intro, status, capability) {
     if (!status || !status.providers || status.providers.length === 0) return '';
@@ -276,8 +276,8 @@
 
     box.querySelectorAll('[data-edit-key]').forEach((button) => {
       button.onclick = () => {
-        // Форма живёт в строке ключа ниже: открываем её и подводим к ней экран,
-        // чтобы «Задать» из сводки не выглядел кнопкой в пустоту.
+        // The form lives in the key row below: we open it and scroll the screen to it,
+        // so that "Set" from the summary doesn't look like a button into the void.
         editing = button.dataset.editKey;
         pendingRemove = null;
         renderList();
@@ -435,7 +435,7 @@
     };
   }
 
-  // «Перечитать» — для правок .env руками: файл мог поменять человек или деплой.
+  // "Reload" — for manual .env edits: the file could have been changed by a person or a deploy.
   const reloadButton = el('keys-reload-button');
   if (reloadButton) {
     reloadButton.onclick = async () => {

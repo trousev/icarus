@@ -1,8 +1,8 @@
-// Живой ход переживает уход зрителя: накопление событий, догон и закрытие.
+// A live turn survives the viewer leaving: event accumulation, catch-up and close.
 //
-// Проверяем ровно тот случай, ради которого hub и появился: панель закрыли
-// посреди ответа (F5), ход продолжил идти, а вернувшаяся панель догнала его
-// целиком — с размышлениями и шагами, а не только с итогом.
+// We check exactly the case the hub was created for: the panel was closed
+// in the middle of an answer (F5), the turn kept going, and the returned panel
+// caught up with it entirely — with reasoning and steps, not just the result.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -17,7 +17,7 @@ import {
   type LiveEvent,
 } from '../src/control/chat-live.ts';
 
-test('события копятся, даже когда зрителя нет', () => {
+test('events accumulate even when there is no viewer', () => {
   const turn = startTurn('probe', 'web-1');
   emit(turn, { type: 'text', text: 'И' });
   emit(turn, { type: 'text', text: 'кар' });
@@ -25,26 +25,26 @@ test('события копятся, даже когда зрителя нет',
 
   assert.equal(turn.events.length, 3);
   assert.equal(liveTurn('probe', 'web-1'), turn);
-  // Чужой разговор — чужой ход: ключ не должен течь между людьми.
+  // Someone else's conversation is someone else's turn: the key must not leak between people.
   assert.equal(liveTurn('probe', 'web-2'), undefined);
   assert.equal(liveTurn('vita', 'web-1'), undefined);
 });
 
-test('вернувшийся зритель получает всё накопленное и дальше живое', () => {
+test('a returning viewer gets everything accumulated and then the live stream', () => {
   const turn = startTurn('probe', 'web-1');
   const ушёл: LiveEvent[] = [];
   const отписка = subscribe(turn, (event) => ушёл.push(event));
 
-  // Ход идёт: зритель №1 видит первое сообщение…
+  // The turn is in progress: viewer #1 sees the first message…
   emit(turn, { type: 'text', text: 'раз' });
   assert.deepEqual(ушёл, [{ type: 'text', text: 'раз' }]);
 
-  // …потом жмёт F5: отписываемся, как это делает закрытый HTTP-ответ.
+  // …then presses F5: we unsubscribe, as a closed HTTP response does.
   отписка();
   emit(turn, { type: 'text', text: 'два' });
   emit(turn, { type: 'text', text: 'три' });
 
-  // Панель открылась заново и цепляется к потоку: сначала догон, потом живое.
+  // The panel reopened and attaches to the stream: first catch-up, then live.
   const догнал: LiveEvent[] = [];
   const отписка2 = subscribe(turn, (event) => догнал.push(event));
 
@@ -66,15 +66,15 @@ test('вернувшийся зритель получает всё накопл
   отписка2();
 });
 
-test('завершённый ход без зрителей не висит в памяти вечно', async () => {
+test('a finished turn without viewers does not hang in memory forever', async () => {
   const turn = startTurn('probe', 'web-1');
   emit(turn, { type: 'done' });
   finishTurn(turn);
-  // Ход завершён, зрителей нет, но минута ещё не прошла — держим для догона.
+  // The turn is finished, there are no viewers, but a minute has not passed yet — we keep it for catch-up.
   assert.equal(liveTurn('probe', 'web-1'), turn);
 });
 
-test('чужой сбой подписчика не рвёт ход остальным', () => {
+test('someone else\'s subscriber failure does not break the turn for the others', () => {
   const turn = startTurn('probe', 'web-1');
   const дошло: LiveEvent[] = [];
   subscribe(turn, () => {
@@ -86,11 +86,11 @@ test('чужой сбой подписчика не рвёт ход осталь
   assert.deepEqual(дошло, [{ type: 'text', text: 'жив' }]);
 });
 
-test('сводка рассказывает про ходы во всех разговорах сразу', () => {
+test('the bulletin reports turns across all conversations at once', () => {
   const слышал: BulletinEvent[] = [];
   const отписка = watchAll((event) => слышал.push(event));
 
-  // Два разговора в работе одновременно — ради этого сводка и заведена.
+  // Two conversations in progress at the same time — this is what the bulletin was made for.
   broadcast({ userId: 'probe', chatId: 'web-1', type: 'busy' });
   broadcast({ userId: 'probe', chatId: 'web-2', type: 'busy' });
   broadcast({ userId: 'probe', chatId: 'web-1', type: 'idle', chat: { id: 'web-1' } });
@@ -110,7 +110,7 @@ test('сводка рассказывает про ходы во всех раз
   assert.equal(слышал.length, 3, 'отписанный больше ничего не слышит');
 });
 
-test('сорвавшийся слушатель сводки не глушит остальных', () => {
+test('a failed bulletin listener does not silence the others', () => {
   const дошло: BulletinEvent[] = [];
   const убрать = watchAll(() => {
     throw new Error('слушатель сломался');

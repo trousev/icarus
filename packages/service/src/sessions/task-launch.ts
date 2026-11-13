@@ -1,16 +1,16 @@
-// Запуск задачи по расписанию: новый разговор и промпт в него — тем же путём, что и
-// реплика из панели (SessionRegistry), только человек ничего не нажимает.
+// Launching a scheduled task: a new conversation and a prompt into it — the same way as
+// a panel reply (SessionRegistry), only the person presses nothing.
 //
-// Новый разговор — обычный чат, а не служебный тред: он появляется в списке, его можно
-// открыть, продолжить и убрать в архив. Заголовок берём из промпта сразу: человек
-// видит в списке, что именно запустилось, ещё до первого слова модели.
+// The new conversation is an ordinary chat, not a service thread: it appears in the list,
+// can be opened, continued and archived. We take the title from the prompt right away: the
+// person sees in the list what exactly launched, even before the model's first word.
 import { DEFAULT_WORKSPACE, type IcarusConfig, type UserConfig } from '../config.ts';
 import { log, redact } from '../log.ts';
 import { createChatRecord, recordTurn } from './chats.ts';
 import type { SessionRegistry } from './registry.ts';
 import type { TaskLauncher } from './scheduled.ts';
 
-/** Заголовок разговора: первая строка промпта — в списке видно, что запустилось. */
+/** Conversation title: the first line of the prompt — the list shows what launched. */
 function titleFor(prompt: string): string {
   const line = (prompt.split('\n')[0] ?? '').replace(/\s+/g, ' ').trim();
   return line.length > 60 ? `${line.slice(0, 59).trimEnd()}…` : line;
@@ -18,16 +18,17 @@ function titleFor(prompt: string): string {
 
 export function taskLauncher(config: IcarusConfig, registry: SessionRegistry): TaskLauncher {
   return {
-    // Занят — значит идёт ход или сжатие: второй агент в том же контейнере человеку
-    // не нужен, а запуск подождёт (см. ScheduledTasks).
+    // Busy means a turn or compaction is in progress: a person doesn't need a second
+    // agent in the same container, and the launch will wait (see ScheduledTasks).
     busy: (user: UserConfig) => registry.busyConversations(user.id).length > 0,
     launch: async (user, task) => {
       const workspace = task.workspace ?? DEFAULT_WORKSPACE;
       const chat = createChatRecord(config, user, workspace, new Date(), { title: titleFor(task.prompt) });
       const chatId = chat.conversationId ?? chat.id;
       try {
-        // Реестр заводит сессию pi в этом разговоре; промпт уезжает в неё как обычная
-        // реплика. Ответ агент допишет в файл сессии, и панель покажет его в чате.
+        // The registry brings up a pi session in this conversation; the prompt goes into
+        // it as an ordinary reply. The agent will append the answer to the session file,
+        // and the panel will show it in the chat.
         const session = await registry.acquire(user, chatId, workspace);
         recordTurn(config, user, chatId, 'web');
         await session.prompt(task.prompt);

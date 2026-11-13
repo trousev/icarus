@@ -1,8 +1,8 @@
-// Панель артефактов и публичный просмотр: HTTP-часть.
+// Artifact panel and public viewing: the HTTP part.
 //
-// Артефакты глобальные: один каталог на инсталляцию, один список в панели.
-// Права проверяются на каждом действии: read — смотреть, write — менять файлы,
-// admin — права, удаление и публичная ссылка. Владелец управляет своим всегда.
+// Artifacts are global: one directory per installation, one list in the panel.
+// Permissions are checked on every action: read — view, write — change files,
+// admin — permissions, deletion, and the public link. The owner always controls their own.
 import fs from 'node:fs';
 import path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -118,7 +118,7 @@ function decode(value: string | undefined): string {
   }
 }
 
-/** Исходник артефакта пишем через временный файл: половину HTML читать нельзя. */
+/** We write the artifact source through a temporary file: reading a half-written HTML is not allowed. */
 function writeSource(file: string, content: string): void {
   const temporary = `${file}.${process.pid}.${Date.now().toString(36)}.tmp`;
   fs.writeFileSync(temporary, content, { mode: 0o644 });
@@ -134,14 +134,14 @@ function entrySource(read: { artifact: Artifact; dir: string }): { file: string;
 }
 
 /**
- * Скрипт выбора элемента живёт только в ответе предпросмотра: HTML на диске
- * остаётся чистым, а песочница iframe не даёт ему дотянуться до панели.
+ * The element picker script lives only in the preview response: the HTML on disk
+ * stays clean, and the iframe sandbox keeps it from reaching the panel.
  */
 function injectPicker(html: string): string {
   return `${html}\n<!-- Icarus: выбор элемента. Это ответ панели, файл на диске не меняется. -->\n<script>${PICK_CLIENT}</script>\n`;
 }
 
-/** Глобальный список, чтение, права, ссылки и удаление. */
+/** Global list, reading, permissions, links, and deletion. */
 export async function handleArtifactsApi(
   req: IncomingMessage,
   res: ServerResponse,
@@ -223,8 +223,8 @@ export async function handleArtifactsApi(
   }
   const artifact = typeof body.artifact === 'string' ? body.artifact : '';
 
-  // Адреса элементов: проставляем data-icarus-ref в исходник. Идемпотентно —
-  // повторное открытие предпросмотра новых версий не плодит.
+  // Element addresses: we add data-icarus-ref to the source. Idempotent —
+  // reopening the preview doesn't spawn new versions.
   if (route === 'refs') {
     try {
       const read = readArtifact(config, userId, artifact);
@@ -251,8 +251,8 @@ export async function handleArtifactsApi(
     return;
   }
 
-  // Правка текста выбранного элемента: base защищает от гонки с ИИ, который
-  // мог переписать файл, пока человек набирал строку.
+  // Editing the text of the selected element: base protects against a race with the AI, which
+  // could have rewritten the file while the person was typing the line.
   if (route === 'text') {
     const ref = typeof body.ref === 'string' ? body.ref : '';
     const text = typeof body.text === 'string' ? body.text : '';
@@ -287,8 +287,8 @@ export async function handleArtifactsApi(
     return;
   }
 
-  // Чат правки: один разговор на артефакт. Дальше клиент работает обычными
-  // маршрутами /panel/api/chat/* — заводить второй протокол незачем.
+  // Edit chat: one conversation per artifact. After that the client uses the ordinary
+  // /panel/api/chat/* routes — there's no point starting a second protocol.
   if (route === 'chat') {
     const user = findUser(config, userId);
     if (!user) {
@@ -378,8 +378,8 @@ export async function handleArtifactsApi(
 }
 
 /**
- * Файл артефакта: `/panel/artifacts/raw/<артефакт>/<путь>`. Путь, а не query,
- * чтобы относительные стили и картинки внутри HTML разрешались сами.
+ * Artifact file: `/panel/artifacts/raw/<artifact>/<path>`. A path, not a query,
+ * so relative styles and images inside HTML resolve on their own.
  */
 export function handleArtifactsRaw(
   req: IncomingMessage,
@@ -405,8 +405,8 @@ export function handleArtifactsRaw(
     json(res, 404, errorBody('файл не найден или недоступен', 'not_found'));
     return;
   }
-  // Предпросмотр с выбором элемента: тот же адрес файла, поэтому относительные
-  // стили и картинки не ломаются, но в ответ добавляется скрипт выбора.
+  // Preview with element picking: the same file address, so relative
+  // styles and images don't break, but the picker script is added to the response.
   if (url.searchParams.get('pick') === '1' && found.type.includes('text/html')) {
     let source: string;
     try {
@@ -426,8 +426,8 @@ export function handleArtifactsRaw(
 }
 
 /**
- * Файл конкретной версии: ассеты внутри предпросмотра HTML и картинки.
- * `/panel/artifacts/version/<артефакт>/<commit>/<путь>`.
+ * A file of a specific version: assets inside the HTML preview and images.
+ * `/panel/artifacts/version/<artifact>/<commit>/<path>`.
  */
 export async function handleArtifactsVersionRaw(
   req: IncomingMessage,
@@ -462,10 +462,10 @@ export async function handleArtifactsVersionRaw(
 }
 
 /**
- * Публичный просмотр: `/a/<артефакт>/<publicId>/…`.
- * Старые ссылки `/a/<человек>/<workspace>/<артефакт>/<id>/…` уводим на новый
- * адрес: так уже отправленные ссылки не умирают, а относительные картинки
- * продолжают считаться от правильного каталога.
+ * Public viewing: `/a/<artifact>/<publicId>/…`.
+ * Old links `/a/<person>/<workspace>/<artifact>/<id>/…` are redirected to the new
+ * address: that way links already sent don't die, and relative images
+ * keep resolving from the right directory.
  */
 export async function handlePublicArtifact(
   req: IncomingMessage,
@@ -484,12 +484,12 @@ export async function handlePublicArtifact(
   let publicId = decode(parts[1]);
   let asset = parts.slice(2).map(decode).join('/');
 
-  // Сначала новая схема: /a/<slug>/<publicId>/<asset…>. Иначе вложенный ассет
-  // (css/style.css) выглядел бы как старый адрес с четырьмя сегментами.
+  // The new scheme first: /a/<slug>/<publicId>/<asset…>. Otherwise a nested asset
+  // (css/style.css) would look like an old address with four segments.
   let found = publicArtifact(config, slug, publicId);
   let oldRoute = false;
   if (!found) {
-    // Старая схема: /a/<user>/<workspace>/<slug>/<id>/...
+    // Old scheme: /a/<user>/<workspace>/<slug>/<id>/...
     if (parts.length >= 4 && parts[2] && parts[3]) {
       slug = decode(parts[2]);
       publicId = decode(parts[3]);
@@ -566,7 +566,7 @@ export async function handlePublicArtifact(
   return true;
 }
 
-/** «Без панели»: HTML и картинка — сами файлы, markdown — отдельная страница. */
+/** "Without the panel": HTML and an image are the files themselves, markdown is a separate page. */
 function serveBare(
   req: IncomingMessage,
   res: ServerResponse,
@@ -648,8 +648,8 @@ function escapeTitle(value: string): string {
   return value.replace(/[&<>"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[char] ?? char);
 }
 
-/** Код markdown-рендера для «без панели»: тот же файл, что у панели. */
+/** Markdown render code for "without the panel": the same file as the panel's. */
 const MARKDOWN_CLIENT_FOR_BARE = fs.readFileSync(new URL('./artifacts-markdown.js', import.meta.url), 'utf8');
 
-/** Скрипт выбора элемента: вставляется в HTML только в ответе предпросмотра. */
+/** The element picker script: injected into HTML only in the preview response. */
 const PICK_CLIENT = fs.readFileSync(new URL('./artifacts-pick.js', import.meta.url), 'utf8');

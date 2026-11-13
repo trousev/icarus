@@ -1,4 +1,4 @@
-// Веб-поиск: разбор выдачи провайдеров, превращение HTML в текст и честные отказы.
+// Web search: parsing provider results, turning HTML into text and honest refusals.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -11,7 +11,7 @@ import {
   parseTavily,
 } from '../../extensions/web-search.ts';
 
-test('скрипты и стили выкидываются, абзацы сохраняются', () => {
+test('scripts and styles are dropped, paragraphs are preserved', () => {
   const html = `<html><head><style>p{color:red}</style><script>alert(1)</script></head>
     <body><h1>Заголовок</h1><p>Первый абзац</p><p>Второй &amp; последний</p></body></html>`;
   const text = htmlToText(html);
@@ -22,7 +22,7 @@ test('скрипты и стили выкидываются, абзацы сох
   assert.ok(text.split('\n').length >= 3, 'абзацы должны разъехаться по строкам');
 });
 
-test('выдача Tavily разбирается: заголовок, ссылка и выдержка одной строкой', () => {
+test('Tavily results are parsed: title, link and snippet on one line', () => {
   const payload = {
     query: 'лиссабон',
     results: [
@@ -38,7 +38,7 @@ test('выдача Tavily разбирается: заголовок, ссылк
   ]);
 });
 
-test('длинная выдержка Tavily обрезается, а не ломает список', () => {
+test('a long Tavily snippet is truncated instead of breaking the list', () => {
   const long = 'мысль '.repeat(300);
   const [first] = parseTavily({ results: [{ title: 'T', url: 'https://t.dev', content: long }] });
 
@@ -48,7 +48,7 @@ test('длинная выдержка Tavily обрезается, а не ло�
   assert.match(first.snippet, /…$/, 'обрезанную выдержку видно по многоточию');
 });
 
-test('выдача Tavily уважает limit', () => {
+test('Tavily results respect the limit', () => {
   const payload = {
     results: [
       { title: 'A', url: 'https://a.dev', content: 'первый' },
@@ -59,13 +59,13 @@ test('выдача Tavily уважает limit', () => {
   assert.deepEqual(parseTavily(payload, 1), [{ title: 'A', url: 'https://a.dev', snippet: 'первый' }]);
 });
 
-test('пустая и битая выдача Tavily не ломает разбор', () => {
+test('an empty and broken Tavily response does not break parsing', () => {
   assert.deepEqual(parseTavily(null), []);
   assert.deepEqual(parseTavily({ results: 'нет' }), []);
   assert.deepEqual(parseTavily({ results: [] }), []);
 });
 
-test('выдача SearXNG и Brave разбирается в общий вид', () => {
+test('SearXNG and Brave results are parsed into a common shape', () => {
   const searx = parseSearxng({ results: [{ title: 'A', url: 'https://a.dev', content: 'описание' }] });
   assert.deepEqual(searx, [{ title: 'A', url: 'https://a.dev', snippet: 'описание' }]);
 
@@ -73,13 +73,13 @@ test('выдача SearXNG и Brave разбирается в общий вид'
   assert.deepEqual(brave, [{ title: 'B', url: 'https://b.dev', snippet: 'жирно' }]);
 });
 
-test('пустая и битая выдача SearXNG и Brave не ломает разбор', () => {
+test('an empty and broken SearXNG and Brave response does not break parsing', () => {
   assert.deepEqual(parseSearxng(null), []);
   assert.deepEqual(parseSearxng({ results: 'нет' }), []);
   assert.deepEqual(parseBrave({}), []);
 });
 
-test('выдача сервисного роутера разбирается как обычные результаты', () => {
+test('service router results are parsed like ordinary results', () => {
   const payload = {
     query: 'лиссабон',
     provider: 'serpapi',
@@ -98,7 +98,7 @@ test('выдача сервисного роутера разбирается к
   assert.equal(parseRouter(payload, 1).length, 1);
 });
 
-test('ответ роутера говорит, кто ответил и кого обошли', () => {  assert.deepEqual(parseRouterMeta({ provider: 'brave', results: [] }), { upstream: 'brave' });
+test('the router response says who answered and who was skipped', () => {  assert.deepEqual(parseRouterMeta({ provider: 'brave', results: [] }), { upstream: 'brave' });
   assert.deepEqual(
     parseRouterMeta({
       provider: 'tavily',
@@ -115,13 +115,13 @@ test('ответ роутера говорит, кто ответил и ког�
       ],
     },
   );
-  // Обычный ответ без метаданных не должен притворяться роутерным.
+  // An ordinary response without metadata must not pretend to be from the router.
   assert.deepEqual(parseRouterMeta({ results: [] }), {});
   assert.deepEqual(parseRouterMeta(null), {});
   assert.deepEqual(parseRouterMeta({ provider: 42, tried: 'нет' }), {});
 });
 
-test('ответ /fetch разбирается: текст, заголовок и кто прочитал', () => {
+test('the /fetch response is parsed: text, title and who read it', () => {
   assert.deepEqual(parseFetchRouter({ text: 'тело страницы', title: 'Заголовок', provider: 'exa' }), {
     text: 'тело страницы',
     title: 'Заголовок',

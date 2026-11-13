@@ -1,5 +1,5 @@
-// Реестр сессий: (пользователь, разговор) → живой процесс pi.
-// Держит контейнеры тёплыми, гасит простаивающие сессии, защищает от параллельных ходов.
+// Session registry: (user, conversation) → a live pi process.
+// Keeps containers warm, shuts down idle sessions, protects against parallel turns.
 import { randomUUID } from 'node:crypto';
 import { ensureContainerRunning } from '../docker/manager.ts';
 import { log, redact } from '../log.ts';
@@ -33,7 +33,7 @@ import {
 import { refreshUserMcpTokens } from '../mcp/refresh.ts';
 import { prepareUser } from '../workspace.ts';
 
-/** Как реестр создаёт сессии и поднимает контейнеры: в тестах это заглушки. */
+/** How the registry creates sessions and raises containers: in tests these are stubs. */
 export type SessionFactory = (
   config: IcarusConfig,
   user: UserConfig,
@@ -50,44 +50,44 @@ export type RegistryDeps = {
   ensureContainer?: (config: IcarusConfig, user: UserConfig) => Promise<string>;
 };
 
-/** Чем кончилось сжатие по просьбе человека (команда /compact). */
+/** How compaction requested by the person ended (the /compact command). */
 export type CompactOutcome =
   | CompactResult
   | { status: 'no-session' }
   | { status: 'busy' }
   | { status: 'failed'; error: string };
 
-/** Чем кончилась попытка остановить ход (команда /stop). */
+/** How the attempt to stop a turn ended (the /stop command). */
 export type AbortOutcome =
   | { status: 'stopped' }
   | { status: 'idle' }
   | { status: 'no-session' }
   | { status: 'failed'; error: string };
 
-/** Чем кончился новый разговор (команда /clear). */
+/** How the new conversation ended (the /clear command). */
 export type ClearOutcome =
   | { status: 'started' }
   | { status: 'empty' }
   | { status: 'busy' }
   | { status: 'failed'; error: string };
 
-/** Чем кончилось переименование разговора (команда /rename). */
+/** How renaming the conversation ended (the /rename command). */
 export type RenameOutcome =
   | { status: 'renamed'; title: string }
   | { status: 'empty' }
   | { status: 'failed'; error: string };
 
-/** Что рассказать человеку про разговор (команда /stats). */
+/** What to tell the person about the conversation (the /stats command). */
 export type StatsOutcome =
   | { status: 'ok'; stats: Record<string, unknown> }
   | { status: 'failed'; error: string };
 
-/** Что вообще можно позвать в разговоре (команда /skills). */
+/** What can be called in the conversation at all (the /skills command). */
 export type CommandsOutcome =
   | { status: 'ok'; commands: PiCommand[] }
   | { status: 'failed'; error: string };
 
-/** Ждёт обещание не дольше таймаута: дольше — пусть решает тот, кто просил. */
+/** Waits for a promise no longer than the timeout: longer — let the one who asked decide. */
 async function waitFor(promise: Promise<void>, timeoutMs: number): Promise<void> {
   let timer: NodeJS.Timeout | undefined;
   try {
@@ -105,21 +105,21 @@ async function waitFor(promise: Promise<void>, timeoutMs: number): Promise<void>
 export class SessionRegistry {
   private sessions = new Map<string, PiSession>();
   private readyContainers = new Set<string>();
-  /** Поднятие контейнера в полёте: два одновременных запроса не должны создавать его дважды. */
+  /** Container raise in flight: two simultaneous requests must not create it twice. */
   private ensuring = new Map<string, Promise<string>>();
   /**
-   * Поколение «медленных» ресурсов человека: скиллы, персону и расширения pi читает
-   * один раз при старте процесса. Синхронизация скиллов увеличивает поколение, и
-   * следующая сессия человека поднимается заново — с новым каталогом.
+   * Generation of the person's "slow" resources: pi reads skills, the persona and extensions
+   * once at process start. Skill synchronization increases the generation, and
+   * the person's next session is raised anew — with the new catalog.
    */
   private generations = new Map<string, number>();
   private timer: NodeJS.Timeout | null = null;
-  /** Уборка в полёте: сжатие длится минутами, и второй проход по тем же сессиям не нужен. */
+  /** Cleanup in flight: compaction lasts minutes, and a second pass over the same sessions isn't needed. */
   private reaping = false;
   /**
-   * Разговоры, которые уборка сейчас сжимает и закрывает. Ход, пришедший в этот
-   * момент, обязан дождаться конца: иначе он получил бы сессию, которую вот-вот
-   * погасят, — и человек остался бы без ответа.
+   * Conversations that cleanup is currently compacting and closing. A turn that arrives at this
+   * moment must wait for the end: otherwise it would get a session that is about to
+   * be shut down — and the person would be left without an answer.
    */
   private closing = new Map<string, Promise<void>>();
   private config: IcarusConfig;
@@ -133,23 +133,23 @@ export class SessionRegistry {
       ((userConfig, user, conversationId, model, container, generation, workspace, artifact) =>
         new PiSession(userConfig, user, conversationId, model, container, generation, undefined, workspace, artifact));
     this.ensureContainer = deps.ensureContainer ?? ensureContainerRunning;
-    // Тишину проверяем чаще, чем она наступает: сжатие должно случиться «после часа»,
-    // а не «когда-нибудь потом». Пять минут — потолок проверки, иначе при часе
-    // простоя итог подводился бы с опозданием на четверть часа.
+    // We check for silence more often than it occurs: compaction should happen "after an hour",
+    // not "some time later". Five minutes is the check ceiling, otherwise with an hour
+    // of idleness the summary would be made a quarter of an hour late.
     const intervalMs = Math.max(60_000, Math.min(5 * 60_000, Math.round((config.sessionIdleMinutes * 60_000) / 4)));
     this.timer = setInterval(() => void this.reapIdle(), intervalMs);
     this.timer.unref?.();
   }
 
-  /** Текущее поколение ресурсов человека. */
+  /** The person's current resource generation. */
   generation(userId: string): number {
     return this.generations.get(userId) ?? 0;
   }
 
   /**
-   * Отмечает, что ресурсы человека поменялись. Живые сессии не трогаем: идущий ход
-   * нужно доиграть, а следующая сессия этого разговора поднимется уже заново (см.
-   * acquire). История при этом не теряется — она лежит в /workspace/.icarus/sessions.
+   * Marks that the person's resources changed. We don't touch live sessions: the current turn
+   * must be played out, and the next session of this conversation will be raised anew (see
+   * acquire). History isn't lost — it lies in /workspace/.icarus/sessions.
    */
   bumpResources(userId: string): number {
     const next = this.generation(userId) + 1;
@@ -161,7 +161,7 @@ export class SessionRegistry {
     return this.config.models.find((model) => model.tier === 'fast') ?? this.config.models[0];
   }
 
-  /** Модель для работы, где важно качество: написать скилл, разобрать разговор. */
+  /** A model for work where quality matters: writing a skill, analyzing a conversation. */
   private strongModel(): ModelConfig {
     return this.config.models.find((model) => model.tier === 'strong') ?? this.fastModel();
   }
@@ -185,9 +185,9 @@ export class SessionRegistry {
   }
 
   /**
-   * Разовый вопрос дешёвой модели в контейнере человека: тулов, сессии и персоны
-   * тут нет. Заголовки разговоров — первый потребитель, но не единственный:
-   * панель так просит написать скилл, и там нужен уровень повыше.
+   * A one-off question to a cheap model in the person's container: no tools, session or persona
+   * here. Conversation titles are the first consumer, but not the only one:
+   * the panel thus asks to write a skill, and there a higher tier is needed.
    */
   async oneShot(user: UserConfig, prompt: string, options: OneShotOptions & { tier?: 'fast' | 'strong' } = {}): Promise<string> {
     const container = await this.ensureUserContainer(user);
@@ -196,9 +196,9 @@ export class SessionRegistry {
   }
 
   /**
-   * Артефакт для сессии: проверяет, что он есть и что человек вправе его менять.
-   * Права могли поменяться после того, как чат завели, поэтому проверка стоит
-   * на каждом подъёме сессии, а не только на кнопке «Чат».
+   * Artifact for a session: checks that it exists and that the person is allowed to change it.
+   * Rights may have changed after the chat was created, so the check stands
+   * on every session raise, not only on the "Chat" button.
    */
   private artifactSession(user: UserConfig, slug: string | undefined): ArtifactSession | undefined {
     if (!slug) return undefined;
@@ -208,34 +208,34 @@ export class SessionRegistry {
     return { slug: artifact.name, title: artifact.title, entry: artifact.entry, type: artifact.type };
   }
 
-  /** Находит или поднимает сессию разговора. */
+  /** Finds or raises a conversation session. */
   async acquire(
     user: UserConfig,
     conversationId: string,
     workspace?: string,
     artifact?: string,
   ): Promise<PiSession> {
-    // Разговор помнит свой workspace; явный аргумент нужен там, где запись ещё
-    // не создана (новый чат панели) или её только предстоит завести.
+    // The conversation remembers its workspace; the explicit argument is needed where the record isn't
+    // created yet (a new panel chat) or is only about to be created.
     const target = workspace ?? workspaceForConversation(this.config, user, conversationId) ?? DEFAULT_WORKSPACE;
-    // Артефактный разговор работает не в workspace, а в папке артефакта. Имя
-    // берём из аргумента, а если его не передали (второй вход в тот же разговор) —
-    // из реестра: иначе повторный ход открыл бы pi не там.
+    // An artifact conversation works not in a workspace but in the artifact folder. We take the name
+    // from the argument, and if it wasn't passed (a second entry into the same conversation) —
+    // from the registry: otherwise a repeated turn would open pi in the wrong place.
     const artifactName =
       artifact ?? (workspace === undefined ? artifactForConversation(this.config, user, conversationId) : undefined);
     const artifactSession = this.artifactSession(user, artifactName);
     const key = `${user.id}:${conversationId}`;
     const generation = this.generation(user.id);
 
-    // Разговор как раз сжимают и закрывают: ждём конца (не дольше, чем живёт сам
-    // вызов сжатия) и поднимаем сессию заново — уже по сжатой истории.
+    // The conversation is being compacted and closed right now: we wait for the end (no longer than the
+    // compaction call itself lives) and raise the session anew — now from the compacted history.
     const closing = this.closing.get(key);
     if (closing) await waitFor(closing, COMPACT_TIMEOUT_MS + 5_000);
 
     const existing = this.sessions.get(key);
     if (existing && existing.alive) {
-      // Разговор переехал в другой workspace или к другому артефакту — старый
-      // процесс смотрел не туда, продолжать его в новой папке нельзя.
+      // The conversation moved to another workspace or another artifact — the old
+      // process looked in the wrong place, it can't be continued in the new folder.
       if (existing.workspace !== target || existing.artifact?.slug !== artifactSession?.slug) {
         existing.dispose();
         this.sessions.delete(key);
@@ -255,10 +255,10 @@ export class SessionRegistry {
     if (existing) this.sessions.delete(key);
 
     const container = await this.ensureUserContainer(user);
-    // OAuth-токены живут час, а сессия — дольше. Обновляем их до того, как pi
-    // прочитает mcp.json: иначе первый же вызов сервера упрётся в 401, и чинить
-    // это человеку придётся в панели. Ошибка обновления не отменяет разговор:
-    // сервер просто не попадёт в окружение, а панель покажет причину.
+    // OAuth tokens live an hour, while a session lives longer. We refresh them before pi
+    // reads mcp.json: otherwise the very first server call would hit a 401, and the person
+    // would have to fix it in the panel. A refresh error doesn't cancel the conversation:
+    // the server simply won't get into the environment, and the panel will show the reason.
     try {
       await refreshUserMcpTokens(this.config, user);
       prepareUser(this.config, user);
@@ -276,8 +276,8 @@ export class SessionRegistry {
       artifactSession,
     );
     this.sessions.set(key, session);
-    // Разговор поднялся — значит, он существует. Реестр ведёт все каналы сразу:
-    // панель показывает Telegram и API рядом с веб-чатами, ничего не сканируя.
+    // The conversation was raised — so it exists. The registry tracks all channels at once:
+    // the panel shows Telegram and API next to web chats without scanning anything.
     try {
       ensureChat(
         this.config,
@@ -289,8 +289,8 @@ export class SessionRegistry {
         artifactSession?.slug,
       );
     } catch (error) {
-      // Реестр — удобство панели, а не условие разговора: его сбой не должен
-      // оставить человека без ответа.
+      // The registry is a panel convenience, not a condition of the conversation: its failure must not
+      // leave the person without an answer.
       log.warn('не записался реестр разговоров', { user: user.id, error: String(error) });
     }
     return session;
@@ -301,9 +301,9 @@ export class SessionRegistry {
   }
 
   /**
-   * Сжатие по просьбе человека: команда `/compact`. Делает это pi по RPC `compact`.
-   * Если разговор затих и процесса нет, поднимаем его: pi откроет ту же историю и
-   * сожмёт её так же, как в живом разговоре.
+   * Compaction requested by the person: the `/compact` command. pi does it via the `compact` RPC.
+   * If the conversation went quiet and there's no process, we raise it: pi will open the same history and
+   * compact it the same way as in a live conversation.
    */
   async compact(user: UserConfig, conversationId: string, customInstructions?: string): Promise<CompactOutcome> {
     const live = this.sessions.get(`${user.id}:${conversationId}`);
@@ -319,8 +319,8 @@ export class SessionRegistry {
   }
 
   /**
-   * Прерывание хода по просьбе человека: команда `/stop`. Работает только с живой
-   * занятой сессией — если pi уже молчит, прерывать нечего, и это не ошибка.
+   * Interrupting a turn at the person's request: the `/stop` command. Works only with a live
+   * busy session — if pi is already silent, there's nothing to interrupt, and that's not an error.
    */
   async abort(user: UserConfig, conversationId: string): Promise<AbortOutcome> {
     const session = this.sessions.get(`${user.id}:${conversationId}`);
@@ -331,10 +331,10 @@ export class SessionRegistry {
   }
 
   /**
-   * Прерывание под новую реплику: человек написал, пока Икар ещё работал (в Telegram
-   * ему никто не мешает это сделать). Отличие от `/stop` только в том, кто просил:
-   * здесь — следующее сообщение, и прерывание ждёт, пока ход действительно встанет,
-   * чтобы новая реплика не влезла в занятую сессию.
+   * Interrupt for a new message: the person wrote while Icarus was still working (in Telegram
+   * nobody stops them from doing so). The difference from `/stop` is only who asked:
+   * here it's the next message, and the interrupt waits until the turn actually stops,
+   * so the new message doesn't squeeze into a busy session.
    */
   async interrupt(user: UserConfig, conversationId: string): Promise<AbortOutcome> {
     const session = this.sessions.get(`${user.id}:${conversationId}`);
@@ -345,9 +345,9 @@ export class SessionRegistry {
   }
 
   /**
-   * Цифры разговора: токены, деньги, занятый контекст. Сессию при необходимости
-   * поднимаем: файл разговора на месте, pi продолжит его — и цифры будут те же,
-   * что человек видел до затишья.
+   * Conversation numbers: tokens, money, used context. If needed we raise the session:
+   * the conversation file is in place, pi will continue it — and the numbers will be the same
+   * as the person saw before the quiet period.
    */
   async stats(user: UserConfig, conversationId: string): Promise<StatsOutcome> {
     try {
@@ -361,7 +361,7 @@ export class SessionRegistry {
     }
   }
 
-  /** Что можно позвать в разговоре: скиллы человека, промпт-шаблоны, команды расширений. */
+  /** What can be called in the conversation: the person's skills, prompt templates, extension commands. */
   async commands(user: UserConfig, conversationId: string): Promise<CommandsOutcome> {
     try {
       const session = await this.acquire(user, conversationId);
@@ -373,12 +373,12 @@ export class SessionRegistry {
   }
 
   /**
-   * Новый разговор по просьбе человека: команда `/clear`. Контекст чистит сам pi —
-   * RPC `new_session` заводит новую сессию, и разговор переезжает на её id. Файл
-   * прошлой сессии остаётся на диске, но разговор на него больше не ссылается:
-   * история открывается пустой, а следующий запуск продолжает уже новую сессию.
+   * A new conversation at the person's request: the `/clear` command. pi itself clears the context —
+   * the `new_session` RPC starts a new session, and the conversation moves to its id. The file
+   * of the previous session stays on disk, but the conversation no longer references it:
+   * the history opens empty, and the next launch continues the new session.
    *
-   * Память тут ни при чём: она лежит в /workspace/.icarus/memory и `/clear` её не трогает.
+   * Memory has nothing to do with this: it lies in /workspace/.icarus/memory and `/clear` doesn't touch it.
    */
   async clear(user: UserConfig, conversationId: string): Promise<ClearOutcome> {
     const key = `${user.id}:${conversationId}`;
@@ -388,7 +388,7 @@ export class SessionRegistry {
     };
     if (busy()) return { status: 'busy' };
 
-    // Уборка могла застать этот разговор: она сжимает и закрывает его прямо сейчас.
+    // Cleanup may have caught this conversation: it is compacting and closing it right now.
     const closing = this.closing.get(key);
     if (closing) await waitFor(closing, COMPACT_TIMEOUT_MS + 5_000);
     if (busy()) return { status: 'busy' };
@@ -404,9 +404,9 @@ export class SessionRegistry {
       }
     }
 
-    // Процесса нет — значит и чистить в памяти нечего. Переводим разговор на новую
-    // сессию: следующий ход поднимет pi уже с чистого листа. Если истории и так нет,
-    // ничего не выдумываем.
+    // There's no process — so there's nothing to clear in memory either. We move the conversation to a new
+    // session: the next turn will raise pi from a clean slate. If there's no history anyway,
+    // we don't invent anything.
     try {
       const chat = findChatRecord(this.config, user, conversationId);
       if (!chat) return { status: 'empty' };
@@ -427,13 +427,13 @@ export class SessionRegistry {
   }
 
   /**
-   * Переименование разговора: имя живёт в chats.json, поэтому его видят и панель,
-   * и Telegram. После этого автоматический заголовок разговор не переписывает
-   * (`isGenericTitle` уже не срабатывает) — имя выбрал человек.
+   * Renaming a conversation: the name lives in chats.json, so both the panel and
+   * Telegram see it. After that the automatic title doesn't overwrite the conversation
+   * (`isGenericTitle` no longer triggers) — the person chose the name.
    */
   async rename(user: UserConfig, conversationId: string, name: string): Promise<RenameOutcome> {
-    // Имя показывается в списке и в шапке, а у Telegram тема ограничена 128
-    // символами: переводы строк и хвосты там только мешают.
+    // The name is shown in the list and in the header, and in Telegram the topic is limited to 128
+    // characters: line breaks and trailing bits only get in the way there.
     const title = name.replace(/\s+/g, ' ').trim().slice(0, 128);
     if (!title) return { status: 'empty' };
     try {
@@ -449,11 +449,11 @@ export class SessionRegistry {
   }
 
   /**
-   * Уборка затихших сессий: разговор, к которому не возвращались `sessionIdleMinutes`,
-   * считаем законченным — подводим итог (`compact`, пересказ остаётся в файле сессии)
-   * и закрываем процесс. Следующая реплика поднимет pi заново, уже по сжатой истории.
+   * Cleanup of quiet sessions: a conversation not returned to for `sessionIdleMinutes` is
+   * considered finished — we make a summary (`compact`, the retelling stays in the session file)
+   * and close the process. The next message will raise pi anew, now from the compacted history.
    *
-   * Пока человек говорит, сжимать нельзя: занятые сессии пропускаем.
+   * While the person is talking, compaction is not allowed: we skip busy sessions.
    */
   async reapIdle(): Promise<string[]> {
     if (this.reaping) return [];
@@ -461,7 +461,7 @@ export class SessionRegistry {
     const deadline = Date.now() - this.config.sessionIdleMinutes * 60_000;
     const closed: string[] = [];
     try {
-      // Копия списка: во время сжатия сессий карта может поменяться (человек вернулся).
+      // A copy of the list: during session compaction the map may change (the person came back).
       for (const [key, session] of [...this.sessions]) {
         if (this.sessions.get(key) !== session) continue;
         if (session.busy || session.compacting || session.lastUsed > deadline) continue;
@@ -475,14 +475,14 @@ export class SessionRegistry {
     return closed;
   }
 
-  /** Сжатие и закрытие одной затихшей сессии: не вышло сжатие — закрываем как есть. */
+  /** Compacting and closing one quiet session: if compaction failed, we close it as is. */
   private async closeIdle(key: string, session: PiSession): Promise<void> {
     const closing = (async () => {
       try {
         const result = await session.compact();
         log.debug('итог разговора подведён', { key, status: result.status });
       } catch (error) {
-        // История не теряется: файл сессии append-only, и pi откроет её как есть.
+        // History isn't lost: the session file is append-only, and pi will open it as is.
         log.warn('не удалось сжать затихшую сессию — закрываю без пересказа', {
           key,
           error: redact(String(error)),
@@ -510,8 +510,8 @@ export class SessionRegistry {
   }
 
   /**
-   * Разговоры человека, где ход идёт прямо сейчас. Панель берёт это снимком при
-   * загрузке: сводка рассказывает про изменения, а что уже идёт — знает только реестр.
+   * The person's conversations where a turn is going right now. The panel takes this as a snapshot on
+   * load: the summary tells about changes, but only the registry knows what's already running.
    */
   busyConversations(userId: string): string[] {
     const busy: string[] = [];

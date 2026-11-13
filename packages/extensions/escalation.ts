@@ -1,20 +1,20 @@
-// Эскалация моделей: болтовня идёт на быстрой модели, работа — на сильной,
-// картинки — на модели со зрением. Уровни приходят из окружения контейнера,
-// которое сервис собирает из конфига человека.
+// Model escalation: chit-chat runs on the fast model, work on the strong one,
+// images on the vision model. The tiers come from the container environment,
+// which the service assembles from the person's config.
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 export type Tier = "fast" | "strong" | "vision";
 export type TierSpec = { provider: string; id: string; thinking: string };
 
-/** Разбирает «provider/model:thinking» в описание модели. */
+/** Parses "provider/model:thinking" into a model spec. */
 export function parseTierSpec(value: string | undefined, fallback: TierSpec): TierSpec {
   if (!value) return fallback;
   const [path, thinking] = value.split(":");
   const [provider, ...rest] = (path ?? "").split("/");
   const id = rest.join("/");
   if (!provider || !id) return fallback;
-  // Без явного уровня не выключаем размышления: на off модель теряет канал reasoning
-  // и пишет вызовы инструментов разметкой в видимый ответ.
+  // Without an explicit level we don't turn off reasoning: on off the model loses the reasoning
+  // channel and writes tool calls as markup in the visible answer.
   return { provider, id, thinking: thinking ?? "low" };
 }
 
@@ -36,7 +36,7 @@ export const TIERS: Record<Tier, TierSpec> = {
   }),
 };
 
-/** Признаки того, что человек просит работу, а не болтовню. */
+/** Signs that the person is asking for work, not chit-chat. */
 const HEAVY_PATTERNS = [
   /напиши\s+(код|скрипт|функцию|программу)/i,
   /отрефактор/i,
@@ -56,9 +56,9 @@ const HEAVY_PATTERNS = [
 export const LONG_PROMPT = 400;
 
 /**
- * Инструменты-разведка: поиск и чтение. Сами по себе они не повод звать сильную
- * модель — быстрая справится без размышлений, и человек не будет ждать. Всё
- * остальное (bash, правки файлов, MCP, незнакомые тулы) — уже руки, там сильная.
+ * Reconnaissance tools: search and reading. By themselves they're no reason to call the
+ * strong model — the fast one will manage without reasoning, and the person won't wait.
+ * Everything else (bash, file edits, MCP, unfamiliar tools) is already hands, that's strong.
  */
 export const SEARCH_TOOLS = new Set([
   "web_search",
@@ -67,11 +67,11 @@ export const SEARCH_TOOLS = new Set([
   "grep",
   "find",
   "ls",
-  // «который час» — взгляд, а не работа: гонять на нём сильную модель незачем
+  // "what time is it" is a glance, not work: no point running the strong model on it
   "now",
 ]);
 
-/** Сколько поисков подряд терпим на быстрой модели, прежде чем считать это работой. */
+/** How many searches in a row we tolerate on the fast model before counting it as work. */
 export const SEARCH_BUDGET = 3;
 
 export function isSearchTool(name: string): boolean {
@@ -81,9 +81,9 @@ export function isSearchTool(name: string): boolean {
 export type TierInput = {
   hasImages: boolean;
   prompt: string;
-  /** сколько инструментов-разведки уже отработало в этом ходу */
+  /** how many reconnaissance tools have already run in this turn */
   searches?: number;
-  /** попадался ли инструмент, который что-то меняет: bash, write, edit, MCP */
+  /** whether a tool that changes something came up: bash, write, edit, MCP */
   heavyTool?: boolean;
 };
 
@@ -97,13 +97,13 @@ export function chooseTier(input: TierInput): Tier {
 }
 
 /**
- * Разрешает ровно тот уровень размышлений, который выбрал конфиг.
+ * Allows exactly the thinking level the config chose.
  *
- * pi поднимает неподдерживаемый уровень до ближайшего доступного: если в каталоге
- * модели у `medium` стоит null, `thinking: medium` из конфига молча превратился бы в
- * `high`. Мы отдаём модели ровно тот уровень, который выбрал человек, вместо того
- * чтобы гадать по каталогу. `off` не трогаем: это явное выключение размышлений,
- * и подменять его уровнем нельзя.
+ * pi raises an unsupported level to the nearest available one: if the model catalog
+ * has null for `medium`, `thinking: medium` from the config would silently turn into
+ * `high`. We give the model exactly the level the person chose instead of guessing
+ * from the catalog. We don't touch `off`: that's an explicit disabling of reasoning,
+ * and it must not be replaced with a level.
  */
 export function unblockThinking<T extends object>(model: T, level: string): T {
   const map = (model as { thinkingLevelMap?: Record<string, string | null> }).thinkingLevelMap;
@@ -147,10 +147,10 @@ export default function (pi: ExtensionAPI) {
     await apply(turnTier, ctx);
   });
 
-  // Как только агенту понадобились руки — дальше ведём сильной моделью. Но поиск
-  // и чтение руками не считаются: пока их немного, быстрая модель справляется сама.
+  // Once the agent needs hands, we run it on the strong model from there. But search
+  // and reading don't count as hands: while there are few of them, the fast model manages on its own.
   pi.on("tool_execution_start", async (event, ctx) => {
-    if (turnTier === "vision") return; // картинку уже отдали зрячей модели
+    if (turnTier === "vision") return; // the image was already given to the sighted model
     if (isSearchTool(event.toolName)) searches += 1;
     else heavyTool = true;
     const tier = chooseTier({ hasImages: false, prompt: "", searches, heavyTool });

@@ -1,4 +1,4 @@
-// Прогон диалогов: пользователя играет отдельная модель, реплики Икара — кандидат.
+// Dialogue runner: a separate model plays the user, Icarus's replies come from the candidate.
 import { chat, chatFinal, MODELS } from "./api.mjs";
 
 const userSystem = (scenario) => `Ты играешь роль собеседника Икара в тестовом стенде. Не выходи из роли, не комментируй стенд.
@@ -54,7 +54,7 @@ export async function runScenario({ system, scenario, maxTokens = 560 }) {
   return dialogue;
 }
 
-// Страховка стенда: если модель всё же изобразила вызов инструмента, оставляем только текст.
+// Rig safety net: if the model did render a tool call after all, we keep only the text.
 function scrub(text) {
   if (!/DSML|antml|<\|/.test(text)) return text;
   const cleaned = text
@@ -75,10 +75,10 @@ async function replyOnce({ system, dialogue, maxTokens }) {
   try {
     reply = await chat({ model: MODELS.icarus, system, messages, maxTokens, temperature: 1 });
   } catch {
-    // бюджет сгорел в скрытых размышлениях — просим выдать только текст
+    // the budget burned up in hidden reasoning — we ask for text only
     return chatFinal({ model: MODELS.icarus, system, messages, maxTokens: 260, temperature: 1 });
   }
-  // реплика оборвалась на полуслове — просим дописать и склеиваем
+  // the reply was cut off mid-word — we ask it to finish and stitch it together
   if (reply.finish === "length" && reply.content.length > 40) {
     try {
       const tail = reply.content.slice(-400);

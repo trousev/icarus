@@ -1,7 +1,7 @@
-// Учёт обращений: сколько каждый ключ отдал и сколько раз отказал за семь дней.
+// Usage accounting: how much each key delivered and how many times it failed over seven days.
 //
-// Счётчики — не история: проверяем именно суточные корзины, обрезку восьмого дня
-// и суммы, которые видит панель. Сеть подменяется, как и в остальных тестах.
+// The counters are not a history: we check exactly the daily buckets, the trimming of the eighth day
+// and the sums that the panel sees. The network is stubbed, as in the other tests.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -48,7 +48,7 @@ function fakeFetch(handlers: Partial<Record<ProviderId, () => Response>>): typeo
   }) as unknown as typeof fetch;
 }
 
-test('счётчики копятся по дням и суммируются за семь дней', async () => {
+test('counters accumulate per day and are summed over seven days', async () => {
   const config = configWith({});
   await recordUsage(config, 'search', 'tavily', true, { now: clock });
   await recordUsage(config, 'search', 'tavily', true, { now: clock });
@@ -65,10 +65,10 @@ test('счётчики копятся по дням и суммируются з
   assert.equal(report.since, '2026-11-01', 'окно — сегодня и шесть предыдущих дней');
 });
 
-test('восьмой день выбрасывается, а не копится', async () => {
+test('the eighth day is discarded, not accumulated', async () => {
   const config = configWith({});
-  // Девять дней подряд, от сегодняшнего к самому старому, и ещё раз сегодня:
-  // последняя запись — та, что обрезает хвост.
+  // Nine days in a row, from today to the oldest, and once more today:
+  // the last record is the one that trims the tail.
   for (let back = 0; back < 9; back += 1) {
     await recordUsage(config, 'search', 'exa', true, { now: () => NOW - back * DAY });
   }
@@ -79,11 +79,11 @@ test('восьмой день выбрасывается, а не копится
   assert.equal(days.length, USAGE_DAYS, 'в файле ровно семь дней');
   assert.equal(days[0], dayKey(NOW - 6 * DAY));
   assert.equal(days.at(-1), dayKey(NOW));
-  // Сегодня записан дважды (цикл и финальная запись), остальные шесть дней — по разу.
+  // Today is recorded twice (the loop and the final record), the other six days once each.
   assert.deepEqual(usageReport(config, NOW).search.exa, { ok: 8, fail: 0 });
 });
 
-test('битый файл — не повод ломать поиск', async () => {
+test('a corrupted file is no reason to break the search', async () => {
   const config = configWith({});
   fs.writeFileSync(usageFile(config), 'это не json');
 
@@ -92,7 +92,7 @@ test('битый файл — не повод ломать поиск', async ()
   assert.deepEqual(usageReport(config, NOW).fetch.tavily, { ok: 1, fail: 0 });
 });
 
-test('роутер извлечения пишет успех и отказ страницы в счётчики', async () => {
+test('the fetch router records a success and a page failure into the counters', async () => {
   const config = configWith({ linkup: 'l', exa: 'e' });
   const fetchImpl = fakeFetch({
     linkup: () => json({ error: 'unsupported content type' }, 400),
@@ -110,7 +110,7 @@ test('роутер извлечения пишет успех и отказ ст
   assert.equal(linkup?.fails, 0, 'но в карантин за это не отправляем');
 });
 
-test('роутер поиска пишет отказ и успех в счётчики по провайдерам', async () => {
+test('the search router records a failure and a success into the per-provider counters', async () => {
   const config = configWith({ exa: 'e', tavily: 't' });
   const fetchImpl = fakeFetch({
     exa: () => json({ error: 'boom' }, 500),

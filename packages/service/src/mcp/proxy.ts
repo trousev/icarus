@@ -1,15 +1,15 @@
-// Локальный прокси для OAuth-MCP: pi ходит в сервис, сервис — в настоящий MCP.
+// Local proxy for OAuth-MCP: pi talks to the service, the service talks to the real MCP.
 //
-// Зачем: authorization server может выдать access token на пять минут. pi читает
-// mcp.json один раз и держит Authorization весь разговор, поэтому вклеенный Bearer
-// протухает прямо в треде, и mcp_connect не помогает — конфиг уже загружен.
+// Why: the authorization server may issue an access token for five minutes. pi reads
+// mcp.json once and keeps the Authorization for the whole conversation, so an embedded Bearer
+// expires right in the thread, and mcp_connect does not help — the config is already loaded.
 //
-// Прокси решает это на каждом HTTP-запросе: смотрит срок токена, при необходимости
-// молча обновляет его по refresh_token и только потом идёт в MCP. Токен вообще не
-// попадает в mcp.json — оттуда уезжает только непрозрачный proxyKey.
+// The proxy solves this on every HTTP request: it looks at the token's lifetime, silently
+// refreshes it via refresh_token when needed, and only then goes to the MCP. The token never
+// ends up in mcp.json at all — only an opaque proxyKey goes there.
 //
-// Прокси живёт на том же сервисе, поэтому стриминг SSE не буферизуем: тело
-// запроса читаем целиком (это JSON-RPC), ответ пайпим как есть.
+// The proxy lives on the same service, so we do not buffer SSE streaming: we read the request
+// body in full (it is JSON-RPC) and pipe the response as is.
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import https from 'node:https';
 import type { IcarusConfig } from '../config.ts';
@@ -57,7 +57,7 @@ function jsonError(
   res.end(JSON.stringify({ error, error_description: description, ...(reauthUrl ? { reauth_url: reauthUrl } : {}) }));
 }
 
-/** Тело ответа для человеческой ошибки: не тянем в память мегабайты. */
+/** Response body for a human-facing error: we do not pull megabytes into memory. */
 async function responseText(upstream: IncomingMessage, limit = 2000): Promise<string> {
   let text = '';
   try {
@@ -69,7 +69,7 @@ async function responseText(upstream: IncomingMessage, limit = 2000): Promise<st
       }
     }
   } catch {
-    // тело могло оборваться — для сообщения хватит того, что успели
+    // the body may have been cut off — what we managed to read is enough for the message
   }
   return text.slice(0, limit);
 }
@@ -89,7 +89,7 @@ async function readBody(req: IncomingMessage): Promise<Buffer> {
   return Buffer.concat(chunks);
 }
 
-/** Заголовки запроса к MCP: всё, кроме hop-by-hop и нашего Authorization. */
+/** Request headers for the MCP: everything except hop-by-hop and our Authorization. */
 function requestHeaders(
   req: IncomingMessage,
   token: string,
@@ -139,7 +139,7 @@ function forward(
   });
 }
 
-/** Ответ MCP отдаём как есть: SSE, JSON, коды и mcp-session-id важны клиенту. */
+/** We serve the MCP response as is: SSE, JSON, codes and mcp-session-id matter to the client. */
 function pipeResponse(res: ServerResponse, upstream: IncomingMessage): void {
   const headers: http.OutgoingHttpHeaders = {};
   for (const [name, value] of Object.entries(upstream.headers)) {
@@ -155,8 +155,8 @@ function pipeResponse(res: ServerResponse, upstream: IncomingMessage): void {
 }
 
 /**
- * Обрабатывает /mcp-proxy/<key>. Ключ случаен и живёт в credentials.json; токен
- * и refresh здесь же. Ошибки не содержат секретов — только причину.
+ * Handles /mcp-proxy/<key>. The key is random and lives in credentials.json; the token
+ * and refresh live here too. Errors contain no secrets — only the reason.
  */
 export async function handleMcpProxy(
   req: IncomingMessage,
@@ -217,7 +217,7 @@ export async function handleMcpProxy(
   }
 
   const method = req.method ?? 'GET';
-  // Клиент (pi) мог отвалиться по своему таймауту: не держим запрос к MCP вечно.
+  // The client (pi) may have dropped due to its own timeout: we do not hold the request to the MCP forever.
   const controller = new AbortController();
   res.on('close', () => controller.abort());
   try {
@@ -228,8 +228,8 @@ export async function handleMcpProxy(
       body,
       controller.signal,
     );
-    // Токен мог протухнуть между проверкой и запросом или сервер его уже не
-    // признаёт: обновляем принудительно и повторяем ровно один раз.
+    // The token may have expired between the check and the request, or the server no longer
+    // recognizes it: refresh forcibly and retry exactly once.
     if (upstream.statusCode === 401) {
       upstream.resume();
       upstream.destroy();
@@ -253,8 +253,8 @@ export async function handleMcpProxy(
         return;
       }
     }
-    // Повтор не помог — тоже отдаём нашу ошибку со ссылкой, а не сырое тело
-    // сервера: человеку нужен вход, а не текст про bearer token.
+    // The retry did not help either — we serve our error with a link, not the server's
+    // raw body: the person needs to sign in, not text about a bearer token.
     if (upstream.statusCode === 401) {
       const detail = await responseText(upstream);
       jsonError(

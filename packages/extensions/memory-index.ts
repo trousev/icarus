@@ -1,6 +1,6 @@
-// Два шага к памяти: сначала индекс файлов с описаниями, потом обычное чтение
-// выбранных файлов. Модель сама решает, что читать, — и не получает факты
-// в системный промпт, где они начинали выбирать тему разговора.
+// Two steps to memory: first an index of files with descriptions, then a normal read
+// of the selected files. The model decides what to read itself — and does not get facts
+// in the system prompt, where they used to start steering the topic of conversation.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import path from "node:path";
 import { Type } from "typebox";
@@ -10,8 +10,8 @@ const ICARUS = process.env.ICARUS_HOME ?? "/workspaces/.icarus";
 const MEMORY = path.resolve(process.env.ICARUS_MEMORY_DIR ?? `${ICARUS}/memory`);
 
 export default function (pi: ExtensionAPI) {
-  // Один индекс и не больше трёх чтений памяти за ход. Иначе модель уходит
-  // читать полпамяти и заканчивает ход без ответа — проверено на живой памяти.
+  // One index and no more than three memory reads per turn. Otherwise the model goes off
+  // to read half the memory and ends the turn without an answer — verified on live memory.
   let indexes = 0;
   let reads = 0;
   pi.on("before_agent_start", () => {

@@ -1,4 +1,4 @@
-/* Раздел «Ключи»: список секретов и форма правки. */
+/* "Keys" section: list of secrets and edit form. */
 .keys-intro { color: var(--dim); max-width: 700px; margin: 0 0 6px; }
 .keys-meta { color: var(--dim); font-size: 12px; margin: 0 0 18px; }
 .keys-notice { margin: 0 0 16px; padding: 11px 14px; border-radius: 9px; border: 1px solid var(--line);
@@ -30,13 +30,13 @@
 .pill.env { border-color: var(--accent); color: var(--accent); }
 .pill.off { border-color: #6b2f3a; color: var(--danger); }
 .pill.warn { border-color: #6b5a2f; color: #f3d9a4; }
-/* Маршрутизация поиска: строки компактнее ключей — это сводка, а не форма. */
+/* Search routing: rows are more compact than keys — this is a summary, not a form. */
 .search-health { border-bottom: 1px solid var(--line); padding-bottom: 16px; }
 .search-health .keys-intro.small { font-size: 12px; margin-bottom: 10px; }
 .search-row { padding: 11px 14px; }
 .search-row .keys-top code { font-size: 12px; }
 .search-error { color: #d99; overflow-wrap: anywhere; }
-/* Статистика обращений: цифры читаются быстрее, чем слова вокруг них. */
+/* Usage statistics: numbers read faster than the words around them. */
 .keys-usage { font-size: 11.5px; }
 .keys-usage b { color: var(--text); font-weight: 600; }
 .keys-actions { display: flex; gap: 8px; align-items: center; }

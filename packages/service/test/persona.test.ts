@@ -1,7 +1,7 @@
-// Персона — единственное место, где карта окружения и путь к вложениям собираются в
-// текст промпта. Путь там склеивается строкой, поэтому забытая подстановка не падает
-// ни типом, ни линтером: модель просто получает «${ICARUS}/incoming/…» и ищет файл,
-// которого нет. Тест читает готовый промпт и ловит ровно это.
+// Persona is the only place where the environment map and the attachment path are assembled
+// into the prompt text. The path there is concatenated as a string, so a forgotten substitution fails
+// neither by type nor by linter: the model simply gets "${ICARUS}/incoming/…" and looks for a file
+// that does not exist. The test reads the finished prompt and catches exactly this.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -9,7 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-persona-'));
-// Переменные читаются на загрузке модуля, поэтому выставляем их до import().
+// The variables are read at module load, so we set them before import().
 process.env.ICARUS_HOME = ROOT;
 process.env.ICARUS_MEMORY_DIR = path.join(ROOT, 'memory');
 process.env.ICARUS_CHANNEL = 'web';
@@ -29,7 +29,7 @@ function handler(): BeforeStart {
       if (name === 'before_agent_start') captured = fn;
     },
   };
-  // Расширение пользуется только `on`; остальное для этого теста не нужно.
+  // The extension only uses `on`; the rest is not needed for this test.
   persona(pi as never);
   assert.ok(captured, 'персона подписалась на before_agent_start');
   return captured;
@@ -39,14 +39,14 @@ async function prompt(): Promise<string> {
   return (await handler()({ systemPromptOptions: { contextFiles: [] } })).systemPrompt;
 }
 
-test('карта окружения приезжает в промпт из служебного каталога', async () => {
+test('the environment map arrives in the prompt from the service directory', async () => {
   const text = await prompt();
   assert.match(text, /ты Икар/, 'персона прочитана');
   assert.match(text, /# Контекст: .*\/AGENTS\.md/, 'карта окружения подставлена');
   assert.match(text, /служебное лежит в \.icarus/, 'содержимое карты доехало');
 });
 
-test('путь к вложениям подставляется, а не остаётся шаблоном', async () => {
+test('the attachment path is substituted instead of remaining a template', async () => {
   const text = await prompt();
   assert.ok(
     text.includes(`${ROOT}/incoming/файл.jpg`),
@@ -57,7 +57,7 @@ test('путь к вложениям подставляется, а не ост�
   assert.match(text, /ссылка на скачивание/, 'про файлы, а не картинки, веб-чат тоже знает');
 });
 
-test('режим артефакта: промпт про конкретную папку, а не про workspace', async () => {
+test('artifact mode: the prompt is about a specific folder, not about the workspace', async () => {
   process.env.ICARUS_ARTIFACT = 'plan';
   process.env.ICARUS_ARTIFACT_TITLE = 'План на четверг';
   process.env.ICARUS_ARTIFACT_ENTRY = 'index.md';
@@ -80,7 +80,7 @@ test('режим артефакта: промпт про конкретную п
   }
 });
 
-test('режим HTML-артефакта: в промпте есть контракт адресов элементов', async () => {
+test('HTML artifact mode: the prompt contains the element address contract', async () => {
   process.env.ICARUS_ARTIFACT = 'report';
   process.env.ICARUS_ARTIFACT_TITLE = 'Отчёт по «Атласу»';
   process.env.ICARUS_ARTIFACT_ENTRY = 'index.html';

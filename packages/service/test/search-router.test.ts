@@ -1,7 +1,7 @@
-// Поисковый роутер: рейтинг, карантины, «ключ сломан» и разбор выдач.
+// Search router: rating, quarantines, "key broken" and parsing of results.
 //
-// Тесты не ходят в сеть: fetch подменяется, часы тоже. Поэтому пятиминутный
-// карантин проверяется мгновенно, а не ожиданием.
+// Tests do not hit the network: fetch is replaced, and the clock too. That's why the five-minute
+// quarantine is checked instantly rather than by waiting.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -33,7 +33,7 @@ const KEY_ENV: Record<string, string> = {
   tavily: 'TAVILY_API_KEY',
   firecrawl: 'FIRECRAWL_API_KEY',
   you: 'YOU_API_KEY',
-  // Ключа нет: провайдер включается настройкой ICARUS_SEARCH_FREE, а не .env.
+  // No key: the provider is enabled by the ICARUS_SEARCH_FREE setting, not by .env.
   'you-free': 'ICARUS_SEARCH_FREE',
   linkup: 'LINKUP_API_KEY',
 };
@@ -56,7 +56,7 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 }
 
-/** Ответы по провайдерам: незнакомый хост — ошибка теста, а не тихий пропуск. */
+/** Responses per provider: an unknown host is a test error, not a silent skip. */
 function fakeFetch(handlers: Partial<Record<ProviderId, Handler>>): typeof fetch {
   const impl = async (input: string | URL | Request): Promise<Response> => {
     const url = new URL(String(input));
@@ -76,7 +76,7 @@ function configWith(keys: Partial<Record<ProviderId, string>>): IcarusConfig {
   return makeConfig({ secretEnv });
 }
 
-/** Ответ бесплатного MCP: JSON-RPC в SSE, внутри — форма REST-выдачи You.com. */
+/** The free MCP response: JSON-RPC in SSE, inside — the shape of You.com's REST results. */
 function mcpJson(payload: unknown): Response {
   const body = JSON.stringify({ jsonrpc: '2.0', id: 1, result: payload });
   return new Response(`event: message\ndata: ${body}\n\n`, {
@@ -95,7 +95,7 @@ const okYouFree = () =>
     ],
   });
 
-/** Так выглядит исчерпанная суточная квота: 200 OK, но result.isError. */
+/** This is what an exhausted daily quota looks like: 200 OK, but result.isError. */
 const quotaYouFree = () =>
   mcpJson({ isError: true, content: [{ type: 'text', text: 'Error: Free tier limit exceeded.' }] });
 
@@ -117,9 +117,9 @@ function clockAt(start = Date.parse('2026-11-07T12:00:00Z')) {
   };
 }
 
-// --- выбор провайдера --------------------------------------------------------
+// --- provider selection ------------------------------------------------------
 
-test('рейтинг: первым идёт SerpApi, Linkup — последним, бесплатный MCP — рядом с You.com', () => {
+test('rating: SerpApi comes first, Linkup last, the free MCP next to You.com', () => {
   assert.deepEqual(RATING, [
     'serpapi',
     'serpstack',
@@ -133,7 +133,7 @@ test('рейтинг: первым идёт SerpApi, Linkup — последни
   ]);
 });
 
-test('текущий — первый по рейтингу с ключом, и сам по себе не меняется', async () => {
+test('the current one is the first by rating with a key, and does not change on its own', async () => {
   const config = configWith({ brave: 'b', serpapi: 's' });
   const clock = clockAt();
   const fetch = fakeFetch({ serpapi: okSerpApi, brave: okSerpApi });
@@ -143,19 +143,19 @@ test('текущий — первый по рейтингу с ключом, и 
   assert.equal(first.ok && first.provider, 'serpapi');
   assert.equal(readRouterState(stateFile(config)).current, 'serpapi');
 
-  // Повторный запрос идёт к тому же текущему: его никто не банил.
+  // A repeated request goes to the same current one: nobody banned it.
   const second = await routeSearch(config, 'запрос', 2, { fetch, now: clock.now });
   assert.equal(second.ok && second.provider, 'serpapi');
 });
 
-test('без ключей — честный no-keys, а не поход в сеть', async () => {
+test('without keys — an honest no-keys, not a network call', async () => {
   const config = configWith({});
   const fetch = fakeFetch({});
   const result = await routeSearch(config, 'запрос', 2, { fetch });
   assert.deepEqual(result, { ok: false, reason: 'no-keys', tried: [], current: null, retryAt: null });
 });
 
-test('бесплатный MCP ищет без единого ключа', async () => {
+test('the free MCP searches without a single key', async () => {
   const config = makeConfig({ env: { ICARUS_SEARCH_FREE: 'on' } });
   const result = await routeSearch(config, 'запрос', 2, { fetch: fakeFetch({ 'you-free': okYouFree }) });
   assert.equal(result.ok, true);
@@ -163,19 +163,19 @@ test('бесплатный MCP ищет без единого ключа', async
   assert.equal(result.ok && result.results[0]?.url, 'https://free.dev');
 });
 
-test('бесплатный MCP включён по умолчанию: пустой env — и поиск всё равно есть', async () => {
+test('the free MCP is on by default: empty env — and search still exists', async () => {
   const config = makeConfig({ env: {} });
   const result = await routeSearch(config, 'запрос', 1, { fetch: fakeFetch({ 'you-free': okYouFree }) });
   assert.equal(result.ok && result.provider, 'you-free');
 });
 
-test('ICARUS_SEARCH_FREE=off выключает бесплатного провайдера', async () => {
+test('ICARUS_SEARCH_FREE=off disables the free provider', async () => {
   const config = makeConfig({ env: { ICARUS_SEARCH_FREE: 'off' } });
   const result = await routeSearch(config, 'запрос', 2, { fetch: fakeFetch({}) });
   assert.deepEqual(result, { ok: false, reason: 'no-keys', tried: [], current: null, retryAt: null });
 });
 
-test('кончилась бесплатная квота — карантин до полуночи UTC, а не ровные сутки', async () => {
+test('the free quota ran out — quarantine until UTC midnight, not a full 24 hours', async () => {
   const config = makeConfig({ env: { ICARUS_SEARCH_FREE: 'on' } });
   const clock = clockAt();
   const result = await routeSearch(config, 'запрос', 1, { fetch: fakeFetch({ 'you-free': quotaYouFree }), now: clock.now });
@@ -190,7 +190,7 @@ test('кончилась бесплатная квота — карантин д
   );
 });
 
-test('провайдер без ключа пропускается, текущий переезжает на живого', async () => {
+test('a provider without a key is skipped, the current one moves to a live one', async () => {
   const config = configWith({ brave: 'b' });
   const fetch = fakeFetch({ brave: okSerpApi });
   const result = await routeSearch(config, 'запрос', 2, { fetch });
@@ -198,9 +198,9 @@ test('провайдер без ключа пропускается, текущ�
   assert.equal(readRouterState(stateFile(config)).current, 'brave');
 });
 
-// --- карантины ---------------------------------------------------------------
+// --- quarantines ---------------------------------------------------------------
 
-test('отказ: пять минут карантина, запрос уходит к следующему', async () => {
+test('failure: five minutes of quarantine, the request goes to the next one', async () => {
   const config = configWith({ serpapi: 's', brave: 'b' });
   const clock = clockAt();
   const fetch = fakeFetch({
@@ -220,7 +220,7 @@ test('отказ: пять минут карантина, запрос уход�
   assert.equal(Date.parse(ban?.bannedUntil ?? ''), clock.now() + ERROR_BAN_MS);
 });
 
-test('402 — сутки карантина: кредиты за пять минут не вернутся', async () => {
+test('402 — a day of quarantine: credits will not return in five minutes', async () => {
   const config = configWith({ serpapi: 's', brave: 'b' });
   const clock = clockAt();
   const fetch = fakeFetch({
@@ -235,7 +235,7 @@ test('402 — сутки карантина: кредиты за пять мин
   assert.equal(Date.parse(ban?.bannedUntil ?? ''), clock.now() + CREDIT_BAN_MS);
 });
 
-test('429 про кредиты — сутки, 429 про темп — пять минут', () => {
+test('429 about credits — a day, 429 about rate — five minutes', () => {
   assert.equal(classifyFailure(429, '{"error":"insufficient credits"}'), 'credits');
   assert.equal(classifyFailure(429, '{"error":"rate limit exceeded"}'), 'rate');
   assert.equal(classifyFailure(403, 'Not enough credits on balance'), 'credits');
@@ -245,7 +245,7 @@ test('429 про кредиты — сутки, 429 про темп — пять
   assert.equal(classifyFailure(433, 'This request exceeds the pay-as-you-go limit'), 'credits');
 });
 
-test('429 с текстом про кредиты банит на сутки', async () => {
+test('429 with credit-related text bans for a day', async () => {
   const config = configWith({ serpapi: 's', brave: 'b' });
   const clock = clockAt();
   const fetch = fakeFetch({
@@ -259,7 +259,7 @@ test('429 с текстом про кредиты банит на сутки', a
   assert.equal(Date.parse(ban?.bannedUntil ?? ''), clock.now() + CREDIT_BAN_MS);
 });
 
-test('таймаут — обычный карантин на пять минут', async () => {
+test('timeout — a usual five-minute quarantine', async () => {
   const config = configWith({ serpapi: 's', brave: 'b' });
   const clock = clockAt();
   const fetch = fakeFetch({
@@ -276,7 +276,7 @@ test('таймаут — обычный карантин на пять мину�
   assert.equal(Date.parse(ban?.bannedUntil ?? ''), clock.now() + ERROR_BAN_MS);
 });
 
-test('все в карантине: all-banned и ближайшее время разбана', async () => {
+test('everyone is quarantined: all-banned and the nearest unban time', async () => {
   const config = configWith({ serpapi: 's' });
   const clock = clockAt();
   const fetch = fakeFetch({ serpapi: () => json({}, 500) });
@@ -288,9 +288,9 @@ test('все в карантине: all-banned и ближайшее время 
   assert.equal(!second.ok && second.retryAt, new Date(clock.now() + ERROR_BAN_MS).toISOString());
 });
 
-// --- 50 отказов и «ключ сломан» ---------------------------------------------
+// --- 50 failures and "key broken" ---------------------------------------------
 
-test('50 отказов подряд: ключ сломан и семь дней карантина', async () => {
+test('50 failures in a row: the key is broken and seven days of quarantine', async () => {
   const config = configWith({ serpapi: 's' });
   const clock = clockAt();
   const fetch = fakeFetch({ serpapi: () => json({ error: 'boom' }, 500) });
@@ -308,7 +308,7 @@ test('50 отказов подряд: ключ сломан и семь дней
   assert.equal(Date.parse(provider?.bannedUntil ?? ''), clock.now() + BROKEN_BAN_MS);
 });
 
-test('успех после семи дней снимает и флаг, и карантин', async () => {
+test('a success after seven days clears both the flag and the quarantine', async () => {
   const config = configWith({ serpapi: 's' });
   const clock = clockAt();
   let broken = false;
@@ -330,10 +330,10 @@ test('успех после семи дней снимает и флаг, и к�
   assert.equal(provider?.bannedUntil, null);
 });
 
-test('сломанный ключ после семи дней проверяется сам и снимает флаг', async () => {
+test('a broken key is checked by itself after seven days and clears the flag', async () => {
   const config = configWith({ serpapi: 's', brave: 'b' });
   const clock = clockAt();
-  // Состояние как после 50 отказов, но семь дней уже прошли.
+  // The state as after 50 failures, but seven days have already passed.
   await mutateRouterState(stateFile(config), (state) => {
     state.current = 'brave';
     state.providers.serpapi = {
@@ -356,7 +356,7 @@ test('сломанный ключ после семи дней проверяе�
   assert.equal(state.current, 'brave', 'текущий сам по себе не меняется');
 });
 
-test('успех обнуляет счётчик отказов', async () => {  const config = configWith({ serpapi: 's' });
+test('a success resets the failure counter', async () => {  const config = configWith({ serpapi: 's' });
   const clock = clockAt();
   let fail = true;
   const fetch = fakeFetch({ serpapi: () => (fail ? json({}, 500) : okSerpApi()) });
@@ -371,9 +371,9 @@ test('успех обнуляет счётчик отказов', async () => { 
   assert.equal(provider?.bannedUntil, null);
 });
 
-// --- состояние и панель ------------------------------------------------------
+// --- state and panel ----------------------------------------------------------
 
-test('состояние переживает пересоздание конфига: карантин лежит в JSON', async () => {
+test('the state survives config recreation: the quarantine lives in JSON', async () => {
   const config = configWith({ serpapi: 's' });
   const clock = clockAt();
   const fetch = fakeFetch({ serpapi: () => json({}, 500) });
@@ -384,7 +384,7 @@ test('состояние переживает пересоздание конф�
   assert.ok(again.providers.serpapi?.bannedUntil);
 });
 
-test('битый JSON не роняет роутер, а чужие провайдеры игнорируются', () => {
+test('broken JSON does not crash the router, and unknown providers are ignored', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-search-state-'));
   const file = path.join(dir, 'search-router.json');
   fs.writeFileSync(file, '{это не json');
@@ -405,7 +405,7 @@ test('битый JSON не роняет роутер, а чужие провай
   assert.equal(state.providers['неведомый'], undefined);
 });
 
-test('панель видит текущего, карантин и сломанный ключ', async () => {
+test('the panel sees the current one, the quarantine and a broken key', async () => {
   const config = configWith({ serpapi: 's', brave: 'b' });
   const clock = clockAt();
   const fetch = fakeFetch({ serpapi: () => json({}, 500), brave: okSerpApi });
@@ -421,7 +421,7 @@ test('панель видит текущего, карантин и сломан
   assert.equal(you?.current, false);
 });
 
-test('проверка из панели снимает карантин, если провайдер ответил', async () => {
+test('a check from the panel clears the quarantine if the provider responded', async () => {
   const config = configWith({ serpapi: 's' });
   const clock = clockAt();
   const failing = fakeFetch({ serpapi: () => json({}, 500) });
@@ -438,7 +438,7 @@ test('проверка из панели снимает карантин, есл
   assert.equal(provider?.fails, 0);
 });
 
-test('панель видит провайдера без ключа: keyless, present, пустой keyName', () => {
+test('the panel sees a provider without a key: keyless, present, empty keyName', () => {
   const config = makeConfig({ env: { ICARUS_SEARCH_FREE: 'on' } });
   const row = searchStatus(config).providers.find((provider) => provider.id === 'you-free');
   assert.equal(row?.keyless, true);
@@ -447,7 +447,7 @@ test('панель видит провайдера без ключа: keyless, p
   assert.match(row?.note ?? '', /100 поисков в сутки/);
 });
 
-test('You.com без ключа подписан «необязателен», пока работает бесплатный MCP', () => {
+test('You.com without a key is labeled "optional" while the free MCP works', () => {
   const on = searchStatus(makeConfig({ env: { ICARUS_SEARCH_FREE: 'on' } }));
   const you = on.providers.find((provider) => provider.id === 'you');
   assert.equal(you?.present, false);
@@ -465,14 +465,14 @@ test('You.com без ключа подписан «необязателен», �
   assert.equal(withKey?.optional, false, 'ключ есть — подсказка не нужна');
 });
 
-test('проверка из панели зовёт провайдера без ключа, а не отказывает', async () => {
+test('a check from the panel calls the provider without a key instead of refusing', async () => {
   const config = makeConfig({ env: { ICARUS_SEARCH_FREE: 'on' } });
   const result = await checkProvider(config, 'you-free', { fetch: fakeFetch({ 'you-free': okYouFree }) });
   assert.equal(result.ok, true);
   assert.equal(result.results, 1);
 });
 
-test('проверка из панели без ключа не ходит в сеть и говорит прямо', async () => {
+test('a check from the panel without a key does not hit the network and says so directly', async () => {
   const config = configWith({});
   const check = await checkProvider(config, 'serpapi', {
     fetch: fakeFetch({}),
@@ -482,7 +482,7 @@ test('проверка из панели без ключа не ходит в с
   assert.equal(check.error, 'ключ не задан');
 });
 
-test('SearchFailure по умолчанию — обычный сбой, а не кредиты', () => {
+test('SearchFailure by default is a usual failure, not credits', () => {
   const failure = new SearchFailure('network', 'сеть легла');
   assert.equal(failure.kind, 'network');
   assert.equal(failure.status, null);
@@ -503,7 +503,7 @@ function startServer(config: IcarusConfig, fetchImpl?: typeof fetch) {
   });
 }
 
-test('GET /search: изнутри сети без токена, снаружи — только с токеном', async () => {
+test('GET /search: from inside the network without a token, from outside — only with a token', async () => {
   const config = configWith({ serpapi: 's' });
   const box = await startServer(config, fakeFetch({ serpapi: okSerpApi }));
   try {
@@ -516,11 +516,11 @@ test('GET /search: изнутри сети без токена, снаружи �
     assert.equal(body.provider, 'serpapi');
     assert.equal(body.results.length, 2);
 
-    // Петля — это внутренняя сеть: контейнер pi ходит сюда без всяких токенов.
+    // The loopback is the internal network: the pi container reaches here without any tokens.
     const internal = await fetch(`${box.base}/search?q=лиссабон`);
     assert.equal(internal.status, 200);
 
-    // А вот чужой токен не принимаем даже изнутри: это уже не «нет токена».
+    // But a wrong token is not accepted even from inside: that's no longer "no token".
     const wrong = await fetch(`${box.base}/search?q=лиссабон`, { headers: { authorization: 'Bearer wrong-token' } });
     assert.equal(wrong.status, 401);
   } finally {
@@ -528,7 +528,7 @@ test('GET /search: изнутри сети без токена, снаружи �
   }
 });
 
-test('внутренние адреса узнаются, публичные — нет', () => {
+test('internal addresses are recognized, public ones — not', () => {
   for (const address of [
     '127.0.0.1',
     '::1',
@@ -548,7 +548,7 @@ test('внутренние адреса узнаются, публичные —
   }
 });
 
-test('POST /search понимает query и пустой запрос отвергает', async () => {
+test('POST /search understands query and rejects an empty request', async () => {
   const config = configWith({ serpapi: 's' });
   const box = await startServer(config, fakeFetch({ serpapi: okSerpApi }));
   try {
@@ -572,9 +572,9 @@ test('POST /search понимает query и пустой запрос отве�
   }
 });
 
-// --- разбор выдач ------------------------------------------------------------
+// --- parsing of results ------------------------------------------------------
 
-test('SerpApi и Serpstack: organic_results', async () => {
+test('SerpApi and Serpstack: organic_results', async () => {
   const { parseSerpApi, parseSerpStack } = await import('../src/search/providers.ts');
   const payload = {
     organic_results: [
@@ -592,7 +592,7 @@ test('SerpApi и Serpstack: organic_results', async () => {
   ]);
 });
 
-test('Brave, Exa, Tavily, Firecrawl, You, Linkup разбираются в общий вид', async () => {
+test('Brave, Exa, Tavily, Firecrawl, You, Linkup are parsed into a common shape', async () => {
   const { parseBrave, parseExa, parseTavily, parseFirecrawl, parseYou, parseLinkup } = await import(
     '../src/search/providers.ts'
   );
@@ -617,7 +617,7 @@ test('Brave, Exa, Tavily, Firecrawl, You, Linkup разбираются в об�
   ]);
 });
 
-test('битые выдачи не ломают разбор и уважают limit', async () => {
+test('broken results do not break parsing and respect limit', async () => {
   const { parseSerpApi, parseBrave, parseExa, parseFirecrawl, parseYou, parseLinkup } = await import(
     '../src/search/providers.ts'
   );
@@ -635,7 +635,7 @@ test('битые выдачи не ломают разбор и уважают l
   assert.equal(parseSerpApi(many, 1).length, 1);
 });
 
-test('каждый адаптер шлёт ключ туда, куда надо, и разбирает ответ', async () => {
+test('each adapter sends the key where it should and parses the response', async () => {
   const responses: Record<string, unknown> = {
     serpapi: { organic_results: [{ title: 'S', link: 'https://s.dev', snippet: 'x' }] },
     serpstack: { organic_results: [{ title: 'S', url: 'https://s.dev', description: 'x' }] },
@@ -644,8 +644,8 @@ test('каждый адаптер шлёт ключ туда, куда надо,
     tavily: { results: [{ title: 'T', url: 'https://t.dev', content: 'x' }] },
     firecrawl: { data: [{ title: 'F', url: 'https://f.dev', description: 'x' }] },
     you: { results: { web: [{ title: 'Y', url: 'https://y.dev', description: 'x' }] } },
-    // Бесплатный MCP отвечает не REST-телом, а JSON-RPC: результат лежит
-    // строкой в content[0].text, и внутри — та же форма results.web.
+    // The free MCP responds not with a REST body but with JSON-RPC: the result lies
+    // as a string in content[0].text, and inside — the same results.web shape.
     'you-free': {
       jsonrpc: '2.0',
       id: 1,
@@ -687,7 +687,7 @@ test('каждый адаптер шлёт ключ туда, куда надо,
   assert.equal((you?.init.headers as Record<string, string>)['x-api-key'], 'secret-key');
   assert.match(String(you?.init.body), /лиссабон/);
 
-  // Бесплатный MCP: тот же You.com, но без ключа вообще — ни заголовка, ни query.
+  // The free MCP: the same You.com, but without a key at all — no header, no query.
   const free = seen.get('you-free');
   assert.equal(free?.url.hostname, 'api.you.com');
   assert.equal(free?.url.searchParams.get('profile'), 'free');
@@ -696,6 +696,6 @@ test('каждый адаптер шлёт ключ туда, куда надо,
   assert.equal(JSON.parse(String(free?.init.body)).params.name, 'you-search');
 });
 
-test('провайдеры зарегистрированы ровно в порядке рейтинга', () => {
+test('providers are registered exactly in rating order', () => {
   assert.deepEqual(Object.keys(PROVIDERS), [...RATING]);
 });

@@ -1,4 +1,4 @@
-// Сравнение: один и тот же сценарий гоняем на нескольких промптах и на стоковом ассистенте.
+// Comparison: run the same scenario across several prompts and against the stock assistant.
 // node compare.mjs --in ../../icarus.md --personas stock.txt,icarus-v0.md [--scenarios a,b]
 import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, isAbsolute } from "node:path";

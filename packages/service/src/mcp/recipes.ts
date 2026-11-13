@@ -1,83 +1,83 @@
-// Рецепты MCP: готовые пресеты серверов, которые человек добавляет одной кнопкой.
+// MCP recipes: ready-made server presets that a person adds with one button.
 //
-// Зачем это здесь. «Добавить MCP» требует знать команду, аргументы, транспорт и
-// имена переменных окружения. Человек, который просто хочет погоду в Дублине,
-// этого не знает и не должен узнавать. Рецепт — это описание сервера без секретов:
-// команда/адрес, несекретные настройки и имена ключей, которые попросит форма.
+// Why this is here. "Add MCP" requires knowing the command, arguments, transport and
+// environment variable names. A person who just wants the weather in Dublin
+// does not know this and should not have to. A recipe is a description of a server without secrets:
+// command/address, non-secret settings and the names of the keys the form will ask for.
 //
-// Правила, по которым каталог собран:
-//   * в рецепте нет ни одного значения секрета — только имена и подсказки, откуда
-//     взять; значения человек вводит в форме и они ложатся в credentials.json;
-//   * если сервер требует внешней инфраструктуры (Proton Bridge, rclone, Home
-//     Assistant), это написано в requires и caveat, а не спрятано в «работает из
-//     коробки»;
-//   * дата проверки у каждого рецепта — чтобы через полгода было видно, что пакет
-//     и адрес проверяли, а не переписывали из головы.
+// The rules by which the catalog is assembled:
+//   * a recipe contains no secret value at all — only names and hints where
+//     to get it; the person enters values in the form and they go into credentials.json;
+//   * if a server requires external infrastructure (Proton Bridge, rclone, Home
+//     Assistant), this is written in requires and caveat, not hidden in "works out of
+//     the box";
+//   * each recipe has a verification date — so that half a year later it is visible that the package
+//     and address were verified, not rewritten from memory.
 import type { McpAuthType, McpTransport } from './registry.ts';
 
-/** Один ключ, который попросит форма. Значения здесь нет и быть не должно. */
+/** One key the form will ask for. There is no value here and there must not be. */
 export type McpRecipeSecret = {
-  /** Имя переменной окружения (stdio) или заголовка (HTTP). */
+  /** Environment variable name (stdio) or header name (HTTP). */
   name: string;
-  /** Что это и где взять — человеку, а не модели. */
+  /** What this is and where to get it — for the person, not the model. */
   hint: string;
 };
 
 /**
- * Рецепт сервера. Это не сохранённый сервер: id рецепта не попадает в реестр,
- * а команда/адрес подставляются в обычную форму добавления.
+ * A server recipe. This is not a saved server: the recipe id does not go into the registry,
+ * but the command/address are substituted into the ordinary add form.
  */
 export type McpRecipe = {
   id: string;
   name: string;
-  /** Короткая категория для карточки: почта, календарь, файлы… */
+  /** Short category for the card: mail, calendar, files… */
   category: string;
-  /** Когда сервер реально нужен — по критерию «раз в неделю». */
+  /** When the server is really needed — by the "once a week" criterion. */
   when: string;
-  /** Описание, которое уедет в карточку сервера и в AGENTS.md. */
+  /** Description that will go into the server card and into AGENTS.md. */
   description: string;
   transport: McpTransport;
   command?: string;
   args?: string[];
   url?: string;
   auth: McpAuthType;
-  /** Несекретные настройки stdio: адреса, порты, режимы. */
+  /** Non-secret stdio settings: addresses, ports, modes. */
   env?: Record<string, string>;
-  /** Несекретные постоянные заголовки HTTP. */
+  /** Non-secret permanent HTTP headers. */
   headers?: Record<string, string>;
-  /** Ключи, которые попросит форма: только имена и подсказки. */
+  /** Keys the form will ask for: only names and hints. */
   secrets: McpRecipeSecret[];
-  /** Где живёт ключ: в переменных окружения stdio или в заголовке HTTP. */
+  /** Where the key lives: in stdio environment variables or in an HTTP header. */
   secretKind: 'env' | 'header';
-  /** Что должно быть снаружи до нажатия «Добавить». */
+  /** What must be outside before pressing "Add". */
   requires: string[];
-  /** Что сделать руками, по шагам. */
+  /** What to do by hand, step by step. */
   steps: string[];
-  /** Если не поднялся — самые частые причины. */
+  /** If it did not come up — the most common causes. */
   trouble: string[];
-  /** Ограничение, о котором нельзя молчать (localhost, тариф, чужая машина). */
+  /** A limitation that must not be kept silent (localhost, plan, someone else's machine). */
   caveat?: string;
   docs: string;
-  /** Дата, когда проверили пакет, адрес и команду. */
+  /** Date when the package, address and command were verified. */
   checkedAt: string;
 };
 
-/** Критерий отбора из идеи: «раз в неделю» — граница между умением и игрушкой. */
+/** Selection criterion from the idea: "once a week" is the line between a skill and a toy. */
 export const RECIPE_RULE =
   'MCP стоит заводить, если ты пользуешься им хотя бы раз в неделю. Всё остальное — инструменты, которые висят в каждом разговоре и занимают контекст.';
 
-/** Что в каталог осознанно не попало — чтобы это не выглядело забывчивостью. */
+/** What deliberately did not make it into the catalog — so it does not look like forgetfulness. */
 export const RECIPE_SKIPPED =
   'Банки и биллинг сюда не попали: раз в неделю ими не пользуются, а цена ошибки выше, чем польза от инструмента.';
 
 export const RECIPE_CHECKED_AT = '2026-11-09';
 
 /**
- * Каталог. Порядок — как в идее: почта, календарь, файлы, заметки, новости,
- * погода, дом. Home Assistant уже умеет быть общим сервером из config.yaml, но
- * рецепт для него всё равно нужен: человек, у которого HA свой, заводит его сам.
- * Медиа — Кинозал (смотрит фильмы) и Видео в блог-пост (читает доклады): оба
- * про одно и то же «медиа», поэтому стоят рядом.
+ * The catalog. The order is as in the idea: mail, calendar, files, notes, news,
+ * weather, home. Home Assistant can already be a shared server from config.yaml, but
+ * a recipe for it is still needed: a person who has their own HA sets it up themselves.
+ * Media — Kinozal (watches movies) and Video to blog post (reads talks): both
+ * are about the same "media", so they stand next to each other.
  */
 export const MCP_RECIPES: McpRecipe[] = [
   {
@@ -90,8 +90,8 @@ export const MCP_RECIPES: McpRecipe[] = [
     command: 'npx',
     args: ['-y', '--package=proton-mail-bridge-client', 'proton-mail-bridge-mcp'],
     auth: 'headers',
-    // Режим drafts — безопасный по умолчанию: читать и писать черновики можно,
-    // отправлять и удалять модель не сможет, пока человек не поменяет env.
+    // The drafts mode is safe by default: reading and writing drafts is allowed,
+    // the model cannot send or delete until the person changes the env.
     env: {
       PROTONMAIL_IMAP_HOST: '127.0.0.1',
       PROTONMAIL_IMAP_PORT: '1143',
@@ -136,8 +136,8 @@ export const MCP_RECIPES: McpRecipe[] = [
     command: 'npx',
     args: ['-y', 'caldav-mcp'],
     auth: 'headers',
-    // Адрес подставлен как образец: у каждого свой сервер, поэтому человек его
-    // правит в форме, а не получает нерабочее значение «из коробки».
+    // The address is substituted as an example: everyone has their own server, so the person edits it
+    // in the form rather than getting a non-working value "out of the box".
     env: { CALDAV_BASE_URL: 'https://caldav.example.com' },
     secrets: [
       { name: 'CALDAV_USERNAME', hint: 'логин CalDAV (обычно почта)' },
@@ -246,8 +246,8 @@ export const MCP_RECIPES: McpRecipe[] = [
     command: 'node',
     args: ['/opt/icarus/tools/opds-mcp/server.mjs'],
     auth: 'none',
-    // Адрес — образец публичного каталога: его видно в форме и можно заменить на
-    // свой (Calibre, домашняя библиотека). Сайт в коде сервера не зашит.
+    // The address is an example of a public catalog: it is visible in the form and can be replaced with
+    // your own (Calibre, home library). The site is not hardcoded in the server code.
     env: { OPDS_URL: 'https://www.gutenberg.org/ebooks.opds/' },
     secrets: [],
     secretKind: 'env',
@@ -309,8 +309,8 @@ export const MCP_RECIPES: McpRecipe[] = [
     command: 'npx',
     args: ['-y', '@dangahagan/weather-mcp@latest'],
     auth: 'none',
-    // basic — шесть инструментов вместо семнадцати: меньше контекста в каждом
-    // разговоре. Для «погоды в Дублине» остального и не нужно.
+    // basic — six tools instead of seventeen: less context in each
+    // conversation. For "weather in Dublin" nothing else is needed.
     env: { WEATHER_UNITS: 'metric', ENABLED_TOOLS: 'basic' },
     secrets: [],
     secretKind: 'env',
@@ -367,13 +367,13 @@ export const MCP_RECIPES: McpRecipe[] = [
     when: 'Фильм или сериал: найти, посмотреть, что уже скачано и сколько места, и заказать загрузку после явного «да».',
     description: 'Кинозал: Radarr и Sonarr — поиск, коллекция, очередь, диски и профили качества; заказ файла отдельным инструментом с подтверждением.',
     transport: 'stdio',
-    // Сервер едет в контейнер из репозитория: путь тот же, что монтирует compose.
-    // Своего кода у рецепта нет — это описание того, что уже лежит в образе.
+    // The server comes into the container from the repository: the same path as compose mounts.
+    // The recipe has no code of its own — it is a description of what already lies in the image.
     command: 'node',
     args: ['/opt/icarus/tools/arr-mcp/server.mjs'],
     auth: 'headers',
-    // Адреса тоже вводит человек: 127.0.0.1 в контейнере — это сам контейнер,
-    // а не машина с Radarr, поэтому подставлять «пример из головы» вредно.
+    // The person also enters the addresses: 127.0.0.1 in the container is the container itself,
+    // not the machine with Radarr, so substituting an "example from memory" is harmful.
     secrets: [
       { name: 'ARR_RADARR_URL', hint: 'адрес Radarr, видимый из контейнера: http://<хост>:7878' },
       { name: 'ARR_RADARR_KEY', hint: 'Radarr → Settings → General → API Key' },
@@ -408,11 +408,11 @@ export const MCP_RECIPES: McpRecipe[] = [
     when: 'Ролик, доклад или подкаст нужно прочитать, а не смотреть: расшифровка и готовый пост. Раз в неделю — да, в каждом разговоре — лишний контекст.',
     description: 'Видео в блог-пост: yt-dlp скачивает звук, Whisper расшифровывает, DeepSeek переписывает транскрипт в Markdown-пост с заголовком и разделами.',
     transport: 'stdio',
-    // Сервер едет в контейнер из репозитория: своего кода у рецепта нет, только описание.
+    // The server comes into the container from the repository: the recipe has no code of its own, only a description.
     command: 'node',
     args: ['/opt/icarus/tools/video-blog-mcp/server.mjs'],
     auth: 'none',
-    // Настройки несекретные и осознанно видимые: их можно поменять в форме, не трогая код.
+    // The settings are non-secret and deliberately visible: they can be changed in the form without touching the code.
     env: {
       VIDEO_BLOG_ASR_MODEL: 'openai/whisper-large-v3-turbo',
       VIDEO_BLOG_LLM_MODEL: 'deepseek-ai/DeepSeek-V4.1-Flash',
@@ -443,15 +443,15 @@ export const MCP_RECIPES: McpRecipe[] = [
   },
 ];
 
-/** Рецепт по id. Неизвестный id — не ошибка панели, а 404 в обработчике. */
+/** Recipe by id. An unknown id is not a panel error but a 404 in the handler. */
 export function recipeById(id: string): McpRecipe | undefined {
   return MCP_RECIPES.find((recipe) => recipe.id === id);
 }
 
 /**
- * Что форма получает от рецепта. Форма уже умеет открываться с «редактором»
- * сохранённого сервера (server + имена ключей), поэтому рецепт приезжает в том же
- * виде: команда и настройки заполнены, пустые остаются только значения ключей.
+ * What the form gets from the recipe. The form already knows how to open with the "editor"
+ * of a saved server (server + key names), so the recipe arrives in the same
+ * shape: command and settings filled in, only key values remain empty.
  */
 export type McpRecipeEditor = {
   recipe: McpRecipe;
@@ -468,7 +468,7 @@ export type McpRecipeEditor = {
   };
   credentialHeaders: string[];
   credentialEnv: string[];
-  /** Что сервер будет ждать от человека: имена ключей, значения пустые. */
+  /** What the server will expect from the person: key names, values empty. */
   expectsHeaders: string[];
   expectsEnv: string[];
   oauth: null;

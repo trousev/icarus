@@ -1,8 +1,8 @@
-// Запуск задачи: новый разговор и промпт в него.
+// Task launch: a new conversation and a prompt into it.
 //
-// Докера и модели тут нет: реестр — заглушка, а реестр разговоров настоящий. Проверяем
-// главное обещание задачи — по времени появляется ОБЫЧНЫЙ чат с промптом человека,
-// а не сообщение в чужой разговор.
+// There's no Docker or model here: the registry is a stub, and the conversation registry is real. We check
+// the main promise of a task — on schedule, an ORDINARY chat appears with the person's prompt,
+// not a message into someone else's conversation.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { userPaths } from '../src/config.ts';
@@ -44,7 +44,7 @@ function task(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
   };
 }
 
-test('запуск заводит новый разговор: заголовок из промпта, промпт уходит агенту', async () => {
+test('launch starts a new conversation: title from the prompt, prompt goes to the agent', async () => {
   const config = makeConfig({ users: [probe('probe')] });
   const user = probe('probe');
   const { registry, sent, acquired } = makeRegistry();
@@ -52,22 +52,22 @@ test('запуск заводит новый разговор: заголово�
   const outcome = await taskLauncher(config, registry).launch(user, task());
 
   assert.equal(outcome.error, undefined);
-  // Разговор появился в реестре чатов — панель покажет его в списке.
+  // The conversation appeared in the chat registry — the panel will show it in the list.
   const chats = readChats(config, user);
   assert.equal(chats.length, 1);
   assert.equal(chats[0].id, outcome.chatId);
   assert.equal(chats[0].channel, 'web');
   assert.equal(chats[0].workspace, 'talk');
-  // Заголовок — промпт, а не «Новый чат»: в списке видно, что запустилось.
+  // The title is the prompt, not "New chat": the list shows what was launched.
   assert.equal(chats[0].title, PROMPT);
-  // Промпт уехал целиком, а не заголовком.
+  // The prompt went through in full, not as the title.
   assert.deepEqual(sent, [PROMPT]);
   assert.deepEqual(acquired, [{ conversationId: outcome.chatId, workspace: 'talk' }]);
-  // Канал хода записан: панель подписывает реплику как веб-чат.
+  // The turn channel is recorded: the panel labels the reply as a web chat.
   assert.equal(findChatRecord(config, user, outcome.chatId ?? '')?.lastTurn?.channel, 'web');
 });
 
-test('длинный промпт в заголовке режется по первой строке', async () => {
+test('a long prompt in the title is cut at the first line', async () => {
   const config = makeConfig({ users: [probe('probe')] });
   const user = probe('probe');
   const { registry } = makeRegistry();
@@ -81,7 +81,7 @@ test('длинный промпт в заголовке режется по пе
   assert.equal(title.includes('вторая строка'), false, 'в заголовок идёт только первая строка');
 });
 
-test('задача работает в своём workspace', async () => {
+test('a task runs in its own workspace', async () => {
   const config = makeConfig({ users: [probe('probe')] });
   const user = probe('probe');
   const { registry, acquired } = makeRegistry();
@@ -93,7 +93,7 @@ test('задача работает в своём workspace', async () => {
   assert.ok(outcome.chatId);
 });
 
-test('агент не поднялся: разговор остаётся, а ошибка возвращается задаче', async () => {
+test('the agent did not come up: the conversation remains, and the error is returned to the task', async () => {
   const config = makeConfig({ users: [probe('probe')] });
   const user = probe('probe');
   const { registry, sent } = makeRegistry({ fail: 'контейнер icarus-user-probe не найден — подними стек' });
@@ -106,14 +106,14 @@ test('агент не поднялся: разговор остаётся, а о
   assert.deepEqual(sent, [], 'промпт никуда не уехал');
 });
 
-test('занятость человека — это занятые сессии его разговоров', () => {
+test('a person\'s busyness is the busy sessions of their conversations', () => {
   const config = makeConfig({ users: [probe('probe')] });
   const user = probe('probe');
   assert.equal(taskLauncher(config, makeRegistry().registry).busy(user), false);
   assert.equal(taskLauncher(config, makeRegistry({ busy: true }).registry).busy(user), true);
 });
 
-test('задача, созданная через хранилище, запускается своим промптом', async () => {
+test('a task created through the store is launched with its own prompt', async () => {
   const config = makeConfig({ users: [probe('probe')], env: { TZ: 'Europe/Dublin' } });
   const user = probe('probe');
   const { registry, sent } = makeRegistry();
@@ -129,6 +129,6 @@ test('задача, созданная через хранилище, запус
 
   assert.deepEqual(sent, [PROMPT]);
   assert.equal(readChats(config, user)[0].id, outcome.chatId);
-  // Разговоры лежат в dataDir человека: файл сессии появится рядом.
+  // Conversations live in the person's dataDir: the session file will appear alongside.
   assert.ok(userPaths(config, user).sessions.includes('probe'));
 });

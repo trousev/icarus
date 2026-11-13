@@ -1,4 +1,4 @@
-// Идентичность, вложения и конфиг — то, что легко сломать незаметно.
+// Identity, attachments and config — the things that are easy to break unnoticed.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -10,7 +10,7 @@ import { expandValue, loadConfig, userPaths, type IcarusConfig } from '../src/co
 
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 
-test('заголовки клиента задают пользователя и разговор', () => {
+test('client headers set the user and the conversation', () => {
   const req = {
     headers: { 'x-icarus-user-id': 'probe', 'x-icarus-conversation-id': 'conv-1' },
   } as any;
@@ -19,7 +19,7 @@ test('заголовки клиента задают пользователя и
   assert.equal(identity.conversationId, 'conv-1');
 });
 
-test('без заголовков остаётся фолбэк на тело и хеш истории', () => {
+test('without headers, the fallback to the body and the history hash remains', () => {
   const req = { headers: {} } as any;
   const identity = resolveIdentity(req, { user: 'from-body' }, [{ role: 'user', content: 'привет' }]);
   assert.equal(identity.userId, 'from-body');
@@ -28,7 +28,7 @@ test('без заголовков остаётся фолбэк на тело и
   assert.equal(same.conversationId, identity.conversationId, 'хеш должен быть детерминированным');
 });
 
-test('вложение раскодируется в файл, а не теряется', () => {
+test('an attachment is decoded into a file instead of being lost', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-incoming-'));
   const messages = [
     {
@@ -48,20 +48,20 @@ test('вложение раскодируется в файл, а не теря�
   assert.ok(fs.statSync(path.join(dir, written[0])).size > 0, 'файл не должен быть пустым');
 });
 
-test('упоминание вложений попадает в реплику', () => {
+test('mentioning attachments gets into the message', () => {
   const prompt = buildPrompt('что тут?', ['/workspaces/.icarus/incoming/a.png']);
   assert.match(prompt, /что тут\?/);
   assert.match(prompt, /\/workspaces\/\.icarus\/incoming\/a\.png/);
 });
 
-test('подстановка ~ и переменных окружения', () => {
+test('expansion of ~ and environment variables', () => {
   assert.ok(expandValue('~/icarus', { HOME: '/home/x' } as any).startsWith('/home'));
   assert.equal(expandValue('env:MY_KEY', { MY_KEY: 'secret' } as any), 'secret');
   assert.equal(expandValue('${MY_KEY}', { MY_KEY: 'secret' } as any), 'secret');
   assert.equal(expandValue('просто строка', {} as any), 'просто строка');
 });
 
-test('контейнер монтирует память, сессии и репозитории', () => {
+test('the container mounts memory, sessions and repositories', () => {
   const config = {
     dataDir: '/data',
     docker: { image: 'icarus-user:dev', prefix: 'icarus-user', socket: null },
@@ -76,20 +76,20 @@ test('контейнер монтирует память, сессии и реп
     'общие скиллы — только для чтения, чтобы получатель не мог переписать чужой',
   );
   assert.match(joined, /\/data\/users\/probe\/workspaces\/private:\/workspaces\/private:ro/);
-  // Код сервера артефактов нужен контейнеру всегда, даже без Maple; остальной
-  // каталог tools (стенды и логи) в контейнер не едет.
+  // The artifacts server code is always needed by the container, even without Maple; the rest of the
+  // tools directory (stands and logs) does not go into the container.
   assert.match(joined, /\/tools\/artifacts-mcp:\/opt\/icarus\/tools\/artifacts-mcp:ro/);
-  // OPDS-сервер — рецепт из каталога: без маунта команда из рецепта не найдёт файл.
+  // The OPDS server is a recipe from the catalog: without the mount, the command from the recipe would not find the file.
   assert.match(joined, /\/tools\/opds-mcp:\/opt\/icarus\/tools\/opds-mcp:ro/);
-  // Кинозал монтируется всегда: сервер может понадобиться и после сборки конфига.
+  // The cinema room is always mounted: the server may be needed even after the config is built.
   assert.match(joined, /\/tools\/arr-mcp:\/opt\/icarus\/tools\/arr-mcp:ro/);
-  // Видео в блог-пост — такой же рецепт из каталога: маунт только для чтения,
-  // потому что бинарники сервер скачивает себе в служебный каталог сам.
+  // Video to blog post is the same kind of recipe from the catalog: the mount is read-only,
+  // because the server downloads the binaries into its own service directory.
   assert.match(joined, /\/tools\/video-blog-mcp:\/opt\/icarus\/tools\/video-blog-mcp:ro/);
   assert.doesNotMatch(joined, /\/tools:\/opt\/icarus\/tools:ro/);
 });
 
-test('пути пользователя выводятся из dataDir', () => {
+test('user paths are derived from dataDir', () => {
   const config = { dataDir: '/data' } as unknown as IcarusConfig;
   const paths = userPaths(config, { id: 'probe' });
   assert.equal(paths.workspaces, '/data/users/probe/workspaces');
@@ -98,7 +98,7 @@ test('пути пользователя выводятся из dataDir', () => 
   assert.equal(paths.sharedMemory, '/data/shared');
 });
 
-test('конфиг без apiKey не принимается', () => {
+test('a config without apiKey is not accepted', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-cfg-'));
   const file = path.join(dir, 'config.yaml');
   fs.writeFileSync(file, 'dataDir: /tmp\nmodels:\n  - provider: deepinfra\n    id: deepseek-ai/DeepSeek-V4.1-Flash\nusers:\n  - a\n');

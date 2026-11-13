@@ -1,9 +1,9 @@
-// Workspaces: рабочие папки человека. Один workspace — одна папка в
-// `<dataDir>/users/<id>/workspaces`, и это единственное, что определяет, где агент
-// работает. Служебные каталоги живут рядом, в `.icarus`, и в workspace не входят.
+// Workspaces: a person's working folders. One workspace is one folder in
+// `<dataDir>/users/<id>/workspaces`, and it's the only thing that determines where the
+// agent works. Service directories live nearby, in `.icarus`, and are not part of the workspace.
 //
-// Метаданные — отдельный файл вне монтируемого дерева: агенту незачем видеть и тем
-// более править список своих рабочих папок.
+// Metadata is a separate file outside the mounted tree: the agent has no reason to see,
+// let alone edit, the list of its working folders.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -18,7 +18,7 @@ export type Workspace = {
   createdAt: string;
 };
 
-/** Имя workspace'а в интерфейсе: у служебных оно фиксированное. */
+/** Workspace name in the interface: service ones have a fixed one. */
 const FIXED: Record<string, { name: string; kind: WorkspaceKind }> = {
   [DEFAULT_WORKSPACE]: { name: 'Разговор', kind: 'talk' },
   [PRIVATE_WORKSPACE]: { name: 'Приватный', kind: 'private' },
@@ -55,13 +55,13 @@ function readMeta(config: IcarusConfig, user: UserConfig): Workspace[] {
 function writeMeta(config: IcarusConfig, user: UserConfig, items: Workspace[]): void {
   const file = metaFile(config, user);
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  // Через временный файл: оборванная запись не должна оставить человека без списка.
+  // Via a temporary file: an interrupted write must not leave the person without a list.
   const tmp = `${file}.tmp`;
   fs.writeFileSync(tmp, `${JSON.stringify({ version: META_VERSION, items }, null, 2)}\n`);
   fs.renameSync(tmp, file);
 }
 
-/** Транслитерация в slug: кириллица → латиница, остальное — дефисы. */
+/** Transliteration to slug: Cyrillic → Latin, everything else — hyphens. */
 export function slugify(name: string): string {
   const map: Record<string, string> = {
     а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh', з: 'z', и: 'i',
@@ -80,7 +80,7 @@ export function slugify(name: string): string {
   return slug || 'workspace';
 }
 
-/** Содержимое AGENTS.md, которое получает новый workspace. */
+/** The AGENTS.md content a new workspace gets. */
 export function workspaceAgents(slug: string, name: string): string {
   if (slug === PRIVATE_WORKSPACE) {
     return `# Приватный workspace
@@ -123,7 +123,7 @@ function workspaceDir(config: IcarusConfig, user: UserConfig, slug: string): str
   return path.join(userPaths(config, user).workspaces, slug);
 }
 
-/** Кладёт AGENTS.md в папку workspace'а, если его там ещё нет. */
+/** Puts AGENTS.md into the workspace folder if it's not there yet. */
 function seedAgents(config: IcarusConfig, user: UserConfig, workspace: Workspace): void {
   const dir = workspaceDir(config, user, workspace.slug);
   fs.mkdirSync(dir, { recursive: true });
@@ -133,8 +133,8 @@ function seedAgents(config: IcarusConfig, user: UserConfig, workspace: Workspace
 }
 
 /**
- * Приводит хозяйство в порядок: «Разговор» и «Приватный» есть всегда, их папки
- * созданы, AGENTS.md на месте. Возвращает полный список в порядке интерфейса.
+ * Puts things in order: «Talk» and «Private» always exist, their folders are created,
+ * AGENTS.md is in place. Returns the full list in interface order.
  */
 export function ensureWorkspaces(config: IcarusConfig, user: UserConfig): Workspace[] {
   const now = new Date().toISOString();
@@ -147,7 +147,7 @@ export function ensureWorkspaces(config: IcarusConfig, user: UserConfig): Worksp
     bySlug.set(slug, { slug, name: fixed.name, kind: fixed.kind, createdAt: now });
   }
 
-  // Чужие служебные имена не должны притворяться workspace'ами.
+  // Someone else's service names must not pretend to be workspaces.
   const ordered = [
     bySlug.get(DEFAULT_WORKSPACE)!,
     bySlug.get(PRIVATE_WORKSPACE)!,
@@ -173,17 +173,17 @@ export function findWorkspace(config: IcarusConfig, user: UserConfig, slug: stri
 }
 
 /**
- * Workspace'ы, которые человек может выбрать для разговора. Приватный сюда не
- * входит: он только для чтения, и переключать в него разговор нельзя — не
- * «спрятать из списка, но пустить по имени», а не участвует вообще.
+ * Workspaces the person can choose for a conversation. Private is not included: it's
+ * read-only, and you can't switch a conversation into it — not «hidden from the list but
+ * allowed by name», but not participating at all.
  */
 export function selectableWorkspaces(config: IcarusConfig, user: UserConfig): Workspace[] {
   return listWorkspaces(config, user).filter((item) => item.kind !== 'private');
 }
 
 /**
- * Workspace по тому, что человек написал: slug папки (`icarus`) или её имя
- * (`Работа`). Отдельный ответ для приватного: это не опечатка, а запрет.
+ * Workspace by what the person wrote: the folder slug (`icarus`) or its name (`Work`).
+ * A separate answer for private: that's not a typo but a prohibition.
  */
 export function findSelectableWorkspace(
   config: IcarusConfig,
@@ -200,7 +200,7 @@ export function findSelectableWorkspace(
   return items.find((item) => item.kind !== 'private' && matches(item)) ?? null;
 }
 
-/** Workspace по умолчанию для входов без выбора (Telegram, старые записи). */
+/** Default workspace for entries without a choice (Telegram, old records). */
 export function defaultWorkspace(config: IcarusConfig, user: UserConfig): Workspace {
   return findWorkspace(config, user, DEFAULT_WORKSPACE) ?? {
     slug: DEFAULT_WORKSPACE,
@@ -211,7 +211,7 @@ export function defaultWorkspace(config: IcarusConfig, user: UserConfig): Worksp
 }
 
 export class WorkspaceError extends Error {
-  /** HTTP-статус, которым панель ответит на эту ошибку. */
+  /** HTTP status the panel will answer this error with. */
   status: 400 | 404 | 409;
 
   constructor(message: string, status: 400 | 404 | 409) {
@@ -220,7 +220,7 @@ export class WorkspaceError extends Error {
   }
 }
 
-/** Заводит новую рабочую папку. Папка создаётся сразу, вместе с AGENTS.md. */
+/** Creates a new working folder. The folder is created at once, together with AGENTS.md. */
 export function createWorkspace(config: IcarusConfig, user: UserConfig, rawName: unknown): Workspace {
   const name = typeof rawName === 'string' ? rawName.replace(/\s+/g, ' ').trim() : '';
   if (!name) throw new WorkspaceError('нужно название workspace', 400);
@@ -244,9 +244,9 @@ export function createWorkspace(config: IcarusConfig, user: UserConfig, rawName:
 }
 
 /**
- * Убирает workspace из списка. Папка на диске остаётся: это данные человека, и
- * панель обещает, что удаление workspace'а их не трогает. Диалоги возвращаются
- * в «Разговор» — это делает вызывающий, который умеет переписывать реестр.
+ * Removes a workspace from the list. The folder on disk stays: it's the person's data, and
+ * the panel promises that deleting a workspace doesn't touch it. Dialogues return to
+ * «Talk» — the caller, who can rewrite the registry, does that.
  */
 export function deleteWorkspace(config: IcarusConfig, user: UserConfig, slug: string): Workspace {
   const items = listWorkspaces(config, user);
@@ -257,7 +257,7 @@ export function deleteWorkspace(config: IcarusConfig, user: UserConfig, slug: st
   return workspace;
 }
 
-/** Случайное имя папки: пригодится, если workspace заводят без названия. */
+/** Random folder name: useful when a workspace is created without a name. */
 export function randomSlug(): string {
   return `ws-${crypto.randomBytes(4).toString('hex')}`;
 }

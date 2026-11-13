@@ -1,8 +1,8 @@
-// Файлы рабочей папки для правой панели чата: дерево, предпросмотр и отдача файла.
+// Working folder files for the chat's right panel: tree, preview and file serving.
 //
-// Главное, что здесь проверяется, — безопасность. Панель смотрит только в один
-// workspace: `..`, абсолютный путь и символическая ссылка наружу не должны
-// показать ни чужую папку, ни весь хост.
+// The main thing checked here is security. The panel looks into only one
+// workspace: `..`, an absolute path and a symlink pointing outside must not
+// expose either a foreign folder or the whole host.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -44,7 +44,7 @@ write('projects/contacts.svg', '<svg xmlns="http://www.w3.org/2000/svg"><rect wi
 write('.git/HEAD', 'ref: refs/heads/main');
 write('node_modules/x/index.js', 'module.exports = 1');
 
-test('дерево: файлы раньше папок, типы подписаны, служебный мусор скрыт', () => {
+test('tree: files before folders, types are labeled, service junk is hidden', () => {
   const list = listWorkspaceEntries(root);
   const names = list.entries.map((entry) => entry.name);
 
@@ -75,7 +75,7 @@ test('дерево: файлы раньше папок, типы подписа�
   );
 });
 
-test('подписи типов и картинки узнаются по расширению', () => {
+test('type labels and images are recognized by extension', () => {
   assert.equal(typeLabelOf('AGENTS.md'), 'MARKDOWN');
   assert.equal(typeLabelOf('plan.txt'), 'TEXT');
   assert.equal(typeLabelOf('contacts.svg'), 'SVG');
@@ -85,7 +85,7 @@ test('подписи типов и картинки узнаются по рас
   assert.equal(isImageName('a.md'), false);
 });
 
-test('путь не выходит за workspace: .. и абсолютные адреса отсекаются', () => {
+test('a path does not escape the workspace: .. and absolute addresses are cut off', () => {
   assert.throws(() => listWorkspaceEntries(root, '..'), FilesError);
   assert.throws(() => listWorkspaceEntries(root, '../private'), FilesError);
   assert.throws(() => listWorkspaceEntries(root, '/etc'), FilesError);
@@ -93,18 +93,18 @@ test('путь не выходит за workspace: .. и абсолютные а
   assert.equal(rawWorkspaceFile(root, '../private/AGENTS.md'), null);
 });
 
-test('символическая ссылка наружу не раскрывается', () => {
+test('a symlink pointing outside is not exposed', () => {
   const link = path.join(root, 'escape');
   const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-outside-'));
   if (!fs.existsSync(link)) fs.symlinkSync(outside, link);
 
-  // Сама ссылка в дереве не появляется, а пройти через неё нельзя.
+  // The link itself does not appear in the tree, and one cannot pass through it.
   assert.ok(!listWorkspaceEntries(root).entries.some((entry) => entry.name === 'escape'));
   assert.throws(() => listWorkspaceEntries(root, 'escape'), FilesError);
   assert.equal(rawWorkspaceFile(root, 'escape/passwd'), null);
 });
 
-test('markdown и текст — строкой, картинка — адресом', () => {
+test('markdown and text as a string, an image as an address', () => {
   const md = previewWorkspaceFile(root, 'talk', 'projects/AGENTS.md');
   assert.equal(md.kind, 'markdown');
   assert.match(md.text ?? '', /Вложенные инструкции/);
@@ -122,7 +122,7 @@ test('markdown и текст — строкой, картинка — адрес
   assert.match(image.download, /download=1/);
 });
 
-test('двоичный файл честно называется двоичным, большой текст — обрезается', () => {
+test('a binary file is honestly called binary, large text is truncated', () => {
   write('blob.bin', Buffer.from([0, 1, 2, 3, 4]));
   assert.equal(previewWorkspaceFile(root, 'talk', 'blob.bin').kind, 'binary');
 
@@ -133,7 +133,7 @@ test('двоичный файл честно называется двоичны
   assert.equal((big.text ?? '').length, 256 * 1024, 'показано ровно 256 КБ');
 });
 
-test('отдача файла: картинка идёт как картинка, остальное — файлом', () => {
+test('file serving: an image goes as an image, the rest as a file', () => {
   const image = rawWorkspaceFile(root, 'projects/contacts.svg');
   assert.equal(image?.type, 'image/svg+xml');
   assert.equal(image?.name, 'contacts.svg');
@@ -141,7 +141,7 @@ test('отдача файла: картинка идёт как картинка
   assert.equal(rawWorkspaceFile(root, 'projects/missing.txt'), null);
 });
 
-test('workspace берётся из реестра, а незнакомый slug не открывается', () => {
+test('the workspace is taken from the registry, and an unknown slug does not open', () => {
   assert.equal(workspaceTarget(config, user, 'nope'), null);
   const target = workspaceTarget(config, user, 'talk');
   assert.equal(target?.workspace.name, 'Разговор');
@@ -149,7 +149,7 @@ test('workspace берётся из реестра, а незнакомый slug
   assert.ok((target?.workspace.path ?? '').endsWith('workspaces/talk'), 'в шапке видно папку на диске');
 });
 
-/** Копилка для ответа: JSON-маршрутам хватает status, заголовков и тела. */
+/** A collector for the response: JSON routes are fine with status, headers and body. */
 function fakeResponse() {
   const chunks: Buffer[] = [];
   const res = {
@@ -170,7 +170,7 @@ function fakeResponse() {
   return res;
 }
 
-test('API отвечает деревом и предпросмотром, чужой workspace — 404', async () => {
+test('the API responds with the tree and preview, a foreign workspace is 404', async () => {
   const list = fakeResponse();
   await handleWorkspaceFilesApi(
     { method: 'GET' } as never,
@@ -205,7 +205,7 @@ test('API отвечает деревом и предпросмотром, чу�
   assert.equal(missing.status, 404, 'незнакомый workspace не читается');
 });
 
-test('API не разрешает запись: панель только смотрит файлы', async () => {
+test('the API does not allow writing: the panel only views files', async () => {
   const res = fakeResponse();
   await handleWorkspaceFilesApi(
     { method: 'POST' } as never,
@@ -216,7 +216,7 @@ test('API не разрешает запись: панель только смо
   assert.equal(res.status, 405);
 });
 
-test('удаление: файл удаляется, пустая папка — сразу, непустая — только с force', () => {
+test('deletion: a file is deleted, an empty folder right away, a non-empty one only with force', () => {
   write('trash/file.txt', 'мусор');
   write('trash/nested/deep.txt', 'тоже мусор');
   fs.mkdirSync(path.join(root, 'empty-dir'), { recursive: true });
@@ -224,7 +224,7 @@ test('удаление: файл удаляется, пустая папка —
   removeWorkspaceEntry(root, 'trash/file.txt');
   assert.equal(fs.existsSync(path.join(root, 'trash/file.txt')), false, 'файл удалён');
 
-  // Непустую папку без подтверждения сервер не трогает.
+  // The server does not touch a non-empty folder without confirmation.
   assert.throws(
     () => removeWorkspaceEntry(root, 'trash'),
     (error: unknown) => error instanceof FilesError && error.status === 409,
@@ -232,7 +232,7 @@ test('удаление: файл удаляется, пустая папка —
   );
   assert.ok(fs.existsSync(path.join(root, 'trash/nested/deep.txt')), 'содержимое на месте');
 
-  // Пустая папка удаляется тем же запросом, без подтверждения.
+  // An empty folder is deleted by the same request, without confirmation.
   removeWorkspaceEntry(root, 'empty-dir');
   assert.equal(fs.existsSync(path.join(root, 'empty-dir')), false, 'пустая папка удалена');
 
@@ -242,14 +242,14 @@ test('удаление: файл удаляется, пустая папка —
   assert.equal(fs.existsSync(path.join(root, 'trash')), false, 'непустая папка удалена с содержимым');
 });
 
-test('удаление не выходит за workspace и не трогает корень', () => {
+test('deletion does not escape the workspace and does not touch the root', () => {
   assert.throws(() => removeWorkspaceEntry(root, ''), FilesError, 'корень workspace не удаляем');
   assert.throws(() => removeWorkspaceEntry(root, '.'), FilesError);
   assert.throws(() => removeWorkspaceEntry(root, '../private/AGENTS.md'), FilesError);
   assert.throws(() => removeWorkspaceEntry(root, '/etc/passwd'), FilesError);
 });
 
-test('символическую ссылку удалять нельзя: за ней чужой файл', () => {
+test('a symlink cannot be deleted: there is a foreign file behind it', () => {
   const outside = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-outside-')), 'keep.txt');
   fs.writeFileSync(outside, 'не трогать');
   const link = path.join(root, 'escape-file');
@@ -259,7 +259,7 @@ test('символическую ссылку удалять нельзя: за 
   assert.ok(fs.existsSync(outside), 'файл за ссылкой цел');
 });
 
-test('API удаляет файл и папки: пустую сразу, непустую — после force', async () => {
+test('the API deletes a file and folders: an empty one right away, a non-empty one after force', async () => {
   write('api-delete.txt', 'удалить');
   write('api-dir/inside.txt', 'внутри');
 
@@ -304,7 +304,7 @@ test('API удаляет файл и папки: пустую сразу, неп
   assert.equal(fs.existsSync(path.join(root, 'api-dir')), false, 'с force папка удаляется целиком');
 });
 
-test('рекурсивное удаление папки не идёт по символическим ссылкам', () => {
+test('recursive folder deletion does not follow symlinks', () => {
   write('bag/inner.txt', 'своё');
   const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-outside-'));
   const keep = path.join(outsideDir, 'keep.txt');
@@ -317,7 +317,7 @@ test('рекурсивное удаление папки не идёт по си
   assert.ok(fs.existsSync(keep), 'файл за ссылкой цел');
 });
 
-test('корневой AGENTS.md не удаляется, вложенный — можно', () => {
+test('the root AGENTS.md is not deleted, a nested one can be', () => {
   assert.throws(
     () => removeWorkspaceEntry(root, 'AGENTS.md'),
     (error: unknown) => error instanceof FilesError && error.status === 403,
@@ -329,11 +329,11 @@ test('корневой AGENTS.md не удаляется, вложенный —
   assert.equal(fs.existsSync(path.join(root, 'projects/AGENTS.md')), false, 'вложенный AGENTS.md удаляется');
 });
 
-test('поиск: находит текст во вложенных файлах и имя файла, мусор пропускает', () => {
+test('search: finds text in nested files and the file name, skips junk', () => {
   write('search/code.ts', 'const secret = "needle";\n// и ещё needle в комментарии\n');
   write('search/notes.md', 'Одна строка\nЗдесь тоже Needle — регистр не важен.\n');
   write('search/needle-file.txt', 'ничего интересного');
-  // Двоичный файл: needle лежит в нём, но текстом его не показывают.
+  // A binary file: needles lie in it, but it is not shown as text.
   write('search/blob.bin', Buffer.from([0, 1, 2, ...Buffer.from('needle inside binary')]));
   write('.git/needle.txt', 'needle');
   write('node_modules/needle/index.js', 'needle');
@@ -360,7 +360,7 @@ test('поиск: находит текст во вложенных файлах
   assert.equal(hit?.file.type, 'TS');
 });
 
-test('поиск: символическая ссылка наружу не открывает чужие файлы', () => {
+test('search: a symlink pointing outside does not open foreign files', () => {
   const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-outside-'));
   fs.writeFileSync(path.join(outside, 'secret.txt'), 'needle в чужой папке');
   const link = path.join(root, 'search/outside');
@@ -373,7 +373,7 @@ test('поиск: символическая ссылка наружу не от
   );
 });
 
-test('поиск требует хотя бы два символа и не принимает бесконечный запрос', () => {
+test('search requires at least two characters and does not accept an infinite query', () => {
   assert.equal(SEARCH_MIN_QUERY, 2);
   assert.throws(
     () => searchWorkspaceFiles(root, 'n'),
@@ -383,14 +383,14 @@ test('поиск требует хотя бы два символа и не пр
   assert.throws(() => searchWorkspaceFiles(root, 'x'.repeat(201)), FilesError);
 });
 
-test('поиск: большой файл проверяется только по имени, содержимое не читается', () => {
+test('search: a large file is checked by name only, its content is not read', () => {
   write('search/needle-huge.txt', 'x'.repeat(1024 * 1024 + 10));
   const result = searchWorkspaceFiles(root, 'needle');
   const huge = result.hits.filter((hit) => hit.file.path === 'search/needle-huge.txt');
   assert.deepEqual(huge.map((hit) => hit.line), [0], 'у огромного файла остаётся только совпадение по имени');
 });
 
-test('API ищет по workspace и отдаёт строку, кусок и позицию совпадения', async () => {
+test('the API searches the workspace and returns the line, snippet and match position', async () => {
   const res = fakeResponse();
   await handleWorkspaceFilesApi(
     { method: 'GET' } as never,
@@ -418,7 +418,7 @@ test('API ищет по workspace и отдаёт строку, кусок и п
   assert.equal(short.status, 400, 'один символ — не запрос');
 });
 
-test('поиск честно говорит, что упёрся в потолок', () => {
+test('search honestly says it hit the ceiling', () => {
   for (let index = 0; index < 60; index += 1) write('many/f' + index + '.txt', 'needle');
   const result = searchWorkspaceFiles(root, 'needle');
   assert.equal(result.hits.length, 50, 'больше потолка не отдаём');

@@ -1,7 +1,7 @@
-// Клиент панели MCP исполняется по-настоящему: диалог мимикрии — это разметка,
-// которую рисует JS, и человек проходит по ней руками. Тест проверяет ровно путь
-// «нажал Подключить → прочитал три шага → вставил адрес → вход завершился», а не
-// наличие строк в HTML: опечатка в селекторе ломает диалог молча.
+// The MCP panel client runs for real: the mimicry dialog is markup
+// drawn by JS, and a human walks through it by hand. The test checks exactly the path
+// "clicked Connect → read three steps → pasted the address → login completed", not the
+// presence of strings in HTML: a typo in a selector breaks the dialog silently.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseHTML } from 'linkedom';
@@ -47,7 +47,7 @@ const serverView = {
 
 type Route = (path: string, init?: RequestInit) => { status?: number; body: unknown };
 
-/** Запускает скрипт раздела MCP в DOM с заглушкой сети и возвращает всё для проверок. */
+/** Runs the MCP section script in the DOM with a network stub and returns everything for checks. */
 async function openPanel(routes: Record<string, Route>, view: Record<string, unknown> = serverView) {
   const html = mcpPage(SESSION);
   const configMatch = html.match(/window\.__MCP_CFG__ = (\{.*?\});/s);
@@ -90,7 +90,7 @@ const click = (node: any): void => {
   node.dispatchEvent(new (node.ownerDocument.defaultView as any).Event('click'));
 };
 
-test('мимикрия: диалог объясняет шаги, открывает вход и ждёт вставленный адрес', async () => {
+test('mimicry: the dialog explains the steps, opens the login and waits for the pasted address', async () => {
   const started = {
     url: 'https://mcp.any.do/authorize?client_id=client-1&state=st',
     state: 'st',
@@ -110,7 +110,7 @@ test('мимикрия: диалог объясняет шаги, открыва
   click(connect ?? null);
   await new Promise((resolve) => setTimeout(resolve, 20));
 
-  // Вкладку панели не уводим: иначе человек не сможет вставить адрес.
+  // We do not navigate the panel tab away: otherwise the person could not paste the address.
   assert.equal(opened.location.href, 'http://panel/panel/mcp');
 
   const steps = [...document.querySelectorAll('.mcp-steps li')];
@@ -139,7 +139,7 @@ test('мимикрия: диалог объясняет шаги, открыва
   assert.match(document.getElementById('mcp-notice')?.textContent ?? '', /Доступ к «Any\.do MCP» получен/);
 });
 
-test('ошибка про redirect_uri подсказывает галочку, а с галочкой — уже нет', async () => {
+test('a redirect_uri error suggests the checkbox, but with the checkbox on — it no longer does', async () => {
   const failed = {
     status: 400,
     body: { error: { message: "динамическая регистрация клиента не удалась: Redirect URI 'x' is not allowed." } },
@@ -152,12 +152,12 @@ test('ошибка про redirect_uri подсказывает галочку, 
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.match(plain.document.getElementById('mcp-notice')?.textContent ?? '', /Мимикрировать под Claude/);
 
-  // С включённой галочкой человек уже сделал что мог: повторять совет незачем.
+  // With the checkbox on, the person has already done what they could: there is no point repeating the advice.
   const mimicRoutes = {
     'oauth/start': (): { status: number; body: unknown } => failed,
   };
   const withMimic = await openPanel(mimicRoutes);
-  // Карточка приходит с mimic: true — сервер уже мимикрирует.
+  // The card comes with mimic: true — the server is already mimicking.
   const mirror = [...withMimic.document.querySelectorAll('.mcp-actions button')].find(
     (button) => button.textContent === 'Подключить',
   );
@@ -168,7 +168,7 @@ test('ошибка про redirect_uri подсказывает галочку, 
   assert.doesNotMatch(notice, /Мимикрировать под Claude/);
 });
 
-test('форма показывает галочку мимикрии только для OAuth и шлёт её на сервер', async () => {
+test('the form shows the mimicry checkbox only for OAuth and sends it to the server', async () => {
   const opened = await openPanel({
     add: () => ({ body: { server: serverView } }),
   });
@@ -180,7 +180,7 @@ test('форма показывает галочку мимикрии тольк
   assert.ok(row, 'строка галочки есть в форме');
   assert.equal((row as any).hidden, true, 'по умолчанию авторизация «без», галочки не видно');
 
-  // linkedom отдаёт select.value только на чтение: даём обычный сеттер, как в браузере.
+  // linkedom exposes select.value as read-only: we provide a regular setter, as in a browser.
   const auth = document.getElementById('f-auth') as any;
   Object.defineProperty(auth, 'value', {
     configurable: true,

@@ -1,5 +1,5 @@
-// render-config правит боевой config.yaml перед деплоем. Ошибка здесь — это либо
-// чужой ключ API, либо пустой список людей, поэтому проверяем и правку, и отказы.
+// render-config edits the live config.yaml before deployment. A mistake here is either
+// someone else's API key or an empty list of people, so we test both the edit and the refusals.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -32,7 +32,7 @@ function load(text: string) {
   return loadConfig(file, {});
 }
 
-test('люди, порт и ключ приезжают из окружения, остальное — из примера', () => {
+test('people, port and key come from the environment, the rest — from the example', () => {
   const result = renderConfig(EXAMPLE, {
     users: 'trousev vita julia',
     port: '8081',
@@ -65,7 +65,7 @@ test('люди, порт и ключ приезжают из окружения,
   assert.deepEqual(config.mcp.echo?.args, ['/opt/icarus/mcp/echo-server.mjs']);
 });
 
-test('без переменных конфиг на хосте переживает деплой: люди, порт и ключ остаются', () => {
+test('without variables the host config survives the deploy: people, port and key stay', () => {
   const result = renderConfig(CUSTOM, {});
 
   assert.deepEqual(result.users, ['old']);
@@ -78,50 +78,50 @@ test('без переменных конфиг на хосте пережива�
   assert.equal(config.dataDir, '/srv/icarus');
 });
 
-test('ключ API генерируется, если его нет ни в секрете, ни в конфиге', () => {
+test('the API key is generated if it is neither in the secret nor in the config', () => {
   const withoutKey = renderConfig(EXAMPLE.replace(/^apiKey:.*$/m, ''), { users: 'probe' }, () => 'generated-token');
 
   assert.equal(withoutKey.apiKeySource, 'generated');
   assert.equal(load(withoutKey.text).apiKey, 'generated-token');
 });
 
-test('люди приходят через запятую и пробел, повторы ловятся', () => {
+test('people come comma- and space-separated, duplicates are caught', () => {
   assert.deepEqual(renderConfig(EXAMPLE, { users: 'trousev,vita' }).users, ['trousev', 'vita']);
   assert.deepEqual(renderConfig(EXAMPLE, { users: 'trousev, vita' }).users, ['trousev', 'vita']);
   assert.throws(() => renderConfig(EXAMPLE, { users: 'trousev,trousev' }), /повторяется/);
 });
 
-test('пустой ICARUS_USERS людей не трогает, а полное отсутствие людей — ошибка', () => {
+test('an empty ICARUS_USERS leaves people alone, but a complete absence of people is an error', () => {
   assert.deepEqual(renderConfig(EXAMPLE, { users: '  ' }).users, ['probe', 'probe2'], 'пустая переменная — не повод увольнять людей');
   assert.throws(() => renderConfig(EXAMPLE.replace(/^users:[\s\S]*$/m, ''), { users: '' }), /нет ни одного человека/);
   assert.throws(() => renderConfig(EXAMPLE, { users: 'trousev,../etc' }), /не годится/);
   assert.throws(() => renderConfig(EXAMPLE, { users: 'trousev', port: 'восемь' }), /ожидался номер порта/);
 });
 
-test('люди в файле заменяются, а не дописываются', () => {
+test('people in the file are replaced, not appended', () => {
   const result = renderConfig(CUSTOM, { users: 'vita' });
   assert.deepEqual(load(result.text).users.map((user) => user.id), ['vita']);
   assert.equal(/\n\s+- old\b/.test(result.text), false);
 });
 
-test('флаг админа: миграция выдаёт его trousev, а выданный руками переживает деплой', () => {
-  // Старый конфиг — люди строками. Деплой с ICARUS_USERS пишет флаг явно: у trousev
-  // он есть по миграции, у остальных нет.
+test('the admin flag: the migration grants it to trousev, and one granted by hand survives the deploy', () => {
+  // The old config has people as strings. A deploy with ICARUS_USERS writes the flag explicitly:
+  // trousev has it via migration, the rest don't.
   const migrated = renderConfig(EXAMPLE, { users: 'trousev, vita' });
   assert.deepEqual(load(migrated.text).users, [{ id: 'trousev', admin: true }, { id: 'vita' }]);
 
-  // Админ, выданный на хосте, не пропадает при следующем деплое: пользователь
-  // остался в списке — значит его флаг сохраняется.
+  // An admin granted on the host does not disappear on the next deploy: the user
+  // stayed in the list — so their flag is preserved.
   const custom = migrated.text.replace('  - vita', '  - id: vita\n    admin: true');
   const kept = renderConfig(custom, { users: 'trousev, vita' });
   assert.deepEqual(load(kept.text).users, [{ id: 'trousev', admin: true }, { id: 'vita', admin: true }]);
 
-  // Убрали человека из ICARUS_USERS — вместе с ним уходит и его флаг.
+  // A person was removed from ICARUS_USERS — their flag goes away with them.
   const removed = renderConfig(custom, { users: 'trousev' });
   assert.deepEqual(load(removed.text).users, [{ id: 'trousev', admin: true }]);
 });
 
-test('docker.dns приезжает из ICARUS_DNS, none убирает его, пусто — не трогает', () => {
+test('docker.dns comes from ICARUS_DNS, none removes it, empty leaves it alone', () => {
   const withDns = renderConfig(EXAMPLE, { users: 'probe', dns: '1.1.1.1, 8.8.8.8' });
   assert.deepEqual(withDns.dns, ['1.1.1.1', '8.8.8.8']);
   assert.deepEqual(load(withDns.text).docker.dns, ['1.1.1.1', '8.8.8.8']);
@@ -137,7 +137,7 @@ test('docker.dns приезжает из ICARUS_DNS, none убирает его,
   assert.throws(() => renderConfig(EXAMPLE, { users: 'probe', dns: 'мой-резолвер' }), /ICARUS_DNS: «мой-резолвер»/);
 });
 
-test('url приезжает из ICARUS_URL и переживает деплой', () => {
+test('url comes from ICARUS_URL and survives the deploy', () => {
   const set = renderConfig(CUSTOM, { users: 'probe', url: 'https://chat.trousev.pro/' });
   assert.equal(set.url, 'https://chat.trousev.pro/');
   assert.equal(load(set.text).url, 'https://chat.trousev.pro/');
@@ -150,7 +150,7 @@ test('url приезжает из ICARUS_URL и переживает депло�
   assert.equal(load(absent.text).url, 'http://localhost:9000', 'конфиг подставит localhost по порту');
 });
 
-/** Тот же разбор, но с токеном бота в окружении: без него блок telegram не поднимается. */
+/** The same parsing, but with a bot token in the environment: without it the telegram block does not come up. */
 function loadWithBot(text: string) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-render-tg-'));
   const file = path.join(dir, 'config.yaml');
@@ -158,7 +158,7 @@ function loadWithBot(text: string) {
   return loadConfig(file, { TELEGRAM_BOT_TOKEN: 'bot-token' });
 }
 
-test('маппинг telegram приезжает из ICARUS_TELEGRAM_MAPPING и переживает деплой', () => {
+test('the telegram mapping comes from ICARUS_TELEGRAM_MAPPING and survives the deploy', () => {
   const set = renderConfig(EXAMPLE, { users: 'trousev, vita', telegramMapping: '@trousev:trousev, @vita:vita' });
   assert.deepEqual(set.telegram, { trousev: 'trousev', vita: 'vita' });
   assert.deepEqual(loadWithBot(set.text).telegram, {
@@ -179,7 +179,7 @@ test('маппинг telegram приезжает из ICARUS_TELEGRAM_MAPPING и
   assert.throws(() => renderConfig(EXAMPLE, { users: 'probe', telegramMapping: 'трусев:probe' }), /не похоже/);
 });
 
-test('час тишины приезжает из ICARUS_SESSION_IDLE_MINUTES и переживает деплой', () => {
+test('the quiet hour comes from ICARUS_SESSION_IDLE_MINUTES and survives the deploy', () => {
   const set = renderConfig(CUSTOM, { users: 'probe', sessionIdleMinutes: '60' });
   assert.equal(set.sessionIdleMinutes, 60);
   assert.equal(load(set.text).sessionIdleMinutes, 60);

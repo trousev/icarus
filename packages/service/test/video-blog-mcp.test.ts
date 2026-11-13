@@ -1,7 +1,7 @@
-// MCP «видео в блог-пост» в общем наборе: сервер живёт в tools/video-blog-mcp,
-// здесь — короткая интеграция через настоящий stdio, чтобы CI видел главное:
-// ссылка на входе даёт пост и транскрипт на диске, а внешний мир (yt-dlp,
-// DeepInfra) подменён заглушками.
+// The "video to blog post" MCP in the shared set: the server lives in tools/video-blog-mcp,
+// here is a short integration over real stdio so CI sees the main thing:
+// a link on input yields a post and a transcript on disk, while the outside world
+// (yt-dlp, DeepInfra) is replaced with stubs.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
@@ -21,7 +21,7 @@ const INFO = {
   webpage_url: 'https://example.invalid/watch?v=1',
 };
 
-/** Заглушка yt-dlp: `-J` отдаёт метаданные, обычный вызов кладёт файл «аудио». */
+/** yt-dlp stub: `-J` returns metadata, a regular call writes an "audio" file. */
 function fakeYtdlp(dir: string): string {
   const file = path.join(dir, 'fake-yt-dlp');
   const lines = [
@@ -40,7 +40,7 @@ function fakeYtdlp(dir: string): string {
 
 type FakeApi = { url: string; calls: () => number; close: () => Promise<void> };
 
-/** Ровно те два маршрута, которых хватает цепочке: расшифровка и редактор. */
+/** Exactly the two routes the chain needs: transcription and the editor. */
 async function fakeDeepInfra(): Promise<FakeApi> {
   const state = { calls: 0 };
   const server = http.createServer((req, res) => {
@@ -101,7 +101,7 @@ async function start(env: Record<string, string>): Promise<Rpc> {
     }
   });
   child.stderr.on('data', () => {
-    // диагностика сервера тесту не нужна
+    // the server diagnostics are not needed by the test
   });
   const call = (message: Record<string, unknown>) =>
     new Promise<Record<string, any>>((resolve) => {
@@ -127,7 +127,7 @@ async function start(env: Record<string, string>): Promise<Rpc> {
   };
 }
 
-test('MCP видео-в-блог: ссылка на входе, пост и транскрипт на выходе', async () => {
+test('video-to-blog MCP: a link on input, a post and a transcript on output', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'video-blog-mcp-'));
   const home = path.join(root, 'home');
   const out = path.join(root, 'out');
@@ -180,7 +180,7 @@ test('MCP видео-в-блог: ссылка на входе, пост и тр
   }
 });
 
-test('MCP видео-в-блог: без ключа честно говорит, чего не хватает', async () => {
+test('video-to-blog MCP: without a key it honestly says what is missing', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'video-blog-mcp-'));
   const audio = path.join(root, 'audio.m4a');
   fs.writeFileSync(audio, Buffer.alloc(4096, 3));
@@ -194,7 +194,7 @@ test('MCP видео-в-блог: без ключа честно говорит,
     const status = await rpc.tool('blog_status');
     assert.match(status.text, /Ключ DeepInfra: НЕТ/);
 
-    // Локальный файл вместо ссылки: ключ проверяется раньше, чем сеть, и без yt-dlp.
+    // A local file instead of a link: the key is checked before the network and without yt-dlp.
     const empty = await rpc.tool('video_transcribe', { file: audio });
     assert.equal(empty.isError, true);
     assert.match(empty.text, /нет ключа/);

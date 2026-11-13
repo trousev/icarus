@@ -1,6 +1,6 @@
-// MCP кинозала в общем наборе: сервер живёт в tools/arr-mcp, здесь — короткая
-// интеграция через настоящий stdio, чтобы CI видел хотя бы главное: поиск
-// ничего не заказывает, а arr_add без confirm не уходит на сервер.
+// The cinema MCP in the shared suite: the server lives in tools/arr-mcp, here is a short
+// integration over real stdio, so CI at least sees the essentials: lookup
+// orders nothing, and arr_add without confirm never reaches the server.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
@@ -15,7 +15,7 @@ type FakeArr = {
   close: () => Promise<void>;
 };
 
-/** Ровно те маршруты, которые нужны сценарию «нашёл → добавил». */
+/** Exactly the routes the "found → added" scenario needs. */
 async function fakeRadarr(): Promise<FakeArr> {
   const posts: FakeArr['posts'] = [];
   const movie = {
@@ -86,7 +86,7 @@ async function start(env: Record<string, string>): Promise<Rpc> {
     }
   });
   child.stderr.on('data', () => {
-    // диагностика сервера тесту не нужна
+    // the test doesn't need server diagnostics
   });
   const call = (message: Record<string, unknown>) =>
     new Promise<Record<string, any>>((resolve) => {
@@ -112,7 +112,7 @@ async function start(env: Record<string, string>): Promise<Rpc> {
   };
 }
 
-test('MCP кинозала: поиск read-only, заказ только с подтверждением', async () => {
+test('cinema MCP: lookup is read-only, ordering only with confirmation', async () => {
   const radarr = await fakeRadarr();
   const rpc = await start({
     ARR_RADARR_URL: radarr.url,

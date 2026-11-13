@@ -1,5 +1,5 @@
-// Markdown артефакта: документ, а не чат. Файл клиентский и без сборки, поэтому
-// тест берёт исходник как есть и проверяет ровно тот код, который уедет в браузер.
+// Markdown of an artifact: a document, not a chat. The file is client-side and buildless, so
+// the test takes the source as is and checks exactly the code that ships to the browser.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -10,19 +10,19 @@ const renderer = new Function(`${SOURCE}\nreturn { artifactMarkdown };`)() as {
   artifactMarkdown: (text: string, options?: Options) => string;
 };
 const render = renderer.artifactMarkdown;
-/** Между блоками рендер ставит перевод строки: для сравнения он не важен. */
+/** Between blocks the renderer puts a newline: it does not matter for comparison. */
 const compact = (html: string): string => html.replace(/\n/g, '');
 
-test('заголовки документа — настоящие h1–h6, а не чатовые h3', () => {
+test('document headings are real h1–h6, not chat h3', () => {
   assert.equal(render('# План на четверг'), '<h1>План на четверг</h1>');
   assert.equal(render('## Риски'), '<h2>Риски</h2>');
   assert.equal(render('### Шаги'), '<h3>Шаги</h3>');
 });
 
-test('списки, цитата и таблица остаются структурой', () => {
+test('lists, quote and table stay structure', () => {
   assert.equal(compact(render('1. Стендап\n2. Демо')), '<ol><li>Стендап</li><li>Демо</li></ol>');
   assert.equal(compact(render('- один\n- два')), '<ul><li>один</li><li>два</li></ul>');
-  // Вложенный список живёт внутри своего пункта, а не рядом с ним.
+  // A nested list lives inside its item, not next to it.
   assert.equal(
     compact(render('- один\n  - вложенный\n- два')),
     '<ul><li>один<ul><li>вложенный</li></ul></li><li>два</li></ul>',
@@ -37,19 +37,19 @@ test('списки, цитата и таблица остаются структ
   );
 });
 
-test('в ячейке таблицы живёт разметка, а \\| — литеральная палка', () => {
+test('markup lives in a table cell, and \\| is a literal pipe', () => {
   const html = render('| **шаг** | что |\n| --- | --- |\n| миграция | схема \\| данные |');
   assert.match(html, /<th><strong>шаг<\/strong><\/th>/);
   assert.match(html, /<td>схема \| данные<\/td>/);
   assert.doesNotMatch(html, /\\\|/);
-  // Меньше ячеек, чем в шапке, — таблица не разваливается.
+  // Fewer cells than in the header — the table does not break apart.
   assert.equal(
     compact(render('| a | b |\n| --- | --- |\n| c |')),
     '<table><thead><tr><th>a</th><th>b</th></tr></thead><tbody><tr><td>c</td><td></td></tr></tbody></table>',
   );
 });
 
-test('картинки и ссылки внутри артефакта ведут в его же папку', () => {
+test('images and links inside an artifact lead to its own folder', () => {
   assert.equal(
     render('![схема](images/scheme.png)', { fileBase: '/raw/site/' }),
     '<p><img src="/raw/site/images/scheme.png" alt="схема"></p>',
@@ -58,31 +58,31 @@ test('картинки и ссылки внутри артефакта веду�
     render('[отчёт](report.html)', { fileBase: '/raw/site/' }),
     '<p><a href="/raw/site/report.html" target="_blank" rel="noopener noreferrer">отчёт</a></p>',
   );
-  // Внешние адреса не переписываются.
+  // External addresses are not rewritten.
   assert.match(render('[сайт](https://example.com)'), /href="https:\/\/example\.com"/);
 });
 
-test('сырой HTML в markdown не проходит', () => {
+test('raw HTML in markdown does not pass', () => {
   assert.equal(render('<script>alert(1)</script>'), '<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>');
   assert.doesNotMatch(render('<img src=x onerror=alert(1)>'), /<img src=x/);
 });
 
-test('опасные схемы ссылок и картинок не проходят', () => {
+test('dangerous link and image schemes do not pass', () => {
   assert.doesNotMatch(render('[жми](javascript:alert(1))'), /javascript:/);
   assert.match(render('[жми](javascript:alert(1))'), /href="#"/);
   assert.doesNotMatch(render('![x](javascript:alert(1))'), /javascript:/);
-  // data: — только для картинок и только image/*.
+  // data: — only for images and only image/*.
   assert.match(render('![x](data:image/png;base64,AAAA)'), /src="data:image\/png/);
   assert.doesNotMatch(render('[x](data:text/html;base64,AAAA)'), /data:text/);
 });
 
-test('код, жирный и зачёркнутый — без потери текста', () => {
+test('code, bold and strikethrough — without losing text', () => {
   assert.equal(render('`npm test`'), '<p><code>npm test</code></p>');
   assert.equal(render('**готово** и ~~старое~~'), '<p><strong>готово</strong> и <del>старое</del></p>');
   assert.equal(render('```\nconst x = 1;\n```'), '<pre><code>const x = 1;</code></pre>');
 });
 
-test('горизонтальная линия и пустой документ не ломают страницу', () => {
+test('a horizontal rule and an empty document do not break the page', () => {
   assert.equal(render('---'), '<hr>');
   assert.equal(render(''), '<p></p>');
 });

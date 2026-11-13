@@ -1,51 +1,51 @@
-// Глобальная библиотека артефактов.
+// Global artifact library.
 //
-// Артефакт — это папка `<dataDir>/artifacts/<slug>/`, одна на всю семью. Она
-// монтируется в контейнер каждого человека как `/artifacts`, поэтому модель
-// видит библиотеку целиком, а не только свою рабочую папку.
+// An artifact is a folder `<dataDir>/artifacts/<slug>/`, one for the whole family. It
+// is mounted into each person's container as `/artifacts`, so the model
+// sees the whole library, not just its own working folder.
 //
-// Внутри папки:
+// Inside the folder:
 //
-//   index.html | index.md | index.png|jpg|svg — то, что видит человек;
-//   index.ai.md                                — короткое описание для ИИ;
-//   .artifact.json                             — публичная ссылка (publicId);
-//   .folder-acl.json                          — владелец и права.
+//   index.html | index.md | index.png|jpg|svg — what the person sees;
+//   index.ai.md                                — a short description for the AI;
+//   .artifact.json                             — public link (publicId);
+//   .folder-acl.json                          — owner and permissions.
 //
-// Права — матрица «субъект × уровень»:
+// Permissions are a "subject × level" matrix:
 //
-//   me     — владелец артефакта;
-//   family — все остальные;
+//   me     — the artifact owner;
+//   family — everyone else;
 //   none ⊂ read ⊂ write ⊂ admin.
 //
-// `none` — артефакта нет в списках панели и MCP, его нельзя прочитать или
-// изменить. Это уровень для очень личных вещей, и он же стоит у семьи по
-// умолчанию: новый артефакт виден только владельцу, пока тот не откроет доступ.
-// Владелец всегда может управлять своим артефактом (иначе можно было бы
-// заблокировать себя), но уровень me управляет тем, что ему позволяет агент.
-// Файл `.folder-acl.json` намеренно общий для любого каталога, а не только
-// артефактов: тот же формат читает generic folder-guard в расширениях.
+// `none` — the artifact is absent from the panel and MCP lists, it cannot be read or
+// changed. This is the level for very personal things, and it is also the
+// family default: a new artifact is visible only to the owner until they grant access.
+// The owner can always manage their own artifact (otherwise they could
+// lock themselves out), but the me level controls what the agent allows them.
+// The `.folder-acl.json` file is deliberately shared by any directory, not just
+// artifacts: the same format is read by the generic folder-guard in extensions.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { userPaths, type IcarusConfig, type UserConfig } from './config.ts';
 import { listWorkspaces } from './workspaces.ts';
 
-/** Имя глобального каталога внутри dataDir. */
+/** Name of the global directory inside dataDir. */
 export const ARTIFACTS_DIR = 'artifacts';
 
-/** Скрытая метка артефакта: publicId и даты. Человеку она не видна. */
+/** Hidden artifact marker: publicId and dates. Not visible to the person. */
 export const META_FILE = '.artifact.json';
 
-/** Права папки. Один и тот же формат у артефактов и будущих общих каталогов. */
+/** Folder permissions. The same format for artifacts and future shared directories. */
 export const ACL_FILE = '.folder-acl.json';
 
 export type ArtifactType = 'html' | 'markdown' | 'image';
 export type AccessLevel = 'none' | 'read' | 'write' | 'admin';
 
 export type FolderAcl = {
-  /** Уровень владельца. */
+  /** Owner level. */
   me: AccessLevel;
-  /** Уровень всех остальных. */
+  /** Level of everyone else. */
   family: AccessLevel;
 };
 
@@ -57,7 +57,7 @@ export type ArtifactAcl = {
   updatedAt: string;
 };
 
-/** Новый артефакт личный: владелец admin, семья не видит его вовсе. */
+/** A new artifact is personal: owner is admin, family does not see it at all. */
 export const DEFAULT_ACL: FolderAcl = { me: 'admin', family: 'none' };
 
 export const ARTIFACT_TYPE_LABELS: Record<ArtifactType, string> = {
@@ -91,27 +91,27 @@ export type Artifact = {
   summary: string;
   ai: boolean;
   files: string[];
-  /** Чей артефакт. У мигрированных старых папок это автор рабочей папки. */
+  /** Whose artifact this is. For migrated old folders this is the workspace author. */
   owner: string;
   acl: FolderAcl;
-  /** Что может текущий смотрящий. */
+  /** What the current viewer can do. */
   access: AccessLevel;
   canRead: boolean;
   canWrite: boolean;
-  /** Управление правами, удалением и публичной ссылкой. */
+  /** Managing permissions, deletion and the public link. */
   canManage: boolean;
   publicId?: string;
   urls: ArtifactUrls;
 };
 
 export type ArtifactUrls = {
-  /** Ссылка в панели (за SSO). */
+  /** Link in the panel (behind SSO). */
   panel: string;
-  /** Файл без панели: index как есть; у markdown это исходник. */
+  /** File without the panel: index as is; for markdown this is the source. */
   raw: string;
-  /** Публичная ссылка с панелью; её открывает любой, у кого она есть. */
+  /** Public link with the panel; anyone who has it can open it. */
   public?: string;
-  /** Публичная ссылка без панели. */
+  /** Public link without the panel. */
   bare?: string;
 };
 
@@ -138,17 +138,17 @@ export function levelRank(level: AccessLevel): number {
   return LEVELS[level];
 }
 
-/** Что даёт уровень: следующий включает предыдущий. */
+/** What a level grants: each next one includes the previous. */
 export function allows(level: AccessLevel, required: AccessLevel): boolean {
   return levelRank(level) >= levelRank(required);
 }
 
-/** Уровень смотрящего по матрице «владелец → me, остальные → family». */
+/** Viewer level by the matrix "owner → me, everyone else → family". */
 export function accessFor(owner: string, acl: FolderAcl, viewer: string): AccessLevel {
   return viewer === owner ? acl.me : acl.family;
 }
 
-/** Имя папки-артефакта: без слешей, без выхода из каталога, без скрытых имён. */
+/** Artifact folder name: no slashes, no directory escape, no hidden names. */
 export function isArtifactName(value: string): boolean {
   for (const char of value) if (char.charCodeAt(0) < 32) return false;
   return (
@@ -162,7 +162,7 @@ export function isArtifactName(value: string): boolean {
   );
 }
 
-/** Глобальный каталог артефактов: один на инсталляцию. */
+/** Global artifacts directory: one per installation. */
 export function artifactsRoot(config: IcarusConfig): string {
   return path.join(config.dataDir, ARTIFACTS_DIR);
 }
@@ -220,7 +220,7 @@ function writeJsonAtomic(file: string, value: unknown): void {
   fs.renameSync(temporary, file);
 }
 
-/** YAML-frontmatter в начале index.ai.md — метаданные, а не заголовок и не описание. */
+/** YAML frontmatter at the start of index.ai.md is metadata, not a heading nor a description. */
 function stripFrontmatter(text: string): string {
   const source = text.replace(/^\uFEFF/, '');
   if (!source.startsWith('---')) return source;
@@ -300,7 +300,7 @@ export function listFiles(dir: string, prefix = ''): string[] {
   return files;
 }
 
-/** Index-файл среди имён: тот же выбор, что и на диске, но для git-дерева версии. */
+/** Index file among the names: the same choice as on disk, but for a git tree version. */
 export function entryForFiles(files: Iterable<string>): { file: string; type: ArtifactType } | null {
   const names = new Set(files);
   for (const candidate of INDEX_FILES) {
@@ -319,7 +319,7 @@ export function detectEntry(dir: string): { file: string; type: ArtifactType } |
   return entryForFiles(names);
 }
 
-/** Права папки: null — файла нет или он битый. */
+/** Folder permissions: null — the file is missing or broken. */
 export function readAcl(dir: string): ArtifactAcl | null {
   const text = readTextIfSmall(path.join(dir, ACL_FILE));
   if (text === null) return null;
@@ -399,8 +399,8 @@ export function artifactDir(config: IcarusConfig, slug: string): string | null {
 }
 
 /**
- * Артефакт глазами смотрящего. null — папки нет, index-файла нет или нет ACL:
- * без прав артефакт не существует для чужих инструментов и панели.
+ * Artifact through the viewer's eyes. null — the folder is missing, the index file is missing, or there is no ACL:
+ * without permissions the artifact does not exist for other people's tools and the panel.
  */
 export function inspectArtifact(config: IcarusConfig, slug: string, viewer: string): Artifact | null {
   const dir = artifactDir(config, slug);
@@ -442,15 +442,15 @@ export function inspectArtifact(config: IcarusConfig, slug: string, viewer: stri
     access,
     canRead: allows(access, 'read'),
     canWrite: allows(access, 'write'),
-    // Владелец управляет своим артефактом всегда: иначе он мог бы выставить
-    // себе read и навсегда потерять доступ к настройкам прав.
+    // The owner always manages their own artifact: otherwise they could set
+    // themselves to read and permanently lose access to permission settings.
     canManage: ownerViewer || allows(access, 'admin'),
     ...(meta?.publicId === undefined ? {} : { publicId: meta.publicId }),
     urls: artifactUrls(config, slug, found.file, meta?.publicId),
   };
 }
 
-/** Все артефакты, которые этот человек вправе видеть. */
+/** All artifacts this person is allowed to see. */
 export function listArtifacts(config: IcarusConfig, viewer: string): Artifact[] {
   const root = ensureArtifactsRoot(config);
   let entries: fs.Dirent[];
@@ -472,7 +472,7 @@ export function countArtifacts(config: IcarusConfig, viewer: string): number {
   return listArtifacts(config, viewer).length;
 }
 
-/** Чтение содержимого: без read — честный 403. */
+/** Reading the content: without read, an honest 403. */
 export function readArtifact(
   config: IcarusConfig,
   viewer: string,
@@ -523,8 +523,8 @@ export function clearPublicId(config: IcarusConfig, viewer: string, slug: string
 }
 
 /**
- * Менять права может владелец или админ. `none` — законный уровень для семьи,
- * но не для владельца: с ним артефакт пропадает даже из его собственного списка.
+ * Only the owner or an admin can change permissions. `none` is a legitimate level for family,
+ * but not for the owner: with it the artifact disappears even from their own list.
  */
 export function setAcl(
   config: IcarusConfig,
@@ -628,7 +628,7 @@ function artifactFileUnchecked(
   return { file, type: mimeOf(file) };
 }
 
-/** Файл артефакта: требует read и не выпускает за папку. */
+/** Artifact file: requires read and does not escape the folder. */
 export function artifactFile(
   config: IcarusConfig,
   viewer: string,
@@ -640,7 +640,7 @@ export function artifactFile(
   return artifactFileUnchecked(config, slug, relative);
 }
 
-/** Файл по уже проверенной публичной ссылке: ACL не нужен, publicId уже проверен. */
+/** File via an already verified public link: ACL is not needed, publicId has been checked. */
 export function publicArtifactFile(
   config: IcarusConfig,
   slug: string,
@@ -650,8 +650,8 @@ export function publicArtifactFile(
 }
 
 /**
- * Публичный артефакт: только по случайному publicId, без ACL и без SSO.
- * Публичная ссылка — осознанное «покажи вот этот», а не доступ по умолчанию.
+ * Public artifact: only via a random publicId, without ACL and without SSO.
+ * A public link is a deliberate "show this one", not default access.
  */
 export function publicArtifact(
   config: IcarusConfig,
@@ -668,14 +668,14 @@ export function publicArtifact(
   return { artifact, dir };
 }
 
-/** Как артефакт называется для человека: путь внутри контейнера. */
+/** What the artifact is called for the person: the path inside the container. */
 export function displayPath(slug: string, entry: string): string {
   return `/artifacts/${slug}/${entry}`;
 }
 
 /**
- * Переносит старые артефакты из per-user/per-workspace в глобальную библиотеку.
- * Запускается при подготовке человека; после переноса старый каталог пуст.
+ * Moves old artifacts from per-user/per-workspace into the global library.
+ * Runs when preparing the person; after the move the old directory is empty.
  */
 export function migrateLegacyArtifacts(config: IcarusConfig, user: UserConfig): string[] {
   const root = ensureArtifactsRoot(config);
@@ -716,7 +716,7 @@ export function migrateLegacyArtifacts(config: IcarusConfig, user: UserConfig): 
     try {
       fs.rmdirSync(oldRoot);
     } catch {
-      // В старой папке осталось что-то чужое или скрытое — не трогаем.
+      // Something foreign or hidden is left in the old folder — leave it alone.
     }
   }
   return moved;

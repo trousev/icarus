@@ -1,9 +1,9 @@
-// Вложения из Telegram: фото, картинка документом и голосовое.
+// Attachments from Telegram: photos, an image sent as a document, and voice.
 //
-// Bot API не присылает файлы — только ссылки: сначала getFile за путём, потом сам
-// файл отдельным запросом. Картинку отдаём модели нативно (как это делает HTTP-вход)
-// и кладём в incoming/ человека, чтобы её видели ещё и тулы. Голосовое
-// модель не слышит: здесь только байты, а в текст его перекладывает speech.ts.
+// The Bot API doesn't send files — only links: first getFile for the path, then the file
+// itself in a separate request. We give the image to the model natively (as the HTTP
+// input does) and put it into the person's incoming/ so the tools can see it too. The
+// model doesn't hear voice: only bytes here, and speech.ts turns it into text.
 import fs from 'node:fs';
 import path from 'node:path';
 import { CONTAINER_INCOMING } from '../config.ts';
@@ -15,17 +15,17 @@ import {
   type TelegramPhotoSize,
 } from './api.ts';
 
-/** Фото Telegram — всегда JPEG, чем бы кадр ни был снят. */
+/** A Telegram photo is always JPEG, no matter what the shot was taken with. */
 export const PHOTO_MIME = 'image/jpeg';
 
-/** Что модель умеет смотреть. Остальные картинки честнее прислать фото. */
+/** What the model can look at. Other images are more honest to send as a photo. */
 export const IMAGE_MIME = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
 
 export type IncomingImage = {
-  /** base64 без префикса `data:` — ровно то, что ждёт pi в команде prompt. */
+  /** base64 without the `data:` prefix — exactly what pi expects in the prompt command. */
   data: string;
   mimeType: string;
-  /** Путь внутри контейнера: по нему картинку найдёт тул. */
+  /** Path inside the container: the tool will find the image by it. */
   file: string;
 };
 
@@ -36,27 +36,27 @@ export type IncomingVoice = {
 };
 
 /**
- * Что человек прислал. Разбираем одно вложение на сообщение — так их и присылают,
- * а подпись к нему становится текстом реплики.
+ * What the person sent. We parse one attachment per message — that's how they're sent,
+ * and its caption becomes the reply text.
  */
 export type Incoming = {
   text: string;
   images: IncomingImage[];
   voice: IncomingVoice | null;
-  /** Вложение, которое мы не разбираем: «видео», «стикер», «аудиофайл». */
+  /** An attachment we don't parse: “video”, “sticker”, “audio file”. */
   unsupported: string | null;
 };
 
 /**
- * Забирает вложение и раскладывает его по видам. Бросает, если файл не скачался:
- * решать, что сказать человеку, — дело бота.
+ * Fetches the attachment and sorts it by kind. Throws if the file didn't download:
+ * deciding what to tell the person is the bot's job.
  */
 export async function collectIncoming(
   api: TelegramApi,
   message: TelegramMessage,
   incomingDir: string,
 ): Promise<Incoming> {
-  // У вложения текст лежит в подписи: «смотри, что нашёл» приходит именно там.
+  // With an attachment the text is in the caption: “look what I found” arrives there.
   const text = (message.text ?? message.caption ?? '').trim();
   const incoming: Incoming = { text, images: [], voice: null, unsupported: null };
 
@@ -71,7 +71,7 @@ export async function collectIncoming(
     return incoming;
   }
 
-  // Документ-картинка — обычное дело: так присылают скриншот без сжатия Telegram.
+  // An image document is a common thing: that's how a screenshot is sent without Telegram compression.
   const document = message.document;
   if (document) {
     const mimeType = document.mime_type ?? '';
@@ -99,7 +99,7 @@ export async function collectIncoming(
   return { ...incoming, unsupported: unsupportedKind(message) };
 }
 
-/** Вложение, которое мы не разбираем, — словами: бот скажет это человеку. */
+/** An attachment we don't parse — in words: the bot will say this to the person. */
 export function unsupportedKind(message: TelegramMessage): string | null {
   if (message.video_note) return 'видеосообщение';
   if (message.video) return 'видео';
@@ -109,9 +109,9 @@ export function unsupportedKind(message: TelegramMessage): string | null {
 }
 
 /**
- * Файл из хранилища Telegram: сначала путь, потом байты. Размер проверяем до
- * скачивания, когда Telegram его назвал, и после — на всякий случай: больше 20 МБ
- * Bot API не отдаёт, и лучше сказать это сразу, чем ждать таймаута.
+ * A file from Telegram storage: first the path, then the bytes. We check the size before
+ * downloading, when Telegram has named it, and after — just in case: the Bot API doesn't
+ * serve more than 20 MB, and it's better to say so right away than to wait for a timeout.
  */
 async function fetchFile(api: TelegramApi, fileId: string, fileSize?: number): Promise<Buffer> {
   if ((fileSize ?? 0) > TELEGRAM_FILE_LIMIT) throw new Error(tooBig(fileSize ?? 0));
@@ -127,7 +127,7 @@ function tooBig(bytes: number): string {
   return `файл ${Math.round(bytes / (1024 * 1024))} МБ — Telegram отдаёт не больше ${limit} МБ`;
 }
 
-/** Самый крупный размер снимка: Telegram шлёт один кадр лестницей. */
+/** The largest size of the shot: Telegram sends one frame as a staircase. */
 export function largestPhoto(sizes: TelegramPhotoSize[]): TelegramPhotoSize | undefined {
   return [...sizes].sort((a, b) => pixels(b) - pixels(a))[0];
 }
@@ -136,7 +136,7 @@ function pixels(size: TelegramPhotoSize): number {
   return (size.width ?? 0) * (size.height ?? 0) || (size.file_size ?? 0);
 }
 
-/** Имя документа оставляем человеческим: по нему Икар понимает, что ему прислали. */
+/** We keep the document name human: Icarus understands from it what was sent to it. */
 export function documentName(message: TelegramMessage, document: TelegramDocument): string {
   const original = safeName(document.file_name);
   const suffix = original === '' ? `.${extensionFor(document.mime_type ?? '')}` : `-${original}`;
@@ -144,14 +144,15 @@ export function documentName(message: TelegramMessage, document: TelegramDocumen
 }
 
 /**
- * По чему назван файл: чат и номер сообщения. Одного номера сообщения мало — в личке
- * и в группе они нумеруются порознь, и два разговора завели бы один файл.
+ * What the file is named after: the chat and the message number. One message number
+ * alone is not enough — in a DM and in a group they number separately, and two
+ * conversations would create one file.
  */
 function fileStem(message: TelegramMessage): string {
   return `telegram-${message.chat.id}-${message.message_id}`;
 }
 
-/** Чужое имя файла — это чужие «/» и «..»: оставляем буквы, цифры, точку, дефис, «_». */
+/** Someone else's file name means someone else's “/” and “..”: we keep letters, digits, dot, hyphen, “_”. */
 export function safeName(name: string | undefined): string {
   return (name ?? '')
     .replace(/[^\p{L}\p{N}._-]/gu, '_')
@@ -159,16 +160,17 @@ export function safeName(name: string | undefined): string {
     .slice(0, 60);
 }
 
-/** Расширение из mime: `image/png` → `png`; незнакомое — `bin`. */
+/** Extension from the mime: `image/png` → `png`; an unknown one — `bin`. */
 export function extensionFor(mimeType: string): string {
   const extension = mimeType.split('/')[1]?.replace(/[^a-z0-9]/gi, '') ?? '';
   return extension === '' ? 'bin' : extension;
 }
 
 /**
- * Кладёт вложение в incoming/ человека: путь уезжает в реплику, и по нему картинку
- * найдёт тул. Имя привязано к сообщению, из которого файл пришёл, а не к часам:
- * так видно, откуда он взялся, и два снимка подряд не спорят за один файл.
+ * Puts the attachment into the person's incoming/: the path travels into the reply, and
+ * the tool finds the image by it. The name is tied to the message the file came from,
+ * not to the clock: that way you can see where it came from, and two shots in a row
+ * don't compete for one file.
  */
 function save(incomingDir: string, bytes: Buffer, name: string): string {
   fs.mkdirSync(incomingDir, { recursive: true });

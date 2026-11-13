@@ -1,5 +1,5 @@
-// Тонкая обёртка над docker CLI: контейнеры пользователей, exec, инспекция.
-// Осознанно без dockerode — CLI уже проверен в M0 и не тянет зависимостей.
+// A thin wrapper over the docker CLI: user containers, exec, inspection.
+// Deliberately without dockerode — the CLI was already proven in M0 and pulls no dependencies.
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { log } from '../log.ts';
 import { userContainer, type IcarusConfig, type UserConfig } from '../config.ts';
@@ -9,14 +9,14 @@ import type { ManagedContainer } from './reconcile.ts';
 export type ContainerState = 'running' | 'stopped' | 'missing';
 
 /**
- * Имя процесса pi внутри контейнера. Именно имя: pi переписывает себе cmdline
- * (в `/proc/<pid>/cmdline` остаётся одно слово), поэтому `pkill -f --mode rpc`
- * не находит ничего, а `pkill -x pi` — находит.
+ * The name of the pi process inside the container. The name exactly: pi rewrites its own cmdline
+ * (in `/proc/<pid>/cmdline` a single word remains), so `pkill -f --mode rpc`
+ * finds nothing, while `pkill -x pi` does.
  */
 const PI_PROCESS = 'pi';
 
 function dockerEnv(config: IcarusConfig): NodeJS.ProcessEnv {
-  // Если задан socket (например, docker-socket-proxy), CLI сам поймёт DOCKER_HOST.
+  // If a socket is set (e.g. docker-socket-proxy), the CLI itself understands DOCKER_HOST.
   return config.docker.socket ? { ...process.env, DOCKER_HOST: config.docker.socket } : process.env;
 }
 
@@ -54,7 +54,7 @@ export async function containerState(
   return inspect.stdout.trim() === 'true' ? 'running' : 'stopped';
 }
 
-/** Все контейнеры, которые создавал icarus: по метке и по имени (для старых, без меток). */
+/** All containers icarus created: by label and by name (for old ones without labels). */
 export async function listManaged(config: IcarusConfig): Promise<ManagedContainer[]> {
   const format = [
     '{{.Names}}',
@@ -65,7 +65,7 @@ export async function listManaged(config: IcarusConfig): Promise<ManagedContaine
 
   const [byLabel, byName] = await Promise.all([
     runDocker(config, ['ps', '-a', '--filter', `label=${LABEL_MANAGED}=1`, '--format', format]),
-    // Контейнеры, созданные до появления меток, иначе остались бы невидимыми
+    // Containers created before labels appeared, otherwise they'd stay invisible
     runDocker(config, ['ps', '-a', '--filter', `name=^${config.docker.prefix}-`, '--format', format]),
   ]);
 
@@ -80,8 +80,8 @@ export async function listManaged(config: IcarusConfig): Promise<ManagedContaine
 
   return [...lines].map((line) => {
     const [name = '', user = '', spec = '', state = ''] = line.split('\t');
-    // Контейнер без метки пользователя опознаём по имени: иначе мы приняли бы живого
-    // человека за выбывшего. Отпечатка у него нет — значит, он будет пересоздан.
+    // We identify a container without a user label by name: otherwise we'd take a live
+    // person for a departed one. It has no fingerprint — so it will be recreated.
     const prefix = `${config.docker.prefix}-`;
     const derivedUser = user || (name.startsWith(prefix) ? name.slice(prefix.length) : null);
     return { name, user: derivedUser, spec: spec || null, running: state === 'running' };
@@ -93,9 +93,9 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Ждёт, пока compose поднимет контейнеры людей. Сервис их больше не создаёт: владелец —
- * docker compose (см. compose.ts), иначе хозяев было бы двое, а отвечал бы никто.
- * Пропавший контейнер — не «сейчас создадим», а понятная ошибка оператору.
+ * Waits for compose to bring up people's containers. The service no longer creates them: the owner is
+ * docker compose (see compose.ts), otherwise there would be two masters and no one responsible.
+ * A missing container is not "we'll create it now", but a clear error to the operator.
  */
 export async function waitForContainers(
   config: IcarusConfig,
@@ -123,15 +123,15 @@ export async function waitForContainers(
 }
 
 /**
- * Гасит pi, пережившие прошлый запуск сервиса.
+ * Kills pi processes that survived the previous run of the service.
  *
- * Если icarus убили SIGKILL'ом (OOM, крэш, `docker kill`), клиент `docker exec` умирает,
- * а pi внутри контейнера продолжает жить — проверено: процессы висят минутами, каждый со
- * своим MCP-ребёнком. Следующий ход поднял бы второй pi на тот же `--session-id` и ту же
- * папку сессий. Зовём это только на старте, пока сессий в этом процессе ещё нет.
+ * If icarus was killed with SIGKILL (OOM, crash, `docker kill`), the `docker exec` client dies,
+ * while pi inside the container keeps living — verified: processes hang for minutes, each with
+ * its own MCP child. The next turn would bring up a second pi on the same `--session-id` and the same
+ * sessions folder. We call this only at startup, while there are no sessions in this process yet.
  *
- * Ловим по имени процесса, а не по аргументам: pi переписывает себе cmdline, и в
- * `/proc/<pid>/cmdline` остаётся одно слово `pi`.
+ * We catch by process name, not by arguments: pi rewrites its own cmdline, and in
+ * `/proc/<pid>/cmdline` a single word `pi` remains.
  */
 export async function reapStalePi(
   config: IcarusConfig,
@@ -146,7 +146,7 @@ export async function reapStalePi(
     return false;
   }
 
-  // pkill возвращает 1, когда никого не нашёл, — это обычный случай, а не ошибка.
+  // pkill returns 1 when it found no one — that's a normal case, not an error.
   if (result.code === 0) {
     log.warn('погасил pi, пережившие прошлый запуск сервиса', { container });
     return true;
@@ -158,10 +158,10 @@ export async function reapStalePi(
 }
 
 /**
- * Контейнер человека к моменту запроса. Созданием владеет compose, поэтому здесь только
- * две вещи: остановленный контейнер подтолкнуть (docker сам его не поднимет, если его
- * остановили руками), а пропавший — назвать вслух. Молчаливое `docker run` вернуло бы нас
- * к двум хозяевам: контейнер без compose-меток, который следующий `up` пересоздаст.
+ * A person's container by the time of the request. Compose owns creation, so here there are only
+ * two things: nudge a stopped container (docker won't bring it up by itself if it was
+ * stopped by hand), and name a missing one out loud. A silent `docker run` would bring us back
+ * to two masters: a container without compose labels that the next `up` would recreate.
  */
 export async function ensureContainerRunning(config: IcarusConfig, user: UserConfig): Promise<string> {
   const name = userContainer(config, user);
@@ -180,9 +180,9 @@ export async function ensureContainerRunning(config: IcarusConfig, user: UserCon
 }
 
 /**
- * Запускает `docker exec -i` с проброшенным stdio — на этом стоит RPC-мост.
- * `workdir` — рабочий каталог процесса: так сессия попадает в свой workspace, не
- * требуя отдельного маунта и пересоздания контейнера.
+ * Starts `docker exec -i` with piped stdio — the RPC bridge rests on this.
+ * `workdir` is the process working directory: this way the session lands in its own workspace, not
+ * requiring a separate mount and container recreation.
  */
 export function spawnDockerExec(
   config: IcarusConfig,
@@ -200,8 +200,8 @@ export function spawnDockerExec(
 }
 
 /**
- * Разовая команда в контейнере: stdin закрыт, рабочая папка — /workspaces,
- * наружу идёт только stdout. Для вызовов, которым не нужен ни диалог, ни сессия.
+ * A one-off command in the container: stdin closed, working folder — /workspaces,
+ * only stdout goes out. For calls that need neither a dialog nor a session.
  */
 export function spawnDockerOnce(
   config: IcarusConfig,

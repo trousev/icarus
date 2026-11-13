@@ -1,12 +1,12 @@
-// Интеграционный тест HTTP-слоя: живьём поднимаем сервер и читаем SSE,
-// вместо pi подсовываем фиктивную сессию. Модель и докер не нужны.
+// Integration test of the HTTP layer: we bring the server up for real and read SSE,
+// and pass a fake session instead of pi. No model or docker needed.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import { createServer } from '../src/http/server.ts';
 import { API_KEY, makeConfig } from './fixtures.ts';
 
-/** Сценарий хода pi: события, которые фиктивная сессия отдаст на `prompt`. */
+/** Scenario of a pi turn: events the fake session will emit on `prompt`. */
 type Step = Record<string, unknown>;
 
 const DEFAULT_STEPS: Step[] = [
@@ -77,7 +77,7 @@ function sseRequest(base: string, body: Record<string, unknown>, headers: Record
   });
 }
 
-test('/v1/models отдаёт модель icarus и требует токен', async () => {
+test('/v1/models returns the icarus model and requires a token', async () => {
   await withServer(async (base) => {
     const unauthorized = await fetch(`${base}/v1/models`);
     assert.equal(unauthorized.status, 401);
@@ -88,22 +88,22 @@ test('/v1/models отдаёт модель icarus и требует токен',
   });
 });
 
-test('неизвестный пользователь получает 403', async () => {
+test('an unknown user gets 403', async () => {
   await withServer(async (base) => {
     const response = await sseRequest(base, {}, { 'x-icarus-user-id': 'stranger' });
     assert.equal(response.status, 403);
   });
 });
 
-test('поток содержит текст, активность тулов и финал', async () => {
+test('the stream contains text, tool activity and the finish', async () => {
   await withServer(async (base, session) => {
     const response = await sseRequest(base, {});
     assert.equal(response.status, 200);
     assert.match(response.headers.get('content-type') ?? '', /text\/event-stream/);
 
     const text = await response.text();
-    // Текст уходит законченными кусками: дельты одной фразы склеиваются в один чанк
-    // (см. AnswerBuffer — иначе переключение канала рвёт ответ посреди слова).
+    // Text goes out in completed pieces: deltas of one phrase are merged into a single chunk
+    // (see AnswerBuffer — otherwise switching channels tears the answer mid-word).
     assert.match(text, /"content":"Привет, Саня"/);
     assert.match(text, /"reasoning_content":"читаю memory\/identity\.md\\n"/);
     assert.match(text, /"finish_reason":"stop"/);
@@ -112,7 +112,7 @@ test('поток содержит текст, активность тулов и
   });
 });
 
-test('usage отдаётся только когда клиент его попросил', async () => {
+test('usage is returned only when the client asked for it', async () => {
   await withServer(async (base) => {
     const without = await (await sseRequest(base, {})).text();
     assert.doesNotMatch(without, /"usage"/);
@@ -124,7 +124,7 @@ test('usage отдаётся только когда клиент его поп�
   });
 });
 
-/** Разбирает SSE в список `delta`-объектов (чанки без choices пропускаем). */
+/** Parses SSE into a list of `delta` objects (chunks without choices are skipped). */
 function deltasOf(sse: string): Array<Record<string, string>> {
   const out: Array<Record<string, string>> = [];
   for (const line of sse.split('\n')) {
@@ -136,7 +136,7 @@ function deltasOf(sse: string): Array<Record<string, string>> {
   return out;
 }
 
-test('размышления не смешиваются с ответом: один чанк — один канал', async () => {
+test('reasoning does not mix with the answer: one chunk — one channel', async () => {
   await withServer(async (base) => {
     const deltas = deltasOf(await (await sseRequest(base, {})).text());
 
@@ -154,7 +154,7 @@ test('размышления не смешиваются с ответом: од
   });
 });
 
-test('мысль и активность тула после начала ответа остаются в reasoning_content, а не в тексте', async () => {
+test('a thought and tool activity after the answer has started stay in reasoning_content, not in the text', async () => {
   const steps: Step[] = [
     { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'Сейчас посмотрю. ' } },
     { type: 'tool_execution_start', toolName: 'bash', args: { command: 'ls' } },
@@ -172,9 +172,9 @@ test('мысль и активность тула после начала отв
       'чанк с reasoning_content и content сразу — клиент рисует такое как plain text, а не как «мысли»',
     );
 
-    // В видимом ответе — только слова модели. Канал размышлений не «закрывается»
-    // после первой фразы: агент почти всегда говорит её до тулов, и если закрыть,
-    // весь дальнейший монолог модели уезжает в текст (регресс из PR #45).
+    // The visible answer contains only the model's words. The reasoning channel is not "closed"
+    // after the first phrase: the agent almost always says it before the tools, and if closed,
+    // the rest of the model's monologue leaks into the text (regression from PR #45).
     assert.equal(
       deltas.map((delta) => delta.content ?? '').join(''),
       'Сейчас посмотрю. Готово.',
@@ -188,14 +188,14 @@ test('мысль и активность тула после начала отв
   }, steps);
 });
 
-/** Порядок каналов в потоке: что клиент увидит раньше — мысль или текст. */
+/** Order of channels in the stream: what the client sees first — thought or text. */
 function channelsOf(sse: string): string[] {
   return deltasOf(sse)
     .filter((delta) => delta.content || delta.reasoning_content)
     .map((delta) => (delta.reasoning_content ? 'think' : 'text'));
 }
 
-test('переключение на активность тула не рвёт ответ посреди слова', async () => {
+test('switching to tool activity does not tear the answer mid-word', async () => {
   const steps: Step[] = [
     { type: 'message_update', assistantMessageEvent: { type: 'text_start' } },
     { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'Сайт рендерится д' } },
@@ -213,9 +213,9 @@ test('переключение на активность тула не рвёт 
     const sse = await (await sseRequest(base, {})).text();
     const content = deltasOf(sse).map((delta) => delta.content ?? '').join('');
 
-    // Клиент заводит новую часть на каждое переключение канала и рисует её
-    // отдельным блоком. Слово, оборванное на тул, должно уехать в одну часть с
-    // продолжением, иначе в чате появляется разрыв посреди слова.
+    // The client starts a new part on every channel switch and renders it as a
+    // separate block. A word cut off by a tool must land in the same part as its
+    // continuation, otherwise a mid-word gap appears in the chat.
     assert.equal(
       content,
       'Сайт рендерится джаваскриптом, текстом не отдаёт.\n\nПробую их API.',
@@ -229,9 +229,9 @@ test('переключение на активность тула не рвёт 
   }, steps);
 });
 
-test('поздний thinking_end не вставляет разрыв посреди фразы', async () => {
-  // pi присылает thinking_end уже после первых текстовых дельт того же блока —
-  // если считать его разрывом, посреди фразы появится пустая строка.
+test('a late thinking_end does not insert a break in the middle of a phrase', async () => {
+  // pi sends thinking_end after the first text deltas of the same block —
+  // if it were treated as a break, an empty line would appear in the middle of a phrase.
   const steps: Step[] = [
     { type: 'message_update', assistantMessageEvent: { type: 'text_start' } },
     { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'Итого:' } },
@@ -247,7 +247,7 @@ test('поздний thinking_end не вставляет разрыв поср�
   }, steps);
 });
 
-test('новое сообщение модели начинается с пустой строки, а не приклеивается к хвосту', async () => {
+test('a new model message starts with an empty line instead of sticking to the tail', async () => {
   const steps: Step[] = [
     { type: 'message_update', assistantMessageEvent: { type: 'text_start' } },
     { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'Теперь журнал.' } },
@@ -269,7 +269,7 @@ test('новое сообщение модели начинается с пус�
   }, steps);
 });
 
-test('без стрима размышления уезжают в message.reasoning_content, а не в текст', async () => {
+test('without streaming, reasoning goes into message.reasoning_content, not into the text', async () => {
   const steps: Step[] = [
     { type: 'message_update', assistantMessageEvent: { type: 'thinking_delta', delta: 'Сначала подумаю. ' } },
     { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'Ответ' } },
@@ -285,7 +285,7 @@ test('без стрима размышления уезжают в message.reaso
   }, steps);
 });
 
-test('/healthz отдаёт отпечаток кода: по нему видно, какая версия работает в контейнере', async () => {
+test('/healthz returns the code fingerprint: it shows which version is running in the container', async () => {
   const previous = process.env.ICARUS_REVISION;
   process.env.ICARUS_REVISION = 'rev-test';
   try {

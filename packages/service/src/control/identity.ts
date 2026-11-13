@@ -1,41 +1,41 @@
-// Кто открыл панель управления.
+// Who opened the control panel.
 //
-// Пароля и одноразовых ссылок у панели нет: человека называет SSO-прокси, за которым
-// она живёт (на проде — Authelia за nginx: он подставляет Remote-User из ответа
-// /api/verify и перетирает всё, что клиент прислал сам). Сервис только читает заголовок
-// и проверяет, что такой человек вообще заведён в конфиге.
+// The panel has no password or one-time links: the person is named by the SSO proxy behind
+// which it lives (in prod — Authelia behind nginx: it sets Remote-User from the response
+// /api/verify and overwrites everything the client sent itself). The service only reads the header
+// and checks that such a person exists in the config at all.
 //
-// Отсюда единственное требование к эксплуатации: порт icarus не должен смотреть наружу
-// мимо прокси. Кто дотянется до порта напрямую, тот назовётся любым именем — заголовок
-// здесь не удостоверение, а договорённость с прокси.
+// Hence the only operational requirement: the icarus port must not face outward
+// past the proxy. Whoever reaches the port directly can call themselves any name — the header
+// here is not an identity proof but an agreement with the proxy.
 import type { IncomingMessage } from 'node:http';
 import { findUser, type IcarusConfig } from '../config.ts';
 import { headerValue } from '../http/openai.ts';
 
 export type PanelIdentity = {
   userId: string;
-  /** header — назвал прокси; dev — config.yaml разрешил локальный запуск без SSO. */
+  /** header — named by the proxy; dev — config.yaml allowed a local run without SSO. */
   via: 'header' | 'dev';
 };
 
 export type PanelDenial = {
   status: 401 | 403;
-  /** Что случилось — человеческим языком, его видно и на странице, и в JSON. */
+  /** What happened — in human language, it's visible both on the page and in JSON. */
   message: string;
-  /** Что с этим делать. */
+  /** What to do about it. */
   hint: string;
 };
 
 export type PanelAccess = { ok: true; identity: PanelIdentity } | { ok: false; denial: PanelDenial };
 
-/** Разбор panel.userHeader: в HTTP заголовки приезжают в нижнем регистре. */
+/** Parsing panel.userHeader: HTTP headers arrive in lowercase. */
 function headerName(config: IcarusConfig): string {
   return config.panel.userHeader.toLowerCase();
 }
 
 export function identifyPanelUser(req: IncomingMessage, config: IcarusConfig): PanelAccess {
-  // Слово прокси сильнее локальной настройки: панель за настоящим SSO остаётся панелью
-  // за SSO, даже если в конфиге кто-то оставил devUser.
+  // The proxy's word is stronger than the local setting: a panel behind real SSO stays a panel
+  // behind SSO, even if someone left devUser in the config.
   const claimed = headerValue(req, headerName(config));
   if (claimed) {
     if (!findUser(config, claimed)) {

@@ -1,6 +1,6 @@
-// Страница раздела «Задачи». Каркас и стили — как у остальных разделов панели,
-// а клиентский скрипт лежит отдельным файлом: в TypeScript не приходится экранировать
-// бэктики и скобки, а браузер получает тот же JS и локально, и на проде.
+// "Tasks" section page. The shell and styles are like the other panel sections,
+// and the client script is a separate file: in TypeScript you don't have to escape
+// backticks and braces, and the browser gets the same JS both locally and in prod.
 import fs from 'node:fs';
 import { taskTimeZone } from '../sessions/schedule.ts';
 import { escapeHtml, sessionStrings, sessionUiLanguage, settingsAside, shell, type PanelSession } from './ui.ts';
@@ -10,15 +10,15 @@ const CLIENT_CSS = fs.readFileSync(new URL('./tasks-client.css', import.meta.url
 const CLIENT_JS = fs.readFileSync(new URL('./tasks-client.js', import.meta.url), 'utf8');
 
 /**
- * Подписи дней недели для формы. Их даёт Intl, а не словарь: это названия дней,
- * и в обоих языках они уже есть в стандартной библиотеке браузера.
+ * Weekday labels for the form. They come from Intl, not a dictionary: these are day names,
+ * and they already exist in both languages in the browser standard library.
  */
 function weekdayLabels(lang: string): Array<[number, string]> {
   const format = new Intl.DateTimeFormat(lang === 'en' ? 'en-GB' : 'ru-RU', {
     weekday: 'short',
     timeZone: 'UTC',
   });
-  // 7 января 2024 — воскресенье: от него и отсчитываем дни, начиная с понедельника.
+  // January 7, 2024 is a Sunday: we count days from it, starting with Monday.
   return [1, 2, 3, 4, 5, 6, 0].map((day) => [day, format.format(new Date(Date.UTC(2024, 0, 7 + day)))]);
 }
 

@@ -1,7 +1,7 @@
-// Часы Икара: пояс, часть суток, метка к реплике и тул now.
+// Icarus's clock: time zone, part of day, a marker appended to the message and the now tool.
 //
-// Главное, что здесь стережём: дата НЕ попадает в системный промпт — иначе он менялся
-// бы от смены суток и рвал кэш. Время приезжает меткой к реплике человека.
+// The main thing we guard here: the date does NOT get into the system prompt — otherwise it would
+// change with the day and break the cache. Time arrives as a marker on the human's message.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
@@ -27,7 +27,7 @@ type Tool = {
   execute?: (id: string, params: unknown) => Promise<{ content: Array<{ text?: string }> }>;
 };
 
-/** Заглушка pi: запоминаем обработчики и тулы, чтобы дёргать их руками. */
+/** pi stub: remember handlers and tools so we can call them by hand. */
 function fakePi() {
   const handlers = new Map<string, Handler>();
   const tools: Tool[] = [];
@@ -42,7 +42,7 @@ function fakePi() {
   return { pi: pi as unknown as ExtensionAPI, handlers, tools };
 }
 
-test('пояс берётся из ICARUS_TZ, потом из TZ, битый — не ломает часы', () => {
+test('the zone comes from ICARUS_TZ, then TZ, a broken one does not break the clock', () => {
   assert.equal(resolveZone({ ICARUS_TZ: 'Europe/Dublin', TZ: 'UTC' }), 'Europe/Dublin');
   assert.equal(resolveZone({ TZ: 'Europe/Dublin' }), 'Europe/Dublin');
   assert.ok(isValidZone(resolveZone({ TZ: 'Mars/Olympus' })));
@@ -51,7 +51,7 @@ test('пояс берётся из ICARUS_TZ, потом из TZ, битый —
   assert.equal(unknownZone({ TZ: 'UTC' }), null);
 });
 
-test('часть суток считается по локальному часу', () => {
+test('part of day is computed from local time', () => {
   const at = (iso: string) => dayPart(new Date(iso), 'UTC');
   assert.equal(at('2026-09-18T00:30:00Z'), 'ночь');
   assert.equal(at('2026-09-18T05:59:00Z'), 'ночь');
@@ -63,27 +63,27 @@ test('часть суток считается по локальному час�
   assert.equal(at('2026-09-18T23:59:00Z'), 'вечер');
 });
 
-test('дата считается по поясу человека, а не по UTC', () => {
+test('the date is computed by the human\'s zone, not by UTC', () => {
   const late = new Date('2026-09-18T23:30:00Z');
   assert.deepEqual(localParts(late, 'UTC'), { year: 2026, month: 9, day: 18 });
   assert.deepEqual(localParts(late, 'Europe/Dublin'), { year: 2026, month: 9, day: 19 });
   assert.equal(localDate(late, 'Europe/Dublin'), '2026-09-19');
 });
 
-test('метка «Сейчас» — дата и часть суток, без часов', () => {
+test('the "Now" marker is the date and part of day, without the clock time', () => {
   const line = momentLine(new Date('2026-09-18T22:00:00Z'), 'Europe/Dublin');
   assert.match(line, /^\[Сейчас: .*18 сентября 2026, вечер\]$/);
   assert.doesNotMatch(line, /\d{2}:\d{2}/, 'часы в метку не едут: ход не должен ломать кэш');
 });
 
-test('тул отдаёт точное время, пояс и смещение', () => {
+test('the tool returns exact time, zone and offset', () => {
   const exact = exactMoment(new Date('2026-09-18T10:00:00Z'), 'Europe/Dublin');
   assert.match(exact, /18 сентября 2026, 11:00/);
   assert.match(exact, /\(Europe\/Dublin, UTC\+01:00\)/);
   assert.equal(offsetLabel(new Date('2026-09-18T10:00:00Z'), 'UTC'), '+00:00');
 });
 
-test('метка дописывается к последней реплике человека', () => {
+test('the marker is appended to the last human message', () => {
   const line = '[Сейчас: пятница, 18 сентября 2026, вечер]';
 
   const plain: ChatMessage[] = [
@@ -104,7 +104,7 @@ test('метка дописывается к последней реплике �
   assert.equal(appendMoment([{ role: 'assistant', content: 'ага' }], line), null);
 });
 
-test('часы пропускают метку к реплике, а системный промпт оставляют без даты', async () => {
+test('the clock appends the marker to the message but leaves the system prompt without a date', async () => {
   const clock = fakePi();
   clockExtension(clock.pi);
 

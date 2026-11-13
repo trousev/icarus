@@ -1,7 +1,7 @@
-// MCP артефактов: глобальная библиотека, ACL и инструменты.
+// Artifacts MCP: global library, ACL and tools.
 //
-// Сервер запускается отдельным процессом, как его запускает pi: проверяем
-// настоящий stdio-хендшейк, права и ответы на tools/call.
+// The server runs as a separate process, the way pi launches it: we check
+// the real stdio handshake, permissions and responses to tools/call.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
@@ -94,7 +94,7 @@ function resultText(message: Record<string, unknown>): string {
   return (result.content ?? []).map((item) => item.text ?? '').join('\n');
 }
 
-test('хендшейк: глобальная библиотека, ACL, пять инструментов', async () => {
+test('handshake: global library, ACL, five tools', async () => {
   await withServer({}, async (rpc) => {
     const init = await rpc.call({ method: 'initialize', params: {} });
     const info = init.result as { instructions: string; serverInfo: { name: string } };
@@ -116,7 +116,7 @@ test('хендшейк: глобальная библиотека, ACL, пять
   });
 });
 
-test('artifact_list показывает владельца, уровень и тип', async () => {
+test('artifact_list shows owner, level and type', async () => {
   await withServer(
     {
       'artifacts/plan/.folder-acl.json': acl('probe'),
@@ -139,7 +139,7 @@ test('artifact_list показывает владельца, уровень и �
   );
 });
 
-test('artifact_read отдаёт index.ai.md и права', async () => {
+test('artifact_read returns index.ai.md and permissions', async () => {
   await withServer(
     {
       'artifacts/site/.folder-acl.json': acl('probe'),
@@ -159,7 +159,7 @@ test('artifact_read отдаёт index.ai.md и права', async () => {
   );
 });
 
-test('artifact_new создаёт папку и ACL, после чего разрешена запись', async () => {
+test('artifact_new creates the folder and ACL, after which writing is allowed', async () => {
   await withServer({}, async (rpc, root) => {
     const answer = await rpc.call({
       method: 'tools/call',
@@ -185,7 +185,7 @@ test('artifact_new создаёт папку и ACL, после чего раз�
   });
 });
 
-test('artifact_link: по умолчанию внутренняя, public: true — только admin', async () => {
+test('artifact_link: internal by default, public: true — admin only', async () => {
   await withServer(
     {
       'artifacts/plan/.folder-acl.json': acl('probe2', 'admin', 'read'),
@@ -209,7 +209,7 @@ test('artifact_link: по умолчанию внутренняя, public: true 
   );
 });
 
-test('artifact_link с public: true у владельца создаёт publicId', async () => {
+test('artifact_link with public: true by the owner creates a publicId', async () => {
   await withServer(
     {
       'artifacts/plan/.folder-acl.json': acl('probe'),
@@ -233,7 +233,7 @@ test('artifact_link с public: true у владельца создаёт publicI
   );
 });
 
-test('artifact_check честно говорит, чего не хватает', async () => {
+test('artifact_check honestly reports what is missing', async () => {
   await withServer(
     {
       'artifacts/broken/index.html': '<h1>Без прав и описания</h1>',
@@ -248,7 +248,7 @@ test('artifact_check честно говорит, чего не хватает',
   );
 });
 
-test('ошибка инструмента — это isError, а не падение сервера', async () => {
+test('a tool error is isError, not a server crash', async () => {
   await withServer({}, async (rpc) => {
     const unknown = await rpc.call({ method: 'tools/call', params: { name: 'artifact_delete', arguments: {} } });
     assert.equal((unknown.result as { isError?: boolean }).isError, true);

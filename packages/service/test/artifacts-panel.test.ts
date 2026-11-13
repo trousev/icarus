@@ -1,8 +1,8 @@
-// Раздел «Артефакты» в панели и публичный просмотр — через живой HTTP-сервер.
+// The "Artifacts" section in the panel and public viewing — through a live HTTP server.
 //
-// Артефакты глобальные: список один, без workspace. Здесь проверяется весь путь:
-// чтение за SSO, права, создание и отзыв ссылки, публичный маршрут, ассеты и
-// корзина. Модель и докер не нужны.
+// Artifacts are global: a single list, without workspace. This exercises the whole path:
+// reading behind SSO, permissions, creating and revoking a link, the public route, assets and
+// the trash. No model or docker needed.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -51,7 +51,7 @@ async function withServer(handler: (base: string, config: IcarusConfig) => Promi
     'index.svg': '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>',
     'index.ai.md': '# Идеи подарка\n\nТри идеи для Анны.\n',
   });
-  // Без ACL — не артефакт, в глобальный список не попадает.
+  // Without an ACL — not an artifact, does not appear in the global list.
   seed(path.join(artifactsRoot(config), 'raw'), { 'index.md': '# Без прав', 'index.ai.md': '# Без прав' });
   await ensureArtifactRepos(config);
 
@@ -81,7 +81,7 @@ function pathOf(url: string): string {
   return `${parsed.pathname}${parsed.search}`;
 }
 
-test('страница раздела: глобальный список, поиск и открытый артефакт', async () => {
+test('section page: global list, search and an open artifact', async () => {
   await withServer(async (base) => {
     const page = await fetch(`${base}/panel/artifacts?artifact=plan`, { headers: asUser() });
     assert.equal(page.status, 200);
@@ -101,7 +101,7 @@ test('страница раздела: глобальный список, пои
   });
 });
 
-test('API: глобальный список, чтение и описание для ИИ', async () => {
+test('API: global list, reading and the description for AI', async () => {
   await withServer(async (base) => {
     const list = (await (await api(base, 'list')).json()) as {
       total: number;
@@ -133,7 +133,7 @@ test('API: глобальный список, чтение и описание �
   });
 });
 
-test('публичная ссылка открывает артефакт без входа, старый адрес уводит на новый', async () => {
+test('the public link opens the artifact without login, the old address redirects to the new one', async () => {
   await withServer(async (base) => {
     const linked = (await (await post(base, 'link', { artifact: 'plan' })).json()) as {
       urls: { public: string; bare: string };
@@ -155,7 +155,7 @@ test('публичная ссылка открывает артефакт без
     assert.doesNotMatch(bareHtml, /ПУБЛИЧНЫЙ АРТЕФАКТ/);
     assert.match(bareHtml, /<main class="wrap" id="doc">/);
 
-    // Совместимость: старый /a/<человек>/<workspace>/<slug>/<id>/ редиректит.
+    // Compatibility: the old /a/<person>/<workspace>/<slug>/<id>/ redirects.
     const old = linked.urls.public.replace('/a/plan/', '/a/probe/talk/plan/');
     const redirect = await fetch(`${base}${pathOf(old)}`, { redirect: 'manual' });
     assert.equal(redirect.status, 301);
@@ -166,7 +166,7 @@ test('публичная ссылка открывает артефакт без
   });
 });
 
-test('публичный HTML живёт в песочнице и отдаёт свои ассеты', async () => {
+test('public HTML lives in a sandbox and serves its own assets', async () => {
   await withServer(async (base) => {
     const linked = (await (await post(base, 'link', { artifact: 'report' })).json()) as { urls: { public: string } };
     const basePath = pathOf(linked.urls.public);
@@ -195,7 +195,7 @@ test('публичный HTML живёт в песочнице и отдаёт �
   });
 });
 
-test('картинка в режиме «без панели» — это сам файл, а не страница', async () => {
+test('an image in "no panel" mode is the file itself, not a page', async () => {
   await withServer(async (base) => {
     const linked = (await (await post(base, 'link', { artifact: 'gift' })).json()) as { urls: { bare: string } };
     const bare = await fetch(`${base}${pathOf(linked.urls.bare)}`);
@@ -205,13 +205,13 @@ test('картинка в режиме «без панели» — это сам
   });
 });
 
-test('права: family read не управляет, family write пишет, family admin управляет', async () => {
+test('permissions: family read cannot manage, family write can write, family admin can manage', async () => {
   await withServer(async (base, config) => {
     assert.equal((await post(base, 'link', { artifact: 'plan' }, 'probe2')).status, 403);
     assert.equal((await post(base, 'delete', { artifact: 'plan' }, 'probe2')).status, 403);
     assert.equal((await post(base, 'acl', { artifact: 'plan', acl: { me: 'admin', family: 'read' } }, 'probe2')).status, 403);
 
-    // family write: чтение и запись файлов, но не управление.
+    // family write: reading and writing files, but not managing.
     const planDir = path.join(artifactsRoot(config), 'plan');
     writeAcl(planDir, 'probe', { me: 'admin', family: 'write' });
     const list = (await (await api(base, 'list', {}, 'probe2')).json()) as { items: Array<{ name: string; access: string; canWrite: boolean; canManage: boolean }> };
@@ -221,7 +221,7 @@ test('права: family read не управляет, family write пишет, 
     assert.equal(plan.canManage, false);
     assert.equal((await post(base, 'link', { artifact: 'plan' }, 'probe2')).status, 403);
 
-    // family admin: управляет.
+    // family admin: manages.
     writeAcl(planDir, 'probe', { me: 'admin', family: 'admin' });
     assert.equal((await post(base, 'link', { artifact: 'plan' }, 'probe2')).status, 200);
     const acl = await post(base, 'acl', { artifact: 'plan', acl: { me: 'admin', family: 'read' } }, 'probe2');
@@ -231,7 +231,7 @@ test('права: family read не управляет, family write пишет, 
   });
 });
 
-test('ACL: владелец меняет me/family, кривой уровень — 400', async () => {
+test('ACL: the owner changes me/family, a malformed level — 400', async () => {
   await withServer(async (base, config) => {
     const saved = await post(base, 'acl', { artifact: 'plan', acl: { me: 'write', family: 'write' } });
     assert.equal(saved.status, 200);
@@ -239,7 +239,7 @@ test('ACL: владелец меняет me/family, кривой уровень 
     assert.deepEqual(body.artifact.acl, { me: 'write', family: 'write' });
     assert.equal(body.artifact.canManage, true, 'владелец не теряет управление');
 
-    // none — законный уровень для семьи: артефакт снова становится личным.
+    // none — a legitimate level for the family: the artifact becomes personal again.
     const hidden = await post(base, 'acl', { artifact: 'plan', acl: { me: 'admin', family: 'none' } });
     assert.equal(hidden.status, 200);
     const hiddenBody = (await hidden.json()) as { artifact: { acl: { family: string } } };
@@ -250,7 +250,7 @@ test('ACL: владелец меняет me/family, кривой уровень 
     assert.equal((await api(base, 'read?artifact=plan', {}, 'probe2')).status, 403);
     assert.equal((await api(base, 'history?artifact=plan', {}, 'probe2')).status, 403);
 
-    // Владельцу none выставить нельзя, иначе артефакт пропадёт из его списка.
+    // The owner cannot be set to none, otherwise the artifact would disappear from their list.
     const ownerNone = await post(base, 'acl', { artifact: 'plan', acl: { me: 'none', family: 'none' } });
     assert.equal(ownerNone.status, 400);
     writeAcl(path.join(artifactsRoot(config), 'plan'), 'probe', DEFAULT_ACL);
@@ -260,7 +260,7 @@ test('ACL: владелец меняет me/family, кривой уровень 
   });
 });
 
-test('ссылка отзывается; чужой publicId не открывается', async () => {
+test('the link is revoked; an alien publicId does not open', async () => {
   await withServer(async (base) => {
     const linked = (await (await post(base, 'link', { artifact: 'plan' })).json()) as { urls: { public: string } };
     const publicPath = pathOf(linked.urls.public);
@@ -272,7 +272,7 @@ test('ссылка отзывается; чужой publicId не открыва
   });
 });
 
-test('файлы панели требуют SSO', async () => {
+test('panel files require SSO', async () => {
   await withServer(async (base) => {
     const raw = '/panel/artifacts/raw/plan/index.md';
     assert.equal((await fetch(`${base}${raw}`)).status, 401);
@@ -283,7 +283,7 @@ test('файлы панели требуют SSO', async () => {
   });
 });
 
-test('удаление артефакта убирает его из списка, но оставляет в корзине', async () => {
+test('deleting an artifact removes it from the list but keeps it in the trash', async () => {
   await withServer(async (base, config) => {
     const deleted = await post(base, 'delete', { artifact: 'gift' });
     assert.equal(deleted.status, 200);
@@ -297,7 +297,7 @@ test('удаление артефакта убирает его из списк�
 });
 
 
-test('история версий: список, откат и права', async () => {
+test('version history: list, rollback and permissions', async () => {
   await withServer(async (base, config) => {
     const planDir = path.join(artifactsRoot(config), 'plan');
     const initial = (await (await api(base, 'history?artifact=plan')).json()) as {
@@ -319,7 +319,7 @@ test('история версий: список, откат и права', asyn
     assert.equal(changed.history.length, 2);
     assert.equal(changed.history[0]!.subject, 'artifact: write index.md');
 
-    // family read видит историю, но не может вернуть.
+    // family read sees the history but cannot roll back.
     writeAcl(planDir, 'probe', { me: 'admin', family: 'read' });
     assert.equal((await api(base, 'history?artifact=plan', {}, 'probe2')).status, 200);
     const denied = await post(base, 'restore', { artifact: 'plan', commit: initial.current }, 'probe2');
@@ -338,7 +338,7 @@ test('история версий: список, откат и права', asyn
   });
 });
 
-test('история: мусорный хеш — 400, чужой артефакт — 404', async () => {
+test('history: a garbage hash — 400, an alien artifact — 404', async () => {
   await withServer(async (base) => {
     assert.equal((await post(base, 'restore', { artifact: 'plan', commit: 'не-хеш' })).status, 400);
     assert.equal((await post(base, 'restore', { artifact: 'plan', commit: 'deadbeef' })).status, 400);
@@ -348,7 +348,7 @@ test('история: мусорный хеш — 400, чужой артефак
 });
 
 
-test('предпросмотр версии: контент и ассеты без отката', async () => {
+test('version preview: content and assets without rollback', async () => {
   await withServer(async (base, config) => {
     const planDir = path.join(artifactsRoot(config), 'plan');
     const initial = (await (await api(base, 'history?artifact=plan')).json()) as { current: string };
@@ -367,7 +367,7 @@ test('предпросмотр версии: контент и ассеты бе
     assert.match(preview.aiContent, /Расписание дня/);
     assert.equal(preview.artifact.files.includes('.git'), false);
 
-    // Предпросмотр ничего не откатывает.
+    // The preview rolls nothing back.
     const current = (await (await api(base, 'read?artifact=plan')).json()) as { content: string };
     assert.match(current.content, /План v2/);
 
@@ -385,7 +385,7 @@ test('предпросмотр версии: контент и ассеты бе
 });
 
 
-test('предпросмотр HTML-версии отдаёт index и относительные ассеты', async () => {
+test('previewing an HTML version serves index and relative assets', async () => {
   await withServer(async (base) => {
     const hist = (await (await api(base, 'history?artifact=report')).json()) as {
       current: string;
@@ -408,7 +408,7 @@ test('предпросмотр HTML-версии отдаёт index и отно�
 });
 
 
-test('чат правки: один разговор на артефакт и только с правом записи', async () => {
+test('edit chat: one conversation per artifact and only with write permission', async () => {
   await withServer(async (base, config) => {
     const first = await post(base, 'chat', { artifact: 'plan' });
     assert.equal(first.status, 200);
@@ -416,11 +416,11 @@ test('чат правки: один разговор на артефакт и т
     assert.match(one.chatId, /^web-/);
     assert.match(one.title, /Правка · План на четверг/);
 
-    // Повторное открытие возвращает тот же разговор, а не заводит второй.
+    // Reopening returns the same conversation rather than creating a second one.
     const again = (await (await post(base, 'chat', { artifact: 'plan' })).json()) as { chatId: string };
     assert.equal(again.chatId, one.chatId);
 
-    // /rename в общем чате не должен откатываться при следующем открытии панели.
+    // A /rename in the shared chat must not be rolled back on the next panel open.
     updateChatTitles(config, probe(), new Map([[one.chatId, 'Налоги']]));
     const renamed = (await (await post(base, 'chat', { artifact: 'plan' })).json()) as { title: string };
     assert.equal(renamed.title, 'Налоги', 'ручное имя служебного чата переживает повторное открытие');
@@ -432,7 +432,7 @@ test('чат правки: один разговор на артефакт и т
     assert.equal(record?.artifact, 'plan');
     assert.equal(record?.workspace, 'talk');
 
-    // Права проверяются на входе: read-only артефакт чат не открывает.
+    // Permissions are checked up front: a read-only artifact does not open a chat.
     item(config, 'viewonly', { 'index.md': '# Только смотреть\n', 'index.ai.md': '# Только смотреть\n' }, {
       me: 'read',
       family: 'read',
@@ -443,7 +443,7 @@ test('чат правки: один разговор на артефакт и т
 });
 
 
-test('адреса элементов: разметка, правка текста и версия в истории', async () => {
+test('element refs: annotation, text edit and the version in history', async () => {
   await withServer(async (base, config) => {
     const file = path.join(artifactsRoot(config), 'report', 'index.html');
 
@@ -464,7 +464,7 @@ test('адреса элементов: разметка, правка текст
     assert.equal(h1.editable, true);
     assert.match(fs.readFileSync(file, 'utf8'), /<h1 data-icarus-ref="h1">Атлас<\/h1>/);
 
-    // Повторное включение выбора элемента ничего не коммитит.
+    // Re-enabling element picking commits nothing.
     const again = (await (await post(base, 'refs', { artifact: 'report' })).json()) as {
       changed: boolean;
       base: string;
@@ -492,13 +492,13 @@ test('адреса элементов: разметка, правка текст
   });
 });
 
-test('правка текста: устаревший отпечаток, чужой адрес и read-only — отказ', async () => {
+test('text edit: a stale fingerprint, an alien ref and read-only — rejected', async () => {
   await withServer(async (base, config) => {
     const dir = path.join(artifactsRoot(config), 'report');
     const file = path.join(dir, 'index.html');
     const annotated = (await (await post(base, 'refs', { artifact: 'report' })).json()) as { base: string };
 
-    // Ссылка из другого артефакта: такого адреса здесь нет.
+    // A ref from another artifact: no such ref here.
     const foreign = await post(base, 'text', {
       artifact: 'report',
       ref: 'main.page/section.hero/h1.title',
@@ -508,7 +508,7 @@ test('правка текста: устаревший отпечаток, чуж
     assert.equal(foreign.status, 409);
     assert.match(fs.readFileSync(file, 'utf8'), /Атлас/);
 
-    // ИИ успел переписать файл: отпечаток не сходится — правку не применяем.
+    // The AI rewrote the file in the meantime: the fingerprint does not match — we do not apply the edit.
     fs.writeFileSync(file, '<html><body><h1>Уже другое</h1></body></html>');
     const stale = await post(base, 'text', {
       artifact: 'report',
@@ -519,7 +519,7 @@ test('правка текста: устаревший отпечаток, чуж
     assert.equal(stale.status, 409);
     assert.match(fs.readFileSync(file, 'utf8'), /Уже другое/);
 
-    // Без права записи размечать и править нельзя, даже если читать можно.
+    // Without write permission you cannot annotate or edit, even if you can read.
     writeAcl(dir, 'probe', { me: 'admin', family: 'read' });
     assert.equal((await post(base, 'refs', { artifact: 'report' }, 'probe2')).status, 403);
     assert.equal(
@@ -528,12 +528,12 @@ test('правка текста: устаревший отпечаток, чуж
       403,
     );
 
-    // Markdown-артефакт адресов не имеет: это не ошибка прав, а другой тип.
+    // A Markdown artifact has no refs: this is not a permissions error but a different type.
     assert.equal((await post(base, 'refs', { artifact: 'plan' })).status, 400);
   });
 });
 
-test('предпросмотр с выбором элемента: скрипт только в ответе, файл не меняется', async () => {
+test('preview with element picking: the script is only in the response, the file is unchanged', async () => {
   await withServer(async (base, config) => {
     const file = path.join(artifactsRoot(config), 'report', 'index.html');
     await post(base, 'refs', { artifact: 'report' });
@@ -552,7 +552,7 @@ test('предпросмотр с выбором элемента: скрипт 
     assert.match(html, /postMessage/);
     assert.equal(fs.readFileSync(file, 'utf8'), before, 'исходник на диске не тронут');
 
-    // Выбор элемента — панель артефактов, а не публичная ссылка.
+    // Element picking is the artifacts panel, not the public link.
     assert.equal((await fetch(`${base}/panel/artifacts/raw/report/index.html?pick=1`)).status, 401);
   });
 });

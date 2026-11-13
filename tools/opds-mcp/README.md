@@ -1,56 +1,56 @@
 # OPDS MCP
 
-MCP-сервер, который проксирует книжный каталог по протоколу [OPDS](https://specs.opds.io/).
-Один и тот же код работает с любым каталогом: адрес задаётся в `OPDS_URL`, сайт в
-коде не зашит. Project Gutenberg, Calibre, домашняя библиотека на OPDS-движке —
-разницы нет.
+An MCP server that proxies a book catalog over the [OPDS](https://specs.opds.io/) protocol.
+The same code works with any catalog: the address is set in `OPDS_URL`, the site is
+not hardcoded in the code. Project Gutenberg, Calibre, a home library on an OPDS engine —
+no difference.
 
 ```
-node tools/opds-mcp/server.mjs        # stdio, как его запускает pi
+node tools/opds-mcp/server.mjs        # stdio, the way pi starts it
 ```
 
-## Настройки
+## Configuration
 
-| Переменная | Обязательна | Что это |
+| Variable | Required | What it is |
 |---|---|---|
-| `OPDS_URL` | да | корень OPDS-каталога: `https://www.gutenberg.org/ebooks.opds/`, `http://<адрес>:8080/opds/` |
-| `OPDS_USER`, `OPDS_PASSWORD` | нет | basic-авторизация каталога |
-| `OPDS_TOKEN` | нет | Bearer-токен; приоритетнее basic |
-| `OPDS_TIMEOUT_SECONDS` | нет | таймаут запроса к каталогу, по умолчанию 15 |
-| `OPDS_MAX_DOWNLOAD_MB` | нет | лимит скачивания, по умолчанию 25 МБ |
-| `OPDS_SAVE_DIR` | нет | куда класть файлы; по умолчанию `$ICARUS_HOME/incoming` (папка вложений) |
+| `OPDS_URL` | yes | root of the OPDS catalog: `https://www.gutenberg.org/ebooks.opds/`, `http://<address>:8080/opds/` |
+| `OPDS_USER`, `OPDS_PASSWORD` | no | basic auth for the catalog |
+| `OPDS_TOKEN` | no | Bearer token; takes priority over basic |
+| `OPDS_TIMEOUT_SECONDS` | no | timeout of a request to the catalog, default 15 |
+| `OPDS_MAX_DOWNLOAD_MB` | no | download limit, default 25 MB |
+| `OPDS_SAVE_DIR` | no | where to put files; default `$ICARUS_HOME/incoming` (the attachments folder) |
 
-## Инструменты
+## Tools
 
-- `catalog_search(query, limit?)` — поиск через OpenSearch-шаблон из корня каталога.
-  Если шаблона нет, пробует стандартные `/search?q=` и `/search.opds?query=` и, если
-  ничего не вышло, честно перечисляет причины.
-- `catalog_browse(link?, limit?)` — корень каталога или выбранный раздел, ссылки
-  только из ответов сервера.
-- `book_info(link)` — карточка: авторы, год, языки, форматы с размером, аннотация.
-  Понимает и каталоги, которые отдают книги сразу ссылками на файлы (так делает
-  Calibre): такие записи сервер запоминает из выдачи и строит карточку по ним.
-- `book_download(link, format?, confirm: true)` — скачивание в `incoming/` с
-  человеческим именем «Автор - Название.формат». Без `confirm: true` отказывает,
-  больше `OPDS_MAX_DOWNLOAD_MB` — останавливает.
+- `catalog_search(query, limit?)` — search via the OpenSearch template from the catalog root.
+  If there's no template, it tries the standard `/search?q=` and `/search.opds?query=` and, if
+  nothing worked, honestly lists the reasons.
+- `catalog_browse(link?, limit?)` — the catalog root or a selected section, links
+  only from the server's responses.
+- `book_info(link)` — a card: authors, year, languages, formats with size, annotation.
+  It also understands catalogs that give books directly as file links (that's what
+  Calibre does): the server remembers such entries from the output and builds a card from them.
+- `book_download(link, format?, confirm: true)` — download into `incoming/` with a
+  human-readable name "Author - Title.format". Without `confirm: true` it refuses;
+  more than `OPDS_MAX_DOWNLOAD_MB` — it stops.
 
-Поддерживается Atom/OPDS 1.x. OPDS 2.0 — это JSON, его здесь нет.
+Atom/OPDS 1.x is supported. OPDS 2.0 is JSON, that's not here.
 
-Карточка книги, которую каталог отдал сразу ссылкой на файл, живёт в памяти
-процесса: после перезапуска сервера её надо получить заново через поиск.
+A book card that the catalog gave directly as a file link lives in the process
+memory: after the server restarts, it must be fetched again via search.
 
-Ошибки различаются намеренно: «ничего не найдено» — это разобранная пустая выдача;
-«ответ не Atom/OPDS» — в `OPDS_URL` вписан не каталог, а HTML-страница; 401 — нужны
-`OPDS_USER`/`OPDS_PASSWORD` или `OPDS_TOKEN`; таймаут — каталог не отвечает.
+Errors are distinguished deliberately: "nothing found" is a parsed empty output;
+"response is not Atom/OPDS" — `OPDS_URL` points at an HTML page, not a catalog; 401 — you need
+`OPDS_USER`/`OPDS_PASSWORD` or `OPDS_TOKEN`; timeout — the catalog isn't responding.
 
-## Тесты
+## Tests
 
 ```
-node tools/opds-mcp/test.mjs      # разбор настоящих фикстур Project Gutenberg
+node tools/opds-mcp/test.mjs      # parse real Project Gutenberg fixtures
 ./script/test packages/service/test/opds-mcp.test.ts
-                                  # протокол, ошибки, лимит и скачивание на фейковом каталоге
+                                  # protocol, errors, limit and download on a fake catalog
 ```
 
-Фикстуры в `fixtures/` — реальные ответы публичного каталога Project Gutenberg
-(общественное достояние), сняты 12.11.2026. В тестах адрес подменяется на локальный:
-сеть не нужна.
+The fixtures in `fixtures/` are real responses from the public Project Gutenberg catalog
+(public domain), captured 12.11.2026. In the tests the address is replaced with a local one:
+no network needed.

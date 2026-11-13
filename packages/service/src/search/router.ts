@@ -1,11 +1,11 @@
-// Сам роутер: кого звать, кому верить, кого отправить в карантин.
+// The router itself: whom to call, whom to trust, whom to send to quarantine.
 //
-// Правила простые и намеренно грубые — API квот у половины провайдеров нет:
-//  - первый по рейтингу, кто не в карантине, становится текущим;
-//  - отказ или таймаут — пять минут карантина и запрос к следующему;
-//  - 402/429 «про кредиты» — сутки: за сутки квота, скорее всего, вернётся;
-//  - 50 отказов подряд — «ключ сломан» и семь дней, чтобы человек проверил;
-//  - успех снимает всё: и карантин, и флаг, и счётчик.
+// The rules are simple and deliberately crude — half the providers have no quota API:
+//  - the first by rating that is not in quarantine becomes the current one;
+//  - a refusal or timeout — five minutes of quarantine and a request to the next one;
+//  - 402/429 "about credits" — a day: within a day the quota will most likely return;
+//  - 50 refusals in a row — "key broken" and seven days for the person to check;
+//  - success clears everything: the quarantine, the flag and the counter.
 import { PROVIDERS } from './providers.ts';
 import {
   emptyProviderState,
@@ -33,8 +33,8 @@ import { recordUsage } from './usage.ts';
 import type { IcarusConfig } from '../config.ts';
 
 /**
- * Рейтинг поиска: сверху — те, кто отдаёт выдачу Google или ищет лучше всех.
- * Cloudflare сюда не входит: он умеет только извлекать страницы.
+ * Search rating: at the top are those who return Google results or search best of all.
+ * Cloudflare is not included: it can only extract pages.
  */
 export const RATING: readonly SearchProviderId[] = [
   'serpapi',
@@ -50,13 +50,13 @@ export const RATING: readonly SearchProviderId[] = [
 
 export const ATTEMPT_TIMEOUT_MS = 8_000;
 export const TOTAL_DEADLINE_MS = 20_000;
-/** Обычный сбой: пять минут — достаточно, чтобы провайдер очухался. */
+/** A normal failure: five minutes is enough for the provider to recover. */
 export const ERROR_BAN_MS = 5 * 60_000;
-/** Кончились кредиты: сутки, раньше проверять бессмысленно. */
+/** Credits ran out: a day, checking earlier is pointless. */
 export const CREDIT_BAN_MS = 24 * 60 * 60_000;
-/** «Ключ сломан»: семь дней, но первый же успех снимет флаг. */
+/** "Key broken": seven days, but the first success will clear the flag. */
 export const BROKEN_BAN_MS = 7 * 24 * 60 * 60_000;
-/** Сколько отказов подряд считать сломанным ключом. */
+/** How many refusals in a row to consider a key broken. */
 export const BROKEN_AFTER = 50;
 
 export type TriedProvider = { provider: ProviderId; reason: string };
@@ -81,19 +81,19 @@ export type RouteResult = RouteSuccess | RouteFailure;
 
 export type RouteOptions = {
   fetch?: typeof fetch;
-  /** Подменяемое время: тесты не должны ждать пять минут. */
+  /** Overridable time: tests must not wait five minutes. */
   now?: () => number;
   signal?: AbortSignal;
   timeoutMs?: number;
   deadlineMs?: number;
 };
 
-/** Значение настройки: панель (secretEnv) сильнее .env, .env сильнее окружения. */
+/** Setting value: the panel (secretEnv) beats .env, .env beats the environment. */
 export function secretFor(config: IcarusConfig, name: string): string {
   return config.secretEnv?.[name]?.trim() || config.env[name]?.trim() || process.env[name]?.trim() || '';
 }
 
-/** Ключ провайдера — первая непустая переменная из его списка. */
+/** Provider key — the first non-empty variable from its list. */
 export function keyFor(config: IcarusConfig, provider: { keyNames: string[] }): string {
   for (const name of provider.keyNames) {
     const value = secretFor(config, name);
@@ -102,15 +102,15 @@ export function keyFor(config: IcarusConfig, provider: { keyNames: string[] }): 
   return '';
 }
 
-/** Как выключить бесплатного провайдера без ключа. */
+/** How to disable a free provider without a key. */
 const FREE_OFF = /^(off|false|no|none|0)$/i;
 
 /**
- * Участвует ли провайдер в ротации.
+ * Whether the provider participates in rotation.
  *
- * Обычному нужен ключ: без ключа пробовать нечего — это не бан, а пропуск.
- * Бесплатный MCP You.com ключа не требует и включён по умолчанию — поиск
- * работает даже на пустом .env. Выключается одной строкой: ICARUS_SEARCH_FREE=off.
+ * A normal one needs a key: without a key there is nothing to try — that is not a ban but a skip.
+ * Free MCP You.com needs no key and is enabled by default — search
+ * works even on an empty .env. It is disabled with a single line: ICARUS_SEARCH_FREE=off.
  */
 export function providerEnabled(
   config: IcarusConfig,
@@ -121,8 +121,8 @@ export function providerEnabled(
 }
 
 /**
- * Готов ли провайдер: участвует в ротации и все обязательные секреты заданы.
- * Обязательные нужны там, где одного ключа мало (Cloudflare: аккаунт + токен).
+ * Is the provider ready: it participates in rotation and all required secrets are set.
+ * Required ones are needed where a single key is not enough (Cloudflare: account + token).
  */
 export function providerReady(
   config: IcarusConfig,
@@ -132,7 +132,7 @@ export function providerReady(
   return (provider.requires ?? []).every((name) => secretFor(config, name) !== '');
 }
 
-/** Провайдеры, которых можно звать: с ключом или без него, если так задумано. */
+/** Providers that can be called: with or without a key, if so intended. */
 export function configuredProviders(config: IcarusConfig): SearchProvider[] {
   return RATING.map((id) => PROVIDERS[id]).filter((provider) => providerReady(config, provider));
 }
@@ -160,7 +160,7 @@ function firstAvailable(
   return availableIds(state, candidates, now, scope)[0] ?? null;
 }
 
-/** Первый непопробованный и не забаненный: текущий — вперёд, дальше по рейтингу. */
+/** The first untried and unbanned one: the current goes first, then by rating. */
 function chooseAttempt(
   state: RouterState,
   candidates: readonly Candidate[],
@@ -170,9 +170,9 @@ function chooseAttempt(
 ): ProviderId | null {
   const free = availableIds(state, candidates, now, scope).filter((id) => !tried.has(id));
   if (free.length === 0) return null;
-  // «Сломанный» ключ после семи дней карантина проверяем сами, одним настоящим
-  // запросом: ответил — флаг снимается, нет — снова семь дней. Происходит это
-  // один раз на провайдера, а не на каждый запрос.
+  // We check a "broken" key ourselves after seven days of quarantine, with one real
+  // request: if it answered — the flag is cleared, if not — seven more days. This happens
+  // once per provider, not on every request.
   const providers = scopeProviders(state, scope);
   const revived = free.find((id) => providers[id]?.broken === true);
   if (revived !== undefined) return revived;
@@ -183,7 +183,7 @@ function chooseAttempt(
 
 function banFor(kind: SearchFailure['kind'], id: ProviderId, now: number): { reason: BanReason; ms: number } {
   if (kind !== 'credits') return { reason: 'error', ms: ERROR_BAN_MS };
-  // Суточную квоту незачем держать ровные сутки: ждём её сброса по календарю.
+  // There is no point in holding a daily quota for exactly a day: we wait for it to reset by the calendar.
   const search = id in PROVIDERS ? PROVIDERS[id as SearchProviderId] : undefined;
   const reset = search?.creditsResetAt?.(now);
   return { reason: 'credits', ms: reset === undefined ? CREDIT_BAN_MS : Math.max(60_000, reset - now) };
@@ -199,12 +199,12 @@ function failureText(failure: SearchFailure): string {
 }
 
 /**
- * Записать отказ: счётчик, карантин, при 50 — «ключ сломан».
- * Если отвалился текущий — сразу выбрать нового текущего, чтобы следующий
- * запрос не начинал с того, кого мы только что отправили в карантин.
+ * Record a failure: counter, quarantine, and at 50 — "key broken".
+ * If the current one dropped out — immediately pick a new current, so the next
+ * request does not start with the one we just sent to quarantine.
  *
- * scope нужен, потому что у извлечения страниц свой «текущий» и свои карантины.
- * Отказ страницы (kind === 'page') сюда не попадает — это свойство URL.
+ * scope is needed because page extraction has its own "current" and its own quarantines.
+ * A page refusal (kind === 'page') does not get here — it is a property of the URL.
  */
 export function applyFailure(
   state: RouterState,
@@ -236,7 +236,7 @@ export function applyFailure(
   }
 }
 
-/** Успех означает «провайдер жив»: снимаем карантин, флаг и счётчик отказов. */
+/** Success means "the provider is alive": we clear the quarantine, the flag and the failure counter. */
 export function applySuccess(state: RouterState, id: ProviderId, scope: Capability = 'search'): void {
   const provider = providerState(state, id, scope);
   provider.fails = 0;
@@ -259,17 +259,17 @@ function asFailure(error: unknown): SearchFailure {
 
 export { asFailure };
 
-/** Собрать снимок для сравнения: надо ли вообще писать успех в файл. */
+/** Build a snapshot for comparison: is it even necessary to write the success to the file. */
 export function hasFaults(state: RouterState, id: ProviderId, scope: Capability = 'search'): boolean {
   const provider = scopeProviders(state, scope)[id];
   return !provider || provider.fails > 0 || provider.bannedUntil !== null || provider.broken;
 }
 
 /**
- * Главный вход: найти живого провайдера и вернуть его результаты.
+ * The main entry: find a live provider and return its results.
  *
- * Пробуем по очереди, пока кто-нибудь не ответит. Каждый отказ сразу пишется в
- * состояние: следующий запрос (даже параллельный) уже не пойдёт к упавшему.
+ * We try in turn until someone answers. Every refusal is immediately written to
+ * the state: the next request (even a parallel one) will no longer go to the failed one.
  */
 export async function routeSearch(
   config: IcarusConfig,
@@ -289,8 +289,8 @@ export async function routeSearch(
   const state = readRouterState(file);
   const candidatesIds = new Set(candidates.map((provider) => provider.id));
 
-  // Текущего нет, у него больше нет ключа или он в карантине — выбираем первого
-  // живого по рейтингу. Пока он жив, сам по себе текущий не меняется.
+  // There is no current one, it no longer has a key, or it is in quarantine — we pick the first
+  // live one by rating. While it is alive, the current one does not change by itself.
   const knownCurrent = scopeCurrent(state, 'search');
   const known =
     knownCurrent !== null && candidatesIds.has(knownCurrent)
@@ -341,7 +341,7 @@ export async function routeSearch(
       await recordUsage(config, 'search', id, true, { now });
       return { ok: true, provider: id, results, tried, current: after.current };
     } catch (error) {
-      // Клиент ушёл — это не вина провайдера, банить нельзя.
+      // The client left — not the provider's fault, we must not ban.
       if (options.signal?.aborted) break;
       const failure = asFailure(error);
       await mutateRouterState(file, (next) => applyFailure(next, id, failure, now(), candidates));

@@ -1,4 +1,4 @@
-// Контракт формы ответа OpenAI: то, на что рассчитывает клиент.
+// OpenAI response shape contract: what the client relies on.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { chunk, completion, completionId, DONE, errorBody, usageChunk } from '../src/http/sse.ts';
@@ -7,11 +7,11 @@ function parse(sse: string) {
   return JSON.parse(sse.replace(/^data: /, '').trim());
 }
 
-test('идентификатор похож на OpenAI', () => {
+test('the identifier looks like OpenAI', () => {
   assert.match(completionId(), /^chatcmpl-[a-z0-9]+$/);
 });
 
-test('чанк контента имеет форму chat.completion.chunk', () => {
+test('the content chunk has the chat.completion.chunk shape', () => {
   const parsed = parse(chunk('chatcmpl-1', 'icarus', { content: 'привет' }));
   assert.equal(parsed.object, 'chat.completion.chunk');
   assert.equal(parsed.model, 'icarus');
@@ -20,27 +20,27 @@ test('чанк контента имеет форму chat.completion.chunk', ()
   assert.equal(parsed.choices[0].finish_reason, null);
 });
 
-test('чанк размышлений уходит в reasoning_content', () => {
+test('the reasoning chunk goes into reasoning_content', () => {
   const parsed = parse(chunk('chatcmpl-1', 'icarus', { reasoning_content: 'читаю memory/identity.md\n' }));
   assert.equal(parsed.choices[0].delta.reasoning_content, 'читаю memory/identity.md\n');
 });
 
-test('финальный чанк несёт finish_reason', () => {
+test('the final chunk carries finish_reason', () => {
   const parsed = parse(chunk('chatcmpl-1', 'icarus', {}, 'stop'));
   assert.equal(parsed.choices[0].finish_reason, 'stop');
 });
 
-test('чанк с usage не содержит choices (как у OpenAI при include_usage)', () => {
+test('a chunk with usage contains no choices (like OpenAI with include_usage)', () => {
   const parsed = parse(usageChunk('chatcmpl-1', 'icarus', { prompt_tokens: 5, completion_tokens: 7, total_tokens: 12 }));
   assert.deepEqual(parsed.choices, []);
   assert.equal(parsed.usage.total_tokens, 12);
 });
 
-test('поток заканчивается маркером [DONE]', () => {
+test('the stream ends with the [DONE] marker', () => {
   assert.equal(DONE, 'data: [DONE]\n\n');
 });
 
-test('обычный ответ имеет форму chat.completion', () => {
+test('a regular response has the chat.completion shape', () => {
   const parsed = completion('chatcmpl-1', 'icarus', 'ответ', {
     prompt_tokens: 1,
     completion_tokens: 2,
@@ -52,7 +52,7 @@ test('обычный ответ имеет форму chat.completion', () => {
   assert.equal(parsed.choices[0].finish_reason, 'stop');
 });
 
-test('обычный ответ несёт размышления отдельным полем и не подмешивает их в content', () => {
+test('a regular response carries reasoning in a separate field and does not mix it into content', () => {
   const parsed = completion(
     'chatcmpl-1',
     'icarus',
@@ -64,7 +64,7 @@ test('обычный ответ несёт размышления отдельн
   assert.equal(parsed.choices[0].message.reasoning_content, 'читаю memory/identity.md\n');
 });
 
-test('без размышлений поля reasoning_content нет — старые клиенты не удивляются', () => {
+test('without reasoning there is no reasoning_content field — old clients are not surprised', () => {
   const parsed = completion('chatcmpl-1', 'icarus', 'ответ', {
     prompt_tokens: 1,
     completion_tokens: 2,
@@ -73,7 +73,7 @@ test('без размышлений поля reasoning_content нет — ста
   assert.equal('reasoning_content' in parsed.choices[0].message, false);
 });
 
-test('ошибка отдаётся в форме OpenAI', () => {
+test('an error is returned in the OpenAI shape', () => {
   const parsed = errorBody('нет токена', 'authentication_error') as Record<string, any>;
   assert.equal(parsed.error.type, 'authentication_error');
   assert.equal(parsed.error.message, 'нет токена');

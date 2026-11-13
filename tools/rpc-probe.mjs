@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// Минимальный RPC-клиент к pi внутри контейнера: гоняет подряд несколько реплик,
-// печатает текст ответа и активность тулов. Это прототип будущего моста в icarus.
+// A minimal RPC client to pi inside the container: runs several prompts in a row,
+// prints the response text and tool activity. This is a prototype of the future bridge in icarus.
 //
-//   node tools/rpc-probe.mjs "Привет! Ты помнишь, кто я?" "Запомни: люблю кофе без сахара"
+//   node tools/rpc-probe.mjs "Hello! Do you remember who I am?" "Remember: I like coffee without sugar"
 //
-// Переменные: CONTAINER (по умолчанию icarus-test), MODEL (по умолчанию deepinfra/deepseek-ai/DeepSeek-V4.1-Flash:off)
+// Variables: CONTAINER (default icarus-test), MODEL (default deepinfra/deepseek-ai/DeepSeek-V4.1-Flash:off)
 import { spawn } from 'node:child_process';
 
 const container = process.env.CONTAINER || 'icarus-test';

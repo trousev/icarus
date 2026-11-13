@@ -1,11 +1,11 @@
-// Проверка MCP-сервера из панели: подняться, спросить tools/list и честно сказать,
-// что не так. Нужна не ради красоты: человек добавляет сервер и хочет знать, что
-// он рабочий, ДО того как Икар начнёт им пользоваться. Для OAuth это ещё и способ
-// получить 401-подсказку сервера до старта авторизации.
+// Checking an MCP server from the panel: bring it up, ask tools/list and honestly report
+// what is wrong. It is not for beauty: the person adds a server and wants to know that
+// it works BEFORE Icarus starts using it. For OAuth this is also a way
+// to get the server's 401 hint before starting authorization.
 //
-// Проверяем только HTTP-транспорты. stdio-сервер живёт в контейнере человека, и
-// поднимать его из сервиса значило бы запускать чужой код на хосте; pi сделает это
-// сам при первом подключении.
+// We check only HTTP transports. A stdio server lives in the person's container, and
+// bringing it up from the service would mean running someone else's code on the host; pi will do that
+// itself on the first connection.
 import type { McpServerConfig } from '../config.ts';
 import { tokenIsFresh } from './oauth.ts';
 import { parseWwwAuthenticate, type FetchLike } from './oauth.ts';
@@ -13,14 +13,14 @@ import type { McpCredentials } from './registry.ts';
 
 export type ProbeResult = {
   ok: boolean;
-  /** Имена инструментов, которые сервер отдал. */
+  /** Names of the tools the server returned. */
   tools?: string[];
   server?: { name?: string; version?: string; title?: string };
   protocolVersion?: string;
-  /** Сервер требует авторизацию: панель предложит войти/вставить ключ. */
+  /** The server requires authorization: the panel will offer to log in/paste a key. */
   needsAuth?: boolean;
   challenge?: { resourceMetadata?: string; scope?: string };
-  /** stdio проверяется не здесь. */
+  /** stdio is not checked here. */
   unsupported?: boolean;
   error?: string;
 };
@@ -56,7 +56,7 @@ function initializeMessage(): Record<string, unknown> {
 
 type SseEvent = { event: string; data: string };
 
-/** Минимальный SSE-разбор: события разделяются пустой строкой, data склеивается. */
+/** Minimal SSE parsing: events are separated by an empty line, data is concatenated. */
 class SseReader {
   private buffer = '';
   private decoder = new TextDecoder();
@@ -288,7 +288,7 @@ async function probeSse(url: string, headers: Record<string, string>, fetchImpl:
           break;
         }
       } catch {
-        // не наш ответ
+        // not our answer
       }
     }
     if (!initRpc || initRpc.error) return { ok: false, error: initRpc?.error?.message ?? 'SSE initialize не ответил' };
@@ -309,7 +309,7 @@ async function probeSse(url: string, headers: Record<string, string>, fetchImpl:
           };
         }
       } catch {
-        // не наш ответ
+        // not our answer
       }
     }
   } finally {

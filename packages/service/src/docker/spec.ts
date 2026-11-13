@@ -1,7 +1,7 @@
-// Отпечаток контейнера: то, что определяет его содержимое.
-// Образ, маунты и окружение теперь общие для всех (см. config.yaml), поэтому
-// отпечаток один на весь сервис: поменял образ или маунт — пересоздаются все
-// контейнеры, а не только тот, который первым попал под руку.
+// Container fingerprint: the thing that determines its contents.
+// The image, mounts, and environment are now shared by all (see config.yaml), so
+// the fingerprint is one for the whole service: change the image or a mount and all
+// containers are recreated, not just the one that happened to come first.
 import { createHash } from 'node:crypto';
 import { CONTAINER_PATHS, userContainer, type IcarusConfig, type UserConfig } from '../config.ts';
 import { languageName, languageOf } from '../profile.ts';
@@ -10,7 +10,7 @@ export const LABEL_MANAGED = 'icarus.managed';
 export const LABEL_USER = 'icarus.user';
 export const LABEL_SPEC = 'icarus.spec';
 
-/** Уровни моделей уезжают в контейнер переменными — их читает расширение эскалации. */
+/** Model tiers travel into the container as variables — the escalation extension reads them. */
 export function modelTierEnv(config: IcarusConfig): Record<string, string> {
   const env: Record<string, string> = {};
   for (const model of config.models) {
@@ -21,51 +21,51 @@ export function modelTierEnv(config: IcarusConfig): Record<string, string> {
 }
 
 /**
- * Окружение контейнера: уровни моделей и общее из config.yaml, а поверх — личное
- * человека: кто он и где живёт панель управления. Личные значения идут последними:
- * их нельзя перебить общим env — иначе один человек отвечал бы за другого.
+ * Container environment: model tiers and the shared values from config.yaml, plus the
+ * person's own: who they are and where the control panel lives. Personal values go last:
+ * they must not be overridden by the shared env — otherwise one person would answer for another.
  */
 export function containerEnv(config: IcarusConfig, user: UserConfig): Record<string, string> {
   return {
     ...modelTierEnv(config),
     ...config.env,
-    // Расширения читают этот путь сами, чтобы не хардкодить раскладку по второму разу.
+    // Extensions read this path themselves so they don't hardcode the layout a second time.
     ICARUS_HOME: CONTAINER_PATHS.home,
     ICARUS_USER_ID: user.id,
     ICARUS_URL: config.url,
-    // Глобальная библиотека артефактов: и MCP, и folder-guard читают этот путь.
+    // Global artifact library: both MCP and folder-guard read this path.
     ICARUS_ARTIFACTS_DIR: CONTAINER_PATHS.artifacts,
-    // Куда skill_writer кладёт личные скиллы: тот же каталог, что читает pi и панель.
+    // Where skill_writer puts personal skills: the same directory pi and the panel read.
     ICARUS_SKILLS_DIR: `${CONTAINER_PATHS.piAgent}/skills`,
-    // Язык разговора — полным именем (English, Russian). Расширение language шлёт его
-    // отдельным системным сообщением: внутри большого русского промпта правило языка
-    // не держало (замер — tools/persona-flywheel/smoke-language.mjs).
+    // Conversation language — as a full name (English, Russian). The language extension sends it
+    // as a separate system message: inside a large Russian prompt the language rule
+    // did not hold (measurement — tools/persona-flywheel/smoke-language.mjs).
     ICARUS_LANGUAGE: languageName(languageOf(config, user)),
   };
 }
 
-/** Всё, что влияет на содержимое контейнера, но не является секретом. */
+/** Everything that affects the container's contents but is not a secret. */
 export function specFor(config: IcarusConfig, user: UserConfig): string {
   const env = containerEnv(config, user);
   const payload = JSON.stringify({
     image: config.docker.image,
     network: config.docker.network ?? null,
-    // DNS — часть содержимого контейнера: сменили серверы, старые контейнеры надо
-    // пересоздать, иначе они останутся на прежнем резолвере.
+    // DNS is part of the container's contents: change the servers and the old containers must be
+    // recreated, otherwise they stay on the previous resolver.
     dns: config.docker.dns ?? [],
-    // dataDir — не «просто настройка»: из него выводятся пути личной памяти, сессий и
-    // pi-agent, которые монтируются в контейнер. Сменили dataDir — контейнеры обязаны
-    // пересоздаться, иначе они останутся примонтированными к старым каталогам, а сервис
-    // будет писать в новые. Ровно на этом мы и споткнулись при переезде конфига.
+    // dataDir is not "just a setting": the paths of personal memory, sessions, and
+    // pi-agent are derived from it and mounted into the container. Change dataDir and the
+    // containers must be recreated, otherwise they stay mounted to the old directories while
+    // the service writes to the new ones. This is exactly what we tripped over when moving the config.
     dataDir: config.dataDir,
-    // Раскладка внутри контейнера — тоже содержимое: переехали наши каталоги в
-    // /workspace/.icarus, и без этого поля старые контейнеры остались бы с прежними
-    // точками монтирования, а сервис писал бы человеку пути, которых там нет.
+    // The layout inside the container is also contents: our directories moved to
+    // /workspace/.icarus, and without this field the old containers would keep the previous
+    // mount points while the service would report paths that don't exist there.
     layout: CONTAINER_PATHS,
-    // Maple — единственное внешнее дерево в контейнере; его путь тоже часть содержимого.
+    // Maple is the only external tree in the container; its path is also part of the contents.
     mapleDir: config.mapleDir ?? null,
-    // Код встроенных MCP монтируется из репозитория: старый контейнер без этого
-    // маунта не запустит сервер артефактов, поэтому список — часть отпечатка.
+    // The code of built-in MCPs is mounted from the repository: an old container without this
+    // mount won't start the artifact server, so the list is part of the fingerprint.
     tools: [
       'artifacts-mcp',
       'opds-mcp',
@@ -73,7 +73,7 @@ export function specFor(config: IcarusConfig, user: UserConfig): string {
       'video-blog-mcp',
       ...(config.mapleDir === undefined ? [] : ['maple-mcp']),
     ],
-    // Глобальная библиотека артефактов — отдельный маунт /artifacts.
+    // Global artifact library — a separate /artifacts mount.
     artifacts: true,
     env: Object.fromEntries(Object.entries(env).sort(([a], [b]) => a.localeCompare(b))),
   });

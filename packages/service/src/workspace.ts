@@ -1,8 +1,8 @@
-// Подготовка рабочего окружения пользователя на хосте: каталоги, AGENTS.md,
-// конфиги pi (auth.json, models.json, settings.json, mcp.json) и наши расширения.
+// Preparing the user's working environment on the host: directories, AGENTS.md,
+// pi configs (auth.json, models.json, settings.json, mcp.json) and our extensions.
 //
-// Всё содержимое — общее (модели, ключи, MCP, маунты из config.yaml); от человека
-// зависит только то, куда это кладётся: каталог в dataDir и имя контейнера.
+// All content is shared (models, keys, MCP, mounts from config.yaml); only where it is
+// placed depends on the person: the directory in dataDir and the container name.
 import fs from 'node:fs';
 import path from 'node:path';
 import { log } from './log.ts';
@@ -32,7 +32,7 @@ const EXTENSIONS_DIR = path.join(REPO_ROOT, 'packages', 'extensions');
 
 export type PreparedUser = ReturnType<typeof prepareUser>;
 
-/** Старое хозяйство лежало прямо в каталоге человека: переносим его в .icarus. */
+/** The old household lay right in the person's directory: we move it into .icarus. */
 function migrateLayout(paths: ReturnType<typeof userPaths>): void {
   const moves: Array<[string, string]> = [
     [path.join(paths.root, 'memory'), paths.memory],
@@ -42,14 +42,14 @@ function migrateLayout(paths: ReturnType<typeof userPaths>): void {
     [path.join(paths.root, 'icarus.md'), paths.icarusMd],
   ];
   for (const [from, to] of moves) {
-    // Переносим только когда старого места ещё есть что переносить, а нового нет:
-    // повторный запуск ничего не трогает, а данные человека не теряются.
+    // We move only when the old place still has something to move and the new one does not:
+    // a repeated run touches nothing and the person's data is not lost.
     if (!fs.existsSync(from) || fs.existsSync(to)) continue;
     fs.mkdirSync(path.dirname(to), { recursive: true });
     try {
       fs.renameSync(from, to);
     } catch {
-      // Другой файл уже занял место — старый оставляем как есть, падать не за что.
+      // Another file already took the place — we leave the old one as is, there is nothing to crash over.
     }
   }
 }
@@ -57,11 +57,11 @@ function migrateLayout(paths: ReturnType<typeof userPaths>): void {
 export function ensureDirs(config: IcarusConfig, user: UserConfig): void {
   const paths = userPaths(config, user);
   migrateLayout(paths);
-  // Глобальная библиотека артефактов живёт в dataDir и монтируется всем как
-  // /artifacts. Заводим её до контейнеров: docker иначе создаст точку маунта root-ом.
+  // The global artifact library lives in dataDir and is mounted for everyone as
+  // /artifacts. We create it before the containers: otherwise docker would create the mount point as root.
   ensureArtifactsRoot(config);
-  // Общие скиллы — тоже до контейнеров: каталог монтируется только для чтения,
-  // и если docker создаст его сам, права будут root-овыми, а панель — не сможет писать.
+  // Shared skills too before the containers: the directory is mounted read-only,
+  // and if docker creates it itself, the permissions will be root's and the panel will not be able to write.
   fs.mkdirSync(skillStorePaths(config).shared, { recursive: true });
   for (const dir of [
     paths.workspaces,
@@ -70,53 +70,53 @@ export function ensureDirs(config: IcarusConfig, user: UserConfig): void {
     paths.incoming,
     paths.sessions,
     paths.piAgent,
-    // Каталог скиллов заводим заранее и пустым: так его видит pi. prepareUser его
-    // не чистит — это не управляемый каталог расширений, а место для скиллов человека,
-    // куда пишет панель (и заводит внутри него git-репозиторий, см. control/skills.ts).
+    // We create the skills directory in advance and empty: that is how pi sees it. prepareUser does
+    // not clean it — this is not a managed extensions directory but a place for the person's skills,
+    // where the panel writes (and creates a git repository inside it, see control/skills.ts).
     paths.skills,
     paths.sharedMemory,
   ]) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  // Каталог математики не заводим: файлы расчётов Maple теперь живут в рабочей
-  // папке разговора, рядом с остальной работой человека.
+  // We do not create the math directory: Maple computation files now live in the working
+  // folder of the conversation, next to the rest of the person's work.
   for (const sub of ['people', 'projects', 'journal']) {
     fs.mkdirSync(path.join(paths.memory, sub), { recursive: true });
   }
-  // shared-memory и shared-skills монтируются вложенно внутрь /workspaces/.icarus:
-  // точки монтирования заводим заранее, иначе docker создаст их root-овыми внутри маунта.
+  // shared-memory and shared-skills are mounted nested inside /workspaces/.icarus:
+  // we create the mount points in advance, otherwise docker will create them as root inside the mount.
   fs.mkdirSync(path.join(paths.icarus, 'shared-memory'), { recursive: true });
   fs.mkdirSync(path.join(paths.icarus, 'shared-skills'), { recursive: true });
-  // Реестр разговоров монтируется в контейнер файлом, а не каталогом: если файла нет,
-  // docker создаст на его месте каталог и маунт останется пустым. Пустой реестр — это
-  // валидное состояние (разговоров ещё нет), поэтому заводим его сами.
+  // The conversation registry is mounted into the container as a file, not a directory: if the file is absent,
+  // docker will create a directory in its place and the mount will stay empty. An empty registry is a
+  // valid state (there are no conversations yet), so we create it ourselves.
   if (!fs.existsSync(paths.chats)) {
     fs.writeFileSync(paths.chats, `${JSON.stringify({ chats: [] }, null, 2)}\n`, { mode: 0o600 });
   }
-  // То же и для карты разговоров: она пересоздаётся перед каждым стартом (см. prepareUser),
-  // но к моменту генерации compose файл уже должен существовать.
+  // The same for the conversation map: it is recreated before every start (see prepareUser),
+  // but by the time compose is generated the file must already exist.
   if (!fs.existsSync(paths.sessionsMap)) {
     fs.writeFileSync(paths.sessionsMap, `${JSON.stringify({ sessions: [] }, null, 2)}\n`, { mode: 0o600 });
   }
-  // «Разговор» и «Приватный» существуют всегда — вместе с их AGENTS.md.
+  // "Conversation" and "Private" always exist — together with their AGENTS.md.
   ensureWorkspaces(config, user);
 }
 
 /**
- * Подсказка про MCP-серверы, которые подключаются по требованию. Без неё модель
- * не знает, что сервер вообще есть: при lifecycle: lazy его инструментов в промпте
- * нет, а mcp_connect сам по себе никто не позовёт. Описание сервера (description)
- * говорит, когда он нужен, — это и есть дешёвый триггер вместо отдельного скилла.
+ * A hint about MCP servers that connect on demand. Without it the model
+ * does not know that the server exists at all: with lifecycle: lazy its tools are not in the prompt,
+ * and nobody will call mcp_connect on their own. The server description tells when it is
+ * needed — that is the cheap trigger instead of a separate skill.
  *
- * Здесь же — политика разрешений, и она намеренно жёсткая: «подключиться» и
- * «сделать» — разные вещи, а модель без явного правила перестраховывается и
- * начинает каждый разговор с «разрешите подключить MCP?». Коннект идемпотентен,
- * наружу ничего не меняет (это тот же initialize, что и у любого клиента), и
- * спрос на него — это спрос на ничто: человек платит вниманием за то, что и так
- * уже разрешил, включив сервер. Разрешение остаётся там, где есть действие —
- * запись, изменение, отправка. Вход по OAuth — не разрешение, а доступ к чужому
- * аккаунту: его выдаёт только человек и только в браузере, поэтому этот случай
- * описан отдельно, чтобы модель не пыталась «подключиться посильнее».
+ * Here also is the permission policy, and it is deliberately strict: "connect" and
+ * "do" are different things, and a model without an explicit rule over-insures and
+ * starts every conversation with "may I connect the MCP?". Connecting is idempotent,
+ * changes nothing outside (it is the same initialize as any client's), and
+ * asking for it is asking for nothing: a person pays attention for what they have already
+ * allowed by enabling the server. Permission stays where there is an action —
+ * writing, changing, sending. OAuth login is not a permission but access to someone else's
+ * account: only a person grants it and only in the browser, so this case
+ * is described separately so that the model does not try to "connect harder".
  */
 function renderMcpOnDemand(servers: Record<string, McpServerConfig>): string {
   const lazy = Object.entries(servers).filter(([, server]) => mcpLifecycle(server) === 'lazy');
@@ -153,16 +153,16 @@ ${bullets.join('\n')}
 }
 
 /**
- * Карта окружения: то, что агент читает как AGENTS.md.
+ * Environment map: what the agent reads as AGENTS.md.
  *
- * Серверы приходят снаружи: у каждого человека свой набор — общие из config.yaml
- * плюс его включённые пользовательские. Выключенные сюда не попадают вовсе, иначе
- * модель звала бы `mcp_connect` на сервер, которого у неё нет.
+ * Servers come from outside: each person has their own set — the shared ones from config.yaml
+ * plus their enabled user ones. Disabled ones do not get here at all, otherwise
+ * the model would call `mcp_connect` for a server it does not have.
  */
 export function renderAgentsMd(
   config: IcarusConfig,
   servers: Record<string, McpServerConfig> = config.mcp,
-  /** Язык ответов этого человека: он меняет только раздел «Язык», всё остальное — общее. */
+  /** The reply language of this person: it changes only the "Language" section, everything else is shared. */
   language: Language = config.userLanguage ?? DEFAULT_LANGUAGE,
 ): string {
   const home = CONTAINER_PATHS.home;
@@ -239,25 +239,25 @@ ${languageRule(language)}`;
 }
 
 /**
- * Язык ответов — настройка человека, а не свойство разговора.
+ * Reply language is a person's setting, not a property of the conversation.
  *
- * Здесь остаётся только то, чего НЕ несёт правило у реплики (language.ts): там короткая
- * строка «твой язык — X, не зеркаль», и она держит обычный случай лучше любого абзаца
- * в промпте (136 символов давали 10/10 там, где 894 — 9/10; см. PR #114). А этот раздел
- * держит исключения — разовую просьбу и режим, — которых у реплики нет и быть не может:
- * просьба сформулирована словами самого человека в конкретный ход.
- * Держим коротким: раздел едет в каждый разговор, а его сценарий — редкий.
+ * What remains here is only what the rule at the turn (language.ts) does NOT carry: there a short
+ * line "your language is X, do not mirror", and it handles the usual case better than any paragraph
+ * in the prompt (136 characters gave 10/10 where 894 gave 9/10; see PR #114). And this section
+ * holds the exceptions — a one-off request and a mode — which the turn does not have and cannot have:
+ * the request is phrased in the person's own words for a specific turn.
+ * We keep it short: the section travels into every conversation, and its scenario is rare.
  *
- * Язык меняет ТОЛЬКО язык реплик. Характер, шутки, объём и «сначала свой, потом
- * смешной» остаются как есть: иначе англоязычный Икар оказался бы другим
- * человеком, а это уже не локализация, а вторая личность (см. icarus.md).
+ * Language changes ONLY the language of the turns. Character, jokes, length and "first your own, then
+ * the funny one" stay as they are: otherwise an English-speaking Icarus would be a different
+ * person, and that is no longer localization but a second personality (see icarus.md).
  *
- * Экспортируется ради стенда (tools/persona-flywheel/probe-language.mjs): он собирает
- * системное сообщение как сервис и должен брать правило отсюда, а не держать копию.
- * Копия однажды разъедется с боевым текстом — и стенд будет проверять не то, что в бою.
+ * Exported for the test bench (tools/persona-flywheel/probe-language.mjs): it assembles
+ * the system message like the service and must take the rule from here rather than keep a copy.
+ * A copy would one day diverge from the production text — and the bench would test something other than what is in production.
  */
 export function languageRule(language: Language): string {
-  // Имя языка — полное и на нём самом, без кода: в промпт идёт «English», а не «en».
+  // The language name is full and in that language itself, without a code: the prompt gets "English", not "en".
   const name = languageName(language);
   return `
 ## ЯЗЫК КОММУНИКАЦИИ
@@ -280,19 +280,19 @@ export function languageRule(language: Language): string {
 `;
 }
 
-/** Ключи провайдеров в формате pi: ~/.pi/agent/auth.json. */
+/** Provider keys in the pi format: ~/.pi/agent/auth.json. */
 export function renderAuthJson(config: IcarusConfig): string {
   const entries = Object.entries(config.auth).map(([provider, key]) => [provider, { type: 'api_key', key }]);
   return JSON.stringify(Object.fromEntries(entries), null, 2) + '\n';
 }
 
 /**
- * Пакеты pi и дополнительные пути к скиллам.
+ * pi packages and additional paths to skills.
  *
- * MCP-мост подключаем только если у человека есть хоть один сервер. Общие скиллы,
- * которые человек включил, приезжают сюда путями: каталог `~/.pi/agent/skills`
- * остаётся его личным, а снимки из `shared-skills` pi читает как дополнительные
- * источники. Выключенный скилл сюда не попадает вовсе — ни в промпт, ни в контекст.
+ * We connect the MCP bridge only if the person has at least one server. The shared skills
+ * that the person enabled arrive here as paths: the directory `~/.pi/agent/skills`
+ * stays their personal one, and pi reads snapshots from `shared-skills` as additional
+ * sources. A disabled skill does not get here at all — neither into the prompt nor into the context.
  */
 export function renderSettingsJson(
   config: IcarusConfig,
@@ -301,19 +301,19 @@ export function renderSettingsJson(
 ): string {
   const servers = Object.keys(mcpServers);
   const settings: Record<string, unknown> = {};
-  // 1.8.0 — первая версия с mcp_connect/mcp_status. Без них lifecycle: lazy
-  // превращается в ловушку: инструменты сервера не активны, а подключить его
-  // из разговора нечем (в 1.5.0 был только ручной /mcp:start).
+  // 1.8.0 is the first version with mcp_connect/mcp_status. Without them lifecycle: lazy
+  // turns into a trap: the server's tools are inactive, and there is nothing to connect it
+  // from the conversation with (1.5.0 had only the manual /mcp:start).
   if (servers.length > 0) settings.packages = ['npm:pi-mcp-extension@1.8.0'];
   if (skillPaths.length > 0) settings.skills = skillPaths;
   return JSON.stringify(settings, null, 2) + '\n';
 }
 
 /**
- * ~/.pi/agent/mcp.json — то, что читает pi-mcp-extension.
+ * ~/.pi/agent/mcp.json — what pi-mcp-extension reads.
  *
- * Заголовки HTTP-серверов едут сюда как есть, вместе с ключом доступа: файл лежит
- * рядом с auth.json, поэтому пишется закрытым на чтение (см. prepareUser).
+ * The HTTP server headers travel here as is, together with the access key: the file lies
+ * next to auth.json, so it is written read-closed (see prepareUser).
  */
 export function renderMcpJson(
   config: IcarusConfig,
@@ -337,9 +337,9 @@ export function renderMcpJson(
 }
 
 /**
- * Записывает файл, снося каталог с тем же именем.
- * Docker при монтировании несуществующего пути создаёт каталог — после этого обычная
- * запись файла падает с EISDIR, поэтому подстраховываемся.
+ * Writes a file, removing a directory with the same name.
+ * When mounting a nonexistent path, Docker creates a directory — after that a normal
+ * file write fails with EISDIR, so we guard against it.
  */
 function writeFileSafe(target: string, content: string, mode?: number): void {
   if (fs.existsSync(target) && fs.statSync(target).isDirectory()) {
@@ -350,8 +350,8 @@ function writeFileSafe(target: string, content: string, mode?: number): void {
 
 function copyDirFiles(from: string, to: string, depth = 0): string[] {
   if (!fs.existsSync(from)) {
-    // Молча ничего не скопировать — худший вариант: агент останется без персоны и памяти,
-    // а мы будем думать, что расширения на месте.
+    // Copying nothing silently is the worst option: the agent would be left without a persona and memory,
+    // and we would think the extensions are in place.
     throw new Error(`каталог расширений не найден: ${from}`);
   }
   fs.mkdirSync(to, { recursive: true });
@@ -362,7 +362,7 @@ function copyDirFiles(from: string, to: string, depth = 0): string[] {
     const source = path.join(from, entry.name);
     const target = path.join(to, entry.name);
     if (entry.isDirectory()) {
-      // подкаталоги вроде lib/ — это общие модули, pi их расширениями не считает
+      // subdirectories like lib/ are shared modules, pi does not count them as extensions
       copied.push(...copyDirFiles(source, target, depth + 1).map((name) => `${entry.name}/${name}`));
       continue;
     }
@@ -385,14 +385,14 @@ export function prepareUser(config: IcarusConfig, user: UserConfig) {
   }
   const paths = userPaths(config, user);
 
-  // Пользовательские MCP: включённые и готовые серверы добавляются к общим.
-  // Хранилище может быть сломано (правили руками, кончилось место) — тогда
-  // человек остаётся с серверами из config.yaml, а не без разговора вовсе.
+  // User MCP: enabled and ready servers are added to the shared ones.
+  // The store may be broken (edited by hand, out of space) — then
+  // the person is left with the servers from config.yaml rather than without a conversation at all.
   let mcpServers: Record<string, McpServerConfig> = config.mcp;
   try {
     fs.mkdirSync(storePaths(config).dir, { recursive: true, mode: 0o700 });
-    // Старым OAuth-записям нужен ключ прокси: без него токен снова уедет в
-    // mcp.json и протухнет прямо в живом разговоре.
+    // Old OAuth records need the proxy key: without it the token would go into
+    // mcp.json again and expire right in a live conversation.
     const keys = ensureOAuthProxyKeys(config, user.id);
     if (keys.length > 0) log.info('MCP: OAuth-серверы переведены на локальный прокси', { user: user.id, servers: keys });
     const merged = effectiveServers(config, readStore(config), user.id);
@@ -407,19 +407,19 @@ export function prepareUser(config: IcarusConfig, user: UserConfig) {
     });
   }
 
-  // Язык — из профиля человека: он меняет только раздел «Язык» в карте окружения,
-  // поэтому читается здесь, а не живёт в общем config.yaml.
+  // Language comes from the person's profile: it changes only the "Language" section in the environment map,
+  // so it is read here rather than living in the shared config.yaml.
   writeFileSafe(paths.agentsMd, renderAgentsMd(config, mcpServers, languageOf(config, user)));
 
-  // Карта разговоров для агента: по ссылке из панели он находит файл сессии в этом
-  // же ответе, а не гадает по именам файлов. Перерисовываем при каждом старте —
-  // за время жизни контейнера разговоры успевают появиться, переименоваться и уехать
-  // в другой workspace (см. sessions/chats.ts).
+  // Conversation map for the agent: from a panel link it finds the session file in the same
+  // answer, instead of guessing from file names. We redraw it on every start —
+  // during the container's lifetime conversations manage to appear, be renamed and move
+  // to another workspace (see sessions/chats.ts).
   try {
     writeFileSafe(paths.sessionsMap, renderSessionsMap(config, user));
   } catch (error) {
-    // Сломанный реестр — не повод не пускать человека в разговор: агент просто
-    // останется без карты (и в AGENTS.md написано, что она read-only).
+    // A broken registry is no reason to keep a person out of the conversation: the agent simply
+    // stays without the map (and AGENTS.md says it is read-only).
     log.warn('карта разговоров не собралась', { user: user.id, error: String(error) });
   }
 
@@ -427,15 +427,15 @@ export function prepareUser(config: IcarusConfig, user: UserConfig) {
   writeFileSafe(authPath, renderAuthJson(config), 0o600);
   fs.chmodSync(authPath, 0o600);
 
-  // Общие скиллы: сначала догоняем снимки до файлов владельцев (их могли поправить
-  // руками или откатить коммитом), потом отдаём pi только включённые пути.
+  // Shared skills: first we catch the snapshots up to the owners' files (they could have been edited
+  // by hand or rolled back by a commit), then we give pi only the enabled paths.
   let sharedSkillPaths: string[] = [];
   try {
     syncShared(config);
     sharedSkillPaths = enabledSharedPaths(config, user.id);
   } catch (error) {
-    // Сломанное хранилище общих скиллов не должно лишать человека разговора:
-    // он просто останется со своими скиллами.
+    // A broken shared skills store must not deprive a person of a conversation:
+    // they simply stay with their own skills.
     log.warn('скиллы: общие не собрались', { user: user.id, error: String(error) });
   }
 
@@ -444,19 +444,19 @@ export function prepareUser(config: IcarusConfig, user: UserConfig) {
     renderSettingsJson(config, mcpServers, sharedSkillPaths),
   );
 
-  // mcp.json может везти ключ доступа к MCP-серверу, поэтому права те же, что у
-  // auth.json: ключ модели и ключ к чужому сервису одинаково не для чужих глаз.
+  // mcp.json may carry an access key to an MCP server, so the permissions are the same as for
+  // auth.json: a model key and a key to someone else's service are equally not for prying eyes.
   const mcpPath = path.join(paths.piAgent, 'mcp.json');
   writeFileSafe(mcpPath, renderMcpJson(config, mcpServers), 0o600);
   fs.chmodSync(mcpPath, 0o600);
 
-  // models.json — описание кастомных провайдеров (DeepInfra): без него pi не найдёт
-  // ни самой модели, ни её адреса. Пишем всегда, даже пустым: файл управляемый, и
-  // оставшийся от прежней конфигурации провайдер не должен пережить свой config.yaml.
+  // models.json is the description of custom providers (DeepInfra): without it pi will find
+  // neither the model itself nor its address. We write it always, even empty: the file is managed, and
+  // a provider left from a previous configuration must not outlive its config.yaml.
   writeFileSafe(path.join(paths.piAgent, 'models.json'), renderModelsJson(config.models));
 
-  // Персона одна на всех, источник истины — репозиторий: при старте перезаписываем копию
-  // в каталоге пользователя, иначе правки в icarus.md не доедут до существующих людей.
+  // The persona is shared by everyone, the source of truth is the repository: on start we overwrite the copy
+  // in the user's directory, otherwise edits in icarus.md would not reach existing people.
   const personaSource = path.join(REPO_ROOT, 'icarus.md');
   if (fs.existsSync(personaSource)) {
     writeFileSafe(paths.icarusMd, fs.readFileSync(personaSource, 'utf8'));
@@ -464,14 +464,14 @@ export function prepareUser(config: IcarusConfig, user: UserConfig) {
     log.warn('icarus.md не найден — агент останется на дефолтном промпте', { source: personaSource });
   }
 
-  // Старая инструкция по Maple жила отдельным файлом; теперь правила в описаниях
-  // инструментов, и оставленный файл только путал бы агента. Это наш управляемый
-  // файл, поэтому убираем его без вопросов (расчётов в нём нет).
+  // The old Maple instruction lived in a separate file; now the rules are in the tool
+  // descriptions, and the leftover file would only confuse the agent. This is our managed
+  // file, so we remove it without questions (there are no computations in it).
   const legacyMapleMd = path.join(paths.icarus, 'MAPLE.md');
   if (fs.existsSync(legacyMapleMd)) fs.rmSync(legacyMapleMd, { force: true });
 
-  // Каталог расширений — управляемый: чистим его, иначе после переименований там
-  // остаются старые копии, которые pi продолжит загружать как расширения.
+  // The extensions directory is managed: we clean it, otherwise after renames there
+  // remain old copies that pi would keep loading as extensions.
   const extensionsDir = path.join(paths.piAgent, 'extensions');
   fs.rmSync(extensionsDir, { recursive: true, force: true });
   const extensions = copyDirFiles(EXTENSIONS_DIR, extensionsDir);

@@ -1,4 +1,4 @@
-// Таблица лидеров: собирает все logs/*/scores.json в одну сводку.
+// Leaderboard: collects all logs/*/scores.json into a single summary.
 import { readdirSync, readFileSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ROOT } from "./lib/api.mjs";

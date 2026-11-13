@@ -1,18 +1,18 @@
-// Отпечаток кода сервиса для docker compose.
+// Fingerprint of the service code for docker compose.
 //
-// Compose пересоздаёт контейнер при смене образа, маунтов или окружения, а исходники
-// приезжают в контейнер bind-mount'ом и в это сравнение не входят. Без отпечатка
-// `docker compose up` оставляет жить старый процесс со старым кодом в памяти: деплой
-// зелёный, /healthz зелёный, а на стенде старый код. Так фикс кнопки «забыть» уехал
-// в main, но на проде остался старый confirm — сервис просто не перезапустился.
+// Compose recreates the container when the image, mounts or environment change, but the sources
+// arrive in the container via bind-mount and are not part of that comparison. Without a fingerprint
+// `docker compose up` leaves the old process with the old code in memory running: the deploy is
+// green, /healthz is green, but the stand runs old code. That is how the fix for the "forget" button went
+// to main, but in prod the old confirm stayed — the service simply did not restart.
 //
-// Отпечаток кладётся в окружение сервиса (ICARUS_REVISION): изменился код — изменилось
-// окружение — compose пересоздаёт контейнер и node читает новый код с диска.
+// The fingerprint is placed into the service environment (ICARUS_REVISION): code changed — environment
+// changed — compose recreates the container and node reads the new code from disk.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 
-/** Что считаем кодом сервиса: правка любого из этих путей обязана пересоздать icarus. */
+/** What we count as service code: editing any of these paths must recreate icarus. */
 export const SERVICE_CODE = [
   'packages/service/src',
   'packages/extensions',
@@ -20,7 +20,7 @@ export const SERVICE_CODE = [
   'pnpm-lock.yaml',
 ];
 
-/** Обходит путь и собирает файлы относительно корня репозитория; отсутствующие пути пропускает. */
+/** Walks a path and collects files relative to the repository root; skips missing paths. */
 function collect(repoRoot: string, entry: string, prefix: string, files: string[]): void {
   const full = path.join(repoRoot, entry);
   const stat = fs.statSync(full, { throwIfNoEntry: false });
@@ -32,16 +32,16 @@ function collect(repoRoot: string, entry: string, prefix: string, files: string[
   if (!stat.isDirectory()) return;
   const entries = fs.readdirSync(full, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
   for (const child of entries) {
-    // node_modules и скрытые каталоги (.git) — не код: их содержимое меняется само по себе.
+    // node_modules and hidden directories (.git) are not code: their contents change on their own.
     if (child.name === 'node_modules' || child.name.startsWith('.')) continue;
     collect(repoRoot, path.join(entry, child.name), `${prefix}/${child.name}`, files);
   }
 }
 
 /**
- * Считает отпечаток содержимого кода: путь плюс байты каждого файла. Порядок обхода
- * фиксирован, поэтому один и тот же код даёт один и тот же отпечаток, а правка любого
- * байта — другой. Короткого hex хватает: это не защита от подделки, а признак «код другой».
+ * Computes a fingerprint of the code content: path plus the bytes of each file. The walk order
+ * is fixed, so the same code yields the same fingerprint, and editing any
+ * byte yields a different one. A short hex is enough: this is not protection against forgery but a sign that "the code is different".
  */
 export function sourceRevision(repoRoot: string, entries: readonly string[] = SERVICE_CODE): string {
   const files: string[] = [];

@@ -1,18 +1,19 @@
-// Локальная панель: сервис без докера.
+// Local panel: the service without docker.
 //
-// Панель управления живёт на хосте и работает с файлами и git — ни контейнеры, ни pi
-// ей для этого не нужны. Этот вход поднимает только её: посмотреть панель на своих
-// данных можно, не собирая стек и не дожидаясь контейнеров.
+// The control panel lives on the host and works with files and git — it needs neither containers nor pi
+// for that. This entry point brings up only it: you can look at the panel on your own
+// data without building the stack or waiting for containers.
 //
-// Отличия от боевого входа (index.ts) намеренные и все — про безопасность чужой работы:
-//   - человека называет panel.devUser: локально SSO-прокси нет, и вход решать некому;
-//   - слушаем только 127.0.0.1: панель без прокси наружу не выставляется;
-//   - Telegram не поднимается: у бота один опросчик апдейтов, и второй сломал бы
-//     ответы тому, кто уже работает;
-//   - контейнеры не поднимаются и осиротевшие pi не гасятся: посмотреть панель —
-//     не повод трогать работающий стек.
+// The differences from the production entry point (index.ts) are intentional and all about the safety of
+// someone else's work:
+//   - the person is named by panel.devUser: locally there is no SSO proxy, and there is no one to decide the login;
+//   - we listen only on 127.0.0.1: the panel without a proxy is not exposed outward;
+//   - Telegram is not started: the bot has one update poller, and a second one would break
+//     replies for the one already working;
+//   - containers are not started and orphaned pi processes are not killed: looking at the panel is
+//     not a reason to touch a running stack.
 //
-// Отсюда и цена: разговора тут нет — Икар отвечает только в настоящем сервисе.
+// Hence the price: there is no conversation here — Icarus answers only in the real service.
 import { DEFAULT_CONFIG_PATH, findUser, loadConfig, type IcarusConfig } from './config.ts';
 import { loadRuntimeEnv } from './runtime.ts';
 import { log } from './log.ts';
@@ -24,7 +25,7 @@ import { ScheduledTasks } from './sessions/scheduled.ts';
 import { taskLauncher } from './sessions/task-launch.ts';
 import { createServer } from './http/server.ts';
 
-/** Порт по умолчанию: 8081 занят настоящим сервисом, и путать их не надо. */
+/** Default port: 8081 is taken by the real service, and they must not be confused. */
 const DEFAULT_PORT = 8099;
 
 type Args = { configPath: string; user?: string; port?: number; withModel: boolean };
@@ -46,7 +47,7 @@ function parseArgs(argv: string[]): Args {
       index += 1;
       continue;
     }
-    // Позиционный аргумент — путь к конфигу: так же зовётся и настоящий сервис.
+    // Positional argument — path to the config: the real service is called the same way.
     if (arg.startsWith('-')) throw new Error(`не понимаю «${arg}»: жду --user, --port, --config или --with-model`);
     args.configPath = arg;
   }
@@ -64,14 +65,14 @@ if (!user) {
   throw new Error(`человека «${args.user ?? ''}» нет в ${args.configPath}: в конфиге — ${config.users.map((item) => item.id).join(', ')}`);
 }
 
-// Прокси локально нет — значит, человека называем сами. Слушаем при этом только
-// петлю: панель без входа наружу не выставляется.
+// There is no proxy locally — so we name the person ourselves. At the same time we listen only on the
+// loopback: the panel is not exposed outward without a login.
 config.panel.devUser = user.id;
 config.host = '127.0.0.1';
 config.port = args.port ?? DEFAULT_PORT;
-// Локальная панель живёт не на том порту, что боевой сервис. OAuth-callback и
-// CIMD строятся из url, поэтому здесь он обязан указывать на этот порт, иначе
-// браузер после входа уедет на 8081 — в чужой (или никакой) сервис.
+// The local panel lives on a different port than the production service. The OAuth callback and
+// CIMD are built from url, so here it must point to this port, otherwise
+// after login the browser would go to 8081 — to someone else's (or no) service.
 config.url = `http://${config.host}:${config.port}`;
 
 for (const person of config.users) {
@@ -85,18 +86,18 @@ try {
 }
 log.info('локальная панель: данные и git готовы', { dataDir: config.dataDir, user: user.id });
 
-// Чат поднимает настоящий реестр сессий: если стек уже работает, панель говорит
-// с теми же контейнерами и теми же сессиями pi, что и сервис. Контейнеры панель
-// не создаёт — нет стека, значит чат честно ответит ошибкой (ensureContainerRunning).
-// С `--with-model` дополнительно включается «напиши за меня» в редакторе скиллов.
+// The chat is brought up by the real session registry: if the stack is already running, the panel talks
+// to the same containers and the same pi sessions as the service. The panel does not create
+// containers — if there is no stack, the chat will honestly answer with an error (ensureContainerRunning).
+// With `--with-model`, "write it for me" in the skill editor is additionally enabled.
 const registry = new SessionRegistry(config);
-// Расписания тикают и здесь: задача заводит новый разговор тем же путём, что и панель.
-// Контейнера рядом может не быть — тогда задача честно запишет, что запуск не удался.
+// Schedules tick here too: a task starts a new conversation the same way as the panel.
+// There may be no container around — then the task honestly records that the launch failed.
 const scheduled = new ScheduledTasks(config, { launch: taskLauncher(config, registry) });
 scheduled.start();
 
 const server = createServer(config, registry, {
-  // Без модели писать скилл за человека некому: кнопки в редакторе не будет вовсе.
+  // Without a model there is no one to write a skill for the person: the button in the editor won't exist at all.
   draftSkills: args.withModel,
 });
 server.listen(config.port, config.host, () => {

@@ -1,30 +1,30 @@
-// Бесплатный профиль You.com: поиск без ключа, только по MCP.
+// You.com free profile: keyless search, only via MCP.
 //
-// У You.com «free» живёт исключительно в MCP: REST /v1/search требует ключ, а
-// бесплатного ключевого профиля нет. Но MCP — это обычный JSON-RPC поверх HTTP
-// (streamable HTTP), так что из роутера это такой же провайдер, как остальные:
-// один POST вместо REST-запроса, ответ — поток SSE с тем же JSON внутри.
+// With You.com "free" lives exclusively in MCP: REST /v1/search requires a key, and
+// there is no free keyed profile. But MCP is just JSON-RPC over HTTP
+// (streamable HTTP), so for the router it is a provider like any other:
+// one POST instead of a REST request, the response is an SSE stream with the same JSON inside.
 //
-// Что проверено на живом сервере 2026-11-07:
-//  - сервер stateless: initialize и Mcp-Session-Id не нужны, tools/call
-//    принимается сразу, авторизации нет;
-//  - free-профиль отдаёт только you-search и you-discover (100 запросов в
-//    сутки); you-contents в него не входит, а extraction: full_page отвечает
-//    «Free tier limit exceeded». Значит, для web_fetch бесплатный MCP не
-//    годится — им можно только искать;
-//  - исчерпанная квота приходит не 429, а успешным JSON-RPC-ответом с
-//    result.isError = true и текстом «Free tier limit exceeded». Поэтому
-//    ошибку инструмента надо разбирать отдельно от HTTP-статуса.
+// What was verified against the live server on 2026-11-07:
+//  - the server is stateless: initialize and Mcp-Session-Id are not needed, tools/call
+//    is accepted immediately, there is no authorization;
+//  - the free profile serves only you-search and you-discover (100 requests per
+//    day); you-contents is not part of it, and extraction: full_page answers
+//    "Free tier limit exceeded". So for web_fetch the free MCP is not
+//    suitable — it can only search;
+//  - an exhausted quota does not come as 429, but as a successful JSON-RPC response with
+//    result.isError = true and the text "Free tier limit exceeded". Therefore a
+//    tool error must be parsed separately from the HTTP status.
 import { SearchFailure, type FailureKind } from './types.ts';
 import { requestText, type RequestContext } from './request.ts';
 
-/** Точка входа free-профиля. Ключ и профиль — в query, авторизации нет. */
+/** Free profile entry point. The key and profile are in the query, there is no authorization. */
 export const YOU_FREE_MCP_URL = 'https://api.you.com/mcp?profile=free';
 
-/** Версия протокола: сервер её понимает, но и без заголовка отвечает. */
+/** Protocol version: the server understands it, but also responds without the header. */
 export const MCP_PROTOCOL_VERSION = '2025-06-18';
 
-/** Счётчик id: JSON-RPC требует уникальный id на запрос, сервер его эхом. */
+/** id counter: JSON-RPC requires a unique id per request, the server echoes it. */
 let lastId = 0;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -37,7 +37,7 @@ function asText(value: unknown): string | null {
   return typeof value === 'string' && value.trim() !== '' ? value.trim() : null;
 }
 
-/** Кадры SSE: `data: {...}` через пустую строку. Не наш кадр — молча пропускаем. */
+/** SSE frames: `data: {...}` separated by a blank line. A frame that isn't ours — we silently skip it. */
 export function parseSseEvents(body: string): unknown[] {
   const events: unknown[] = [];
   for (const block of body.split(/\r?\n\r?\n/)) {
@@ -50,15 +50,15 @@ export function parseSseEvents(body: string): unknown[] {
     try {
       events.push(JSON.parse(data) as unknown);
     } catch {
-      // Обрывок или комментарий — не повод считать весь ответ битым.
+      // A fragment or a comment is no reason to consider the whole response broken.
     }
   }
   return events;
 }
 
 /**
- * Сообщения ответа. Сервер вправе ответить и обычным JSON — тогда SSE-кадров
- * нет, а тело начинается с фигурной скобки.
+ * Response messages. The server may also reply with plain JSON — then there are no SSE frames,
+ * and the body starts with a curly brace.
  */
 export function parseMcpBody(body: string): unknown[] {
   const trimmed = body.trim();
@@ -66,16 +66,16 @@ export function parseMcpBody(body: string): unknown[] {
     try {
       return [JSON.parse(trimmed) as unknown];
     } catch {
-      // Похоже на JSON, но не он — ниже попробуем разобрать как SSE.
+      // Looks like JSON, but isn't — below we'll try to parse it as SSE.
     }
   }
   return parseSseEvents(trimmed);
 }
 
 /**
- * Найти ответ на свой запрос среди уведомлений. Сервер эхом отдаёт id, но если
- * id не совпал (или его нет), а осмысленный ответ ровно один — берём его:
- * уведомления о ходе поиска не должны ронять запрос.
+ * Find the response to our request among the notifications. The server echoes the id, but if
+ * the id didn't match (or is absent), and there is exactly one meaningful response — we take it:
+ * progress notifications about the search must not break the request.
  */
 export function pickResponse(events: unknown[], id: number): unknown | null {
   const answers = events.filter((event) => {
@@ -90,7 +90,7 @@ export function pickResponse(events: unknown[], id: number): unknown | null {
   return answers.length === 1 ? answers[0] : null;
 }
 
-/** Текст первого content-блока: у MCP результат — массив блоков. */
+/** Text of the first content block: for MCP the result is an array of blocks. */
 function contentText(content: unknown): string | null {
   if (!Array.isArray(content)) return null;
   for (const block of content) {
@@ -101,14 +101,14 @@ function contentText(content: unknown): string | null {
 }
 
 /**
- * Признаки «кончилась бесплатная квота». You.com пишет «Free tier limit
- * exceeded. Please upgrade», не давая ни 429, ни Retry-After.
+ * Signs of "free quota exhausted". You.com writes "Free tier limit
+ * exceeded. Please upgrade", giving neither 429 nor Retry-After.
  */
 const QUOTA_TEXT = /free tier|\bquota\b|\bcredits?\b|\bbilling\b|upgrade|\blimit exceeded\b/i;
 
 /**
- * Отказ внутри ответа MCP: либо JSON-RPC error, либо result.isError.
- * Возвращает null, если ответ успешный.
+ * Failure inside an MCP response: either a JSON-RPC error, or result.isError.
+ * Returns null if the response is successful.
  */
 export function mcpError(envelope: unknown): SearchFailure | null {
   const root = asRecord(envelope);
@@ -131,8 +131,8 @@ export function mcpError(envelope: unknown): SearchFailure | null {
 }
 
 /**
- * JSON из ответа инструмента: you-search кладёт его строкой в content[0].text.
- * Внутри — та же форма, что у REST /v1/search: {results: {web, news, knowledge}}.
+ * JSON from the tool response: you-search puts it as a string into content[0].text.
+ * Inside — the same shape as REST /v1/search: {results: {web, news, knowledge}}.
  */
 export function mcpPayload(envelope: unknown): unknown | null {
   const text = contentText(asRecord(asRecord(envelope)?.result)?.content);
@@ -145,8 +145,8 @@ export function mcpPayload(envelope: unknown): unknown | null {
 }
 
 /**
- * Один поиск через free-профиль. Просим только you-search: you-discover ищет
- * агентов, а не страницы.
+ * One search via the free profile. We ask only for you-search: you-discover searches
+ * agents, not pages.
  */
 export async function youFreeSearch(query: string, limit: number, ctx: RequestContext): Promise<unknown> {
   lastId += 1;
@@ -187,9 +187,9 @@ export async function youFreeSearch(query: string, limit: number, ctx: RequestCo
 }
 
 /**
- * Когда вернётся суточная квота. Ровные сутки карантина тут дороги: квота
- * сбрасывается по календарю, и провайдер простоял бы лишние часы. Минута
- * запаса — на расхождение часов.
+ * When the daily quota returns. A flat 24-hour quarantine is expensive here: the quota
+ * resets by calendar, and the provider would sit idle for extra hours. A minute
+ * of margin — for clock skew.
  */
 export function nextUtcMidnight(now: number): number {
   const date = new Date(now);

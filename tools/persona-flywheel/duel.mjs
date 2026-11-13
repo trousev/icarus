@@ -1,5 +1,5 @@
-// Парное сравнение двух промптов на одних сценариях с двойным судейством
-// (позиции меняются местами, чтобы убрать bias на порядок).
+// Pairwise comparison of two prompts on the same scenarios with double judging
+// (positions are swapped to remove order bias).
 // node duel.mjs --a persona-vA.md --b persona-vB.md --label duel-vA-vB [--scenarios a,b] [--set core|probe]
 import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -27,7 +27,7 @@ const criteria = loadText(join(ROOT, "criteria.md"));
 const a = { name: aName.replace(/\.md$/, ""), system: readFileSync(join(ROOT, aName), "utf8") };
 const b = { name: bName.replace(/\.md$/, ""), system: readFileSync(join(ROOT, bName), "utf8") };
 
-// quick — короткий набор для быстрых отборочных дуэлей; core — полный набор ядра
+// quick — a short set for fast qualifying duels; core — the full core set
 const QUICK = ["banter", "real-grief", "stress-support", "absurd-request", "provocation", "long-scroll"];
 const all = loadScenarios();
 const base = all.filter((s) => {
@@ -88,7 +88,7 @@ const results = await mapLimit(base, 4, async (scenario) => {
     withRetry(() => runScenario({ system: a.system, scenario })),
     withRetry(() => runScenario({ system: b.system, scenario })),
   ]);
-  // один проход: A всегда чемпион, B — претендент, порядок одинаков для всех сценариев
+  // single pass: A is always the champion, B the challenger, same order for all scenarios
   const verdictRaw = await withRetry(() => judgeDuel(scenario, dialogueA, dialogueB));
   const verdict = verdictRaw.winner === "A" || verdictRaw.winner === "B" ? verdictRaw.winner : "tie";
   const scoreA = lean ? null : await withRetry(() => judge({ criteria, persona: a.system, scenario, dialogue: dialogueA }));

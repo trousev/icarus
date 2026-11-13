@@ -1,8 +1,8 @@
-// Самотест MCP артефактов: глобальная библиотека, ACL и инструменты.
+// Self-test for the artifacts MCP: global library, ACL and tools.
 //
 //   node tools/artifacts-mcp/test.mjs
 //
-// Сервер запускается отдельным процессом, как его запускает pi.
+// The server is launched as a separate process, the way pi launches it.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -85,7 +85,7 @@ async function withServer(files, run) {
   }
 }
 
-test('initialize отдаёт инструкции и пять инструментов', async () => {
+test('initialize returns instructions and five tools', async () => {
   await withServer({}, async (rpc) => {
     const init = await rpc.call({ method: 'initialize', params: {} });
     assert.equal(init.result.serverInfo.name, 'artifacts');
@@ -102,7 +102,7 @@ test('initialize отдаёт инструкции и пять инструме�
   });
 });
 
-test('список, чтение и права', async () => {
+test('list, read and permissions', async () => {
   await withServer(
     {
       'artifacts/plan/.folder-acl.json': acl('probe'),
@@ -130,7 +130,7 @@ test('список, чтение и права', async () => {
   );
 });
 
-test('artifact_new создаёт папку и ACL', async () => {
+test('artifact_new creates a folder and ACL', async () => {
   await withServer({}, async (rpc, root) => {
     const answer = text(
       await rpc.call({ method: 'tools/call', params: { name: 'artifact_new', arguments: { name: 'plan' } } }),
@@ -150,7 +150,7 @@ test('artifact_new создаёт папку и ACL', async () => {
   });
 });
 
-test('artifact_link по умолчанию — внутренняя ссылка; public: true — у владельца', async () => {
+test('artifact_link defaults to an internal link; public: true — owner-scoped', async () => {
   await withServer(
     {
       'artifacts/plan/.folder-acl.json': acl('probe'),
@@ -178,7 +178,7 @@ test('artifact_link по умолчанию — внутренняя ссылк�
   );
 });
 
-test('artifact_check видит отсутствие прав и описания', async () => {
+test('artifact_check sees missing permissions and description', async () => {
   await withServer(
     { 'artifacts/broken/index.html': '<h1>Без прав</h1>' },
     async (rpc) => {
@@ -191,7 +191,7 @@ test('artifact_check видит отсутствие прав и описани�
   );
 });
 
-test('ошибка инструмента — это isError, а не падение сервера', async () => {
+test('a tool error is isError, not a server crash', async () => {
   await withServer({}, async (rpc) => {
     const unknown = await rpc.call({
       method: 'tools/call',

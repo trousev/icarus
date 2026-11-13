@@ -1,9 +1,9 @@
-// Конфигурация сервиса: config.yaml в корне репозитория.
+// Service configuration: config.yaml at the repository root.
 //
-// Всё, что одинаково у всех (модели, ключи провайдеров, маунты, MCP, окружение),
-// лежит на верхнем уровне; у человека остаётся только id — из него выводятся имя
-// контейнера, каталоги в dataDir и id сессии pi. Иначе конфиг растёт с каждым
-// человеком, а настройки у людей незаметно разъезжаются.
+// Everything that is the same for everyone (models, provider keys, mounts, MCP, environment)
+// lives at the top level; the human keeps only an id — from it the container name, the
+// directories under dataDir and the pi session id are derived. Otherwise the config grows with
+// every human, and people's settings quietly drift apart.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -15,10 +15,10 @@ import { isLanguage, type Language } from './profile.ts';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
-/** Корень репозитория: в нём лежат config.yaml, .env, icarus.md и расширения. */
+/** Repository root: it holds config.yaml, .env, icarus.md and the extensions. */
 export const REPO_ROOT = path.resolve(HERE, '../../..');
 export const DEFAULT_CONFIG_PATH = path.join(REPO_ROOT, 'config.yaml');
-/** Файл с ключами: в git не попадает, образец — .env.example. */
+/** File with the keys: doesn't go into git, the template is .env.example. */
 export const ENV_FILE = path.join(REPO_ROOT, '.env');
 
 export type ModelConfig = {
@@ -28,7 +28,7 @@ export type ModelConfig = {
   tier?: 'fast' | 'strong' | 'vision';
 };
 
-/** Описание MCP-сервера: формат тот же, что читает pi-mcp-extension. */
+/** MCP server description: the same format that pi-mcp-extension reads. */
 export type McpServerConfig = {
   transport?: 'stdio' | 'streamable-http' | 'sse';
   command?: string;
@@ -36,32 +36,32 @@ export type McpServerConfig = {
   env?: Record<string, string>;
   url?: string;
   /**
-   * Заголовки HTTP-транспорта (streamable-http, sse). Так MCP-серверы принимают
-   * ключ доступа: у Home Assistant это `Authorization: Bearer <ключ>`. В config.yaml
-   * сам ключ не пишем — он там же, где остальные секреты, то есть в .env:
+   * HTTP transport headers (streamable-http, sse). This is how MCP servers accept an
+   * access key: for Home Assistant it's `Authorization: Bearer <key>`. In config.yaml we
+   * don't write the key itself — it lives where the other secrets do, i.e. in .env:
    * `Authorization: Bearer ${HOMEASSISTANT_TOKEN}`.
    */
   headers?: Record<string, string>;
   lifecycle?: 'eager' | 'lazy';
   /**
-   * Служебный сервер: он есть у всех и всегда включён, а в панели его нет.
-   * Так живут встроенные умения вроде Maple — это часть Икара, а не чужой
-   * инструмент, который человек добавляет, настраивает и выключает себе.
-   * Из mcp.json и AGENTS.md он при этом никуда не пропадает.
+   * Service server: everyone has it and it's always on, and it isn't in the panel.
+   * This is how built-in abilities like Maple live — it's part of Icarus, not a third-party
+   * tool the human adds, configures and turns off for themselves.
+   * It still doesn't disappear from mcp.json and AGENTS.md.
    */
   hidden?: boolean;
   /**
-   * Человеческое описание сервера для модели. В mcp.json не уезжает: из него
-   * собирается подсказка в AGENTS.md — зачем сервер нужен и когда его подключать
-   * (см. renderAgentsMd). Без описания модель видит только имя сервера.
+   * Human-readable description of the server for the model. It doesn't go to mcp.json:
+   * it's used to compose a hint in AGENTS.md — why the server is needed and when to
+   * connect it (see renderAgentsMd). Without a description the model sees only the server name.
    */
   description?: string;
 };
 
 /**
- * Когда подключать MCP-сервер. По умолчанию — по требованию: ленивый сервер не
- * держит свои инструменты в промпте каждого разговора. eager — осознанный выбор
- * для серверов, которые нужны всегда.
+ * When to connect an MCP server. By default — on demand: a lazy server doesn't keep
+ * its tools in the prompt of every conversation. eager is a deliberate choice
+ * for servers that are always needed.
  */
 export const DEFAULT_MCP_LIFECYCLE: NonNullable<McpServerConfig['lifecycle']> = 'lazy';
 
@@ -70,18 +70,18 @@ export function mcpLifecycle(server: McpServerConfig): NonNullable<McpServerConf
 }
 
 /**
- * Человек: id и признак админа. Всё остальное — общее (см. IcarusConfig).
+ * Human: id and admin flag. Everything else is shared (see IcarusConfig).
  *
- * Админ правит секреты инсталляции в панели (раздел «Ключи»). Флаг необязателен:
- * у конфига, написанного до его появления, админом считается один trousev — так
- * прошла миграция, и старый config.yaml продолжает работать без правок (см.
- * parseUsers). `admin` в объекте человека сильнее этого умолчания.
+ * The admin edits the installation's secrets in the panel ("Keys" section). The flag is
+ * optional: for a config written before it existed, trousev is considered the admin — that's
+ * how the migration went, and the old config.yaml keeps working without edits (see
+ * parseUsers). `admin` in the human object overrides this default.
  */
 export type UserConfig = { id: string; admin?: boolean };
 
 /**
- * Кому достался флаг при миграции: до появления раздела «Ключи» ключи правил
- * руками один человек, и это был trousev. Новым людям флаг выдают явно.
+ * Who got the flag during migration: before the "Keys" section appeared, one person edited
+ * the keys by hand, and that was trousev. New people are given the flag explicitly.
  */
 export const LEGACY_ADMIN_ID = 'trousev';
 
@@ -90,47 +90,47 @@ export function isAdmin(user: UserConfig | undefined): boolean {
 }
 
 /**
- * Telegram-бот: основной вход к тому же Икару. Человека узнаём по username в
- * Telegram — он приезжает в каждом сообщении, — и по карте переводим в id
- * человека icarus: id — та же строка, что в `users` и в заголовке
- * x-icarus-user-id. Так у бота нет своей таблицы людей: заведён в `users` —
- * значит, можешь и в Telegram.
+ * Telegram bot: the main entrance to the same Icarus. We recognize the human by the username
+ * in Telegram — it arrives in every message — and map it to the icarus human id:
+ * the id is the same string as in `users` and in the x-icarus-user-id header. This way the bot
+ * has no people table of its own: listed in `users` means you can also use it via Telegram.
  */
 export type TelegramConfig = {
   token: string;
-  /** Ключи — telegram username без «@» и в нижнем регистре, значения — id из users. */
+  /** Keys are telegram usernames without "@" and lowercased, values are ids from users. */
   mapping: Record<string, string>;
 };
 
 /**
- * Панель управления: как сервис узнаёт, кто её открыл.
+ * Control panel: how the service finds out who opened it.
  *
- * Пароля у панели нет и быть не должно: человека называет SSO-прокси (на проде —
- * Authelia за nginx), а сервис читает его имя из заголовка. Поэтому панель обязана
- * жить за прокси: порт icarus, открытый в обход него, — это чужая память в чужих руках.
+ * The panel has no password and shouldn't have one: the human is named by the SSO proxy
+ * (Authelia behind nginx in production), and the service reads their name from the header.
+ * That's why the panel must live behind a proxy: an icarus port exposed around it is
+ * someone else's memory in someone else's hands.
  */
 export type PanelConfig = {
-  /** Заголовок, которым прокси называет вошедшего: Authelia кладёт Remote-User. */
+  /** The header with which the proxy names the logged-in person: Authelia sets Remote-User. */
   userHeader: string;
   /**
-   * Человек, которым панель прикидывается без SSO, — только для локального запуска.
-   * Задан на проде — панель открыта всем, кто дотянется до порта (сервис об этом ругается).
+   * The human the panel pretends to be without SSO — only for local runs.
+   * Set in production, the panel is open to anyone who can reach the port (the service complains about this).
    */
   devUser?: string;
 };
 
 /**
- * Распознавание речи: голосовые из Telegram модель не слышит, поэтому их сначала
- * перекладывают в текст отдельной моделью провайдера (Whisper у DeepInfra). Ключ
- * берётся из auth — тот же, что уехал в контейнер, так что новых секретов не нужно.
+ * Speech recognition: the model can't hear Telegram voice messages, so they are first
+ * converted to text by a separate provider model (Whisper on DeepInfra). The key
+ * is taken from auth — the same one shipped into the container, so no new secrets are needed.
  */
 export type SpeechConfig = {
   provider: string;
-  /** id модели распознавания. */
+  /** recognition model id. */
   model: string;
-  /** Язык диктовки — подсказка распознавателю; не задан, так определит сам. */
+  /** Dictation language — a hint to the recognizer; if unset, it determines it itself. */
   language?: string;
-  /** Базовый адрес OpenAI-совместимого API провайдера (метод /audio/transcriptions). */
+  /** Base URL of the provider's OpenAI-compatible API (the /audio/transcriptions method). */
   baseUrl: string;
   apiKey: string;
 };
@@ -139,7 +139,7 @@ export type DockerConfig = {
   image: string;
   network?: string;
   prefix?: string;
-  /** DNS-серверы контейнеров; не заданы — берётся резолвер хоста (обычный случай). */
+  /** Container DNS servers; if unset, the host resolver is used (the usual case). */
   dns?: string[];
   socket?: string | null;
 };
@@ -149,62 +149,62 @@ export type IcarusConfig = {
   port: number;
   apiKey: string;
   /**
-   * Внешний адрес панели управления: по нему человек открывает её из чата и из закладки.
-   * Внутри контейнера localhost бесполезен, поэтому на проде это публичный адрес.
+   * External address of the control panel: the human opens it from the chat and from a bookmark.
+   * Inside the container localhost is useless, so in production this is the public address.
    */
   url: string;
   dataDir: string;
   sessionIdleMinutes: number;
   /**
-   * Язык ответов по умолчанию: русский или английский. Человек может перекрыть его
-   * себе в панели (раздел «Пользователь»), а это — умолчание для тех, кто не выбирал.
+   * Default answer language: Russian or English. The human can override it
+   * for themselves in the panel ("User" section), and this is the default for those who haven't chosen.
    */
   userLanguage?: Language;
   docker: DockerConfig;
-  /** Панель управления: заголовок прокси и (для локального запуска) человек без SSO. */
+  /** Control panel: the proxy header and (for local runs) the human without SSO. */
   panel: PanelConfig;
-  /** Модели всех людей: уровни (tier) раздаёт эскалация. */
+  /** Models of all people: escalation hands out the tiers. */
   models: ModelConfig[];
-  /** Ключи провайдеров: подобранные из .env и явные из auth в config.yaml. */
+  /** Provider keys: those picked up from .env and the explicit ones from auth in config.yaml. */
   auth: Record<string, string>;
-  /** Переменные окружения контейнера: ими настраиваются наши расширения. */
+  /** Container environment variables: our extensions are configured with them. */
   env: Record<string, string>;
   /**
-   * Каталог установки Maple, если сервер включён: он монтируется в контейнер тем же
-   * путём, что и на хосте (launcher ищет свои библиотеки по записанному внутри пути).
+   * Maple installation directory, if the server is enabled: it's mounted into the container at
+   * the same path as on the host (the launcher looks for its libraries at the path recorded inside).
    */
   mapleDir?: string;
-  /** MCP-серверы: то, чем Икар обрастает без правки кода. */
+  /** MCP servers: what Icarus grows with without editing code. */
   mcp: Record<string, McpServerConfig>;
-  /** Telegram-бот: null — выключен (нет токена или некому отвечать). */
+  /** Telegram bot: null means disabled (no token or no one to answer). */
   telegram: TelegramConfig | null;
-  /** Распознавание голосовых: null — выключено (нет ключа провайдера или отключено в конфиге). */
+  /** Voice recognition: null means disabled (no provider key or disabled in the config). */
   speech: SpeechConfig | null;
   users: UserConfig[];
   /**
-   * Откуда прочитан конфиг. Нужен, чтобы панель могла перечитать его после
-   * сохранения ключей, не спрашивая путь у того, кто её позвал (см. runtime.ts).
+   * Where the config was read from. Needed so the panel can re-read it after
+   * saving keys, without asking the caller for the path (see runtime.ts).
    */
   configPath?: string;
-  /** Рабочий файл ключей: по умолчанию .env в корне (подменяется в тестах). */
+  /** Working keys file: .env at the root by default (overridden in tests). */
   envFile?: string;
-  /** Настройки панели: по умолчанию keys.json в корне (подменяется в тестах). */
+  /** Panel settings: keys.json at the root by default (overridden in tests). */
   keysFile?: string;
   /**
-   * Состояние поискового роутера (карантины и текущий провайдер). По умолчанию
-   * search-router.json в dataDir; в тестах подменяется, чтобы не писать в общий.
+   * Search router state (quarantines and the current provider). By default
+   * search-router.json in dataDir; overridden in tests so as not to write to the shared one.
    */
   searchStateFile?: string;
   /**
-   * Ключи и переменные из .env и настроек панели — ровно то, что должно уехать
-   * в процесс pi. Контейнер получает их при создании, но новый ключ из панели
-   * должен доехать до следующего разговора без пересоздания контейнера: сервис
-   * передаёт этот набор в `docker exec -e` (см. sessions/pi-session.ts).
+   * Keys and variables from .env and the panel settings — exactly what should be shipped
+   * into the pi process. The container gets them at creation, but a new key from the panel
+   * must reach the next conversation without recreating the container: the service
+   * passes this set into `docker exec -e` (see sessions/pi-session.ts).
    */
   secretEnv?: Record<string, string>;
 };
 
-/** Подставляет ~ и значения вида env:VAR_NAME / ${VAR_NAME}. */
+/** Substitutes ~ and values of the form env:VAR_NAME / ${VAR_NAME}. */
 export function expandValue(value: string, env: NodeJS.ProcessEnv = process.env): string {
   const withHome = value.startsWith('~') ? path.join(os.homedir(), value.slice(1)) : value;
   return withHome.replace(/\$\{([A-Z0-9_]+)\}|^env:([A-Z0-9_]+)$/g, (_m, braced, prefixed) => {
@@ -214,17 +214,17 @@ export function expandValue(value: string, env: NodeJS.ProcessEnv = process.env)
 }
 
 /**
- * Читает .env в process.env, не перетирая уже заданное непустым: окружение сильнее
- * файла — ровно как ведёт себя docker compose с env_file, так что порядок не зависит
- * от того, запущен сервис в контейнере или прямо на хосте. Файла нет — это норма:
- * ключи могут прийти из окружения. Сами значения нужны только здесь (auth); в
- * контейнеры людей compose отдаёт файл целиком, поэтому секреты не попадают в
- * docker-compose.yml.
+ * Reads .env into process.env without overwriting what's already set to a non-empty value:
+ * the environment is stronger than the file — exactly how docker compose with env_file behaves,
+ * so the order doesn't depend on whether the service runs in a container or directly on the host.
+ * No file is fine: keys may come from the environment. The values themselves are needed only
+ * here (auth); compose passes the file whole to people's containers, so secrets don't end up
+ * in docker-compose.yml.
  *
- * Пустая строка в окружении — это «не задано», а не «пусто»: незаданная переменная
- * в CI (например vars.MAPLE_DIR в deploy.yml) приезжает именно так. Считать её
- * заданной нельзя — она перебивает рабочее значение из .env, и ${MAPLE_DIR} в
- * config.yaml раскрывается в '', а маунт — в ::ro (docker: invalid spec).
+ * An empty string in the environment means "not set", not "empty": an unset variable
+ * in CI (e.g. vars.MAPLE_DIR in deploy.yml) arrives exactly like that. It must not be
+ * treated as set — it overrides a working value from .env, and ${MAPLE_DIR} in
+ * config.yaml expands to '', and the mount to ::ro (docker: invalid spec).
  */
 export function loadEnvFile(file: string = ENV_FILE): void {
   if (!fs.existsSync(file)) return;
@@ -249,15 +249,15 @@ export function loadEnvFile(file: string = ENV_FILE): void {
 
   for (const [name, value] of Object.entries(parsed)) {
     if (typeof value !== 'string') continue;
-    // Пустое окружение — то же самое, что отсутствующее: иначе незаданная
-    // переменная из CI затирает .env (см. комментарий к loadEnvFile).
+    // An empty environment is the same as a missing one: otherwise an unset
+    // variable from CI wipes out .env (see the comment on loadEnvFile).
     if (!process.env[name]) process.env[name] = value;
   }
 }
 
-// --- разбор и проверка ---------------------------------------------------------
-// Конфиг — единственное, что человек правит руками, поэтому ошибки должны быть
-// с путём до поля и по-русски, а не «cannot read property of undefined».
+// --- parsing and validation ---------------------------------------------------
+// The config is the only thing the human edits by hand, so errors must come with the
+// path to the field and in Russian, not "cannot read property of undefined".
 
 function asRecord(value: unknown, what: string): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -292,7 +292,7 @@ function numberOr(value: unknown, what: string, fallback: number): number {
   return parsed;
 }
 
-/** Карта строк, в значениях подставляются ~ и переменные окружения. */
+/** String map, values get ~ and environment variables substituted. */
 function stringMap(value: unknown, what: string, env: NodeJS.ProcessEnv): Record<string, string> {
   const record = value === undefined || value === null ? {} : asRecord(value, what);
   return Object.fromEntries(
@@ -301,19 +301,19 @@ function stringMap(value: unknown, what: string, env: NodeJS.ProcessEnv): Record
 }
 
 /**
- * Провайдер pi → переменная окружения с его ключом. Список повторяет карту pi
- * (@earendil-works/pi-ai, env-api-keys), чтобы провайдера из models не приходилось
- * дублировать в config.yaml: положил ключ в .env — он уже в auth.json. Провайдера
- * в списке нет — ключ задаётся явно через auth. Один ключ на нескольких
- * провайдеров — норма: у moonshotai и moonshotai-cn он общий.
+ * pi provider → environment variable with its key. The list mirrors pi's map
+ * (@earendil-works/pi-ai, env-api-keys), so a provider from models doesn't have to be
+ * duplicated in config.yaml: put the key in .env and it's already in auth.json. If the provider
+ * isn't in the list, the key is set explicitly via auth. One key for several
+ * providers is normal: moonshotai and moonshotai-cn share it.
  *
- * deepinfra в каталоге pi нет — это наш кастомный провайдер, его описание живёт в
- * providers.ts и уезжает в models.json. В auth.json ключ всё равно попадает: там он
- * лежит по имени провайдера, и лишним не бывает.
+ * deepinfra isn't in pi's catalog — it's our custom provider, its description lives in
+ * providers.ts and is shipped to models.json. The key ends up in auth.json anyway: there it
+ * is stored by provider name, and it never hurts.
  *
- * Особые случаи pi сюда не помещаются, для них остаётся auth: — anthropic
- * принимает ещё ANTHROPIC_AUTH_TOKEN и ANTHROPIC_OAUTH_TOKEN, amazon-bedrock
- * обходится AWS-кредами, google-vertex — Application Default Credentials.
+ * pi's special cases don't fit here, for those auth: remains — anthropic
+ * also accepts ANTHROPIC_AUTH_TOKEN and ANTHROPIC_OAUTH_TOKEN, amazon-bedrock
+ * gets by with AWS creds, google-vertex with Application Default Credentials.
  */
 export const PROVIDER_ENV: Record<string, string> = {
   anthropic: 'ANTHROPIC_API_KEY',
@@ -357,17 +357,17 @@ export const PROVIDER_ENV: Record<string, string> = {
 };
 
 /**
- * DeepInfra — единственный провайдер, описание которого нам приходится держать
- * самим (см. providers.ts). Адрес один и на чат, и на распознавание речи: методы
- * у OpenAI-совместимого API те же, отличается только путь.
+ * DeepInfra is the only provider whose description we have to keep ourselves
+ * (see providers.ts). The address is the same for chat and for speech recognition: the
+ * OpenAI-compatible API has the same methods, only the path differs.
  */
 export const DEEPINFRA_BASE_URL = 'https://api.deepinfra.com/v1/openai';
 
 /**
- * Где и чем расшифровывать голосовые — по имени провайдера из `speech`. Ключ берём
- * из auth (или из окружения — тем же именем, что у моделей), отдельного секрета не
- * заводим. У незнакомого провайдера ни адреса, ни модели не угадать: и то и другое
- * задаётся в конфиге.
+ * Where and with what to transcribe voice messages — by the provider name from `speech`.
+ * The key is taken from auth (or from the environment — under the same name as the models),
+ * we don't introduce a separate secret. For an unfamiliar provider neither the address nor the
+ * model can be guessed: both are set in the config.
  */
 export const SPEECH_PROVIDERS: Record<string, { baseUrl: string; model: string }> = {
   deepinfra: { baseUrl: DEEPINFRA_BASE_URL, model: 'openai/whisper-large-v3' },
@@ -375,11 +375,11 @@ export const SPEECH_PROVIDERS: Record<string, { baseUrl: string; model: string }
   groq: { baseUrl: 'https://api.groq.com/openai/v1', model: 'whisper-large-v3' },
 };
 
-/** По умолчанию голосовые расшифровывает Whisper у DeepInfra: ключ уже есть в .env. */
+/** By default DeepInfra's Whisper transcribes voice messages: the key is already in .env. */
 export const DEFAULT_SPEECH_PROVIDER = 'deepinfra';
 
 /**
- * Ключ провайдера из окружения — одним списком имён на всех (PROVIDER_ENV).
+ * Provider key from the environment — with a single list of names for everyone (PROVIDER_ENV).
  */
 function keyFromEnv(provider: string, env: NodeJS.ProcessEnv): string {
   const name = PROVIDER_ENV[provider];
@@ -387,8 +387,8 @@ function keyFromEnv(provider: string, env: NodeJS.ProcessEnv): string {
 }
 
 /**
- * Ключи, которые уже лежат в окружении. Берём только провайдеров из models:
- * ключ от провайдера, которого в конфиге нет, в auth.json не нужен.
+ * Keys that are already in the environment. We take only providers from models:
+ * a key from a provider that isn't in the config isn't needed in auth.json.
  */
 export function detectAuth(models: ModelConfig[], env: NodeJS.ProcessEnv = process.env): Record<string, string> {
   const auth: Record<string, string> = {};
@@ -400,10 +400,10 @@ export function detectAuth(models: ModelConfig[], env: NodeJS.ProcessEnv = proce
 }
 
 /**
- * Ключи провайдеров: то, что нашлось в окружении (.env), плюс явный auth из config.yaml —
- * он сильнее. Пустое явное значение — это почти всегда неподставленная переменная
- * окружения, а не желание работать без ключа: ругаемся сразу, иначе сервис молча
- * перезапишет auth.json пустышкой и агент сломается на первом же запросе.
+ * Provider keys: what was found in the environment (.env), plus the explicit auth from
+ * config.yaml — it wins. An empty explicit value is almost always an unsubstituted environment
+ * variable, not a wish to work without a key: we complain right away, otherwise the service
+ * would silently overwrite auth.json with a blank and the agent would break on the very first request.
  */
 function parseAuth(value: unknown, env: NodeJS.ProcessEnv, models: ModelConfig[]): Record<string, string> {
   const explicit = stringMap(value, 'auth', env);
@@ -416,8 +416,8 @@ function parseAuth(value: unknown, env: NodeJS.ProcessEnv, models: ModelConfig[]
 }
 
 const TIERS: Array<NonNullable<ModelConfig['tier']>> = ['fast', 'strong', 'vision'];/**
- * Каталог Maple: монтируется сам, отдельным маунтом в конфиге его больше не задают.
- * Пусто или относительно — ошибка: путь должен быть один и тот же внутри и снаружи.
+ * Maple directory: it's mounted by itself, it's no longer set with a separate mount in the config.
+ * Empty or relative — an error: the path must be the same inside and outside.
  */
 function resolveMapleDir(
   mcp: Record<string, McpServerConfig>,
@@ -456,11 +456,11 @@ function parseModels(value: unknown): ModelConfig[] {
 const TRANSPORTS: Array<NonNullable<McpServerConfig['transport']>> = ['stdio', 'streamable-http', 'sse'];
 
 /**
- * DNS-серверы контейнеров (docker.dns). Нужны там, где резолвер хоста не пускает
- * docker-подсети (например, unbound с access-control только на 10.0.0.0/8 отвечает
- * контейнерам REFUSED, и тогда каждый внешний запрос ждёт таймаут ~4 с, прежде чем
- * Docker уйдёт на следующий сервер из resolv.conf). Проверяем форму записи здесь,
- * чтобы опечатка не всплыла посреди `docker compose up`.
+ * Container DNS servers (docker.dns). Needed where the host resolver doesn't let
+ * docker subnets through (e.g. unbound with access-control only on 10.0.0.0/8 answers
+ * containers with REFUSED, and then every external request waits ~4 s for the timeout before
+ * Docker moves on to the next server from resolv.conf). We validate the entry format here
+ * so a typo doesn't surface in the middle of `docker compose up`.
  */
 const DNS_ENTRY = /^[0-9a-fA-F:.]{3,45}$/;
 
@@ -517,12 +517,12 @@ function parseMcp(value: unknown, env: NodeJS.ProcessEnv): Record<string, McpSer
   return servers;
 }
 
-/** id идёт в имя контейнера и в путь на диске — держим его предсказуемым. */
+/** The id goes into the container name and the disk path — we keep it predictable. */
 const USER_ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
 
 /**
- * Язык ответов по умолчанию. Опечатка здесь — не повод не подняться: неизвестный
- * язык игнорируется с записью в лог, а человек получит встроенный русский.
+ * Default answer language. A typo here isn't a reason not to come up: an unknown
+ * language is ignored with a log entry, and the human gets the built-in Russian.
  */
 function parseLanguage(value: unknown): Language | undefined {
   if (value === undefined || value === null) return undefined;
@@ -532,17 +532,17 @@ function parseLanguage(value: unknown): Language | undefined {
 }
 
 /**
- * Люди. Два написания: строка (как было) и объект с флагом админа.
+ * People. Two spellings: a string (as it was) and an object with an admin flag.
  *
  *   users:
- *     - trousev            # админ по миграции: до флага ключи правил он один
+ *     - trousev            # admin by migration: before the flag, they alone edited the keys
  *     - id: vita
- *       admin: true        # явно выданный флаг
+ *       admin: true        # explicitly granted flag
  *
- * Флаг админа — не косметика: он открывает раздел «Ключи», то есть доступ ко всем
- * секретам инсталляции. Поэтому его выдают явно, а не «всем, кто первый попался»:
- * у старого конфига без объектов админ ровно один — trousev (LEGACY_ADMIN_ID).
- * Явное `admin: false` это умолчание перекрывает: забрать флаг у основателя можно.
+ * The admin flag isn't cosmetic: it opens the "Keys" section, i.e. access to all
+ * the installation's secrets. That's why it's granted explicitly, not to "whoever comes first":
+ * for an old config without objects there's exactly one admin — trousev (LEGACY_ADMIN_ID).
+ * An explicit `admin: false` overrides this default: the flag can be taken away from the founder.
  */
 function parseUsers(value: unknown): UserConfig[] {
   const users = asArray(value, 'users').map((item, index) => {
@@ -578,9 +578,9 @@ function parseUsers(value: unknown): UserConfig[] {
 }
 
 /**
- * Telegram username: в конфиге и в апдейтах он в одном виде — без «@», нижним
- * регистром. В yaml имя с «@» придётся взять в кавычки: с @ начинаются
- * зарезервированные конструкции, и `@trousev: trousev` не разберётся.
+ * Telegram username: in the config and in updates it's in one form — without "@", lowercased.
+ * In yaml a name with "@" has to be quoted: reserved constructs start with @,
+ * and `@trousev: trousev` won't parse.
  */
 const TELEGRAM_USERNAME = /^[a-zA-Z0-9_]{3,32}$/;
 
@@ -589,18 +589,18 @@ export function normalizeTelegramUsername(value: string): string {
 }
 
 /**
- * Telegram: токен бота и карта «кто есть кто».
+ * Telegram: bot token and the "who is who" map.
  *
- * Карту принимаем в двух написаниях: `telegram.mapping` и отдельным ключом
- * `telegram_mapping` — второе читается ровно как в жизни:
+ * We accept the map in two spellings: `telegram.mapping` and a separate key
+ * `telegram_mapping` — the latter reads exactly as in real life:
  *
  *   telegram_mapping:
  *     '@trousev': trousev
  *
- * Заданы оба — побеждает `telegram.mapping`.
+ * If both are set, `telegram.mapping` wins.
  *
- * Без токена или с пустой картой бот просто не поднимается: сервис работает как
- * раньше, а в логе видно, чего не хватает.
+ * Without a token or with an empty map the bot simply doesn't come up: the service works as
+ * before, and the log shows what's missing.
  */
 function parseTelegram(
   value: unknown,
@@ -609,7 +609,7 @@ function parseTelegram(
   users: UserConfig[],
 ): TelegramConfig | null {
   const raw = value === undefined || value === null ? {} : asRecord(value, 'telegram');
-  // Токен можно и не писать: он подхватывается из .env, как ключи провайдеров.
+  // The token can be omitted too: it's picked up from .env, like the provider keys.
   const token = expandValue(optionalString(raw.token, 'telegram.token') ?? '${TELEGRAM_BOT_TOKEN}', env).trim();
 
   const nested = raw.mapping;
@@ -647,12 +647,12 @@ function parseTelegram(
   return { token, mapping };
 }
 
-/** Заголовок Authelia по умолчанию: его подставляет nginx из ответа /api/verify. */
+/** The default Authelia header: nginx sets it from the /api/verify response. */
 export const DEFAULT_PANEL_USER_HEADER = 'Remote-User';
 
 /**
- * Разбор panel: заголовок прокси и человек для локального запуска. Незнакомый devUser —
- * ошибка, а не «панель никого не найдёт»: опечатку в id видно сразу на старте.
+ * Parsing panel: the proxy header and the human for local runs. An unfamiliar devUser is
+ * an error, not "the panel won't find anyone": a typo in the id is visible right at startup.
  */
 function parsePanel(value: unknown, users: UserConfig[]): PanelConfig {
   const record = value === undefined || value === null ? {} : asRecord(value, 'panel');
@@ -667,12 +667,12 @@ function parsePanel(value: unknown, users: UserConfig[]): PanelConfig {
 }
 
 /**
- * Голосовые: чем расшифровывать. Блока в конфиге нет — берём Whisper у DeepInfra,
- * чей ключ уже лежит в .env: голосовые должны работать без правки конфига, как и
- * остальные модели. Отключить совсем — `speech: none` (или `false`).
+ * Voice messages: with what to transcribe. If there's no block in the config — take DeepInfra's
+ * Whisper, whose key is already in .env: voice messages should work without editing the config,
+ * just like the other models. To disable entirely — `speech: none` (or `false`).
  *
- * Ключа провайдера нет — распознавание выключается с записью в лог: сервис работает
- * как раньше, а бот на голосовое отвечает, что не умеет, вместо тишины.
+ * If there's no provider key, recognition is disabled with a log entry: the service works
+ * as before, and the bot answers a voice message that it can't, instead of silence.
  */
 function parseSpeech(value: unknown, env: NodeJS.ProcessEnv, auth: Record<string, string>): SpeechConfig | null {
   const off = value === false || (typeof value === 'string' && value.trim().toLowerCase() === 'none');
@@ -696,9 +696,9 @@ function parseSpeech(value: unknown, env: NodeJS.ProcessEnv, auth: Record<string
     throw new Error(`speech.provider: «${provider}» — не знаю модели распознавания, задай speech.model (${hints})`);
   }
 
-  // Ключ ищем и в auth, и прямо в окружении: распознавание — не модель, и его
-  // провайдера в `models` может не быть (перешли на другую модель для чата —
-  // голосовые от этого работать не перестают).
+  // We look for the key both in auth and directly in the environment: recognition isn't a
+  // model, and its provider may not be in `models` (you switched to another model for chat —
+  // voice messages don't stop working because of that).
   const apiKey = auth[provider] ?? keyFromEnv(provider, env);
   if (apiKey === '') {
     const where = PROVIDER_ENV[provider] ?? `auth.${provider}`;
@@ -746,8 +746,8 @@ export function loadConfig(file: string, env: NodeJS.ProcessEnv = process.env): 
   const users = parseUsers(raw.users);
   const auth = parseAuth(raw.auth, env, models);
   if (raw.mounts !== undefined) {
-    // Кастомных маунтов больше нет: контейнер видит только /workspaces и служебное.
-    // Нужен чужой репозиторий — чекаут в workspace, а не маунт с хоста.
+    // There are no more custom mounts: the container sees only /workspaces and service stuff.
+    // Need someone else's repository — check it out into the workspace, not a mount from the host.
     log.warn('mounts в конфиге больше не поддерживаются и пропущены', { file: resolved });
   }
   const mcp = parseMcp(raw.mcp, env);
@@ -757,7 +757,7 @@ export function loadConfig(file: string, env: NodeJS.ProcessEnv = process.env): 
     host,
     port,
     apiKey,
-    // В ссылке не покажешь «слушать везде»: без явного url человек получит localhost.
+    // You can't show "listen everywhere" in a link: without an explicit url the human gets localhost.
     url: expandValue(optionalString(raw.url, 'url') ?? `http://${publicHost(host)}:${port}`, env),
     dataDir: expandValue(optionalString(raw.dataDir, 'dataDir') ?? '~/icarus', env),
     sessionIdleMinutes: numberOr(raw.sessionIdleMinutes, 'sessionIdleMinutes', 60),
@@ -777,8 +777,8 @@ export function loadConfig(file: string, env: NodeJS.ProcessEnv = process.env): 
     telegram: parseTelegram(raw.telegram, raw.telegram_mapping, env, users),
     speech: parseSpeech(raw.speech, env, auth),
     users,
-    // Путь — не секрет и не настройка, но панели он нужен, чтобы перечитать файл
-    // после сохранения ключей (см. runtime.ts).
+    // The path isn't a secret or a setting, but the panel needs it to re-read the file
+    // after saving keys (see runtime.ts).
     configPath: resolved,
   };
 }
@@ -787,7 +787,7 @@ export function findUser(config: IcarusConfig, userId: string | undefined): User
   return config.users.find((user) => user.id === userId);
 }
 
-/** Человек по telegram username: имена сравниваем без «@» и без регистра. */
+/** The human by telegram username: we compare names without "@" and case-insensitively. */
 export function findTelegramUser(config: IcarusConfig, username: string | undefined): UserConfig | undefined {
   if (!username) return undefined;
   const id = config.telegram?.mapping[normalizeTelegramUsername(username)];
@@ -795,71 +795,71 @@ export function findTelegramUser(config: IcarusConfig, username: string | undefi
 }
 
 /**
- * Служебный каталог Икара внутри контейнера. Здесь всё «про Икара»: память,
- * вложения, сессии, персона и карта окружения. Сам `/workspace` при этом остаётся
- * пустым и свободным: это место человека, куда агент может класть что угодно,
- * ничего не задевая. Один список на весь код — чтобы точка монтирования и путь,
- * который уезжает в промпт, не разъезжались.
+ * Icarus's service directory inside the container. Everything "about Icarus" is here: memory,
+ * attachments, sessions, persona and the environment map. The `/workspace` itself stays
+ * empty and free: it's the human's place, where the agent can put anything
+ * without touching anything. One list for the whole codebase — so that the mount point and the
+ * path that goes into the prompt don't drift apart.
  */
 export const CONTAINER_HOME = '/workspaces/.icarus';
 
 /**
- * Корень рабочих пространств. Один workspace — одна папка внутри: агент работает
- * в /workspaces/<slug>, а служебное хозяйство лежит рядом, в /workspaces/.icarus,
- * и ни в один workspace не входит. Так папка человека остаётся его папкой, а мы
- * не подмешиваем в неё свои файлы.
+ * Root of the workspaces. One workspace — one folder inside: the agent works
+ * in /workspaces/<slug>, and the service household sits next to it, in /workspaces/.icarus,
+ * and isn't part of any workspace. This way the human's folder stays their folder, and we
+ * don't mix our files into it.
  */
 export const CONTAINER_WORKSPACES = '/workspaces';
 
-/** Пути внутри контейнера: только то, что мы монтируем сами (см. userVolumes). */
+/** Paths inside the container: only what we mount ourselves (see userVolumes). */
 export const CONTAINER_PATHS = {
   workspaces: CONTAINER_WORKSPACES,
   home: CONTAINER_HOME,
-  /** Глобальная библиотека артефактов: общая для всех, отдельным маунтом. */
+  /** Global artifact library: shared by everyone, a separate mount. */
   artifacts: '/artifacts',
   memory: `${CONTAINER_HOME}/memory`,
   incoming: `${CONTAINER_HOME}/incoming`,
   sessions: `${CONTAINER_HOME}/sessions`,
-  /** Реестр разговоров: только чтение, чтобы агент мог связать id панели с сессией pi. */
+  /** Conversation registry: read-only, so the agent can link the panel id to the pi session. */
   chats: `${CONTAINER_HOME}/chats.json`,
-  /** Карта разговоров для агента: conversationId → sessionId и файл истории. */
+  /** Conversation map for the agent: conversationId → sessionId and the history file. */
   sessionsMap: `${CONTAINER_HOME}/sessions.json`,
   sharedMemory: `${CONTAINER_HOME}/shared-memory`,
   /**
-   * Снимки скиллов, которыми поделились: глобальный каталог `<dataDir>/skills/shared`,
-   * смонтированный только для чтения. Включённые скиллы оттуда приезжают в
-   * settings.json человека дополнительными путями, а не копируются в его каталог.
+   * Snapshots of shared skills: the global directory `<dataDir>/skills/shared`,
+   * mounted read-only. Enabled skills from there arrive in the human's
+   * settings.json as additional paths, rather than being copied into their directory.
    */
   sharedSkills: `${CONTAINER_HOME}/shared-skills`,
   agentsMd: `${CONTAINER_HOME}/AGENTS.md`,
   icarusMd: `${CONTAINER_HOME}/icarus.md`,
-  /** pi-agent монтируется к pi, а не в рабочее дерево: это его собственный дом. */
+  /** pi-agent is mounted to pi, not into the working tree: it's its own home. */
   piAgent: '/home/node/.pi/agent',
 } as const;
 
-/** Workspace по умолчанию: в нём живут и сюда же возвращаются диалоги. */
+/** Default workspace: dialogues live in it and return to it. */
 export const DEFAULT_WORKSPACE = 'talk';
 
-/** Приватный workspace: память видна, но писать в неё нельзя. */
+/** Private workspace: memory is visible, but you can't write to it. */
 export const PRIVATE_WORKSPACE = 'private';
 
-/** Каталог workspace внутри контейнера — он же cwd сессии pi. */
+/** Workspace directory inside the container — it's also the cwd of the pi session. */
 export function containerWorkspace(slug: string): string {
   return `${CONTAINER_WORKSPACES}/${slug}`;
 }
 
 /**
- * Куда контейнер человека видит каталог вложений (см. userVolumes в compose.ts).
- * Путь нужен и сервису: вложение он кладёт на хост, а в реплику отдаёт уже этот
- * адрес — иначе pi искал бы файл мимо.
+ * Where the human's container sees the attachments directory (see userVolumes in compose.ts).
+ * The service needs the path too: it puts the attachment on the host, but passes this
+ * address in the reply — otherwise pi would look for the file in the wrong place.
  */
 export const CONTAINER_INCOMING = CONTAINER_PATHS.incoming;
 
-/** Пути на хосте, которые сервис готовит и монтирует пользователю. */
+/** Host paths that the service prepares and mounts for the user. */
 export function userPaths(config: IcarusConfig, user: UserConfig) {
   const root = path.join(config.dataDir, 'users', user.id);
-  // Всё служебное — под /workspaces/.icarus: корень рабочих пространств
-  // монтируется в контейнер целиком, и .icarus просто лежит внутри него.
+  // Everything service-related is under /workspaces/.icarus: the workspace root
+  // is mounted into the container whole, and .icarus simply lies inside it.
   const workspaces = path.join(root, 'workspaces');
   const icarus = path.join(workspaces, '.icarus');
   return {
@@ -869,22 +869,22 @@ export function userPaths(config: IcarusConfig, user: UserConfig) {
     memory: path.join(icarus, 'memory'),
     incoming: path.join(icarus, 'incoming'),
     sessions: path.join(icarus, 'sessions'),
-    /** Реестр разговоров лежит в корне человека, а контейнеру отдаётся внутрь .icarus. */
+    /** The conversation registry lies in the human's root, and is given to the container inside .icarus. */
     chats: path.join(root, 'chats.json'),
     /**
-     * Расписания задач лежат в корне человека рядом с чатами: расписание
-     * принадлежит человеку, а не разговору — задача переживает /clear и переезд
-     * прошлого запуска в архив.
+     * Task schedules lie in the human's root next to the chats: a schedule
+     * belongs to the human, not the conversation — a task survives /clear and the move
+     * of the previous run to the archive.
      */
     scheduledTasks: path.join(root, 'scheduled-tasks.json'),
-    /** Карта разговоров для агента — рядом с реестром, тоже только чтение. */
+    /** Conversation map for the agent — next to the registry, also read-only. */
     sessionsMap: path.join(icarus, 'sessions.json'),
     piAgent: path.join(root, 'pi-agent'),
     /**
-     * Скиллы: `~/.pi/agent/skills` внутри контейнера. Каталог агентский (не проектный),
-     * поэтому pi берёт его без всякого доверия к проекту. Пишет сюда панель, раздел
-     * «Скиллы» (control/skills.ts), и держит каталог под git — историю и откат панель
-     * обещает те же, что у памяти.
+     * Skills: `~/.pi/agent/skills` inside the container. The directory is agent-level (not project-level),
+     * so pi takes it without any trust in the project. The panel writes here, the
+     * "Skills" section (control/skills.ts), and keeps the directory under git — history and rollback
+     * the panel promises are the same as for memory.
      */
     skills: path.join(root, 'pi-agent', 'skills'),
     agentsMd: path.join(icarus, 'AGENTS.md'),
@@ -893,12 +893,12 @@ export function userPaths(config: IcarusConfig, user: UserConfig) {
   };
 }
 
-/** Контейнеры: один на пользователя, живёт постоянно. */
+/** Containers: one per user, running permanently. */
 export function userContainer(config: IcarusConfig, user: UserConfig): string {
   return `${config.docker.prefix}-${user.id}`;
 }
 
-/** 0.0.0.0 и :: — это «слушать везде»; в ссылке им делать нечего, остаётся localhost. */
+/** 0.0.0.0 and :: mean "listen everywhere"; they have no place in a link, so localhost remains. */
 export function publicHost(host: string): string {
   return host === '0.0.0.0' || host === '::' || host === '' ? 'localhost' : host;
 }

@@ -1,6 +1,6 @@
-// Прерывание хода под новую реплику: очередь pi чистится, abort уходит, и только
-// после `agent_settled` сессию можно занимать снова. Проверяется на заглушке pi:
-// нам важен порядок команд и то, что метод действительно ждёт конца хода.
+// Interrupting a turn for a new utterance: the pi queue is cleared, abort is sent, and only
+// after `agent_settled` can the session be occupied again. Tested against a pi stub:
+// the order of commands matters to us, and that the method really waits for the end of the turn.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -13,8 +13,8 @@ import type { Spawner } from '../src/sessions/rpc-client.ts';
 import { makeConfig, probe } from './fixtures.ts';
 
 /**
- * Заглушка pi: отвечает на команды и присылает `agent_settled` после abort — как
- * настоящий pi, который гасит инструменты и только потом объявляет ход вставшим.
+ * A pi stub: responds to commands and sends `agent_settled` after abort — like
+ * the real pi, which shuts down the tools and only then declares the turn finished.
  */
 const STUB = `
 import fs from 'node:fs';
@@ -40,7 +40,7 @@ process.stdin.on('data', (chunk) => {
 process.stdout.write(JSON.stringify({ type: 'agent_start' }) + '\\n');
 `;
 
-/** Заглушка, которая помнит команды и окружение запуска. */
+/** A stub that remembers the commands and the launch environment. */
 function stubSpawner(envs: Array<Record<string, string>> = []): Spawner {
   return (_container, _args, env) => {
     if (env) envs.push(env);
@@ -53,7 +53,7 @@ function makeSession(spawner: Spawner): PiSession {
   return new PiSession(config, probe(), 'telegram-4242', config.models[0], 'stub', 0, spawner);
 }
 
-test('прерывание чистит очередь, шлёт abort и ждёт, пока ход встанет', async () => {
+test('interrupt clears the queue, sends abort and waits for the turn to settle', async () => {
   const log = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-interrupt-')), 'commands.log');
   process.env.STUB_LOG = log;
   try {
@@ -67,7 +67,7 @@ test('прерывание чистит очередь, шлёт abort и ждё
     assert.equal(stopped, true);
     assert.equal(session.busy, false, 'после прерывания сессия свободна');
     assert.ok(elapsed >= 100, 'ждали agent_settled, а не просто ответ на abort');
-    // Очередь до abort: иначе pi доиграл бы отложенные сообщения прошлого хода.
+    // Queue before abort: otherwise pi would finish the deferred messages of the previous turn.
     assert.deepEqual(fs.readFileSync(log, 'utf8').trim().split('\n'), ['clear_queue', 'abort']);
     session.dispose();
   } finally {
@@ -75,7 +75,7 @@ test('прерывание чистит очередь, шлёт abort и ждё
   }
 });
 
-test('модели уровней уезжают в контейнер: субагентам есть кого брать', () => {
+test('tier models go into the container: subagents have someone to take', () => {
   const config = makeConfig();
   assert.deepEqual(modelTierEnv(config), {
     ICARUS_MODEL_FAST: 'deepinfra/deepseek-ai/DeepSeek-V4.1-Flash:low',
@@ -84,7 +84,7 @@ test('модели уровней уезжают в контейнер: суба
   assert.deepEqual(modelTierEnv({ ...config, models: [{ provider: 'x', id: 'y' }] }), {});
 });
 
-test('в бою имя модели приходит из конфига, а не из окружения хоста', async () => {
+test('in production the model name comes from the config, not from the host environment', async () => {
   const envs: Array<Record<string, string>> = [];
   const session = makeSession(stubSpawner(envs));
   session.dispose();
@@ -94,7 +94,7 @@ test('в бою имя модели приходит из конфига, а н�
   assert.match(envs[0]?.ICARUS_SEARCH_URL ?? '', /^http:\/\/icarus:\d+$/, 'адрес роутера задан и не требует токена');
 });
 
-test('адрес поискового роутера собирается из порта сервиса', () => {
+test('the search router address is built from the service port', () => {
   const envs: Array<Record<string, string>> = [];
   const config = makeConfig({ port: 8081 });
   const session = new PiSession(config, probe(), 'telegram-1', config.models[0], 'stub', 0, stubSpawner(envs));

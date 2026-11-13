@@ -1,27 +1,27 @@
-// Буфер видимого ответа. Нужен из-за того, как клиент собирает сообщение:
-// он заводит новую часть (`content`-элемент) на каждом переключении канала
-// content ↔ reasoning_content и рисует соседние части отдельными блоками с
-// отступом. Значит, каждое наше переключение на размышления или фразу тула
-// разрезает ответ — и разрез попадает туда, где модель оборвала сообщение,
-// чтобы позвать тул, то есть иногда посреди слова.
+// Buffer for the visible answer. It's needed because of how the client assembles a message:
+// it creates a new part (a `content` element) on every channel switch
+// content ↔ reasoning_content and renders adjacent parts as separate blocks with
+// a gap. So every switch of ours to reasoning or a tool phrase
+// cuts the answer — and the cut lands where the model broke off the message
+// to call a tool, that is, sometimes mid-word.
 //
-// Поэтому незаконченный хвост ответа мы придерживаем и склеиваем с продолжением:
-// переключение канала случается на границе строки или предложения, а не посреди
-// фразы. Плата — текст идёт кусками по предложению, а не по буквам.
+// Therefore we hold back the unfinished tail of the answer and glue it to the continuation:
+// the channel switch happens at a line or sentence boundary, not in the middle
+// of a phrase. The price — text comes in sentence-sized chunks rather than letter by letter.
 
-/** Сколько знаков незаконченного хвоста готовы держать: дальше важнее живость. */
+/** How many characters of an unfinished tail we're willing to hold: beyond that, liveliness matters more. */
 export const HOLD_LIMIT = 300;
 
-/** Знаки, после которых фраза считается законченной. */
+/** Characters after which a phrase is considered finished. */
 const SENTENCE_END = '.!?…';
 
-/** Словообразующий символ: по нему видно, что кусок оборван посреди слова. */
+/** Word-forming character: it shows that a chunk was broken off mid-word. */
 const WORD_CHAR = /[\p{L}\p{N}_]/u;
 
 /**
- * До какого места хвост можно отдать целиком: конец строки или конец
- * предложения (знак, а за ним пробел — иначе «12.10» и «т.е.» рвали бы фразу).
- * Ноль — хвост не закончен, держим его целиком.
+ * Up to what point the tail can be handed over whole: end of line or end of
+ * sentence (a mark followed by a space — otherwise "12.10" and "i.e." would break the phrase).
+ * Zero — the tail is unfinished, we hold it whole.
  */
 export function safeCut(text: string): number {
   let cut = 0;
@@ -40,11 +40,11 @@ export function safeCut(text: string): number {
 }
 
 /**
- * Разделитель между придержанным хвостом и продолжением. Модель дробит ответ на
- * сообщения (текст → тулы → текст) и может оборвать его посреди слова
- * («рендерится д» → «жаваскриптом») — такое продолжение приклеиваем вплотную,
- * иначе в тексте появится дырка. Законченную фразу отделяем пустой строкой: для
- * модели это новое сообщение, а не продолжение фразы.
+ * Separator between a held-back tail and the continuation. The model splits the answer into
+ * messages (text → tools → text) and may break it mid-word
+ * ("renders j" → "javascript") — we glue such a continuation tight,
+ * otherwise a hole would appear in the text. We separate a finished phrase with a blank line: for
+ * the model this is a new message, not a continuation of the phrase.
  */
 export function joinChunks(tail: string, next: string): string {
   if (!tail || !next) return '';
@@ -56,9 +56,9 @@ export function joinChunks(tail: string, next: string): string {
 }
 
 /**
- * Копит видимый текст и отдаёт его в клиент законченными кусками. Один и тот же
- * экземпляр живёт весь ход: границы кусков задаёт pi (`text_start` — новый кусок,
- * мысль или тул — разрыв), а не мы.
+ * Accumulates the visible text and hands it to the client in finished chunks. The same
+ * instance lives for the whole turn: pi sets the chunk boundaries (`text_start` — a new chunk,
+ * a thought or a tool — a break), not us.
  */
 export class AnswerBuffer {
   private pending = '';
@@ -67,19 +67,19 @@ export class AnswerBuffer {
   private sink: (text: string) => void;
   private limit: number;
 
-  /** `limit` — предохранитель по длине придержанного хвоста (в тестах меньше). */
+  /** `limit` — a safeguard on the length of the held-back tail (smaller in tests). */
   constructor(sink: (text: string) => void, limit = HOLD_LIMIT) {
     this.sink = sink;
     this.limit = limit;
   }
 
-  /** pi начал новый кусок текста: первый delta склеиваем с хвостом. */
+  /** pi started a new text chunk: we glue the first delta to the tail. */
   startBlock(): void {
     this.newBlock = true;
     this.inText = false;
   }
 
-  /** Ход переключился на размышления или тул — следующий текст начнёт новый кусок. */
+  /** The turn switched to reasoning or a tool — the next text will start a new chunk. */
   breakText(): void {
     this.inText = false;
   }
@@ -92,12 +92,12 @@ export class AnswerBuffer {
     this.release(false);
   }
 
-  /** Ход кончился: отдаём всё, что придержали. */
+  /** The turn is over: we hand over everything we held back. */
   flush(): void {
     this.release(true);
   }
 
-  /** Что ещё не ушло клиенту — только для тестов и логов. */
+  /** What hasn't gone to the client yet — for tests and logs only. */
   get held(): string {
     return this.pending;
   }
@@ -106,8 +106,8 @@ export class AnswerBuffer {
     if (!this.pending) return;
     let cut = force ? this.pending.length : safeCut(this.pending);
     if (!force && this.pending.length > this.limit) {
-      // Предохранитель: длинный абзац без границ не держим до конца хода.
-      // Режем по последнему пробелу, чтобы не разорвать слово.
+      // Safeguard: we don't hold a long paragraph with no boundaries until the end of the turn.
+      // We cut at the last space so as not to split a word.
       const space = this.pending.lastIndexOf(' ') + 1;
       cut = space > 0 ? Math.max(cut, space) : this.pending.length;
     }

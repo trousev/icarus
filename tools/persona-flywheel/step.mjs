@@ -1,6 +1,6 @@
-// Шаг прогона: диалоги -> судья -> критик -> артефакты.
-// По умолчанию проверяется боевой icarus.md из корня репозитория —
-// один источник правды, никаких копий промпта в стенде.
+// Run step: dialogues -> judge -> critic -> artifacts.
+// By default it checks the production icarus.md from the repository root —
+// a single source of truth, no prompt copies in the rig.
 // node step.mjs [--in ../icarus.md] --label step-01 [--scenarios id1,id2] [--set core|probe] [--no-critic]
 import { writeFileSync, mkdirSync, existsSync, readFileSync } from "node:fs";
 import { join, isAbsolute } from "node:path";

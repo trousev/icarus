@@ -1,4 +1,4 @@
-// Дешёвые метрики поверх диалогов: длина, плотность шуток, служебные штампы.
+// Cheap metrics over dialogues: length, joke density, boilerplate stamps.
 export const MARKERS = [
   "отличный вопрос",
   "с удовольствием помогу",
@@ -18,8 +18,8 @@ export const MARKERS = [
 const LAUGH = /(ахах|хаха|хех|аха|лол|🤣|😂|😄|🙂|смешно|ору|ржу|шутк|подкол|сарказ|ирония|мем|абсурд)/i;
 const PUNCH = /[—–-]\s|\.\.\.|!|\?|«|»|как |будто |словно |представь|напоминает|типа |ровно |ровно как/i;
 
-// грубая, но устойчивая оценка: реплика считается шутливой, если в ней есть
-// игровая лексика, сравнение, вопрос-подначка или восклицание при короткой длине
+// crude but robust heuristic: a reply counts as a joke if it contains
+// playful vocabulary, a comparison, a teasing question, or an exclamation in a short reply
 export function looksLikeJoke(text) {
   if (!text) return false;
   if (LAUGH.test(text)) return true;

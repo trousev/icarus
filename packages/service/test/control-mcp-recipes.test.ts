@@ -1,8 +1,8 @@
-// Каталог рецептов MCP: валидность описаний, подстановка в форму и добавление.
+// MCP recipe catalog: description validity, substitution into the form and adding.
 //
-// Тест намеренно не ходит в сеть: рецепт — это описание, а не живой сервер.
-// Проверяем то, что панель обещает человеку: команда и транспорт подставлены,
-// ключи только из env/заголовков, значений секретов в каталоге нет.
+// The test deliberately does not go online: a recipe is a description, not a live server.
+// We check what the panel promises the person: the command and transport are substituted,
+// keys come only from env/headers, and there are no secret values in the catalog.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -54,7 +54,7 @@ const get = (base: string, route: string, user = 'probe') => fetch(`${base}${rou
 const post = (base: string, user: string, route: string, body: Record<string, unknown>) =>
   fetch(`${base}/panel/mcp/${route}`, { method: 'POST', headers: headers(user), body: JSON.stringify(body) });
 
-/** Тело, какое соберёт форма после подстановки рецепта: ключи пустые. */
+/** The body the form will assemble after substituting the recipe: keys are empty. */
 function formBody(editor: Editor): Record<string, unknown> {
   return {
     name: editor.server.name,
@@ -68,7 +68,7 @@ function formBody(editor: Editor): Record<string, unknown> {
     env: editor.server.env ?? {},
     credentialHeaders: {},
     credentialEnv: {},
-    // Как форма: имена ключей из рецепта едут вместе с описанием, значения — нет.
+    // Like the form: the key names from the recipe travel with the description, the values do not.
     expectsHeaders: editor.expectsHeaders,
     expectsEnv: editor.expectsEnv,
     shared: false,
@@ -80,7 +80,7 @@ function piMcp(config: ReturnType<typeof makeConfig>, userId: string): { mcpServ
   return JSON.parse(fs.readFileSync(file, 'utf8')) as { mcpServers: Record<string, Record<string, unknown>> };
 }
 
-test('каталог: id и имена уникальны, команда и транспорт сходятся, обязательные поля на месте', () => {
+test('catalog: ids and names are unique, command and transport agree, required fields are present', () => {
   assert.ok(MCP_RECIPES.length >= 6, 'рецептов должно хватать на кандидатов из идеи');
   assert.equal(new Set(MCP_RECIPES.map((recipe) => recipe.id)).size, MCP_RECIPES.length, 'id уникальны');
   assert.equal(new Set(MCP_RECIPES.map((recipe) => recipe.name)).size, MCP_RECIPES.length, 'имена уникальны');
@@ -124,7 +124,7 @@ test('каталог: id и имена уникальны, команда и т�
     assert.ok(recipe.trouble.length > 0, `${recipe.id}: есть «если не поднялся»`);
     assert.match(recipe.docs, /^https:\/\//, `${recipe.id}: документация по https`);
     assert.match(recipe.checkedAt, /^\d{4}-\d{2}-\d{2}$/, `${recipe.id}: дата проверки`);
-    // Каталог собран 09.11; новый рецепт могли проверить позже — важно, что не раньше.
+    // The catalog was assembled on 09.11; a new recipe could have been checked later — what matters is that not earlier.
     assert.ok(recipe.checkedAt >= RECIPE_CHECKED_AT, `${recipe.id}: дата проверки не раньше каталога`);
   }
 
@@ -132,7 +132,7 @@ test('каталог: id и имена уникальны, команда и т�
   assert.ok(RECIPE_SKIPPED.includes('Банки'), 'отказ от банков объяснён, а не забыт');
 });
 
-test('в рецептах нет значений секретов: только имена и подсказки', () => {
+test('recipes contain no secret values: only names and hints', () => {
   const suspicious = [/sk-[A-Za-z0-9]{8,}/, /Bearer\s+[A-Za-z0-9._-]{12,}/, /(?:password|token|secret)\s*[:=]\s*\S{8,}/i];
   for (const recipe of MCP_RECIPES) {
     const json = JSON.stringify(recipe);
@@ -156,7 +156,7 @@ test('в рецептах нет значений секретов: только
   }
 });
 
-test('GET /panel/mcp/recipes отдаёт правило, каталог и дату проверки', async () => {
+test('GET /panel/mcp/recipes returns the rule, the catalog and the checked date', async () => {
   await withServer(async (base) => {
     const response = await get(base, '/panel/mcp/recipes');
     assert.equal(response.status, 200);
@@ -179,7 +179,7 @@ test('GET /panel/mcp/recipes отдаёт правило, каталог и да
   });
 });
 
-test('GET /panel/mcp/recipe подставляет команду, транспорт и имена ключей', async () => {
+test('GET /panel/mcp/recipe substitutes the command, transport and key names', async () => {
   await withServer(async (base) => {
     const response = await get(base, '/panel/mcp/recipe?id=proton-mail');
     assert.equal(response.status, 200);
@@ -209,7 +209,7 @@ test('GET /panel/mcp/recipe подставляет команду, трансп�
   });
 });
 
-test('рецепт добавляется как обычный сервер: пока ключей нет, модели его не обещают', async () => {
+test('a recipe is added as a regular server: while there are no keys, the model is not promised it', async () => {
   await withServer(async (base, config) => {
     const editor = (await (await get(base, '/panel/mcp/recipe?id=proton-mail')).json()) as Editor;
     const response = await fetch(`${base}/panel/mcp/add`, {
@@ -229,11 +229,11 @@ test('рецепт добавляется как обычный сервер: п
     assert.deepEqual(servers.servers.map((server) => server.name), ['Proton Mail']);
     assert.equal(servers.ready, 0);
 
-    // Готового доступа нет — сервера нет и в mcp.json: иначе модель получила бы
-    // инструменты, которые молча падают на каждом вызове.
+    // There is no ready access — the server is also absent from mcp.json: otherwise the model would get
+    // tools that silently fail on every call.
     assert.equal(piMcp(config, 'probe').mcpServers[created.server.id], undefined);
 
-    // Человек вводит ключи — теперь сервер готов и уезжает в контейнер.
+    // The person enters the keys — now the server is ready and goes into the container.
     const saved = await post(base, 'probe', 'credentials', {
       id: created.server.id,
       env: { PROTONMAIL_USERNAME: 'me@proton.me', PROTONMAIL_PASSWORD: 'bridge-pass' },
@@ -249,7 +249,7 @@ test('рецепт добавляется как обычный сервер: п
     assert.equal(env.PROTONMAIL_IMAP_PORT, '1143', 'несекретные настройки рецепта доехали');
     assert.equal(env.PROTONMAIL_PASSWORD, 'bridge-pass', 'ключ доезжает до сервера, иначе он бесполезен');
 
-    // Но в реестре описаний ключа нет: он живёт отдельным файлом 0600.
+    // But the key is not in the descriptions registry: it lives in a separate 0600 file.
     const paths = storePaths(config);
     assert.equal(fs.readFileSync(paths.registry, 'utf8').includes('bridge-pass'), false, 'в registry.json ключа нет');
     assert.equal(fs.readFileSync(paths.credentials, 'utf8').includes('bridge-pass'), true, 'в credentials.json ключ есть');
@@ -257,7 +257,7 @@ test('рецепт добавляется как обычный сервер: п
   });
 });
 
-test('рецепт без ключей добавляется готовым: погода с metric и basic', async () => {
+test('a recipe without keys is added ready: weather with metric and basic', async () => {
   await withServer(async (base, config) => {
     const editor = (await (await get(base, '/panel/mcp/recipe?id=weather-dublin')).json()) as Editor;
     const response = await fetch(`${base}/panel/mcp/add`, {
@@ -278,7 +278,7 @@ test('рецепт без ключей добавляется готовым: п
 });
 
 
-test('рецепт OPDS: адрес каталога в env, запуск ленивый', async () => {
+test('OPDS recipe: the catalog address is in env, startup is lazy', async () => {
   const recipe = recipeById('opds');
   assert.ok(recipe, 'рецепт OPDS в каталоге');
   assert.equal(recipe.category, 'книги');
@@ -308,7 +308,7 @@ test('рецепт OPDS: адрес каталога в env, запуск лен
   });
 });
 
-test('Кинозал — обычный рецепт: четыре env-ключа, ленивый, без ручного mcp.arr', async () => {
+test('Kinozal is a regular recipe: four env keys, lazy, without a manual mcp.arr', async () => {
   const recipe = recipeById('kinozal');
   assert.ok(recipe, 'рецепт кинозала есть в каталоге');
   assert.equal(recipe.category, 'медиа');
@@ -336,8 +336,8 @@ test('Кинозал — обычный рецепт: четыре env-ключ�
     const created = (await added.json()) as { server: { id: string; ready: boolean } };
     assert.equal(created.server.ready, false, 'без ключей сервер добавлен, но не готов');
 
-    // Одной пары достаточно: Radarr без Sonarr — рабочая настройка, а пустые
-    // значения формы не должны превращаться в пустые переменные в контейнере.
+    // One pair is enough: Radarr without Sonarr is a working setup, and empty
+    // form values must not turn into empty variables in the container.
     const saved = await post(base, 'probe', 'credentials', {
       id: created.server.id,
       env: {
@@ -360,7 +360,7 @@ test('Кинозал — обычный рецепт: четыре env-ключ�
     assert.equal(env.ARR_SONARR_URL, undefined, 'пустая вторая пара не уезжает в контейнер');
   });
 });
-test('Видео в блог-пост — обычный рецепт: ключей не просит, ленивый, берёт ключ Икара', async () => {
+test('Video to blog post is a regular recipe: asks for no keys, lazy, uses Icarus key', async () => {
   const recipe = recipeById('video-blog');
   assert.ok(recipe, 'рецепт видео в блог-пост есть в каталоге');
   assert.equal(recipe.category, 'медиа');
@@ -396,7 +396,7 @@ test('Видео в блог-пост — обычный рецепт: ключ�
     assert.deepEqual(entry.env, recipe.env, 'несекретные настройки доехали до сервера');
   });
 });
-test('страница MCP рисует каталог рецептов, а не только список серверов', async () => {
+test('the MCP page renders the recipe catalog, not just the server list', async () => {
   await withServer(async (base) => {
     const response = await get(base, '/panel/mcp');
     assert.equal(response.status, 200);
@@ -405,8 +405,8 @@ test('страница MCP рисует каталог рецептов, а не
     assert.match(html, /id="mcp-rule"/);
     assert.match(html, /id="mcp-skipped"/);
     assert.match(html, /\/panel\/mcp\/recipes/, 'клиент знает, откуда читать каталог');
-    // Рецепты приезжают клиентом и в HTML не вшиваются: страница не должна
-    // пухнуть от описаний, которые нужны только разделу MCP.
+    // Recipes arrive from the client and are not embedded in the HTML: the page must not
+    // bloat with descriptions that only the MCP section needs.
     assert.doesNotMatch(html, /proton-mail-bridge-mcp/);
   });
 });

@@ -1,20 +1,21 @@
-// Профиль человека: то, что он сам про себя настроил в панели.
+// The person's profile: what they configured about themselves in the panel.
 //
-// Здесь две независимые настройки языка. `language` — язык ОТВЕТОВ: он не трогает
-// личность (персона, память и шутки остаются как есть), меняется только язык реплик
-// (см. раздел «Язык» в icarus.md) и уезжает в AGENTS.md. `uiLanguage` — язык
-// ИНТЕРФЕЙСА панели: подписи, кнопки, пустые состояния. Общего у них только то, что
-// оба живут в профиле человека; менять их надо порознь, иначе англоязычный интерфейс
-// потянет за собой ответы (или наоборот).
+// There are two independent language settings here. `language` is the language of REPLIES:
+// it doesn't touch the persona (persona, memory, and jokes stay as they are), only the
+// language of replies changes (see the «Язык» section in icarus.md) and goes into
+// AGENTS.md. `uiLanguage` is the language of the panel INTERFACE: labels, buttons, empty
+// states. All they share is that both live in the person's profile; they must be changed
+// separately, otherwise an English-language interface will drag the replies along with it
+// (or vice versa).
 //
-// Файл лежит рядом с памятью человека (`<home>/profile.json`), а не в config.yaml:
-// config.yaml — общий для всех, а язык у каждого свой. Читает его сервис: язык
-// ответов подставляется в AGENTS.md, который и уезжает в контейнер, а язык
-// интерфейса — в строки панели.
+// The file lives next to the person's memory (`<home>/profile.json`) rather than in
+// config.yaml: config.yaml is shared by everyone, while the language is each person's own.
+// It's read by the service: the reply language is substituted into AGENTS.md, which is
+// what goes into the container, and the interface language into the panel's strings.
 //
-// Конфиг — не единственный источник: он даёт умолчание (`userLanguage`), профиль
-// человека его перекрывает. Так у старой установки всё остаётся по-русски, пока
-// человек сам не переключит.
+// The config isn't the only source: it provides the default (`userLanguage`), and the
+// person's profile overrides it. That way an old installation stays Russian until the
+// person switches it themselves.
 import fs from 'node:fs';
 import path from 'node:path';
 import { userPaths, type IcarusConfig, type UserConfig } from './config.ts';
@@ -22,9 +23,9 @@ import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { log } from './log.ts';
 
 /**
- * Язык ответов. Код (`ru`, `en`) — ключ хранения: он живёт в config.yaml и в
- * profile.json и НИКОГДА не попадает в промпт. В тексте требования язык называется
- * полным именем: «отвечай на языке: English».
+ * Reply language. The code (`ru`, `en`) is the storage key: it lives in config.yaml and
+ * in profile.json and NEVER gets into the prompt. In the requirement text the language is
+ * named by its full name: «отвечай на языке: English».
  */
 export const LANGUAGES = ['ru', 'en'] as const;
 export type Language = (typeof LANGUAGES)[number];
@@ -32,35 +33,36 @@ export type Language = (typeof LANGUAGES)[number];
 export const DEFAULT_LANGUAGE: Language = 'ru';
 
 /**
- * Язык интерфейса панели. Те же коды, что у языка ответов, но список отдельный:
- * перевести интерфейс на язык, которого нет у ответов (или наоборот), — обычное
- * дело, и общий список заставлял бы добавлять языки парами.
+ * Panel interface language. The same codes as the reply language, but a separate list:
+ * translating the interface into a language the replies don't have (or vice versa) is
+ * a common thing, and a shared list would force adding languages in pairs.
  */
 export const UI_LANGUAGES = ['ru', 'en'] as const;
 export type UiLanguage = (typeof UI_LANGUAGES)[number];
 
 /**
- * Умолчание — русский: панель всегда была русской, и старый profile.json без
- * `uiLanguage` не должен при первом же чтении переключить человеку интерфейс.
+ * The default is Russian: the panel has always been Russian, and an old profile.json
+ * without `uiLanguage` must not switch the person's interface on the very first read.
  */
 export const DEFAULT_UI_LANGUAGE: UiLanguage = 'ru';
 
 /**
- * Всё, что нужно прозе промпта, — одним словарём на язык.
+ * Everything the prompt prose needs — in a single dictionary per language.
  *
- * Так, а не четырьмя параллельными картами, по двум причинам. Первая: карты
- * разъезжаются — добавили язык в одну и забыли в другой. Вторая: формы для русского
- * текста разные и не выводятся из имени («English», но «in English»; «Русский», но
- * «по-русски»), и держать их рядом с именем честнее, чем изобретать общее правило.
+ * This way, rather than four parallel maps, for two reasons. First: maps drift apart —
+ * a language is added to one and forgotten in another. Second: the forms for Russian
+ * text differ and aren't derivable from the name («English», but «in English»;
+ * «Русский», but «по-русски»), and keeping them next to the name is more honest than
+ * inventing a general rule.
  *
- * Новый язык — одна строка здесь плюс строка в LANGUAGES.
+ * A new language is one line here plus one line in LANGUAGES.
  */
 type LanguageForms = {
-  /** Как язык называется человеку в панели — подпись кнопки. */
+  /** How the language is called to the person in the panel — the button label. */
   label: string;
-  /** Полное имя для промпта: «отвечай на языке: English». Только оно идёт в текст. */
+  /** Full name for the prompt: «отвечай на языке: English». Only it goes into the text. */
   name: string;
-  /** Прилагательное для русской прозы: «твой язык — английский». */
+  /** Adjective for Russian prose: «твой язык — английский». */
   adjective: string;
 };
 
@@ -69,17 +71,17 @@ const FORMS: Record<Language, LanguageForms> = {
   en: { label: 'English', name: 'English', adjective: 'английский' },
 };
 
-/** Подписи для панели: как язык видит человек. */
+/** Panel labels: how the person sees the language. */
 export const LANGUAGE_LABELS: Record<Language, string> = Object.fromEntries(
   LANGUAGES.map((code) => [code, FORMS[code].label]),
 ) as Record<Language, string>;
 
-/** Полное имя языка для промпта. В тексте требования — только это. */
+/** The language's full name for the prompt. Only this goes into the requirement text. */
 export function languageName(language: Language): string {
   return FORMS[language].name;
 }
 
-/** Формы для русской прозы требования (см. languageRule). */
+/** Forms for the requirement's Russian prose (see languageRule). */
 export function languageForms(language: Language): LanguageForms {
   return FORMS[language];
 }
@@ -95,9 +97,9 @@ export function isUiLanguage(value: unknown): value is UiLanguage {
 }
 
 /**
- * Язык интерфейса этого человека. Конфиг здесь не участвует: `userLanguage` —
- * умолчание языка ответов, а интерфейс до этой настройки всегда был русским.
- * Битый или неизвестный `uiLanguage` — тоже русский, а не отказ отрисовать панель.
+ * This person's interface language. The config doesn't participate here: `userLanguage`
+ * is the default reply language, and the interface was always Russian before this setting.
+ * A broken or unknown `uiLanguage` is also Russian, not a refusal to render the panel.
  */
 export function uiLanguageOf(config: IcarusConfig, user: UserConfig): UiLanguage {
   const stored = readProfile(config, user);
@@ -105,9 +107,9 @@ export function uiLanguageOf(config: IcarusConfig, user: UserConfig): UiLanguage
 }
 
 /**
- * Язык, который человек видит у себя. Профиль перекрывает умолчание конфига,
- * а тот — встроенный русский: отсутствующий или битый profile.json не повод
- * оставить человека без ответа.
+ * The language the person sees for themselves. The profile overrides the config default,
+ * which in turn overrides the built-in Russian: a missing or broken profile.json isn't a
+ * reason to leave the person without a reply.
  */
 export function languageOf(config: IcarusConfig, user: UserConfig): Language {
   const stored = readProfile(config, user);
@@ -115,7 +117,7 @@ export function languageOf(config: IcarusConfig, user: UserConfig): Language {
   return config.userLanguage ?? DEFAULT_LANGUAGE;
 }
 
-/** Путь профиля: рядом с памятью, чтобы «моё» лежало в одном месте. */
+/** Profile path: next to memory, so "mine" lies in one place. */
 export function profilePath(config: IcarusConfig, user: UserConfig): string {
   return path.join(userPaths(config, user).icarus, 'profile.json');
 }
@@ -135,8 +137,8 @@ export function readProfile(
   try {
     parsed = parseYaml(text);
   } catch (error) {
-    // Файл правят и руками, поэтому битый профиль — не авария: язык остаётся
-    // прежним (умолчанием), а в логе видно, что именно не разобралось.
+    // The file is edited by hand too, so a broken profile isn't a crash: the language
+    // stays as before (the default), and the log shows exactly what failed to parse.
     log.warn('профиль человека не разобрался — язык останется из конфига', {
       user: user.id,
       file,
@@ -148,13 +150,13 @@ export function readProfile(
   const raw = parsed as Record<string, unknown>;
   const language = raw.language;
   if (!isLanguage(language)) return undefined;
-  // Своей строки у старого профиля нет — интерфейс остаётся русским. Неизвестная
-  // локаль тоже не повод не отрисовать панель: язык ответов при этом сохраняется.
+  // An old profile has no line of its own — the interface stays Russian. An unknown
+  // locale is also no reason not to render the panel: the reply language is preserved.
   const uiLanguage = isUiLanguage(raw.uiLanguage) ? raw.uiLanguage : DEFAULT_UI_LANGUAGE;
   return { language, uiLanguage };
 }
 
-/** Записать настройки. Каталог создаётся: панель может обогнать первый старт сервиса. */
+/** Write the settings. The directory is created: the panel may outpace the service's first start. */
 export function writeProfile(config: IcarusConfig, user: UserConfig, profile: Profile): void {
   const file = profilePath(config, user);
   fs.mkdirSync(path.dirname(file), { recursive: true });

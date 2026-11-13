@@ -1,46 +1,46 @@
-// Живой ход разговора, переживающий уход зрителя.
+// A live turn of a conversation that survives the viewer leaving.
 //
-// Ход pi не принадлежит HTTP-запросу: человек нажал F5 или закрыл вкладку — это
-// значит «ушёл смотреть», а не «останови ход». Поэтому события хода копятся здесь,
-// в памяти процесса, а ответ — лишь один из подписчиков. Вернувшись, панель
-// забирает накопленное и доживает ход вместе с ним.
+// A pi turn does not belong to the HTTP request: the person pressed F5 or closed the tab — that
+// means "left to watch", not "stop the turn". So the turn's events accumulate here,
+// in process memory, and the response is just one of the subscribers. On return, the panel
+// picks up what has accumulated and lives out the turn along with it.
 //
-// Состояние живёт до конца хода и не переживает перезапуск службы: незавершённый
-// ход после рестарта теряется вместе с контейнером pi, который его вёл.
+// The state lives until the end of the turn and does not survive a service restart: an unfinished
+// turn after a restart is lost together with the pi container that was running it.
 import { log } from '../log.ts';
 
-/** Событие хода: то же, что панель шлёт в поток (`step-start`, `text`, `done`...). */
+/** Turn event: the same as what the panel sends into the stream (`step-start`, `text`, `done`...). */
 export type LiveEvent = Record<string, unknown>;
 
 type Subscriber = (event: LiveEvent) => void;
 
 /**
- * Сводка по всем разговорам человека: панели нужно знать, где ход идёт и где он
- * кончился, не подписываясь на полный поток каждого разговора. Событий мало и они
- * редкие — старт хода и финал; дельты текста тут не ходят.
+ * Summary across all of a person's conversations: the panel needs to know where a turn is running and where
+ * it ended, without subscribing to the full stream of each conversation. Events are few and
+ * rare — turn start and finish; text deltas don't travel here.
  */
 export type BulletinEvent = {
-  /** Чей ход: панель чужие события должна пропустить. */
+  /** Whose turn: the panel must skip other people's events. */
   userId: string;
   chatId: string;
   /**
-   * `title` — у разговора уточнилось имя (модель придумала его после хода или
-   * человек переименовал из списка): панель меняет шапку и строку сайдбара.
-   * `queue` — поменялось то, что ждёт хода: панель перерисовывает «В очереди: N».
+   * `title` — the conversation's name was refined (the model came up with it after the turn or
+   * the person renamed it from the list): the panel changes the header and the sidebar row.
+   * `queue` — what is waiting for a turn changed: the panel redraws "Queued: N".
    */
   type: 'busy' | 'idle' | 'title' | 'queue';
-  /** id/payload обновлённой записи разговора — для `idle` и `title`. */
+  /** id/payload of the updated conversation record — for `idle` and `title`. */
   chat?: unknown;
-  /** Что стоит в очереди, — только для `queue`. */
+  /** What is queued — only for `queue`. */
   queue?: Array<{ id: string; text: string }>;
 };
 
 type Watcher = (event: BulletinEvent) => void;
 
-/** Кто слушает сводку: по писцу на живой GET-ответ панели. */
+/** Who listens to the summary: one writer per live panel GET response. */
 const watchers = new Set<Watcher>();
 
-/** Подписка на сводку по всем разговорам. Возвращает отписку. */
+/** Subscription to the summary across all conversations. Returns an unsubscribe function. */
 export function watchAll(watcher: Watcher): () => void {
   watchers.add(watcher);
   return () => {
@@ -48,7 +48,7 @@ export function watchAll(watcher: Watcher): () => void {
   };
 }
 
-/** Событие сводки — всем, кто слушает. Упавший писец чужих не роняет. */
+/** Summary event — to everyone who listens. A crashed writer does not drop the others. */
 export function broadcast(event: BulletinEvent): void {
   for (const watcher of watchers) {
     try {
@@ -59,23 +59,23 @@ export function broadcast(event: BulletinEvent): void {
   }
 }
 
-/** Живой ход одного разговора. */
+/** A live turn of one conversation. */
 export type Turn = {
-  /** Накопленные события с начала хода: по ним новый зритель догоняет ход. */
+  /** Events accumulated since the start of the turn: a new viewer catches up on the turn from them. */
   events: LiveEvent[];
-  /** Кто сейчас смотрит: писцы HTTP-ответов. Ушёл — просто вычеркнули. */
+  /** Who is watching right now: writers of HTTP responses. Left — simply struck off. */
   subscribers: Set<Subscriber>;
-  /** Ход встал: replay отдаст хвост и закроет соединение. */
+  /** The turn stopped: replay will give the tail and close the connection. */
   done: boolean;
   startedAt: number;
-  /** Обещание конца хода: его ждут очередь и «прервать и отправить». */
+  /** Promise of the turn's end: the queue and "interrupt and send" wait for it. */
   finished: Promise<void>;
   finish: () => void;
 };
 
 const turns = new Map<string, Turn>();
 
-/** Ключ один на всех: человек и разговор. Второй ход в том же разговоре невозможен. */
+/** One key for all: person and conversation. A second turn in the same conversation is impossible. */
 function key(userId: string, chatId: string): string {
   return `${userId}\u0000${chatId}`;
 }
@@ -93,8 +93,8 @@ export function startTurn(userId: string, chatId: string): Turn {
 export function liveTurn(userId: string, chatId: string): Turn | undefined {
   const turn = turns.get(key(userId, chatId));
   if (!turn) return undefined;
-  // Завершённый ход, за которым никто не вернулся, держим недолго: он уже записан
-  // в разговор, а помнить вечно нечего. Минута — чтобы панель успела переподключиться.
+  // We keep a finished turn that nobody came back for only briefly: it is already written
+  // into the conversation, and there is nothing to remember forever. A minute — so the panel has time to reconnect.
   if (turn.done && turn.subscribers.size === 0 && Date.now() - turn.startedAt > 60_000) {
     turns.delete(key(userId, chatId));
     return undefined;
@@ -102,23 +102,23 @@ export function liveTurn(userId: string, chatId: string): Turn | undefined {
   return turn;
 }
 
-/** Новое событие хода: в память и всем, кто сейчас смотрит. */
+/** A new turn event: into memory and to everyone watching right now. */
 export function emit(turn: Turn, event: LiveEvent): void {
   turn.events.push(event);
   for (const subscriber of turn.subscribers) {
     try {
       subscriber(event);
     } catch (error) {
-      // Болен один зритель — не должны страдать остальные и сам ход.
+      // One viewer is sick — the others and the turn itself must not suffer.
       log.warn('чат: подписчик отвалился', { error: String(error) });
     }
   }
 }
 
-/** Подписка: сначала накопленный хвост, потом живое. Возвращает отписку. */
+/** Subscription: first the accumulated tail, then live. Returns an unsubscribe function. */
 export function subscribe(turn: Turn, subscriber: Subscriber, replayFrom = 0): () => void {
   const replay = turn.events.slice(replayFrom);
-  // Подписываемся до replay: событие, пришедшее в промежутке, не должно потеряться.
+  // Subscribe before replay: an event that arrives in between must not be lost.
   turn.subscribers.add(subscriber);
   for (const event of replay) {
     try {
@@ -138,14 +138,14 @@ export function finishTurn(turn: Turn): void {
 }
 
 /**
- * Ход действительно встал. Прерывание только просит pi остановиться, а `busy`
- * снимается раньше, чем ход дописал ответ: ждать конца нужно по этому обещанию.
+ * The turn really stopped. Interruption only asks pi to stop, and `busy`
+ * is cleared before the turn has finished writing the response: the end must be awaited via this promise.
  */
 export function whenTurnDone(turn: Turn): Promise<void> {
   return turn.finished;
 }
 
-/** Ход идёт прямо сейчас, а не только доигран минуту назад для запоздавшего зрителя. */
+/** The turn is running right now, not merely replayed a minute ago for a late viewer. */
 export function runningTurn(userId: string, chatId: string): Turn | undefined {
   const turn = liveTurn(userId, chatId);
   return turn && !turn.done ? turn : undefined;

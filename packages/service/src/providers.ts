@@ -1,37 +1,37 @@
-// Кастомные провайдеры pi: то, чего нет во встроенном каталоге pi.
+// Custom pi providers: the ones not in pi's built-in catalog.
 //
-// pi знает только свой каталог моделей. DeepInfra в него не входит — это обычный
-// OpenAI-совместимый хост, поэтому провайдер описывается явно в ~/.pi/agent/models.json.
-// Файл собирается из config.yaml при подготовке человека (см. workspace.ts).
+// pi only knows its own model catalog. DeepInfra isn't in it — it's a regular
+// OpenAI-compatible host, so the provider is described explicitly in ~/.pi/agent/models.json.
+// The file is assembled from config.yaml during workspace setup (see workspace.ts).
 //
-// Почему описание живёт здесь, а не в config.yaml: config.yaml человек правит руками,
-// и в нём лежит только выбор — провайдер, id модели, уровень размышлений, tier.
-// Базовый адрес, протокол, способ подписи и метаданные модели — свойство провайдера,
-// а не выбора, и его место рядом с остальными знаниями о провайдерах (PROVIDER_ENV
-// в config.ts). Иначе каждый человек в своей копии конфига держал бы ещё и адрес API.
+// Why the description lives here and not in config.yaml: the human edits config.yaml by hand,
+// and it holds only the choice — provider, model id, reasoning level, tier.
+// The base URL, protocol, signing method and model metadata are a property of the provider,
+// not of the choice, and their place is next to the other provider knowledge (PROVIDER_ENV
+// in config.ts). Otherwise every human in their own copy of the config would also keep the API address.
 import { DEEPINFRA_BASE_URL, type ModelConfig } from './config.ts';
 
-/** Что pi должен знать о модели, чего нет в config.yaml. */
+/** What pi needs to know about the model that isn't in config.yaml. */
 type ModelMeta = {
-  /** Человеческое имя для списка моделей; пусто — подставится id. */
+  /** Human-readable name for the model list; empty means the id is used instead. */
   name: string;
   /**
-   * Картинки, которые модель принимает. По этому полю pi решает, можно ли отдать
-   * ей изображение, — от него зависит уровень vision в эскалации.
+   * Images the model accepts. pi uses this field to decide whether an image can be
+   * given to it — the vision level in escalation depends on it.
    */
   input: Array<'text' | 'image'>;
-  /** Умеет ли модель размышления: без этого thinking из config.yaml ни на что не влияет. */
+  /** Whether the model supports reasoning: without this, thinking from config.yaml does nothing. */
   reasoning: boolean;
   contextWindow: number;
   maxTokens: number;
-  /** Цены за миллион токенов — только для показа расходов в pi, на запросы не влияют. */
+  /** Prices per million tokens — only for showing costs in pi, they don't affect requests. */
   cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
 };
 
 /**
- * Модели DeepInfra, которые мы выбираем в config.yaml. Значения — с их страниц моделей
- * (context_length и pricing из /v1/openai/models?filter=with_meta). Список не обязан
- * быть полным каталогом: незнакомая модель получит осторожные умолчания ниже.
+ * DeepInfra models that we choose in config.yaml. The values come from their model pages
+ * (context_length and pricing from /v1/openai/models?filter=with_meta). The list doesn't have to
+ * be a complete catalog: an unfamiliar model gets the cautious defaults below.
  */
 const DEEPINFRA_CATALOG: Record<string, Partial<ModelMeta>> = {
   'deepseek-ai/DeepSeek-V4.1-Flash': {
@@ -66,8 +66,8 @@ const DEEPINFRA_CATALOG: Record<string, Partial<ModelMeta>> = {
 };
 
 /**
- * Умолчания для модели, которой нет в каталоге выше: тексты, без размышлений.
- * Осторожность важнее полноты — лишние параметры размышлений чужой модели ни к чему.
+ * Defaults for a model not in the catalog above: text, without reasoning.
+ * Caution matters more than completeness — extra reasoning parameters for someone else's model are uncalled for.
  */
 const DEEPINFRA_DEFAULTS: ModelMeta = {
   name: '',
@@ -78,9 +78,9 @@ const DEEPINFRA_DEFAULTS: ModelMeta = {
 };
 
 /**
- * Уровни pi → значения reasoning_effort DeepInfra. У pi свой набор уровней, у хоста
- * свой; `off` — это не отсутствие поля, а явное «none»: иначе DeepInfra применит
- * умолчание модели и размышления могут остаться включёнными.
+ * pi levels → DeepInfra reasoning_effort values. pi has its own set of levels, the host
+ * has its own; `off` is not the absence of the field, but an explicit "none": otherwise
+ * DeepInfra would apply the model default and reasoning could stay enabled.
  */
 const DEEPINFRA_THINKING_LEVELS = {
   off: 'none',
@@ -92,7 +92,7 @@ const DEEPINFRA_THINKING_LEVELS = {
   max: 'max',
 } as const;
 
-/** Описание одной модели DeepInfra в формате models.json. */
+/** Description of a single DeepInfra model in models.json format. */
 function deepInfraModel(id: string): Record<string, unknown> {
   const meta: ModelMeta = { ...DEEPINFRA_DEFAULTS, ...(DEEPINFRA_CATALOG[id] ?? {}) };
   return {
@@ -108,22 +108,22 @@ function deepInfraModel(id: string): Record<string, unknown> {
 }
 
 /**
- * Провайдеры, которых pi не знает сам. Ключ — имя провайдера в config.yaml,
- * значение — сборка блока `providers.<имя>` для models.json.
+ * Providers that pi doesn't know by itself. The key is the provider name in config.yaml,
+ * the value assembles the `providers.<name>` block for models.json.
  */
 const CUSTOM_PROVIDERS: Record<string, (models: ModelConfig[]) => Record<string, unknown>> = {
   deepinfra: (models) => ({
     name: 'DeepInfra',
     baseUrl: DEEPINFRA_BASE_URL,
     api: 'openai-completions',
-    // Ключ подставляется из окружения контейнера: .env уезжает туда целиком (env_file).
+    // The key is substituted from the container environment: .env is shipped there whole (env_file).
     apiKey: '$DEEPINFRA_API_KEY',
     compat: {
-      // DeepSeek на DeepInfra не принимает роль developer — системный промпт идёт как system.
+      // DeepSeek on DeepInfra doesn't accept the developer role — the system prompt goes as system.
       supportsDeveloperRole: false,
-      // DeepInfra знает reasoning_effort, но не поле thinking:{type} из DeepSeek API:
-      // второе молча игнорируется. Формат openai шлёт ровно reasoning_effort —
-      // в том числе reasoning_effort: "none", когда размышления выключены.
+      // DeepInfra knows reasoning_effort, but not the thinking:{type} field from the DeepSeek API:
+      // the latter is silently ignored. The openai format sends exactly reasoning_effort —
+      // including reasoning_effort: "none" when reasoning is disabled.
       thinkingFormat: 'openai',
       supportsReasoningEffort: true,
     },
@@ -132,12 +132,12 @@ const CUSTOM_PROVIDERS: Record<string, (models: ModelConfig[]) => Record<string,
 };
 
 /**
- * Собирает models.json для pi. В файл попадают только кастомные провайдеры из
- * config.yaml: встроенные (anthropic, google, ...) pi знает по своему каталогу,
- * и переописывать их здесь значило бы чинить то, что не сломано.
+ * Assembles models.json for pi. Only custom providers from config.yaml make it into the file:
+ * pi knows the built-in ones (anthropic, google, ...) from its own catalog,
+ * and re-describing them here would mean fixing what isn't broken.
  *
- * @param models - модели из config.yaml.
- * @returns содержимое ~/.pi/agent/models.json.
+ * @param models - models from config.yaml.
+ * @returns contents of ~/.pi/agent/models.json.
  */
 export function renderModelsJson(models: ModelConfig[]): string {
   const providers: Record<string, unknown> = {};

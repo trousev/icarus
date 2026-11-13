@@ -1,22 +1,21 @@
-// Общие скиллы: кто ими поделился, кому они включены и откуда их читает pi.
+// Shared skills: who shared them, who has them enabled and where pi reads them from.
 //
-// Личные скиллы остаются там же, где были, — в `pi-agent/skills` человека, и
-// по-прежнему принадлежат только ему. Здесь живёт то, что человек решил отдать
-// другим:
+// Personal skills stay where they were — in the person's `pi-agent/skills`, and still
+// belong to them alone. What lives here is what a person decided to give to others:
 //
-//   <dataDir>/skills/registry.json — кто с кем поделился и включённость у каждого;
-//   <dataDir>/skills/shared/       — снимки расшаренных скиллов для контейнеров.
+//   <dataDir>/skills/registry.json — who shared with whom and each one's enabled state;
+//   <dataDir>/skills/shared/       — snapshots of shared skills for containers.
 //
-// Снимок, а не ссылка на чужой каталог: контейнер человека видит только свой
-// `pi-agent` и общие маунты, а личный каталог соседа туда не пробрасывается.
-// Снимок обновляется при сохранении скилла владельцем и при сборке окружения
-// (syncShared): правка в панели доезжает до всех, а не остаётся у автора.
+// A snapshot, not a link to someone else's folder: a person's container sees only its own
+// `pi-agent` and the shared mounts, and a neighbor's personal folder is not passed through.
+// The snapshot is updated when the owner saves the skill and when the environment is built
+// (syncShared): an edit in the panel reaches everyone instead of staying with the author.
 //
-// Главное правило то же, что у MCP: поделились — скилл приезжает остальным
-// ВЫКЛЮЧЕННЫМ. Включить его каждый должен сам, иначе чужая инструкция молча
-// оказывается в промпте и в контексте. Включённый скилл уезжает в settings.json
-// дополнительным путём: каталог `~/.pi/agent/skills` не трогаем, чтобы «мои» и
-// «общие» скиллы не путались и права на запись оставались только у владельца.
+// The main rule is the same as with MCP: once shared, the skill arrives to others DISABLED.
+// Each must enable it themselves, otherwise someone else's instruction silently ends up in
+// the prompt and the context. An enabled skill goes into settings.json as an extra path: we
+// don't touch the `~/.pi/agent/skills` folder, so «my» and «shared» skills don't get mixed up
+// and write permissions stay with the owner only.
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -30,16 +29,16 @@ import {
   type SkillSummary,
 } from '../control/skills.ts';
 
-/** Версия формата: без неё будущая миграция не отличит старый файл от нового. */
+/** Format version: without it a future migration can't tell an old file from a new one. */
 export const SKILL_STORE_VERSION = 1;
 
-/** Имя файла, который делает каталог скиллом: нужно, чтобы отличить каталог от плоского .md. */
+/** The file name that makes a folder a skill: needed to tell a folder from a flat .md. */
 const SKILL_FILE = 'SKILL.md';
 
 export type SkillShare = {
-  /** Кто владелец: он один может править, удалять и снимать шаринг. */
+  /** Who the owner is: only they can edit, delete and unshare it. */
   owner: string;
-  /** Путь скилла внутри каталога владельца: `pirate-mode/SKILL.md` или `notes.md`. */
+  /** Skill path inside the owner's folder: `pirate-mode/SKILL.md` or `notes.md`. */
   id: string;
   name: string;
   description: string;
@@ -49,15 +48,15 @@ export type SkillShare = {
 
 export type SkillStore = {
   version: number;
-  /** `owner/id` → описание шаринга. */
+  /** `owner/id` → sharing record. */
   shares: Record<string, SkillShare>;
-  /** userId → `owner/id` → включён ли скилл у этого человека. */
+  /** userId → `owner/id` → whether the skill is enabled for this person. */
   prefs: Record<string, Record<string, boolean>>;
 };
 
-/** Что панель показывает про доступ к скиллу. */
+/** What the panel shows about access to a skill. */
 export type SkillAccess = {
-  /** Включён у меня: для своего — лежит в корне каталога, для чужого — prefs. */
+  /** Enabled for me: for my own — it lies in the folder root, for someone else's — prefs. */
   enabled: boolean;
   owner: string;
   ownerIsMe: boolean;
@@ -65,7 +64,7 @@ export type SkillAccess = {
   canEdit: boolean;
   canShare: boolean;
   canDelete: boolean;
-  /** Устойчивый ключ `owner/id`: по нему панель зовёт toggle и share. */
+  /** Stable key `owner/id`: the panel calls toggle and share with it. */
   key: string;
 };
 
@@ -75,7 +74,7 @@ export type VisibleSkillDetail = SkillDetail & SkillAccess;
 export type SkillStorePaths = { dir: string; registry: string; shared: string };
 
 export class SkillStoreError extends Error {
-  /** HTTP-статус для панели: 4xx — человеку, 5xx — сломанному файлу. */
+  /** HTTP status for the panel: 4xx — to the person, 5xx — to a broken file. */
   readonly status: number;
 
   constructor(message: string, status = 500) {
@@ -98,22 +97,22 @@ export function shareKey(owner: string, id: string): string {
   return `${owner}/${id}`;
 }
 
-/** Сегмент пути без «..» и разделителей: id и владелец приходят из файла, а не из кода. */
+/** Path segment without «..» and separators: id and owner come from a file, not from code. */
 function safeSegment(value: string): boolean {
   return value !== '' && value !== '.' && value !== '..' && !/[\\/]/.test(value) && !value.includes('\0');
 }
 
-/** Путь скилла внутри каталога: сегменты через «/», без выхода наружу. */
+/** Skill path inside the folder: segments with «/», without escaping outside. */
 export function safeSkillId(id: string): boolean {
   return id.split('/').every(safeSegment);
 }
 
-/** Расшарен ли конкретный скилл владельца. */
+/** Whether a specific skill of the owner is shared. */
 export function isShared(config: IcarusConfig, owner: string, id: string): boolean {
   return Object.hasOwn(readStore(config).shares, shareKey(owner, id));
 }
 
-/** Адрес снимка на хосте: каталог скилла или файл плоского .md. */
+/** Snapshot path on the host: a skill folder or a flat .md file. */
 function contentPath(config: IcarusConfig, owner: string, id: string): string {
   if (!safeSegment(owner) || !safeSkillId(id) || id === SKILL_FILE) {
     throw new SkillStoreError(`негодный путь скилла: «${owner}/${id}»`, 400);
@@ -123,10 +122,10 @@ function contentPath(config: IcarusConfig, owner: string, id: string): string {
 }
 
 /**
- * Путь, который уезжает в settings.json контейнера.
+ * The path that goes into the container's settings.json.
  *
- * canonical-скилл — это каталог: pi принимает и файл, и каталог, но каталог
- * удобнее: рядом лежат файлы бандла, на которые скилл ссылается.
+ * A canonical skill is a folder: pi accepts both a file and a folder, but a folder is more
+ * convenient: the bundle files the skill references lie next to it.
  */
 function containerPath(owner: string, id: string): string {
   if (!safeSegment(owner) || !safeSkillId(id)) {
@@ -158,8 +157,8 @@ function readJson(file: string): unknown {
 }
 
 /**
- * Читает хранилище. Сломанный файл — ошибка, а не «пусто»: иначе панель молча
- * показала бы, что шарингов нет, и человек решил бы, что его скиллы пропали.
+ * Reads the store. A broken file is an error, not «empty»: otherwise the panel would
+ * silently show that there are no share, and the person would think their skills are gone.
  */
 export function readStore(config: IcarusConfig): SkillStore {
   const paths = storePaths(config);
@@ -207,7 +206,7 @@ function writeAtomic(file: string, text: string): void {
   try {
     fs.chmodSync(dir, 0o700);
   } catch {
-    // Не на всех ФС права меняются; файл всё равно пишем закрытым.
+    // Permissions don't change on all filesystems; we still write the file closed.
   }
   const temporary = path.join(dir, `.${path.basename(file)}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`);
   fs.writeFileSync(temporary, text, { mode: 0o600 });
@@ -224,7 +223,7 @@ export function writeStore(config: IcarusConfig, store: SkillStore): void {
   );
 }
 
-/** Копирует бандл скилла в снимок, снося прежний: правка не должна смешиваться со старой. */
+/** Copies the skill bundle into the snapshot, wiping the previous one: an edit must not mix with the old. */
 function copyBundle(sourceFile: string, destination: string): void {
   const isCanonical = path.basename(sourceFile) === SKILL_FILE;
   fs.rmSync(destination, { recursive: true, force: true });
@@ -244,7 +243,7 @@ function copyBundle(sourceFile: string, destination: string): void {
   });
 }
 
-/** Публичный вид шаринга: сама запись плюс то, что панель может с ней делать. */
+/** Public view of a share: the record itself plus what the panel can do with it. */
 function accessOf(store: SkillStore, viewer: string, owner: string, id: string, shared: boolean): SkillAccess {
   const ownerIsMe = owner === viewer;
   return {
@@ -259,7 +258,7 @@ function accessOf(store: SkillStore, viewer: string, owner: string, id: string, 
   };
 }
 
-/** Все скиллы, видимые человеку: свои (включённые и выключенные) и чужие расшаренные. */
+/** All skills visible to the person: own (enabled and disabled) and others' shared ones. */
 export function listVisible(config: IcarusConfig, userId: string): VisibleSkill[] {
   const store = readStore(config);
   const paths = userPaths(config, { id: userId });
@@ -274,7 +273,7 @@ export function listVisible(config: IcarusConfig, userId: string): VisibleSkill[
     skills.push({
       ...skill,
       ...accessOf(store, userId, userId, skill.id, ownShared.has(skill.id)),
-      // Свой скилл включён тогда, когда лежит в корне: у `.disabled/` это false.
+      // One's own skill is enabled when it lies in the root: for `.disabled/` this is false.
       enabled: skill.enabled,
     });
   }
@@ -290,7 +289,7 @@ export function listVisible(config: IcarusConfig, userId: string): VisibleSkill[
   }
 
   return skills.sort((a, b) => {
-    // Свои — первыми: с ними человек работает чаще, чем с чужими.
+    // Own ones first: a person works with them more often than with others'.
     if (a.ownerIsMe !== b.ownerIsMe) return a.ownerIsMe ? -1 : 1;
     return a.name.localeCompare(b.name);
   });
@@ -309,7 +308,7 @@ function listSkillsSafe(root: string): SkillSummary[] {
   }
 }
 
-/** Читает расшаренный скилл из снимка; null — шаринг есть, а файлов уже нет. */
+/** Reads a shared skill from the snapshot; null — the share exists but the files are gone. */
 export function readShared(config: IcarusConfig, owner: string, id: string): SkillDetail | null {
   if (!safeSegment(owner) || !safeSkillId(id)) return null;
   const root = path.join(storePaths(config).shared, owner);
@@ -320,7 +319,7 @@ export function readShared(config: IcarusConfig, owner: string, id: string): Ski
   }
 }
 
-/** Один скилл глазами человека: свой редактируемый или чужой только для чтения. */
+/** A single skill through the person's eyes: own editable or someone else's read-only. */
 export function readVisible(
   config: IcarusConfig,
   userId: string,
@@ -343,15 +342,15 @@ export function readVisible(
 }
 
 /**
- * Поделиться скиллом или снять шаринг. Делать это может только владелец.
+ * Share a skill or unshare it. Only the owner can do this.
  *
- * При первом шаринге у остальных стираются прежние prefs: скилл снова приезжает
- * выключенным, как новый, даже если раньше человек его включал.
+ * On the first share, others' previous prefs are wiped: the skill arrives disabled again,
+ * like a new one, even if the person had enabled it before.
  */
 export function setShared(config: IcarusConfig, owner: string, id: string, shared: boolean): SkillShare | null {
-  // Корневой SKILL.md — это не скилл, а весь каталог: его бандл — все скиллы
-  // человека. Делиться им значило бы отдать остальным весь личный каталог.
-  // Снять с него шаринг — просто no-op: расшаренным он никогда не был.
+  // The root SKILL.md is not a skill but the whole folder: its bundle is all of the
+  // person's skills. Sharing it would mean giving everyone the entire personal folder.
+  // Unsharing it is just a no-op: it was never shared.
   if (id === SKILL_FILE) {
     if (shared) throw new SkillStoreError('корневой SKILL.md не расшаривается: переименуй его в каталог', 400);
     return null;
@@ -397,10 +396,10 @@ export function setShared(config: IcarusConfig, owner: string, id: string, share
 }
 
 /**
- * Переименование расшаренного скилла: снимок переезжает вместе с ним.
+ * Renaming a shared skill: the snapshot moves along with it.
  *
- * Возвращает true, если что-то переносили. Если скилл не был расшарен, это no-op:
- * обычное переименование не должно внезапно включать шаринг.
+ * Returns true if something was moved. If the skill wasn't shared, this is a no-op:
+ * a regular rename must not suddenly enable sharing.
  */
 export function renameShare(config: IcarusConfig, owner: string, fromId: string, toId: string): boolean {
   if (fromId === toId) return false;
@@ -417,7 +416,7 @@ export function renameShare(config: IcarusConfig, owner: string, fromId: string,
   fs.rmSync(contentPath(config, owner, fromId), { recursive: true, force: true });
 
   if (!source || !detail) {
-    // Скилл переименовали в никуда — шаринг снимаем вместе с ним.
+    // The skill was renamed into nowhere — we unshare it along with it.
     for (const prefs of Object.values(store.prefs)) delete prefs[fromKey];
     writeStore(config, store);
     return false;
@@ -433,8 +432,8 @@ export function renameShare(config: IcarusConfig, owner: string, fromId: string,
     createdAt: previous?.createdAt ?? new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
-  // Включённость переезжает вместе с ключом: переименование — не повод выключить
-  // скилл у тех, кто им пользуется.
+  // Enabled state moves along with the key: a rename is no reason to disable the
+  // skill for those who use it.
   for (const prefs of Object.values(store.prefs)) {
     if (Object.hasOwn(prefs, fromKey)) prefs[toKey] = prefs[fromKey] === true;
     delete prefs[fromKey];
@@ -443,7 +442,7 @@ export function renameShare(config: IcarusConfig, owner: string, fromId: string,
   return true;
 }
 
-/** Включить или выключить чужой расшаренный скилл себе. */
+/** Enable or disable someone else's shared skill for yourself. */
 export function setSharedEnabled(config: IcarusConfig, userId: string, owner: string, id: string, enabled: boolean): void {
   if (owner === userId) throw new SkillStoreError('свой скилл включается переездом, а не флагом', 400);
   const store = readStore(config);
@@ -454,12 +453,11 @@ export function setSharedEnabled(config: IcarusConfig, userId: string, owner: st
 }
 
 /**
- * Приводит снимки в соответствие с файлами владельцев.
+ * Brings snapshots in line with the owners' files.
  *
- * Нужна не только после правки в панели: файлы можно положить руками или
- * откатить коммитом, и снимок обязан это догнать. Пропавший у владельца скилл
- * перестаёт быть расшаренным — иначе остальные получали бы инструкцию, которой
- * у автора уже нет.
+ * Needed not only after a panel edit: files can be placed by hand or rolled back by a
+ * commit, and the snapshot must catch up. A skill missing from the owner stops being
+ * shared — otherwise others would get an instruction the author no longer has.
  */
 export function syncShared(config: IcarusConfig): void {
   const store = readStore(config);
@@ -475,8 +473,8 @@ export function syncShared(config: IcarusConfig): void {
       continue;
     }
     copyBundle(source, contentPath(config, share.owner, share.id));
-    // Имя и описание могли поменяться вместе с телом: панель показывает их из
-    // записи, чтобы не читать каждый снимок заново.
+    // The name and description could have changed along with the body: the panel shows
+    // them from the record so it doesn't re-read every snapshot.
     const detail = readSkill(paths.skills, share.id);
     if (detail && (detail.name !== share.name || detail.description !== share.description)) {
       store.shares[key] = {
@@ -492,10 +490,10 @@ export function syncShared(config: IcarusConfig): void {
 }
 
 /**
- * Пути для settings.json: только включённые чужие скиллы.
+ * Paths for settings.json: only enabled someone else's skills.
  *
- * Свои пути не добавляем: они уже лежат в `~/.pi/agent/skills`, который pi
- * читает по умолчанию. Дублировать их значило бы показать один скилл дважды.
+ * We don't add own paths: they already lie in `~/.pi/agent/skills`, which pi reads by
+ * default. Duplicating them would mean showing one skill twice.
  */
 export function enabledSharedPaths(config: IcarusConfig, userId: string): string[] {
   const store = readStore(config);
@@ -509,7 +507,7 @@ export function enabledSharedPaths(config: IcarusConfig, userId: string): string
   return paths.sort();
 }
 
-/** Сколько скиллов видит человек: число рядом с разделом в панели. */
+/** How many skills the person sees: the number next to the section in the panel. */
 export function countVisible(config: IcarusConfig, userId: string): number {
   return listVisible(config, userId).length;
 }

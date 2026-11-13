@@ -1,87 +1,87 @@
-# Русский у Икара: чья это беда и что с этим делать
+# Icarus's Russian: whose problem is it and what to do about it
 
-Ветка про качество русского, 2026-09-20. Повод — ответ Икара про досмотр на входе
-в консульство: поверхностно беглый, но с кальками («где реально стоит держать голову»,
-«в чужие руки вне процедуры», «в своей же стране проживания на ирландской земле»)
-и с фразами, которые рассыпаются по смыслу («голос не тот, за который стоит терпеть шмон»).
+A branch about the quality of Russian, 2026-09-20. The occasion — Icarus's reply about the security check at the entrance
+to the consulate: superficially fluent, but with calques («где реально стоит держать голову» [where you really ought to keep your head],
+«в чужие руки вне процедуры» [into someone else's hands outside the procedure], «в своей же стране проживания на ирландской земле» [in your own country of residence on Irish soil])
+and with phrases that fall apart in meaning («голос не тот, за который стоит терпеть шмон» [not the voice worth enduring a shake-down for]).
 
-## Короткий ответ
+## The short answer
 
-Это не «DeepSeek не умеет по-русски» и не чистая случайность. Сходятся три слоя:
+This is not "DeepSeek can't do Russian" and not pure coincidence. Three layers converge:
 
-1. **Модель.** У DeepSeek английский и китайский — родные, русский — второй тир
-   («strong, with light review», не production-grade). Отставание от западных флагманов
-   на русском тексте измеримое, но не катастрофическое.
-2. **Режим.** Включённое мышление съедает бюджет и режет русскую реплику на полуслове;
-   официально рекомендованные `temperature` 1.3 для разговора на русском разваливают морфологию.
-3. **Персона.** `icarus.md` требует коротких реплик с плотной идиоматикой, сленгом и подколками.
-   Это ровно тот регистр, где второ-тировая модель начинает **выдумывать** обороты вместо того,
-   чтобы их знать. Чем плотнее требование «живости» на сжатом тексте, тем больше калек.
+1. **The model.** For DeepSeek English and Chinese are native; Russian is a second tier
+   ("strong, with light review", not production-grade). The gap from the Western flagships
+   on Russian text is measurable, but not catastrophic.
+2. **The mode.** Enabled thinking eats up the budget and cuts the Russian reply off mid-word;
+   the officially recommended `temperature` 1.3 for conversation in Russian wrecks the morphology.
+3. **The persona.** `icarus.md` demands short replies packed with idiom, slang and jabs.
+   This is exactly the register where a second-tier model starts **inventing** turns of phrase instead of
+   knowing them. The denser the requirement for "liveliness" on compressed text, the more calques.
 
-То есть «погуглить и поменять модель» — половина ответа. Вторая половина дешевле и лежит в репозитории.
+So "google it and change the model" is half the answer. The other half is cheaper and lies in the repository.
 
-## Чем проверено: прогон `probe-ru.mjs`
+## What it was checked with: a run of `probe-ru.mjs`
 
-Скрипт `tools/persona-flywheel/probe-ru.mjs` берёт боевой `icarus.md`, один вопрос
-(тот самый, про консульство) и гоняет варианты «модель × режим × правка промпта».
-Полные реплики — в `tools/persona-flywheel/logs/ru-probe-*/samples.md`.
+The script `tools/persona-flywheel/probe-ru.mjs` takes the production `icarus.md`, one question
+(the very one about the consulate) and runs the "model × mode × prompt edit" variants.
+The full replies are in `tools/persona-flywheel/logs/ru-probe-*/samples.md`.
 
-### Мышление включено (дефолт API), `max_tokens: 400`
+### Thinking on (the API default), `max_tokens: 400`
 
-| вариант | что вышло |
+| variant | what came out |
 | --- | --- |
-| flash | 1501 токен ушёл в скрытое размышление; видимого текста ~99 токенов, обрыв на «Это стандарт любого административного» |
-| pro | то же самое, обрыв на «но право у них есть, если им что-то» |
+| flash | 1501 tokens went into hidden reasoning; visible text ~99 tokens, cut off at «Это стандарт любого административного» [This is the standard of any administrative…] |
+| pro | the same, cut off at «но право у них есть, если им что-то» [but they do have the right, if they have something…] |
 
-Вывод жёсткий: **на русском при включённом мышлении реплика Икара обрывается** — а `icarus.md`
-прямо запрещает обрываться. Для fast-тира мышление выключено, но эскалация в strong идёт на
-`deepseek-ai/DeepSeek-V4.1-Flash:medium` — то есть именно там, где ответ длиннее и сложнее, обрыв вероятен.
-Это отдельный баг роутинга, не связанный с качеством языка.
+The conclusion is blunt: **in Russian, with thinking on, Icarus's reply gets cut off** — while `icarus.md`
+explicitly forbids cutting off. For the fast tier thinking is off, but escalation to strong goes to
+`deepseek-ai/DeepSeek-V4.1-Flash:medium` — that is, precisely where the answer is longer and more complex, a cutoff is likely.
+This is a separate routing bug, unrelated to language quality.
 
-### Мышление выключено (боевой режим fast)
+### Thinking off (the production fast mode)
 
-| вариант | русский |
+| variant | Russian |
 | --- | --- |
-| flash, t=1 | ровно, просто, местами пресно: «открытая сумка, закрытый телефон, ровный тон» |
-| flash, t=1.3 | **хуже всех**: «ссыльного спора не заводишь», «киоск с оружием», «переведи в режим, где листать нечего» — выдуманные обороты и потерянный смысл |
-| flash, t=1 + блок «Русский» | чище и идиоматичнее: «Требование обычно рассыпается», финальный вопрос к собеседнику по делу |
-| pro, t=1 | собранно, но с натянутой иронией («гражданин с активной позицией») |
-| pro, t=1 + блок «Русский» | самое чистое из пяти, но вступление «открой закон» — фактическая отсебятина |
+| flash, t=1 | even, simple, at times flat: «открытая сумка, закрытый телефон, ровный тон» [open bag, closed phone, even tone] |
+| flash, t=1.3 | **the worst of all**: «ссыльного спора не заводишь», «киоск с оружием», «переведи в режим, где листать нечего» — invented turns of phrase and lost meaning |
+| flash, t=1 + the «Русский» [Russian] block | cleaner and more idiomatic: «Требование обычно рассыпается» [The requirement usually falls apart], the closing question to the interlocutor to the point |
+| pro, t=1 | composed, but with strained irony («гражданин с активной позицией» [a citizen with an active stance]) |
+| pro, t=1 + the «Русский» block | the cleanest of the five, but the opening «открой закон» [open the law] is a factual invention of its own |
 
-Две честные оговорки. Первая: по одному сэмплу на вариант выводы статистикой не являются,
-стенд шумит ±1.5 по сценарию. Вторая: **ту самую цитату воспроизвести не удалось** — пять
-чистых прогонов дали заметно более приличный русский. Значит, показанный ответ — худший случай,
-но именно такие худшие случаи человек и видит.
+Two honest caveats. First: with one sample per variant the conclusions are not statistics;
+the staging bench is noisy ±1.5 per scenario. Second: **that very quote could not be reproduced** — five
+clean runs produced noticeably more decent Russian. So the reply shown is a worst case,
+but it is precisely such worst cases that a person actually sees.
 
-Тем не менее два эффекта видны сразу: `t=1.3` на русском — вредный совет, а явный блок про
-русский в персоне меняет текст в лучшую сторону на той же модели и той же температуре.
+Still, two effects are visible at once: `t=1.3` for Russian is harmful advice, and an explicit block about
+Russian in the persona changes the text for the better on the same model and the same temperature.
 
-## Почему так, по внешним данным
+## Why this is so, according to external data
 
-- DeepSeek — **bilingual-first**: обучающий корпус смещён в английский и китайский, русский
-  отнесён ко второму тиру, типичный сбой — сползание в английский и англообразный синтаксис
+- DeepSeek is **bilingual-first**: the training corpus is skewed toward English and Chinese, Russian
+  is placed in the second tier, the typical failure is sliding into English and English-like syntax
   ([DeepSeek languages](https://deepseekai.guide/guides/deepseek-languages/)).
-- Независимое сравнение на MERA и LLM Arena RU ставит на первое место по русскому тексту
-  GPT-5.4, а DeepSeek оценивает в 85–90 % от него — дёшево и прилично, но не «как родной»
-  ([сравнение 8 моделей](https://ofox.ai/ru/blog/luchshaya-llm-dlya-russkogo-yazyka-sravnenie-2026/),
+- An independent comparison on MERA and LLM Arena RU puts
+  GPT-5.4 in first place for Russian text, and rates DeepSeek at 85–90 % of it — cheap and decent, but not "like a native"
+  ([a comparison of 8 models](https://ofox.ai/ru/blog/luchshaya-llm-dlya-russkogo-yazyka-sravnenie-2026/),
   [MERA](https://mera.a-ai.ru/), [LLM Arena RU](https://llmarena.ru/)).
-- Русская морфология (6 падежей, вид глагола, свободный порядок) плюс **токенизационный налог**:
-  кириллица стоит заметно больше токенов на тот же смысл, то есть на слово русского текста
-  у модели меньше бюджета и меньше шансов себя поправить
+- Russian morphology (6 cases, verb aspect, free word order) plus a **tokenization tax**:
+  Cyrillic costs noticeably more tokens for the same meaning, that is, per word of Russian text
+  the model has less budget and fewer chances to correct itself
   ([Tokenizer Tax Across 24 European Languages](https://arxiv.org/pdf/2605.24718)).
-- Размышление у моделей этого класса идёт на английском и может подмешиваться в вывод —
-  известный класс сбоев ([Language Mixing in Reasoning LMs](https://aclanthology.org/2025.emnlp-main.132.pdf)).
+- Reasoning in models of this class runs in English and can bleed into the output —
+  a well-known class of failures ([Language Mixing in Reasoning LMs](https://aclanthology.org/2025.emnlp-main.132.pdf)).
 
-## Что делать, по убыванию отдачи
+## What to do, in decreasing order of payoff
 
-### 1. Сделать брак видимым: ось языка в рубрике и судья вне семьи DeepSeek
+### 1. Make the defects visible: a language axis in the rubric and a judge outside the DeepSeek family
 
-Сейчас `criteria.md` не содержит ни одного критерия про русский: есть N («естественность»), но он
-про служебный тон, а не про кальку и падежи. Судья и критик — `deepseek-ai/DeepSeek-V4-Pro-0813`, то есть **та же
-семья, у которой тот же слепой участок**: «avg 8.80» на стенде и калька в бою не противоречат
-друг другу. Это самая дорогая дыра: без неё любая правка проверяется вслепую.
+Right now `criteria.md` contains not a single criterion about Russian: there is N ("naturalness"), but it
+is about the service tone, not about calques and cases. The judge and the critic are `deepseek-ai/DeepSeek-V4-Pro-0813`, that is, **the same
+family, with the same blind spot**: "avg 8.80" on the bench and a calque in production do not contradict each
+other. This is the most costly hole: without it, any edit is checked blind.
 
-Минимальный шаг — седьмая ось (текст для вставки в `criteria.md`):
+The minimal step is a seventh axis (text to paste into `criteria.md`):
 
 ```markdown
 ## Я — Русский язык (0–10)
@@ -95,12 +95,12 @@
 а русский звучит странно — это калька, выше 5 не ставить.
 ```
 
-И судью — на модель другой семьи (при наличии ключа), хотя бы на дуэлях. Иначе рубрика
-будет подтверждать сама себя.
+And the judge — to a model from another family (if a key is available), at least in the duels. Otherwise the rubric
+will keep confirming itself.
 
-### 2. Три строки про русский в `icarus.md`
+### 2. Three lines about Russian in `icarus.md`
 
-Правка проверена прогоном (вариант `flash-off-ru`), влезает в бюджет 90 строк:
+The edit was verified by a run (the `flash-off-ru` variant), it fits within the 90-line budget:
 
 ```markdown
 # Русский
@@ -109,69 +109,69 @@
 - Перед отправкой проверяешь падежи, вид глагола и согласование: ошибка хуже пресной реплики.
 ```
 
-Третья строка — не украшение: первое правило персоны («перечитай, что написал») уже есть,
-но про язык там ни слова.
+The third line is not decoration: the persona's first rule («перечитай, что написал» [reread what you wrote]) already exists,
+but there is not a word about language there.
 
-### 3. Не включать мышление на репликах персоны
+### 3. Do not enable thinking on persona replies
 
-Мышление на русской реплике даёт обрыв и вчетверо больше счёта. Если эскалация в
-`deepseek-ai/DeepSeek-V4.1-Flash:medium` нужна для тулов и разбора, то финальный текст Икара лучше
-отдавать модели без мышления — либо резко поднять потолок вывода.
+Thinking on a Russian reply causes a cutoff and a fourfold bill. If escalation to
+`deepseek-ai/DeepSeek-V4.1-Flash:medium` is needed for tools and analysis, then Icarus's final text is better
+given to a model without thinking — or sharply raise the output ceiling.
 
-### 4. Роутинг: реплику Икара — не на самый дешёвый тир
+### 4. Routing: don't send Icarus's reply to the cheapest tier
 
-Реплики короткие (1–4 фразы), поэтому разница в цене между flash и pro на них копеечная,
-а качество русского у pro в прогоне выше. Идея «держать персона-текст на pro, а рутину на flash»
-экономически почти бесплатна. Альтернатива для тех, кому важен именно русский, — держать
-одну западную модель (GPT/Gemini/Claude) только на финальный текст, а DeepSeek — на инструменты.
+Replies are short (1–4 phrases), so the price difference between flash and pro on them is pennies,
+while pro's Russian quality in the run is higher. The idea "keep persona text on pro and routine on flash"
+is economically almost free. An alternative for those who specifically care about Russian is to keep
+one Western model (GPT/Gemini/Claude) only for the final text, and DeepSeek for the tools.
 
-### 5. Двухпроходность, если хочется выжать больше
+### 5. Two-pass, if you want to squeeze out more
 
-Черновик — flash, правка — модель сильнее и с инструкцией «убери кальки, проверь падежи».
-Дороже в два раза на каждой реплике, поэтому только для длинных ответов, где калька заметнее.
+Draft — flash, edit — a stronger model with the instruction «убери кальки, проверь падежи» [remove the calques, check the cases].
+Twice as expensive per reply, so only for long answers where the calque is more noticeable.
 
-### Что, наоборот, не поможет
+### What, conversely, will not help
 
-- **Понижение температуры само по себе.** t=0.6 не дал качественного скачка, t=1.3 дал явный
-  регресс. Крутить температуру — не замена правке промпта и выбору модели.
-- **Просьба «думать по-русски».** Размышление всё равно уходит в английский, а видимый текст
-  от этого не выигрывает — выигрывает от запрета калек и от проверки перед отправкой.
-- **Дообучение/LoRA под стиль Икара.** Дорого, долго и лечит не ту болезнь: у модели дефицит
-  русской идиоматики, а не знаний о характере.
+- **Lowering the temperature by itself.** t=0.6 gave no qualitative leap, t=1.3 gave a clear
+  regression. Turning the temperature knob is no substitute for editing the prompt and choosing the model.
+- **Asking it to «думать по-русски» [think in Russian].** Reasoning goes into English anyway, and the visible text
+  does not benefit from it — it benefits from banning calques and from checking before sending.
+- **Fine-tuning/LoRA for Icarus's style.** Expensive, slow, and it treats the wrong disease: the model has a deficit
+  of Russian idiom, not of knowledge about the character.
 
-## Артефакты прогона
+## Run artifacts
 
-- `tools/persona-flywheel/probe-ru.mjs` — сам пробник, гоняется `node probe-ru.mjs [flash|pro]`.
-- `tools/persona-flywheel/lib/api.mjs` — добавлен необязательный `extra` в `chat()`
-  (нужен для `thinking: {type}`); поведение по умолчанию не изменилось.
-- `tools/persona-flywheel/logs/ru-probe-2026-09-201405/` — прогон с мышлением (обрывы).
-- `tools/persona-flywheel/logs/ru-probe-2026-09-201407/` — боевой режим, пять вариантов.
+- `tools/persona-flywheel/probe-ru.mjs` — the probe itself, run as `node probe-ru.mjs [flash|pro]`.
+- `tools/persona-flywheel/lib/api.mjs` — an optional `extra` was added to `chat()`
+  (needed for `thinking: {type}`); the default behavior did not change.
+- `tools/persona-flywheel/logs/ru-probe-2026-09-201405/` — the run with thinking (cutoffs).
+- `tools/persona-flywheel/logs/ru-probe-2026-09-201407/` — production mode, five variants.
 
-## Китайское слово в русской фразе (08.11.2026)
+## A Chinese word in a Russian phrase (08.11.2026)
 
-Повод — приветствие в панели: «Воскресенье, день —理论上 время для подвигов, а на деле
-для дивана». Это не перевод и не калька: китайское 理论上 («теоретически») встало на место
-русского слова, а само предложение осталось русским.
+The occasion — a greeting in the panel: «Воскресенье, день —理论上 время для подвигов, а на деле
+для дивана» [Sunday, a day — 理论上 [theoretically] a time for feats, but in reality for the couch]. This is neither a translation nor a calque: the Chinese 理论上 ("theoretically") took the place of
+a Russian word, while the sentence itself remained Russian.
 
-**Откуда.** Тот же корень, что у калек, только глубже: у DeepSeek китайский — родной, и
-когда готового русского слова под рукой нет, подставляется китайское. Это не память и не
-промпт: в персоне, AGENTS.md, памяти и логах сервиса китайского нет — проверено `grep` по
-диапазонам CJK. И не сбой кода: текст приходит от модели как есть.
-Мышление ни при чём — реплика из fast-тира (`deepseek-v4-flash`), где оно выключено.
+**Where it comes from.** The same root as the calques, only deeper: for DeepSeek Chinese is native, and
+when there is no ready Russian word at hand, a Chinese one is substituted. It is not memory and not the
+prompt: there is no Chinese in the persona, AGENTS.md, memory or the service logs — verified with `grep` over
+CJK ranges. Nor is it a code bug: the text comes from the model as is.
+Thinking is irrelevant — the reply is from the fast tier (`deepseek-v4-flash`), where it is off.
 
-**Что сделано.** Запрет добавлен в два места, где модель его точно увидит: строка у
-реплики (`language.ts`, `languageOverride`) и раздел «Язык» персоны (`icarus.md`).
-Прямая просьба («переведи на китайский») остаётся исключением — оно описано в разделе
-«Язык» AGENTS.md, и об этом же говорит хвост «кроме прямой просьбы» у реплики.
+**What was done.** The ban was added in two places where the model will definitely see it: a line on the
+reply (`language.ts`, `languageOverride`) and the persona's «Язык» [Language] section (`icarus.md`).
+A direct request («переведи на китайский» [translate into Chinese]) remains an exception — it is described in the
+«Язык» section of AGENTS.md, and the same is said by the tail «кроме прямой просьбы» [except for a direct request] on the reply.
 
-**Гарантии нет.** Промпт снижает вероятность, но не отменяет сэмплинг. Жёсткий вариант —
-второй проход (переписать реплику моделью, которая китайского не знает) или фильтр по
-диапазонам CJK на выходе: оба стоят задержки на каждой реплике и бьют по легальному
-переводу, поэтому включать их стоит только если проскок повторяется.
+**There is no guarantee.** The prompt lowers the probability but does not cancel sampling. The hard option —
+a second pass (rewriting the reply with a model that does not know Chinese) or a filter over
+CJK ranges on the output: both cost latency on every reply and hurt legitimate
+translation, so they are worth enabling only if the leak repeats.
 
-## Открытые вопросы
+## Open questions
 
-- Сценарий с плотной идиоматикой и «умным» содержанием (право, политика) в стенде не выделен —
-  а именно там калька вылезает. Похоже, стоит завести probe-сценарий вроде «юридический совет».
-- Не проверено, как ведёт себя эскалация в сервисе: если `deepseek-ai/DeepSeek-V4.1-Flash:medium` реально
-  обрезает ответ, это ловится только на живом контейнере, а не на стенде.
+- A scenario with dense idiom and "smart" content (law, politics) is not set apart in the bench —
+  and that is precisely where the calque crawls out. It seems worth adding a probe scenario like "legal advice".
+- It has not been checked how escalation behaves in the service: if `deepseek-ai/DeepSeek-V4.1-Flash:medium` actually
+  truncates the answer, that is caught only on a live container, not on the bench.

@@ -1,8 +1,8 @@
-// Раздел «Ключи»: правит только админ, значения не уезжают в браузер, а сохранённый
-// ключ сразу доезжает до auth.json людей и следующей сессии pi.
+// The "Keys" section: only an admin edits it, values do not reach the browser, and a saved
+// key immediately reaches people's auth.json and the next pi session.
 //
-// Тест ходит через настоящий HTTP-сервер панели: права проверяются там же, где их
-// проверит прод, а не во внутренней функции, которую другой маршрут может обойти.
+// The test goes through the panel's real HTTP server: permissions are checked in the same place
+// where prod will check them, not in an internal function that another route might bypass.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -43,7 +43,7 @@ type Sandbox = {
   close: () => void;
 };
 
-/** Конфиг с админом и обычным человеком, временные .env и keys.json. */
+/** Config with an admin and an ordinary person, temporary .env and keys.json. */
 async function withServer(
   run: (box: Sandbox) => Promise<void>,
   options: { envText?: string } = {},
@@ -102,7 +102,7 @@ const save = (box: Sandbox, user: string, body: Record<string, unknown>) =>
     body: JSON.stringify(body),
   });
 
-test('.env правится построчно: комментарии и чужие ключи остаются', () => {
+test('.env is edited line by line: comments and other keys remain', () => {
   const text = '# Ключи\nDEEPINFRA_API_KEY=old\n\n# Поиск\nTAVILY_API_KEY=tvly-1\n';
   const updated = editEnvText(text, 'DEEPINFRA_API_KEY', 'new');
   assert.match(updated, /# Ключи/);
@@ -111,22 +111,22 @@ test('.env правится построчно: комментарии и чуж
   assert.match(updated, /^TAVILY_API_KEY=tvly-1$/m);
   assert.equal(parseEnv(updated).DEEPINFRA_API_KEY, 'new');
 
-  // Значение с пробелами, решёткой и обратным слэшем обязано пережить круг через
-  // файл: parseEnv не разэкранирует двойные кавычки, поэтому выбираем кавычки по
-  // содержимому, а не всегда JSON.
+  // A value with spaces, a hash and a backslash must survive a round trip through the
+  // file: parseEnv does not unescape double quotes, so we pick quotes by
+  // content rather than always JSON.
   for (const tricky of ['sk-with space#hash', 'sk\\with\\slash', 'sk"quote', "sk'quote"]) {
     const quoted = editEnvText('', 'OPENAI_API_KEY', tricky);
     assert.equal(parseEnv(quoted).OPENAI_API_KEY, tricky, `значение «${tricky}» пережило .env`);
   }
   assert.equal(envLine('A', 'plain-value_1'), 'A=plain-value_1');
 
-  // Удаление убирает строку и повторы, а не оставляет «пустое значение».
+  // Removal deletes the line and duplicates rather than leaving an "empty value".
   const removed = editEnvText('A=1\nB=2\nA=3\nC=4\n', 'A', null);
   assert.equal(removed, 'B=2\nC=4\n');
   assert.equal(editEnvText(text, 'NO_SUCH_KEY', null), text);
 });
 
-test('настройки панели сильнее .env, а убранный ключ гасится', () => {
+test('panel settings win over .env, and a removed key is extinguished', () => {
   const fileVars = { DEEPINFRA_API_KEY: 'from-env', TAVILY_API_KEY: 'tvly' };
   const store: KeysStore = {
     version: 1,
@@ -136,7 +136,7 @@ test('настройки панели сильнее .env, а убранный �
   assert.deepEqual(effectiveSecrets(fileVars, store), { DEEPINFRA_API_KEY: 'from-panel' });
 });
 
-test('перед сборкой стека .env приводится к настройкам панели', () => {
+test('before the stack is built, .env is brought in line with the panel settings', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-sync-'));
   const file = path.join(dir, '.env');
   fs.writeFileSync(file, '# комментарий\nDEEPINFRA_API_KEY=deploy-secret\nTAVILY_API_KEY=tvly\n');
@@ -157,7 +157,7 @@ test('перед сборкой стека .env приводится к наст
   assert.equal(fs.statSync(file).mode & 0o777, 0o600, 'права на файл с секретами — 600');
 });
 
-test('неадмину раздела «Ключи» нет ни страницей, ни API, ни в списке разделов', async () => {
+test('a non-admin has no "Keys" section: neither page, nor API, nor in the section list', async () => {
   await withServer(async (box) => {
     const adminPage = await page(box, ADMIN);
     assert.equal(adminPage.status, 200);
@@ -181,11 +181,11 @@ test('неадмину раздела «Ключи» нет ни страниц�
     };
     assert.equal(adminState.sections.some((section) => section.id === 'keys'), true, 'админу раздел виден');
 
-    // В чате один вход в настройки: списка разделов там нет ни у админа, ни у остальных.
+    // In chat there is a single entry to settings: there is no section list there for the admin or anyone else.
     const chatAdmin = await (await fetch(`${box.base}/panel/chat`, { headers: headers(ADMIN) })).text();
     assert.match(chatAdmin, /href="\/panel\/memory"[^>]*><span>Настройки<\/span>/);
     assert.doesNotMatch(chatAdmin, /href="\/panel\/keys"/);
-    // А в меню настроек «Ключи» видит только админ.
+    // And in the settings menu only the admin sees "Keys".
     assert.match(
       await (await fetch(`${box.base}/panel/memory`, { headers: headers(ADMIN) })).text(),
       /href="\/panel\/keys"/,
@@ -197,7 +197,7 @@ test('неадмину раздела «Ключи» нет ни страниц�
   });
 });
 
-test('админ задаёт ключ: он уезжает в .env и keys.json, а auth.json людей обновляется', async () => {
+test('the admin sets a key: it lands in .env and keys.json, and people\'s auth.json is updated', async () => {
   await withServer(
     async (box) => {
       const response = await save(box, ADMIN, { name: 'DEEPINFRA_API_KEY', value: 'sk-new' });
@@ -206,14 +206,14 @@ test('админ задаёт ключ: он уезжает в .env и keys.json
       assert.match(body.message, /сохранён/);
       assert.equal(body.keys.find((key) => key.name === 'DEEPINFRA_API_KEY')?.present, true);
 
-      // Секрет не вернулся в браузер: только подсказка из хвоста.
+      // The secret did not return to the browser: only a hint from the tail.
       assert.doesNotMatch(JSON.stringify(body), /sk-new/);
       assert.match(JSON.stringify(body), /••••••••/);
 
       assert.equal(parseEnv(fs.readFileSync(box.envFile, 'utf8')).DEEPINFRA_API_KEY, 'sk-new');
       assert.equal(readKeysStore(box.keysFile).values.DEEPINFRA_API_KEY, 'sk-new');
 
-      // Живой конфиг перечитан: ключ уже в auth, значит следующий ход pi его увидит.
+      // The live config is re-read: the key is already in auth, so the next pi turn will see it.
       assert.equal(box.config.auth.deepinfra, 'sk-new');
       assert.equal(box.config.secretEnv?.DEEPINFRA_API_KEY, 'sk-new');
 
@@ -229,7 +229,7 @@ test('админ задаёт ключ: он уезжает в .env и keys.json
   );
 });
 
-test('убрать ключ — значит именно убрать: .env не возвращает его, а pi получает пусто', async () => {
+test('removing a key means actually removing it: .env does not bring it back, and pi gets empty', async () => {
   await withServer(
     async (box) => {
       fs.writeFileSync(box.envFile, 'DEEPINFRA_API_KEY=sk-old\nTAVILY_API_KEY=tvly\n');
@@ -240,8 +240,8 @@ test('убрать ключ — значит именно убрать: .env н�
       const store = readKeysStore(box.keysFile);
       assert.deepEqual(store.removed, ['DEEPINFRA_API_KEY']);
       assert.equal('DEEPINFRA_API_KEY' in box.config.auth, false);
-      // Именно пустая строка: иначе процесс pi унаследовал бы старое значение
-      // из окружения контейнера, созданного по прежнему .env.
+      // An empty string specifically: otherwise the pi process would inherit the old value
+      // from the container environment created from the previous .env.
       assert.equal(box.config.secretEnv?.DEEPINFRA_API_KEY, '');
       assert.equal(box.config.secretEnv?.TAVILY_API_KEY, 'tvly', 'остальные ключи не задеты');
     },
@@ -249,7 +249,7 @@ test('убрать ключ — значит именно убрать: .env н�
   );
 });
 
-test('«Перечитать» подхватывает .env, поправленный руками', async () => {
+test('"Reload" picks up a hand-edited .env', async () => {
   await withServer(async (box) => {
     fs.writeFileSync(box.envFile, 'TAVILY_API_KEY=tvly-manual\n');
     const response = await save(box, ADMIN, { action: 'reload' });
@@ -262,7 +262,7 @@ test('«Перечитать» подхватывает .env, поправлен
   });
 });
 
-test('плохое имя ключа и неподходящее значение — отказ, а не запись', async () => {
+test('a bad key name and an unsuitable value — rejection rather than a write', async () => {
   await withServer(async (box) => {
     for (const name of ['deepinfra_api_key', '../.env', 'A-B', '']) {
       const response = await save(box, ADMIN, { name, value: 'x' });
@@ -275,7 +275,7 @@ test('плохое имя ключа и неподходящее значени�
   });
 });
 
-test('страница «Ключи» и её скрипт компилируются', async () => {
+test('the "Keys" page and its script compile', async () => {
   await withServer(async (box) => {
     const html = await (await page(box, ADMIN)).text();
     const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
@@ -288,7 +288,7 @@ test('страница «Ключи» и её скрипт компилирую�
   });
 });
 
-test('смена ключа поисковика снимает карантин: человек мог починить именно это', async () => {
+test('changing a search key lifts the quarantine: the person may have fixed exactly that', async () => {
   await withServer(async (box) => {
     const file = stateFile(box.config);
     await mutateRouterState(file, (state) => {

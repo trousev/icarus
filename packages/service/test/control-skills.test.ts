@@ -1,10 +1,10 @@
-// Скиллы: панель пишет SKILL.md, а читает его pi.
+// Skills: the panel writes SKILL.md, and pi reads it.
 //
-// Тест держит именно этот стык, а не внутренности панели: раскладку каталога,
-// формат frontmatter и проверки путей. Скилл, который pi не увидит или прочитает
-// не так, — это скилл, которого у Икара нет, даже если в панели он выглядит целым.
-// Поэтому «сохранили и проверили» здесь значит «сохранили и скормили pi его же
-// загрузчику скиллов» (loadSkillsFromDir из @earendil-works/pi-coding-agent).
+// The test holds exactly this seam, not the panel internals: the directory layout,
+// the frontmatter format and the path checks. A skill that pi won't see or will read
+// incorrectly is a skill Icarus doesn't have, even if it looks intact in the panel.
+// That's why "saved and verified" here means "saved and fed to pi's own skill
+// loader" (loadSkillsFromDir from @earendil-works/pi-coding-agent).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -20,12 +20,12 @@ import {
   writeSkill,
 } from '../src/control/skills.ts';
 
-/** Пустой каталог скиллов: дальше его наполняет тест. */
+/** Empty skills directory: the test fills it later. */
 function tempRoot(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-skills-'));
 }
 
-/** Что видит pi в каталоге: имена загруженных скиллов и его же диагностика. */
+/** What pi sees in the directory: names of loaded skills and its own diagnostics. */
 function piSees(root: string) {
   const result = loadSkillsFromDir({ dir: root, source: 'user' });
   return { names: result.skills.map((skill) => skill.name), skills: result.skills, diagnostics: result.diagnostics };
@@ -39,7 +39,7 @@ function seed(root: string, files: Record<string, string>): void {
   }
 }
 
-test('сохранённый скилл видит сам pi: имя, описание и путь', () => {
+test('a saved skill is seen by pi itself: name, description and path', () => {
   const root = tempRoot();
   const result = writeSkill(root, {
     name: 'pirate-mode',
@@ -57,7 +57,7 @@ test('сохранённый скилл видит сам pi: имя, описа
   assert.deepEqual(seen.diagnostics, [], 'pi не должен ругаться на наш файл');
 });
 
-test('описание с двоеточием, кавычками и тире доезжает до pi дословно', () => {
+test('a description with a colon, quotes and a dash reaches pi verbatim', () => {
   const root = tempRoot();
   const description = 'Use when: «пират» — то есть всегда, если речь о "морском" стиле';
   writeSkill(root, { name: 'pirate-mode', description, body: 'Рычи.' });
@@ -66,7 +66,7 @@ test('описание с двоеточием, кавычками и тире �
   assert.equal(skill.description, description, 'YAML не должен переписать описание своими правилами');
 });
 
-test('без описания и с именем не по правилам панель не сохраняет', () => {
+test('the panel does not save without a description or with a name that breaks the rules', () => {
   const root = tempRoot();
   assert.equal(writeSkill(root, { name: 'pirate-mode', description: '   ', body: 'x' }).ok, false);
   assert.equal(writeSkill(root, { name: 'Pirate Mode', description: 'ок', body: 'x' }).ok, false);
@@ -76,7 +76,7 @@ test('без описания и с именем не по правилам па
   assert.deepEqual(listSkills(root), [], 'после отказов каталог остаётся пустым');
 });
 
-test('чужой frontmatter панель не теряет, а своё переписывает', () => {
+test('the panel does not lose foreign frontmatter but rewrites its own', () => {
   const root = tempRoot();
   seed(root, {
     'notes/SKILL.md': [
@@ -111,7 +111,7 @@ test('чужой frontmatter панель не теряет, а своё пер�
   assert.match(readSkill(root, 'notes/SKILL.md')?.body ?? '', /новое тело/);
 });
 
-test('переименование переезжает каталогом — вместе с файлами бандла', () => {
+test('renaming moves the whole directory — together with the bundle files', () => {
   const root = tempRoot();
   writeSkill(root, { name: 'pirate-mode', description: 'ок', body: 'тело' });
   seed(root, { 'pirate-mode/scripts/run.sh': '#!/bin/sh\necho йо-хо-хо\n' });
@@ -132,7 +132,7 @@ test('переименование переезжает каталогом — �
   assert.deepEqual(piSees(root).names, ['sea-wolf']);
 });
 
-test('скилл с полки переименовывается на своей полке, а не переезжает в корень', () => {
+test('a skill on a shelf is renamed on its own shelf, not moved to the root', () => {
   const root = tempRoot();
   seed(root, { 'sea/pirate-mode/SKILL.md': '---\nname: pirate-mode\ndescription: ок\n---\n\nтело\n' });
 
@@ -146,7 +146,7 @@ test('скилл с полки переименовывается на свое�
   assert.deepEqual(piSees(root).names, ['sea-wolf']);
 });
 
-test('за пределы каталога скиллов панель не выпускает', () => {
+test('the panel does not let anything outside the skills directory', () => {
   const root = tempRoot();
   seed(root, { 'outside.md': '---\ndescription: чужое\n---\n' });
   const evil = path.join(root, '..', 'evil.md');
@@ -159,13 +159,13 @@ test('за пределы каталога скиллов панель не вы
   assert.equal(removeSkill(root, '../evil.md').ok, false);
   assert.equal(fs.existsSync(evil), true, 'чужой файл на месте');
 
-  // Имя скилла — это ещё и имя каталога, поэтому слэши и точки в нём отсекает
-  // проверка имени, а не только проверка пути.
+  // A skill name is also a directory name, so slashes and dots in it are cut off
+  // by the name check, not only by the path check.
   assert.equal(writeSkill(root, { name: '../evil', description: 'ок', body: 'x' }).ok, false);
   assert.equal(writeSkill(root, { name: 'sub/evil', description: 'ок', body: 'x' }).ok, false);
 });
 
-test('имя занято — панель отказывает, а не переписывает чужой скилл', () => {
+test('the name is taken — the panel refuses instead of overwriting a foreign skill', () => {
   const root = tempRoot();
   writeSkill(root, { name: 'pirate-mode', description: 'первое', body: 'x' });
   const second = writeSkill(root, { name: 'pirate-mode', description: 'второе', body: 'y' });
@@ -174,7 +174,7 @@ test('имя занято — панель отказывает, а не пер�
   assert.equal(listSkills(root)[0].description, 'первое', 'первый скилл не тронут');
 });
 
-test('удаление сносит скилл с бандлом, но не каталог скиллов', () => {
+test('deletion removes the skill with its bundle but not the skills directory', () => {
   const root = tempRoot();
   writeSkill(root, { name: 'pirate-mode', description: 'ок', body: 'x' });
   seed(root, { 'pirate-mode/scripts/run.sh': '#!/bin/sh\n' });
@@ -187,7 +187,7 @@ test('удаление сносит скилл с бандлом, но не ка
   assert.equal(removeSkill(root, 'pirate-mode/SKILL.md').ok, false, 'второй раз удалять нечего');
 });
 
-test('плоский .md в корне панель тоже правит: pi берёт и такие скиллы', () => {
+test('the panel also edits a flat .md in the root: pi accepts such skills too', () => {
   const root = tempRoot();
   seed(root, { 'sea-wolf.md': '---\nname: loose-note\ndescription: плоский скилл\n---\n\nтело\n' });
 
@@ -200,7 +200,7 @@ test('плоский .md в корне панель тоже правит: pi б
   assert.deepEqual(piSees(root).skills.map((skill) => skill.description), ['новое']);
 });
 
-test('скилл без описания в списке виден, но помечен: pi его пропустит', () => {
+test('a skill without a description is visible in the list but flagged: pi will skip it', () => {
   const root = tempRoot();
   seed(root, { 'half-done.md': '---\nname: half-done\n---\n\nбез описания\n' });
 
@@ -210,7 +210,7 @@ test('скилл без описания в списке виден, но пом
   assert.deepEqual(piSees(root).names, [], 'pi такой файл скиллом не считает');
 });
 
-test('скрытый от модели скилл pi видит, но в каталог промпта не кладёт', () => {
+test('pi sees a skill hidden from the model but does not put it in the prompt catalog', () => {
   const root = tempRoot();
   writeSkill(root, { name: 'secret-handshake', description: 'ок', body: 'x', hidden: true });
 
@@ -219,7 +219,7 @@ test('скрытый от модели скилл pi видит, но в кат�
   assert.equal(listSkills(root)[0].hidden, true);
 });
 
-test('поиск ищет по файлу скилла и возвращает сам скилл, а не путь', () => {
+test('search scans the skill file and returns the skill itself, not the path', () => {
   const root = tempRoot();
   writeSkill(root, { name: 'pirate-mode', description: 'ок', body: '# Как рычать\n\nГовори «йо-хо-хо».\n' });
   writeSkill(root, { name: 'sailor-talk', description: 'ок', body: 'Ничего морского.\n' });
@@ -233,7 +233,7 @@ test('поиск ищет по файлу скилла и возвращает �
   assert.deepEqual(searchSkills(root, 'й'), [], 'слишком короткий запрос не ищем');
 });
 
-test('подпись скилла для коммита — имя, а не путь файла', () => {
+test('the skill label for a commit is the name, not the file path', () => {
   assert.equal(skillLabel('pirate-mode/SKILL.md'), 'pirate-mode');
   assert.equal(skillLabel('sea-wolf.md'), 'sea-wolf');
   assert.equal(skillLabel('SKILL.md'), 'SKILL.md', 'у корневого файла имени нет — остаётся имя файла');

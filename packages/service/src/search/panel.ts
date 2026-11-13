@@ -1,8 +1,8 @@
-// Что панель знает о поиске: кто текущий, кто в карантине, у кого сломан ключ.
+// What the panel knows about search: who's current, who's quarantined, whose key is broken.
 //
-// Отдельный слой нужен, чтобы страница «Ключи» не собирала состояние по кусочкам:
-// она получает готовый список, а кнопка «Проверить» дергает провайдера напрямую и
-// снимает карантин только если тот действительно ответил.
+// A separate layer is needed so that the «Ключи» page doesn't assemble state piecemeal:
+// it gets a ready list, and the «Проверить» button pokes the provider directly and lifts
+// the quarantine only if it actually responded.
 import type { IcarusConfig } from '../config.ts';
 import { FETCH_PROVIDERS, FETCH_RATING } from './fetch-providers.ts';
 import { FETCH_ATTEMPT_TIMEOUT_MS, configuredFetchProviders } from './fetch-router.ts';
@@ -32,16 +32,16 @@ import { usageReport, type UsageCount } from './usage.ts';
 export type SearchProviderStatus = {
   id: ProviderId;
   label: string;
-  /** Первое имя переменной — то, что человек ищет глазами в списке ключей. */
+  /** The first variable name — the thing the person scans for in the key list. */
   keyName: string;
-  /** Ключ этому провайдеру не нужен: он доступен всегда. */
+    /** This provider doesn't need a key: it's always available. */
   keyless: boolean;
   /**
-   * Ключа нет, но он и не нужен: тот же поиск уже работает через провайдера
-   * без ключа (You.com MCP). Панель показывает это вместо «нет ключа».
+   * There's no key, but none is needed: the same search already works via a keyless
+   * provider (You.com MCP). The panel shows this instead of «нет ключа».
    */
   optional: boolean;
-  /** Пояснение под названием: чем провайдер хорош и чего не умеет. */
+  /** A note under the name: what the provider is good at and what it can't do. */
   note: string | null;
   present: boolean;
   current: boolean;
@@ -51,20 +51,20 @@ export type SearchProviderStatus = {
   fails: number;
   lastError: string | null;
   lastErrorAt: string | null;
-  /** Успехи и отказы ключа за окно статистики: панель показывает сумму. */
+  /** Key successes and failures over the stats window: the panel shows the sum. */
   usage: UsageCount;
 };
 
 export type SearchStatus = {
-  /** Поиск. */
+  /** Search. */
   current: ProviderId | null;
   providers: SearchProviderStatus[];
-  /** Извлечение страниц: свой текущий и свой набор провайдеров. */
+  /** Page extraction: its own current one and its own set of providers. */
   fetch: {
     current: ProviderId | null;
     providers: SearchProviderStatus[];
   };
-  /** Окно статистики: семь дней, включая сегодняшний (по UTC). */
+  /** Stats window: seven days, including today (in UTC). */
   usage: { days: number; since: string; through: string };
 };
 
@@ -77,7 +77,7 @@ type RowProvider = {
   requires?: string[];
 };
 
-/** Что показать под названием: у бесплатного провайдера — его лимит и пределы. */
+/** What to show under the name: for a free provider, its limit and bounds. */
 const KEYLESS_NOTE = '100 поисков в сутки без регистрации; страницы читать не умеет.';
 const OPTIONAL_NOTE = 'Ключа нет, и он не нужен: поиск идёт через бесплатный MCP. Ключ даёт больше квоты и чтение страниц.';
 
@@ -119,13 +119,13 @@ function rows(
     });
 }
 
-/** Состояние для панели. Ключи не отдаём даже частично — только «задан/нет». */
+/** State for the panel. We don't hand out keys even partially — only "set/not set". */
 export function searchStatus(config: IcarusConfig, now: number = Date.now()): SearchStatus {
   const state = readRouterState(stateFile(config));
   const usage = usageReport(config, now);
   return {
     current: state.current,
-    // Рейтинг — порядок, в котором роутер пробует провайдеров: в панели он же.
+    // The rating is the order in which the router tries providers: the same in the panel.
     providers: rows(config, RATING, PROVIDERS, state.current, state.providers, usage.search, now),
     fetch: {
       current: state.fetch?.current ?? null,
@@ -143,10 +143,10 @@ export function searchStatus(config: IcarusConfig, now: number = Date.now()): Se
   };
 }
 
-/** Провайдер по имени переменной окружения: правка ключа снимает карантин. */
+/** A provider by environment variable name: editing a key lifts the quarantine. */
 export function providerForKey(name: string): ProviderId | null {
-  // Ключи поиска и извлечения пересекаются, а у Cloudflare ещё и account id:
-  // правка любого из них должна снимать карантин с провайдера.
+  // Search and extraction keys overlap, and Cloudflare also has an account id: editing
+  // any of them must lift the provider's quarantine.
   for (const provider of [...Object.values(PROVIDERS), ...Object.values(FETCH_PROVIDERS)]) {
     if (provider.keyNames.includes(name)) return provider.id;
     if ('requires' in provider && provider.requires?.includes(name)) return provider.id;
@@ -154,10 +154,10 @@ export function providerForKey(name: string): ProviderId | null {
   return null;
 }
 
-/** Снять карантин и флаг «сломан»: ключ сменили или панель проверила вручную. */
+/** Lift the quarantine and the "broken" flag: the key was changed or the panel checked manually. */
 export async function clearProviderState(config: IcarusConfig, id: ProviderId): Promise<void> {
   await mutateRouterState(stateFile(config), (state) => {
-    // Ключ один на обе возможности: починили — снимаем карантин везде.
+    // One key serves both capabilities: once fixed, we lift the quarantine everywhere.
     applySuccess(state, id, 'search');
     applySuccess(state, id, 'fetch');
   });
@@ -172,11 +172,11 @@ export type CheckResult = {
 };
 
 /**
- * Проверка из панели: настоящий поиск, а не «пинг эндпоинта».
+ * A check from the panel: a real search, not an "endpoint ping".
  *
- * Успех снимает карантин и флаг, отказ — наоборот, ставит (и панель честно
- * покажет, что именно ответил провайдер). Ключ берём из свежего secretEnv:
- * человек мог только что сохранить новый.
+ * Success lifts the quarantine and the flag; failure, conversely, sets them (and the
+ * panel will honestly show exactly what the provider answered). We take the key from a
+ * fresh secretEnv: the person may have just saved a new one.
  */
 export async function checkProvider(
   config: IcarusConfig,
@@ -221,15 +221,15 @@ export type FetchCheckResult = {
   ok: boolean;
   provider: ProviderId;
   ms: number;
-  /** Сколько знаков пришло: видно, что страница реально прочиталась. */
+  /** How many characters came: it's visible that the page was actually read. */
   chars: number;
   error: string | null;
 };
 
 /**
- * Проверка извлечения: тянем example.com через выбранного провайдера.
- * Успех снимает карантин; отказ страницы не банит (это свойство URL), а
- * транспортный или денежный — банит, как обычный запрос.
+ * An extraction check: we pull example.com through the selected provider.
+ * Success lifts the quarantine; a page failure doesn't ban (that's a property of the URL),
+ * while a transport or money failure bans, like a regular request.
  */
 export async function checkFetchProvider(
   config: IcarusConfig,
@@ -277,7 +277,7 @@ export async function checkFetchProvider(
   }
 }
 
-/** Для роутов панели: «это правда id провайдера?». */
+/** For panel routes: "is this really a provider id?". */
 export function asProviderId(value: string): ProviderId | null {
   return isProviderId(value) ? value : null;
 }

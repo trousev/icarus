@@ -1,9 +1,9 @@
-// Панель управления: записи памяти и история файла.
+// Control panel: memory entries and file history.
 //
-// Запись — это строка-пункт, у которой есть номер в файле (по нему её удаляют) и
-// дата коммита, который её тронул (её показывает панель). Заголовки и текст
-// записями не считаются: галочки у них нет, и удалять их нельзя — вместе с
-// заголовком уехал бы весь раздел.
+// An entry is a bullet line that has a number in the file (used to delete it) and
+// the date of the commit that touched it (shown by the panel). Headings and text
+// are not considered entries: they have no checkbox, and they cannot be deleted — together with
+// a heading the whole section would go.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -23,7 +23,7 @@ function tempRepo(files: Record<string, string>): string {
   return root;
 }
 
-/** Коммит с заданной датой: иначе даты записей в тесте зависели бы от часов машины. */
+/** A commit with a given date: otherwise entry dates in the test would depend on the machine clock. */
 function commitAt(root: string, when: string, message: string): void {
   execFileSync('git', ['-C', root, 'add', '-A']);
   execFileSync('git', ['-C', root, 'commit', '-q', '-m', message], {
@@ -31,7 +31,7 @@ function commitAt(root: string, when: string, message: string): void {
   });
 }
 
-test('файл разбирается на записи: заголовки и текст — не записи', () => {
+test('the file is parsed into entries: headings and text are not entries', () => {
   const content = ['# Предпочтения', '', '- Кофе без сахара', '- Тишина после 23:00', '', 'Просто строка'].join('\n');
   const { entries, total } = parseEntries(content);
 
@@ -47,17 +47,17 @@ test('файл разбирается на записи: заголовки и �
   );
   assert.equal(total, 2, 'всего записей с галочкой — две');
 
-  // Заголовок второй раз не съедается, а хвостовой перевод строки не добавляет запись.
+  // The heading is not consumed a second time, and a trailing newline does not add an entry.
   assert.equal(parseEntries('- одна\n').entries.length, 1);
   assert.deepEqual(parseEntries('').entries, []);
 });
 
-test('даты записей берутся из git: у новой строки — свежий коммит', async () => {
+test('entry dates come from git: a new line gets a fresh commit', async () => {
   const root = tempRepo({ 'identity.md': '- Живёт в Москве\n- Кофе без сахара\n' });
   await ensureRepo(root);
   commitAt(root, '2026-02-08T10:00:00+03:00', 'memory: первый разбор');
 
-  // Строку поправили позже: дата обязана стать новой именно у неё.
+  // The line was edited later: its date must become the new one.
   fs.writeFileSync(path.join(root, 'identity.md'), '- Живёт в Порту\n- Кофе без сахара\n- Тишина после 23:00\n');
   commitAt(root, '2026-03-02T09:00:00+03:00', 'memory: второй разбор');
 
@@ -71,11 +71,11 @@ test('даты записей берутся из git: у новой строк�
     ['2026-03-02', '2026-02-08', '2026-03-02'],
   );
 
-  // Файла нет в истории — дат нет, и врать нулевой датой панель не должна.
+  // The file is not in history — there are no dates, and the panel must not lie with a zero date.
   assert.deepEqual(await blameLines(root, 'нет-такого.md'), []);
 });
 
-test('записи отдаются порциями, а всего записей — правда', async () => {
+test('entries are served in pages, and the total count is the truth', async () => {
   const many = Array.from({ length: ENTRIES_LIMIT + 20 }, (_, index) => `- запись ${index + 1}`).join('\n');
   const root = tempRepo({ 'journal.md': `${many}\n` });
   await ensureRepo(root);
@@ -86,10 +86,10 @@ test('записи отдаются порциями, а всего записе
   assert.equal(data.capped, true, 'в панели надо сказать, что показано не всё');
 });
 
-test('пачка строк убирается одним заходом, чужие номера отменяют всё', () => {
+test('a batch of lines is removed in one pass, foreign numbers cancel everything', () => {
   const root = tempRepo({ 'preferences.md': '# Предпочтения\n- Кофе без сахара\n- Тишина после 23:00\n- Не будить до 09:00\n' });
 
-  // Один номер промахнулся — не удаляем ничего: половина пачки хуже, чем ничего.
+  // One number missed — we delete nothing: half a batch is worse than nothing.
   const refused = removeLines(root, 'preferences.md', [2, 9]);
   assert.equal(refused.ok, false);
   assert.match(String(fs.readFileSync(path.join(root, 'preferences.md'))), /Кофе без сахара/, 'файл не тронут');
@@ -108,7 +108,7 @@ test('пачка строк убирается одним заходом, чуж
   );
 });
 
-test('история файла: коммиты с числом добавленных и убранных строк', async () => {
+test('file history: commits with the number of added and removed lines', async () => {
   const root = tempRepo({ 'identity.md': '- Живёт в Москве\n' });
   await ensureRepo(root);
   commitAt(root, '2026-02-08T10:00:00+03:00', 'memory: первый разбор');
@@ -116,8 +116,8 @@ test('история файла: коммиты с числом добавлен
   fs.writeFileSync(path.join(root, 'identity.md'), '- Живёт в Порту\n- Кофе без сахара\n');
   commitAt(root, '2026-03-02T09:00:00+03:00', 'memory: второй разбор');
 
-  // Чужой файл в историю файла не попадает: в панели рядом с записями важно, что
-  // случилось именно с ними.
+  // A foreign file does not get into the file history: in the panel, next to the entries, what matters
+  // is what happened to them.
   fs.writeFileSync(path.join(root, 'other.md'), '- Что-то ещё\n');
   commitAt(root, '2026-03-03T09:00:00+03:00', 'memory: другой файл');
 

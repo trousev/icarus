@@ -1,9 +1,9 @@
-// Субагенты: очередь, запрет вложенности, запуск ребёнка и отчёт родителю.
+// Subagents: the queue, the nesting ban, launching a child and the report to the parent.
 //
-// Тесты не ходят в модель: вместо pi на PATH подставляется поддельный скрипт
-// (ICARUS_SUBAGENT_PI), который пишет в журнал свои аргументы, окружение и время
-// старта. Так видно и то, что ребёнку не выдали лишнего, и то, что очередь держит
-// параллельность.
+// The tests don't hit the model: instead of pi, a fake script is substituted on PATH
+// (ICARUS_SUBAGENT_PI) that logs its arguments, environment and start time.
+// This shows both that the child wasn't given anything extra and that the queue keeps
+// parallelism in check.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -42,7 +42,7 @@ type ToolDefinition = {
   ) => Promise<ToolResult>;
 };
 
-/** Расширение с точки зрения pi: нам нужен только собранный инструмент. */
+/** The extension from pi's point of view: we only need the assembled tool. */
 function loadTool(): ToolDefinition {
   const tools: ToolDefinition[] = [];
   const api = {
@@ -78,7 +78,7 @@ setTimeout(() => {
 }, sleep);
 `;
 
-/** Поддельный pi в отдельном каталоге: путь к нему отдаём через ICARUS_SUBAGENT_PI. */
+/** The fake pi in a separate directory: we pass its path via ICARUS_SUBAGENT_PI. */
 function fakePi(): { dir: string; file: string; log: string } {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-fake-pi-'));
   const file = path.join(dir, 'pi');
@@ -86,7 +86,7 @@ function fakePi(): { dir: string; file: string; log: string } {
   return { dir, file, log: path.join(dir, 'log.jsonl') };
 }
 
-/** Сколько детей работало одновременно: журнал пишется в реальном времени. */
+/** How many children worked at the same time: the log is written in real time. */
 function peakFromLog(file: string): number {
   let active = 0;
   let peak = 0;
@@ -110,7 +110,7 @@ function readLog(file: string): Array<{ event: string; args?: string[]; depth?: 
     .map((line) => JSON.parse(line) as { event: string; args?: string[]; depth?: string | null });
 }
 
-/** Окружение на время теста: поддельный pi и быстрые пределы. */
+/** Environment for the duration of the test: the fake pi and fast limits. */
 function withEnv(values: Record<string, string>, run: () => Promise<void>): Promise<void> {
   const saved = new Map(Object.keys(values).map((key) => [key, process.env[key]]));
   for (const [key, value] of Object.entries(values)) process.env[key] = value;
@@ -122,14 +122,14 @@ function withEnv(values: Record<string, string>, run: () => Promise<void>): Prom
   });
 }
 
-test('пределы по умолчанию: четыре параллельно и сорок задач', () => {
+test('default limits: four in parallel and forty tasks', () => {
   const limits = resolveLimits({});
   assert.equal(limits.concurrency, DEFAULT_CONCURRENCY);
   assert.equal(limits.concurrency, 4);
   assert.equal(limits.maxTasks, DEFAULT_MAX_TASKS);
 });
 
-test('пределы клампятся: восемь — потолок, мусор — к умолчанию', () => {
+test('limits are clamped: eight is the ceiling, garbage falls back to the default', () => {
   assert.equal(resolveLimits({ ICARUS_SUBAGENT_CONCURRENCY: '40' }).concurrency, MAX_CONCURRENCY);
   assert.equal(resolveLimits({ ICARUS_SUBAGENT_CONCURRENCY: '0' }).concurrency, DEFAULT_CONCURRENCY);
   assert.equal(resolveLimits({ ICARUS_SUBAGENT_CONCURRENCY: 'два' }).concurrency, DEFAULT_CONCURRENCY);
@@ -137,20 +137,20 @@ test('пределы клампятся: восемь — потолок, мус
   assert.equal(resolveLimits({ ICARUS_SUBAGENT_TASK_TIMEOUT_MS: '1000' }).taskTimeoutMs, 1000);
 });
 
-test('имя агента не зависит от регистра, чужое имя не проходит', () => {
+test('the agent name is case-insensitive, a foreign name does not pass', () => {
   assert.equal(agentNameOf('Scout'), 'scout');
   assert.equal(agentNameOf(' RESEARCHER '), 'researcher');
   assert.equal(agentNameOf('хакер'), null);
   assert.deepEqual(Object.keys(AGENTS).sort(), ['researcher', 'scout', 'worker']);
 });
 
-test('внутри субагента инструмент не появляется', () => {
+test('the tool does not appear inside a subagent', () => {
   assert.equal(isSubagentProcess({}), false);
   assert.equal(isSubagentProcess({ [DEPTH_ENV]: '0' }), false);
   assert.equal(isSubagentProcess({ [DEPTH_ENV]: '1' }), true);
 });
 
-test('аргументы ребёнка: свои инструменты, без чужих расширений и без вложенности', () => {
+test("the child's arguments: its own tools, no foreign extensions and no nesting", () => {
   const spec = AGENTS.researcher;
   const args = buildChildArgs({
     spec,
@@ -173,7 +173,7 @@ test('аргументы ребёнка: свои инструменты, без
   assert.ok(!args.includes('--no-skills'), 'скиллами ребёнок пользуется: ими и работают задачи');
 });
 
-test('работник получает всё: встроенные инструменты, поиск, время и панель', () => {
+test('the worker gets everything: built-in tools, search, time and the panel', () => {
   const args = buildChildArgs({ spec: AGENTS.worker, systemPromptFile: '/tmp/system.md', extensionFiles: [] });
   const tools = args[args.indexOf('--tools') + 1] ?? '';
   const passed = tools.split(',');
@@ -184,7 +184,7 @@ test('работник получает всё: встроенные инстр�
   assert.equal(args[args.indexOf('--exclude-tools') + 1], 'subagent', 'а вложенность запрещена и ему');
 });
 
-test('расширения роли ищутся в каталоге pi и не находятся — не подключаются', () => {
+test("role extensions are looked up in pi's directory and, when not found, are not attached", () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-home-'));
   fs.mkdirSync(path.join(home, '.pi', 'agent', 'extensions'), { recursive: true });
   fs.writeFileSync(path.join(home, '.pi', 'agent', 'extensions', 'web-search.ts'), '// noop');
@@ -197,7 +197,7 @@ test('расширения роли ищутся в каталоге pi и не 
   assert.deepEqual(extensionFilesOf(AGENTS.researcher, path.join(home, 'нет-такого')), []);
 });
 
-test('очередь держит ровно столько работников, сколько разрешено', async () => {
+test('the queue keeps exactly as many workers as allowed', async () => {
   let running = 0;
   let peak = 0;
   const order: number[] = [];
@@ -213,7 +213,7 @@ test('очередь держит ровно столько работников
   assert.deepEqual([...order].sort((a, b) => a - b), [0, 1, 2, 3, 4, 5, 6, 7, 8], 'каждая задача запускается один раз');
 });
 
-test('пустой список задач не запускает очередь вовсе', async () => {
+test('an empty task list does not start the queue at all', async () => {
   let touched = false;
   await runPool(0, 4, async () => {
     touched = true;
@@ -221,7 +221,7 @@ test('пустой список задач не запускает очеред�
   assert.equal(touched, false);
 });
 
-test('отчёт родителю: статусы, причины и обрезка длинного вывода', () => {
+test('report to the parent: statuses, reasons and truncation of long output', () => {
   const states: SubagentState[] = [
     { index: 0, agent: 'scout', task: 'посмотреть', status: 'ok', ms: 1200, output: 'нашёл три файла' },
     { index: 1, agent: 'researcher', task: 'искать', status: 'error', ms: 3000, error: 'таймаут: 5 с' },
@@ -255,7 +255,7 @@ test('отчёт родителю: статусы, причины и обрез�
   assert.match(progress, /ошибка/);
 });
 
-test('промпты ролей и описание инструмента знают про лимит и про файл', () => {
+test('role prompts and the tool description know about the limit and about the file', () => {
   const tool = loadTool();
   const description = (tool as unknown as { description?: string }).description ?? '';
   assert.match(description, /8000/, 'в описании назван лимит вывода');
@@ -267,7 +267,7 @@ test('промпты ролей и описание инструмента зн�
   }
 });
 
-test('пустой набор и незнакомый агент — отказ без запуска процессов', async () => {
+test('an empty set and an unknown agent are refusals without launching processes', async () => {
   const tool = loadTool();
   const ctx = { cwd: os.tmpdir(), model: { provider: 'p', id: 'm' } };
 
@@ -279,7 +279,7 @@ test('пустой набор и незнакомый агент — отказ 
   assert.match(unknown.content[0].text, /scout/);
 });
 
-test('больше сорока задач за вызов не принимаются', async () => {
+test('more than forty tasks per call are not accepted', async () => {
   const tool = loadTool();
   const ctx = { cwd: os.tmpdir(), model: { provider: 'p', id: 'm' } };
   const tasks = Array.from({ length: DEFAULT_MAX_TASKS + 1 }, () => ({ agent: 'scout', task: 'смотреть' }));
@@ -287,7 +287,7 @@ test('больше сорока задач за вызов не принимаю
   assert.match(result.content[0].text, /не больше 40/);
 });
 
-test('две задачи отрабатывают и возвращают отчёт: глубина, аргументы, прогресс', async () => {
+test('two tasks run and return a report: depth, arguments, progress', async () => {
   const fake = fakePi();
   await withEnv({ ICARUS_SUBAGENT_PI: fake.file, FAKE_PI_LOG: fake.log, FAKE_PI_TEXT: 'итог задачи' }, async () => {
     const tool = loadTool();
@@ -324,7 +324,7 @@ test('две задачи отрабатывают и возвращают от�
   });
 });
 
-test('очередь ограничивает параллельность и в настоящем запуске', async () => {
+test('the queue limits parallelism in a real run too', async () => {
   const fake = fakePi();
   await withEnv(
     {
@@ -346,7 +346,7 @@ test('очередь ограничивает параллельность и в
 
       const log = readLog(fake.log);
       assert.equal(log.filter((entry) => entry.event === 'start').length, 5);
-      // Все пять пишут в один журнал: до первого «end» успевают стартовать не больше двух.
+      // All five write to the same log: before the first "end", no more than two manage to start.
       const firstEnd = log.findIndex((entry) => entry.event === 'end');
       assert.ok(firstEnd > 0);
       const startedBeforeEnd = log.slice(0, firstEnd).filter((entry) => entry.event === 'start').length;
@@ -355,7 +355,7 @@ test('очередь ограничивает параллельность и в
   );
 });
 
-test('потолок восемь — на весь процесс: второй вызов не поднимает ещё восемь', async () => {
+test('the ceiling of eight is for the whole process: a second call does not raise eight more', async () => {
   const fake = fakePi();
   await withEnv(
     {
@@ -380,7 +380,7 @@ test('потолок восемь — на весь процесс: второй
   );
 });
 
-test('падение ребёнка не роняет вызов: ошибка видна в отчёте', async () => {
+test("a child's crash does not fail the call: the error is visible in the report", async () => {
   const fake = fakePi();
   await withEnv({ ICARUS_SUBAGENT_PI: fake.file, FAKE_PI_LOG: fake.log, FAKE_PI_FAIL: '2' }, async () => {
     const tool = loadTool();
@@ -397,7 +397,7 @@ test('падение ребёнка не роняет вызов: ошибка �
   });
 });
 
-test('таймаут задачи помечается ошибкой, а не висит вечно', async () => {
+test('a task timeout is marked as an error instead of hanging forever', async () => {
   const fake = fakePi();
   await withEnv(
     {
@@ -424,7 +424,7 @@ test('таймаут задачи помечается ошибкой, а не �
   );
 });
 
-test('прерывание хода убивает детей и выходит из инструмента', async () => {
+test('aborting the turn kills the children and exits the tool', async () => {
   const fake = fakePi();
   await withEnv({ ICARUS_SUBAGENT_PI: fake.file, FAKE_PI_LOG: fake.log, FAKE_PI_SLEEP_MS: '5000' }, async () => {
     const tool = loadTool();
@@ -445,7 +445,7 @@ test('прерывание хода убивает детей и выходит 
   });
 });
 
-test('в процессе-ребёнке расширение молчит', () => {
+test('in a child process the extension stays silent', () => {
   const saved = process.env[DEPTH_ENV];
   process.env[DEPTH_ENV] = '1';
   try {
@@ -458,7 +458,7 @@ test('в процессе-ребёнке расширение молчит', () 
   }
 });
 
-test('шаги ребёнка копятся без повторов и не растут бесконечно', () => {
+test("the child's steps accumulate without repeats and don't grow endlessly", () => {
   const actions: string[] = [];
   assert.equal(rememberAction(actions, 'web_search: amazon.ie'), true);
   assert.equal(rememberAction(actions, 'web_search: amazon.ie'), false, 'повтор подряд новым шагом не считается');
@@ -471,7 +471,7 @@ test('шаги ребёнка копятся без повторов и не р�
   assert.equal(actions[actions.length - 1], 'read: файл-19');
 });
 
-test('общее число шагов честное, даже когда в списке только последние десять', async () => {
+test('the total step count is honest even when the list holds only the last ten', async () => {
   const fake = fakePi();
   await withEnv({ ICARUS_SUBAGENT_PI: fake.file, FAKE_PI_LOG: fake.log, FAKE_PI_ACTIONS: '12' }, async () => {
     const tool = loadTool();
@@ -489,7 +489,7 @@ test('общее число шагов честное, даже когда в с
   });
 });
 
-test('снимок деталей не раздувается шагами: длинные строки обрезаются', () => {
+test('the details snapshot does not bloat with steps: long strings are truncated', () => {
   const states = [
     {
       index: 0,

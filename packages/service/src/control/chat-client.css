@@ -1,10 +1,10 @@
-/* Чат в панели: тёмная колонка диалогов слева, лента и композер справа. */
+/* Chat in the panel: a dark conversation column on the left, the feed and composer on the right. */
 
 .chat-app {
-  /* Ширину колонки задаёт клиент: тянется за правую границу и запоминается. */
+  /* The client sets the column width: it drags by the right edge and is remembered. */
   --side-w: 278px;
-  /* Высота строки сайдбара: кнопка «Новый чат» и черновик совпадают, чтобы
-     список не прыгал, когда кнопка превращается в строку. */
+  /* Sidebar row height: the "New chat" button and the draft match so the
+     list doesn't jump when the button turns into a row. */
   --side-row: 58px;
   display: grid;
   grid-template-columns: var(--side-w) minmax(0, 1fr);
@@ -13,7 +13,7 @@
   background: var(--bg);
 }
 
-/* ── сайдбар ─────────────────────────────────────────────────────────────── */
+/* ── sidebar ─────────────────────────────────────────────────────────────── */
 .chat-side {
   background: var(--side);
   border-right: 1px solid var(--line);
@@ -28,13 +28,13 @@
 .brand-text { min-width: 0; }
 .brand-text b { display: block; font-size: 15px; line-height: 1.25; }
 .brand-text span { display: block; color: var(--dim); font-size: 11px; white-space: nowrap; }
-/* Панель сворачивается только на мелких экранах, где она всплывает поверх чата:
-   на широком экране колонка диалогов всегда на месте, крестик там не нужен. */
+/* The panel collapses only on small screens, where it floats over the chat:
+   on a wide screen the conversation column is always in place, and the close button isn't needed there. */
 .side-close { display: none; margin-left: auto; color: var(--dim); }
 .side-close:hover { color: var(--text); }
 
-/* Ручка ширины: тонкая полоса на правой границе. Начинается от самой границы,
-   поэтому не перекрывает четырёхпиксельный скролл списка. */
+/* Width handle: a thin strip on the right border. It starts at the very border,
+   so it doesn't overlap the list's four-pixel scrollbar. */
 .side-resizer {
   position: absolute; top: 0; bottom: 0; left: 100%; width: 5px;
   z-index: 6; cursor: col-resize; touch-action: none;
@@ -62,21 +62,21 @@
 }
 .new-chat span { font-size: 18px; line-height: 1; margin-top: -1px; }
 .new-chat:hover { filter: brightness(1.06); }
-/* Черновик встаёт на место кнопки и по ширине совпадает со строками списка. */
+/* The draft takes the button's place and matches the list rows in width. */
 .new-chat[hidden], .draft-wrap[hidden] { display: none; }
-/* Ровно та же высота, что у кнопки: замена не сдвигает список ни на пиксель. */
+/* Exactly the same height as the button: the replacement doesn't shift the list by a pixel. */
 .draft-wrap .chat-item { display: block; height: var(--side-row); margin: 0; }
 
 .chat-list {
   flex: 1; min-height: 0; overflow: auto;
-  /* Список выезжает в padding панели: полоса прокрутки стоит в стык с правой
-     границей, а не висит в воздухе за полтора десятка пикселей от неё. */
+  /* The list extends into the panel's padding: the scrollbar sits flush with the right
+     border instead of hanging in the air a dozen-odd pixels from it. */
   margin-right: -12px; padding-right: 8px;
-  /* Место под полосу держим всегда, иначе карточки прыгают на её ширину. */
+  /* We always reserve room for the scrollbar, otherwise the cards jump by its width. */
   scrollbar-gutter: stable;
 }
-/* В списке диалогов полоса вдвое тоньше, чем в ленте: она декоративная и не
-   должна отъедать ширину у карточек. */
+/* In the conversation list the scrollbar is half as thin as in the feed: it's decorative and
+   must not eat into the cards' width. */
 .chat-list::-webkit-scrollbar { width: 4px; }
 .chat-list::-webkit-scrollbar-track { background: transparent; }
 .chat-list::-webkit-scrollbar-thumb { background: var(--line); border-radius: 2px; }
@@ -92,10 +92,10 @@
   display: block; width: 100%; text-align: left; border: 0; background: transparent;
   border-radius: 9px; padding: 9px 10px; color: var(--text); margin: 1px 0;
 }
-/* Строка списка — обёртка вокруг кнопки разговора и карандаша: вложить кнопку
-   в кнопку нельзя, а ручка переименования нужна в той же строке. */
+/* A list row is a wrapper around the conversation button and the pencil: you can't nest a button
+   in a button, and the rename handle is needed in the same row. */
 .chat-row { position: relative; }
-/* Карандаш стоит слева от «⋯»: справа место занято кнопкой папок. */
+/* The pencil sits to the left of "⋯": the space on the right is taken by the folders button. */
 .chat-rename {
   position: absolute; top: 6px; right: 30px; width: 24px; height: 24px;
   display: grid; place-items: center; border: 0; border-radius: 7px;
@@ -105,10 +105,10 @@
 }
 .chat-row:hover .chat-rename, .chat-rename:focus-visible { opacity: 1; }
 .chat-rename:hover { background: var(--line); color: var(--text); }
-/* Ручка ложится поверх времени: на наведении время уступает ей место. */
+/* The handle overlays the time: on hover the time yields its place. */
 .chat-item-time { transition: opacity .12s ease; }
 .chat-row:hover .chat-item-time { opacity: 0; }
-/* Правка имени в строке списка: поле той же высоты, чтобы список не прыгал. */
+/* Renaming in a list row: the field is the same height so the list doesn't jump. */
 .chat-item.editing { padding: 9px 10px; }
 .chat-item-input {
   flex: 1; min-width: 0; width: 100%; border: 1px solid var(--accent);
@@ -119,8 +119,8 @@
 .chat-item:hover { background: var(--raise); }
 .chat-item.active { background: var(--accent-soft); }
 .chat-item-top { display: flex; gap: 10px; align-items: baseline; }
-/* Точка состояния: жёлтая — ход идёт, зелёная — есть непрочитанный ответ.
-   Стоит слева от заголовка, в строке списка. */
+/* Status dot: yellow — a turn is in progress, green — there's an unread reply.
+   It sits to the left of the title, in the list row. */
 .chat-dot {
   flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%;
   align-self: center; margin-right: -3px;
@@ -132,7 +132,7 @@
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .chat-item-time { flex: 0 0 auto; color: var(--dim); font-size: 10px; }
-/* Канал разговора: Telegram и API панель показывает, но продолжать их нельзя. */
+/* The conversation channel: the panel shows Telegram and API, but they can't be continued. */
 .chat-item-tag {
   flex: 0 0 auto; color: var(--dim); font-size: 9px; letter-spacing: .04em;
   text-transform: uppercase; border: 1px solid var(--line); border-radius: 5px;
@@ -144,9 +144,9 @@
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
-/* ── папки в меню ─────────────────────────────────────────────────────────── */
-/* Строка разговора — обёртка: кнопка «⋯» не может жить внутри кнопки чата,
-   иначе браузер сам решает, куда попадёт клик. */
+/* ── folders in the menu ─────────────────────────────────────────────────────────── */
+/* A conversation row is a wrapper: the "⋯" button can't live inside the chat button,
+   otherwise the browser decides on its own where the click goes. */
 .chat-row { position: relative; }
 .chat-row.dragging { opacity: .45; }
 .chat-more {
@@ -157,7 +157,7 @@
 .chat-row:hover .chat-more, .chat-more:focus-visible { opacity: 1; }
 .chat-more:hover { background: var(--line); color: var(--text); }
 
-/* Кнопка «+ Папка» — действие над списком, поэтому мелкая и без акцентной заливки. */
+/* The "+ Folder" button is an action on the list, so it's small and without an accent fill. */
 .new-folder {
   width: 100%; border: 0; background: transparent; color: var(--dim);
   font-size: 12px; text-align: left; padding: 6px 10px; border-radius: 7px;
@@ -172,10 +172,10 @@
   color: var(--dim); font-size: 11px; letter-spacing: .07em; text-transform: uppercase;
 }
 .folder-head:hover { background: var(--raise); color: var(--text); }
-/* «Входящие» — не папка, кликать по ним нечего. */
+/* "Inbox" is not a folder; there's nothing to click on. */
 .folder-head.inbox { cursor: default; }
 .folder-head:focus-visible { outline: 1px solid var(--accent); }
-/* Подсветка цели: пока тащат чат, видно, в какую папку он упадёт. */
+/* Drop target highlight: while a chat is being dragged, you can see which folder it will land in. */
 .folder-head.drop-target { background: var(--accent-soft); color: var(--text); outline: 1px dashed var(--accent); }
 .folder-caret { flex: 0 0 auto; font-size: 9px; width: 10px; transition: transform .12s; }
 .folder-head.collapsed .folder-caret { transform: rotate(-90deg); }
@@ -190,7 +190,7 @@
 .folder-act:hover { background: var(--line); color: var(--text); }
 .folder-empty { margin: 2px 10px 6px; font-style: italic; }
 
-/* Поля имени папки: своё, а не системное, — строка списка не должна прыгать. */
+/* Folder name fields: custom, not system, — the list row must not jump. */
 .folder-new { margin: 10px 2px 2px; }
 .folder-new input, .folder-rename {
   width: 100%; box-sizing: border-box; background: var(--bg); color: var(--text);
@@ -199,7 +199,7 @@
 }
 .folder-rename { flex: 1; min-width: 0; padding: 2px 5px; }
 
-/* Меню «Переместить в…»: то же, что перетаскивание, но доступно с клавиатуры. */
+/* The "Move to…" menu: the same as dragging, but available from the keyboard. */
 .chat-menu {
   position: fixed; z-index: 40; min-width: 190px; max-width: 249px;
   background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
@@ -221,9 +221,9 @@
   margin-top: 4px; border-top: 1px solid var(--line); border-radius: 0;
   color: var(--dim);
 }
-/* ── архив ──────────────────────────────────────────────────────────────────
-   Секция под списком диалогов, свёрнутая по умолчанию: ежедневно архив не
-   нужен, но и прятать его за отдельную страницу незачем — это тот же список. */
+/* ── archive ────────────────────────────────────────────────────────────────
+   A section below the conversation list, collapsed by default: the archive isn't
+   needed daily, but there's no point hiding it behind a separate page — it's the same list. */
 .archive-zone { flex: 0 0 auto; border-top: 1px solid var(--line); margin-top: 8px; padding-top: 4px; }
 .archive-toggle {
   width: 100%; display: flex; align-items: center; gap: 8px;
@@ -240,7 +240,7 @@
 .archive-count[hidden] { display: none; }
 .archive-chevron { flex: 0 0 auto; font-size: 10px; transition: transform .12s; }
 .archive-toggle[aria-expanded="true"] .archive-chevron { transform: rotate(90deg); }
-/* Свой скролл: развёрнутый архив не должен выдавливать список диалогов. */
+/* Its own scroll: the expanded archive must not push out the conversation list. */
 .archive-list {
   max-height: 38vh; overflow: auto; margin-right: -12px; padding-right: 8px;
   scrollbar-gutter: stable;
@@ -249,7 +249,7 @@
 .archive-list::-webkit-scrollbar { width: 4px; }
 .archive-list::-webkit-scrollbar-track { background: transparent; }
 .archive-list::-webkit-scrollbar-thumb { background: var(--line); border-radius: 2px; }
-/* Строка архива: времени у неё нет, зато справа всегда видна кнопка возврата. */
+/* An archive row has no time, but the return button is always visible on the right. */
 .chat-row-action {
   position: absolute; top: 7px; right: 4px; width: 26px; height: 26px;
   display: grid; place-items: center; border: 0; border-radius: 7px;
@@ -267,7 +267,7 @@
 .side-foot { border-top: 1px solid var(--line); margin-top: 12px; padding: 13px 8px 2px; }
 .side-foot div { display: flex; justify-content: space-between; gap: 10px; color: var(--dim); font-size: 11px; margin-bottom: 3px; }
 
-/* ── основная колонка ────────────────────────────────────────────────────── */
+/* ── main column ────────────────────────────────────────────────────── */
 .chat-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .chat-top {
   display: flex; align-items: center; gap: 14px;
@@ -275,15 +275,15 @@
 }
 .menu-btn { display: none; }
 .chat-crumbs { flex: 1; min-width: 0; color: var(--dim); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* Метка в шапке: разговор открыт из архива — значит, он не в общем списке. */
+/* Header tag: the conversation was opened from the archive — so it's not in the main list. */
 .chat-archived-tag {
   margin-left: 8px; color: var(--dim); font-size: 10px; letter-spacing: .04em;
   text-transform: uppercase; border: 1px solid var(--line); border-radius: 5px;
   padding: 1px 5px; vertical-align: 1px;
 }
 .chat-archived-tag[hidden] { display: none; }
-/* Кнопка архива открытого разговора. В архиве она меняет смысл на «Вернуть»,
-   поэтому цвет и подпись разные — человек не ищет вторую кнопку. */
+/* The archive button of the open conversation. In the archive its meaning changes to "Restore",
+   so the color and label differ — the person doesn't look for a second button. */
 .archive-btn {
   display: flex; align-items: center; gap: 6px; flex: 0 0 auto;
   border: 1px solid var(--line); background: var(--panel); color: var(--dim);
@@ -300,8 +300,8 @@
 }
 .chat-search span { color: var(--dim); font-size: 15px; line-height: 1; }
 .chat-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: none; color: var(--text); font: inherit; }
-/* Канал последней реплики: одна строка рядом с именем разговора. Панель и
-   Telegram пишут в одну сессию, поэтому «кто это сказал» — не очевидность. */
+/* The channel of the last message: a line next to the conversation name. The panel and
+   Telegram write to the same session, so "who said this" isn't obvious. */
 .chat-via {
   flex: 0 0 auto; max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--dim); font-size: 12px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px;
@@ -314,13 +314,13 @@
 .chat-scroll { flex: 1; min-height: 0; overflow: auto; padding: 22px 28px 8px; }
 .chat-messages { max-width: 900px; margin: 0 auto; }
 
-/* ── пустой чат ──────────────────────────────────────────────────────────── */
+/* ── empty chat ──────────────────────────────────────────────────────────── */
 .chat-empty {
   min-height: 100%; max-width: 640px; margin: 0 auto; padding: 0 10px 90px;
   display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center;
 }
-/* display:flex сильнее атрибута hidden: прячем пустое состояние явно, иначе оно
-   остаётся висеть над уже загруженной лентой. */
+/* display:flex overrides the hidden attribute: we hide the empty state explicitly, otherwise it
+   stays hanging over the already loaded feed. */
 .chat-empty[hidden], .side-link[hidden], .typing[hidden] { display: none; }
 .empty-logo {
   width: 42px; height: 42px; border-radius: 12px; color: #0f1116; font-weight: 700;
@@ -329,8 +329,8 @@
   box-shadow: 0 8px 30px rgba(76, 110, 245, .25);
 }
 .chat-empty h1 { font-size: 28px; margin: 20px 0 10px; letter-spacing: -.3px; }
-/* Только текст самого пустого состояния: у экрана выбора workspace'ов своя
-   типографика, и общее центрирование абзацев ломало ему выравнивание. */
+/* Only the text of the empty state itself: the workspace picker screen has its own
+   typography, and the shared paragraph centering broke its alignment. */
 .chat-empty > p { color: var(--dim); margin: 0 auto 26px; max-width: 430px; line-height: 1.65; }
 .suggestions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 100%; }
 .suggestions button {
@@ -339,10 +339,10 @@
 }
 .suggestions button:hover { border-color: var(--accent); color: var(--text); }
 
-/* Сообщения (лента, пузыри, .md, трассировка) лежат в chat-messages.css:
-   тот же файл подключает боковой чат правки артефакта. */
+/* Messages (feed, bubbles, .md, trace) live in chat-messages.css:
+   the same file is included by the artifact edit side chat. */
 
-/* ── композер и вложения ─────────────────────────────────────────────────── */
+/* ── composer and attachments ─────────────────────────────────────────────────── */
 .composer { flex: 0 0 auto; padding: 0 28px 18px; }
 .pending { max-width:900px; margin:0 auto 8px; display:flex; gap:8px; flex-wrap:wrap; }
 .pending[hidden] { display:none; }
@@ -366,8 +366,8 @@
   background: var(--panel); border: 1px solid var(--line); border-radius: 13px;
   padding: 9px 9px 9px 14px;
 }
-/* Очередь: реплики, написанные во время хода. Строка стоит над композером — там
-   же, где вложения, чтобы «в очереди» было видно, не отрываясь от поля ввода. */
+/* Queue: messages written during a turn. The row sits above the composer — in the same
+   place as attachments, so "in the queue" is visible without looking away from the input field. */
 .queue {
   max-width: 900px; margin: 0 auto 8px; padding: 7px 10px; display: flex;
   flex-direction: column; gap: 5px;
@@ -388,8 +388,8 @@
 }
 .queue-row .remove:hover { color: var(--danger); }
 .composer-box:focus-within { border-color: var(--accent); }
-/* Палитра команд висит над полем, не сдвигая его: absolute внутри рамки.
-   Максимум десять строк — дальше список скроллится, иначе он закрыл бы ленту. */
+/* The command palette hangs above the field without shifting it: absolute inside the frame.
+   Ten rows maximum — after that the list scrolls, otherwise it would cover the feed. */
 .cmd-palette {
   position: absolute; left: 0; right: 0; bottom: calc(100% + 8px); z-index: 20;
   display: flex; flex-direction: column; gap: 1px;
@@ -419,8 +419,8 @@
   flex: 0 0 auto; color: var(--dim); font-size: 10px; font-style: normal;
   letter-spacing: .06em; text-transform: uppercase; opacity: .75;
 }
-/* Ответ команды — в chat-messages.css: команды работают в двух чатах. */
-/* Граница контекста: /clear начинает новый разговор, но старую ленту не прячет. */
+/* The command reply is in chat-messages.css: commands work in two chats. */
+/* Context boundary: /clear starts a new conversation but doesn't hide the old feed. */
 .turn.divider {
   display: flex; align-items: center; gap: 12px; color: var(--dim);
   font-size: 11px; letter-spacing: .05em; text-transform: uppercase;
@@ -428,22 +428,22 @@
 }
 .turn.divider hr { flex: 1; border: 0; border-top: 1px solid var(--line); margin: 0; }
 .turn.divider span { flex: 0 0 auto; }
-/* Поле тянется до самой правой границы рамки: полоса прокрутки встаёт в стык с
-   ней, как в списке диалогов, а не висит посередине поля. Кнопки отправки и
-   стопа живут поверх поля в правом нижнем углу — отсюда и padding справа. */
+/* The field extends to the very right border of the frame: the scrollbar sits flush with
+   it, as in the conversation list, instead of hanging in the middle of the field. The send and
+   stop buttons live over the field in the bottom-right corner — hence the right padding. */
 .composer-box textarea {
   flex: 1; min-width: 0; resize: none; border: 0; outline: 0; background: none;
   color: var(--text); font: inherit; line-height: 1.5; max-height: 200px;
   margin-right: -9px; padding: 7px 51px 7px 0;
-  /* Место под полосу держим всегда, иначе строки переливаются на её ширину. */
+  /* We always reserve room for the scrollbar, otherwise lines reflow by its width. */
   scrollbar-gutter: stable;
 }
-/* В поле полоса такая же тонкая, как в списке диалогов, и без стрелок. */
+/* In the field the scrollbar is as thin as in the conversation list, and without arrows. */
 .composer-box textarea::-webkit-scrollbar { width: 4px; }
 .composer-box textarea::-webkit-scrollbar-track { background: transparent; }
 .composer-box textarea::-webkit-scrollbar-thumb { background: var(--line); border-radius: 2px; }
 .composer-box textarea::placeholder { color: var(--dim); }
-/* Кнопки — поверх поля, у правого нижнего угла рамки. */
+/* The buttons are over the field, at the bottom-right corner of the frame. */
 .composer-actions {
   position: absolute; right: 9px; bottom: 9px;
   display: flex; align-items: center; gap: 6px;
@@ -454,8 +454,8 @@
   display: grid; place-items: center;
 }
 .send:disabled { opacity: .45; cursor: default; }
-/* Пока идёт ответ, на месте «отправить» стоит «стоп»: ход можно остановить
-   в середине, вместе с работающими субагентами. */
+/* While a reply is in progress, "stop" stands in place of "send": a turn can be stopped
+   in the middle, along with the running subagents. */
 .stop {
   width: 36px; height: 36px; flex: 0 0 auto; border-radius: 9px; border: 0;
   background: rgba(239, 68, 68, .18); color: #f87171; font-size: 13px; line-height: 1;
@@ -463,8 +463,8 @@
 }
 .stop:hover { background: rgba(239, 68, 68, .28); }
 .stop:disabled { opacity: .45; cursor: default; }
-/* «Прервать и отправить» — вторая операция, поэтому и цвет другой: не «отправить»,
-   а «останови чужую работу». Пока ход идёт, поле ввода освобождает ей место. */
+/* "Interrupt and send" is a second operation, so its color is different too: not "send",
+   but "stop someone else's work". While a turn is in progress, the input field makes room for it. */
 .now {
   height: 36px; padding: 0 10px; border-radius: 9px; white-space: nowrap;
   border: 1px solid rgba(239, 68, 68, .45); background: transparent;
@@ -474,16 +474,16 @@
 .now:disabled { opacity: .4; cursor: default; }
 .composer-box.live textarea { padding-right: 236px; }
 .stop[hidden], .send[hidden], .now[hidden] { display: none; }
-/* Пометка на прерванном ответе: сказанное осталось в ленте, но оно недописано. */
+/* A mark on an interrupted reply: what was said stayed in the feed, but it's unfinished. */
 .interrupted { margin-top: 8px; color: var(--dim); font-size: 11px; }
 .composer-foot {
   max-width: 900px; margin: 7px auto 0; display: flex; justify-content: space-between;
   gap: 12px; color: var(--dim); font-size: 11px; min-height: 16px;
 }
-/* Слева — отказы и подтверждения, справа — подсказка по клавишам. Прогресса
-   хода тут нет: шаги и команды видны в трассировке ответа. */
+/* On the left are refusals and confirmations, on the right a keyboard hint. There's no
+   turn progress here: steps and commands are visible in the reply trace. */
 #chat-note { color: var(--dim); }
-/* Внешний разговор: композер выключен, но лента и трассировка читаются как обычно. */
+/* External conversation: the composer is off, but the feed and trace read as usual. */
 .composer-locked {
   max-width: 900px; margin: 0 auto 8px; padding: 9px 12px;
   border: 1px solid var(--line); border-radius: 9px; background: var(--panel);
@@ -491,9 +491,9 @@
 }
 .composer-locked[hidden] { display: none; }
 
-/* ── файлы workspace ─────────────────────────────────────────────────────── */
-/* Панель — третья колонка чата. Ширину задаёт клиент, как и у левой колонки:
-   тянется за левую границу и запоминается в localStorage. */
+/* ── workspace files ─────────────────────────────────────────────────────── */
+/* The panel is the chat's third column. The client sets the width, as with the left column:
+   it drags by the left edge and is remembered in localStorage. */
 .chat-app { --files-w: 400px; }
 .chat-app.files-open { grid-template-columns: var(--side-w) minmax(0, 1fr) var(--files-w); }
 .files-panel {
@@ -502,13 +502,13 @@
 }
 .chat-app.files-open .files-panel { display: flex; }
 
-/* Крестик виден только на узком экране: там панель выдвигается поверх чата и
-   прячет кнопку «Файлы» из шапки. На широком панель закрывается ею же, поэтому
-   второй крестик не нужен. */
+/* The close button is visible only on a narrow screen: there the panel slides over the chat and
+   hides the "Files" button from the header. On a wide screen the panel is closed by that same
+   button, so a second close button isn't needed. */
 .files-close { display: none; }
 
-/* Поиск по workspace: над деревом, на всю ширину панели. Результаты занимают
-   место дерева, поэтому поле не «прыгает» при вводе. */
+/* Workspace search: above the tree, across the panel's full width. The results take
+   the tree's place, so the field doesn't "jump" while typing. */
 .files-search {
   flex: 0 0 auto; display: flex; align-items: center; gap: 7px;
   margin: 10px 8px 2px; padding: 6px 9px;
@@ -522,8 +522,8 @@
 }
 .files-search input::placeholder { color: var(--dim); }
 
-/* Результат поиска: имя файла, путь со строкой и кусок текста вокруг находки.
-   Строка — кнопка: клик открывает предпросмотр того же файла. */
+/* A search result: the file name, the path with the line, and a chunk of text around the find.
+   The row is a button: a click opens a preview of the same file. */
 .srow {
   display: flex; flex-direction: column; gap: 2px; width: 100%;
   margin: 1px 0; padding: 7px 8px; border: 1px solid transparent; border-radius: 8px;
@@ -547,7 +547,7 @@
 .ssnip.name { color: var(--dim); font: inherit; font-size: 11.5px; }
 .ssnip mark { background: rgba(122, 162, 247, .22); color: var(--accent); border-radius: 3px; padding: 0 1px; }
 
-/* Дерево: прокручивается отдельно, поэтому предпросмотр под ним не уезжает. */
+/* The tree scrolls separately, so the preview below it doesn't scroll away. */
 .files-tree {
   flex: 1 1 auto; min-height: 90px; overflow: auto;
   padding: 4px 8px 12px; scrollbar-gutter: stable;
@@ -561,7 +561,7 @@
 .files-error { color: var(--danger); }
 .files-more { margin: 6px 8px 0; font-size: 11px; }
 
-/* Корень workspace — не строка дерева, а подпись: по ней видно, чью папку смотрим. */
+/* The workspace root is not a tree row but a label: it shows whose folder we're viewing. */
 .files-root {
   display: flex; align-items: center; gap: 8px; padding: 9px 8px 7px;
   color: var(--dim); font-size: 10px; letter-spacing: .09em; text-transform: uppercase;
@@ -569,9 +569,9 @@
 .files-root svg { flex: 0 0 auto; opacity: .8; }
 .files-root span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* Строка дерева: слева основная кнопка (шеврон, иконка, имя, тип), справа —
-   корзина. Корзина не появляется, пока на строку не навели: иначе дерево из
-   одних значков удаления читается хуже файлов. */
+/* A tree row: on the left the main button (chevron, icon, name, type), on the right
+   the trash. The trash doesn't appear until the row is hovered: otherwise a tree of
+   nothing but delete icons reads worse than the files. */
 .frow {
   display: flex; align-items: center; width: 100%;
   margin: 1px 0; border: 1px solid transparent; border-radius: 8px;
@@ -599,8 +599,8 @@
   letter-spacing: .09em; text-transform: uppercase; white-space: nowrap;
 }
 .frow.active .ftype { color: var(--accent); }
-/* Корзина: место под неё занято всегда, иначе типы файлов дёргались бы при
-   наведении. На тач-экранах наведения нет — там она видна сразу. */
+/* Trash: room for it is always reserved, otherwise the file types would twitch on
+   hover. On touch screens there's no hover — there it's visible right away. */
 .fdel {
   flex: 0 0 auto; display: grid; place-items: center; width: 26px; height: 26px;
   margin-right: 4px; border: 0; border-radius: 7px; background: transparent;
@@ -614,7 +614,7 @@
   .fdel { opacity: 1; pointer-events: auto; }
 }
 
-/* Разделитель дерева и предпросмотра: тянется мышью, ручка по центру. */
+/* The divider between the tree and the preview: dragged with the mouse, the handle in the center. */
 .files-split {
   display: none; flex: 0 0 auto; height: 13px; position: relative;
   cursor: row-resize; touch-action: none;
@@ -655,12 +655,12 @@
 }
 .files-dl:hover, .files-send:hover, .files-copy:hover { color: var(--text); border-color: var(--accent); }
 .files-dl { font-size: 13px; padding: 2px 8px; }
-/* Копирование — иконка без подписи: в шапке предпросмотра тесно, а действие
-   узнаваемое. Галочка на полторы секунды подтверждает, что текст в буфере. */
+/* Copy is an icon without a label: the preview header is tight, and the action is
+   recognizable. A check mark for a second and a half confirms the text is in the buffer. */
 .files-copy { padding: 3px 7px; }
 .files-copy svg { display: block; }
 .files-copy.copied { color: var(--accent); background: var(--accent-soft); border-color: var(--accent); }
-/* «В чат» — это действие, а не скачивание: заметнее, но не спорит с заголовком. */
+/* "To chat" is an action, not a download: more noticeable, but it doesn't compete with the title. */
 .files-send { color: var(--accent); border-color: rgba(122, 162, 247, .35); }
 .files-send:hover { color: var(--accent); background: var(--accent-soft); }
 .files-send svg { display: block; }
@@ -668,7 +668,7 @@
   margin: 0; padding: 0; background: none; border: 0; color: var(--text);
   font: 12.5px/1.65 ui-monospace, monospace; white-space: pre-wrap; word-break: break-word;
 }
-/* Классы ставит files-highlight.js: здесь только цвета, разметку он не меняет. */
+/* The classes are set by files-highlight.js: here are only colors; it doesn't change the markup. */
 .files-code .tok-comment { color: var(--dim); font-style: italic; }
 .files-code .tok-string { color: #9ece6a; }
 .files-code .tok-number { color: #e0af68; }
@@ -676,20 +676,20 @@
 .files-code .tok-key { color: #7dcfff; }
 .files-truncated { margin: 0 0 10px; color: var(--dim); font-size: 11.5px; }
 .files-image { display: flex; align-items: center; justify-content: center; padding: 4px 0 10px; }
-/* Ссылка — блочный флекс-элемент во всю ширину: у строчной ширина считается от
-   картинки, и `max-width: 100%` схлопывает её в два пикселя. */
+/* The link is a block flex item at full width: for an inline one the width is computed from
+   the image, and `max-width: 100%` collapses it to two pixels. */
 .files-image a { display: block; width: 100%; line-height: 0; }
 .files-image img {
   display: block; max-width: 100%; height: auto; border-radius: 10px;
   border: 1px solid var(--line); margin: 0 auto;
 }
-/* SVG — вектор: его можно тянуть на всю ширину без потери резкости. */
+/* SVG is a vector: it can be stretched to full width without losing sharpness. */
 .files-image.vector img { width: 100%; }
 .files-binary { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
 .files-binary p { margin: 0; color: var(--dim); font-size: 12.5px; line-height: 1.6; }
 .files-binary .files-dl { font-size: 12px; padding: 5px 10px; }
 
-/* Ручка ширины панели — на её левой границе, как у левого сайдбара справа. */
+/* The panel's width handle is on its left border, like the left sidebar's is on the right. */
 .files-resizer {
   position: absolute; top: 0; bottom: 0; right: 100%; width: 5px;
   z-index: 6; cursor: col-resize; touch-action: none;
@@ -703,13 +703,13 @@
 .files-resizer:focus-visible { outline: none; }
 .chat-app.files-resizing { cursor: col-resize; user-select: none; }
 
-/* Кнопка в шапке: открытая панель подсвечена, как в макете. */
+/* The button in the header: the open panel is highlighted, as in the mockup. */
 .files-btn { border: 1px solid transparent; }
 .files-btn[aria-pressed="true"] {
   border-color: var(--accent); background: var(--accent-soft); color: var(--accent);
 }
 
-/* ── адаптив ─────────────────────────────────────────────────────────────── */
+/* ── responsive ─────────────────────────────────────────────────────────────── */
 @media (max-width: 900px) {
   .chat-app { grid-template-columns: 1fr; }
   .chat-side {
@@ -718,8 +718,8 @@
     box-shadow: 20px 0 50px rgba(0, 0, 0, .35);
   }
   .chat-app.side-open .chat-side { transform: none; }
-  /* Панель на узком экране — выдвижная и, как правило, на тач: «⋯» и действия
-     папки видны всегда, иначе до них не добраться; время в строке убираем. */
+  /* On a narrow screen the panel is slide-out and, as a rule, touch: "⋯" and the folder
+     actions are always visible, otherwise they can't be reached; we remove the time in the row. */
   .chat-more, .chat-rename { opacity: 1; }
   .chat-row .chat-item-time { display: none; }
   .folder-actions { display: flex; }
@@ -737,8 +737,8 @@
   .chat-crumbs { display: none; }
 }
 
-/* Панель файлов на средних экранах — выдвижная поверх чата: три колонки
-   оставили бы ленте меньше 400px, а файлы нужны не всё время. */
+/* On medium screens the files panel slides over the chat: three columns
+   would leave the feed less than 400px, and the files aren't needed all the time. */
 @media (max-width: 1100px) {
   .chat-app.files-open { grid-template-columns: var(--side-w) minmax(0, 1fr); }
   .chat-app:not(.files-open) .files-panel {
@@ -751,9 +751,9 @@
   }
   .chat-app.files-open .files-panel { transform: none; visibility: visible; }
   .files-close { display: grid; position: absolute; top: 8px; right: 8px; z-index: 1; }
-  /* Подпись корня не уезжает под крестик. */
+  /* The root label doesn't slide under the close button. */
   .files-root { padding-right: 36px; }
-  /* Поле поиска тоже: крестик висит в том же верхнем углу. */
+  /* The search field too: the close button hangs in the same top corner. */
   .files-search { margin-right: 40px; }
   .files-resizer { display: none; }
 }
@@ -761,7 +761,7 @@
   .chat-app.files-open { grid-template-columns: 1fr; }
 }
 
-/* ── workspace'ы: выбор живёт в пустом состоянии нового чата ──────────────── */
+/* ── workspaces: the picker lives in the empty state of a new chat ────────── */
 .ws-screen { width: 100%; max-width: 720px; text-align: left; }
 .ws-screen h2 { margin: 0 0 8px; font-size: 26px; letter-spacing: -.3px; }
 .ws-about { color: var(--dim); margin: 0 0 20px; line-height: 1.6; max-width: 640px; }

@@ -1,81 +1,81 @@
 # video-blog-mcp
 
-MCP-сервер (stdio): **видео на входе — блог-пост на выходе**. Без внешних
-зависимостей — только Node.js, `yt-dlp`, `ffmpeg` и ключ DeepInfra.
+MCP server (stdio): **video in — blog post out**. No external
+dependencies — just Node.js, `yt-dlp`, `ffmpeg` and a DeepInfra key.
 
-Цепочка одна: `yt-dlp` скачивает звук и метаданные → Whisper расшифровывает →
-DeepSeek переписывает транскрипт в пост с заголовком и разделами. Рядом с постом
-всегда лежат транскрипт (с таймкодами) и метаданные.
+There's a single chain: `yt-dlp` downloads the audio and metadata → Whisper transcribes →
+DeepSeek rewrites the transcript into a post with a title and sections. Next to the post
+there are always a transcript (with timecodes) and the metadata.
 
-## Инструменты (4)
+## Tools (4)
 
-| Инструмент | Что делает |
+| Tool | What it does |
 |---|---|
-| `video_to_blog` | **главный**: ссылка на видео → готовый Markdown-пост, транскрипт и метаданные |
-| `video_transcribe` | только расшифровка: ссылка или локальный файл → текст с таймкодами |
-| `blog_from_transcript` | наоборот: готовый транскрипт (текстом или файлом) → пост, без расшифровки |
-| `blog_status` | есть ли ключ, скачаны ли бинарники, куда лягут файлы; `install: true` скачивает `yt-dlp` и `ffmpeg` заранее |
+| `video_to_blog` | **the main one**: video link → a ready Markdown post, transcript and metadata |
+| `video_transcribe` | transcription only: a link or a local file → text with timecodes |
+| `blog_from_transcript` | the reverse: a ready transcript (as text or a file) → a post, without transcription |
+| `blog_status` | whether the key is present, whether the binaries are downloaded, where the files will go; `install: true` downloads `yt-dlp` and `ffmpeg` in advance |
 
-Транспорт — только stdio. HTTP-режима нет намеренно: сервер работает внутри
-контейнера агента, рядом с ключами и рабочими папками, и выставлять наружу
-у него нечего.
+The transport is stdio only. There's deliberately no HTTP mode: the server works inside
+the agent container, next to the keys and working folders, and there's nothing to expose
+externally.
 
-## Настройка
+## Configuration
 
-Ключ — тот же, на котором работает сам Икар: `DEEPINFRA_API_KEY` уже есть в
-окружении контейнера, отдельного заводить не нужно (можно перекрыть своим
+The key is the same one Icarus itself runs on: `DEEPINFRA_API_KEY` is already in the
+container's environment, no separate one needed (you can override it with your own
 `VIDEO_BLOG_API_KEY`).
 
-| Переменная | Смысл | По умолчанию |
+| Variable | Meaning | Default |
 |---|---|---|
-| `DEEPINFRA_API_KEY` | ключ DeepInfra (или `VIDEO_BLOG_API_KEY`) | — |
-| `VIDEO_BLOG_BASE_URL` | адрес API, OpenAI-совместимый | `https://api.deepinfra.com/v1/openai` |
-| `VIDEO_BLOG_ASR_MODEL` | модель расшифровки | `openai/whisper-large-v3-turbo` |
-| `VIDEO_BLOG_LLM_MODEL` | модель-редактор | `deepseek-ai/DeepSeek-V4.1-Flash` |
-| `VIDEO_BLOG_HOME` | кэш бинарников и рабочих каталогов | `<ICARUS_HOME>/tools/video-blog` |
-| `VIDEO_BLOG_OUT_DIR` | папка результата (можно задать в вызове) | `<рабочая папка>/video-blog` |
-| `VIDEO_BLOG_MAX_MINUTES` | потолок длительности | 240 |
-| `VIDEO_BLOG_MAX_UPLOAD_MB` | с этого размера аудио режется на части | 24 |
-| `VIDEO_BLOG_SPLIT_SECONDS` | длина части при нарезке | 900 |
-| `VIDEO_BLOG_YTDLP`, `VIDEO_BLOG_FFMPEG` | готовые бинарники вместо скачивания | — |
+| `DEEPINFRA_API_KEY` | DeepInfra key (or `VIDEO_BLOG_API_KEY`) | — |
+| `VIDEO_BLOG_BASE_URL` | API address, OpenAI-compatible | `https://api.deepinfra.com/v1/openai` |
+| `VIDEO_BLOG_ASR_MODEL` | transcription model | `openai/whisper-large-v3-turbo` |
+| `VIDEO_BLOG_LLM_MODEL` | editor model | `deepseek-ai/DeepSeek-V4.1-Flash` |
+| `VIDEO_BLOG_HOME` | cache of binaries and working directories | `<ICARUS_HOME>/tools/video-blog` |
+| `VIDEO_BLOG_OUT_DIR` | result folder (can be set in the call) | `<working folder>/video-blog` |
+| `VIDEO_BLOG_MAX_MINUTES` | duration ceiling | 240 |
+| `VIDEO_BLOG_MAX_UPLOAD_MB` | above this size audio is split into parts | 24 |
+| `VIDEO_BLOG_SPLIT_SECONDS` | part length when splitting | 900 |
+| `VIDEO_BLOG_YTDLP`, `VIDEO_BLOG_FFMPEG` | ready-made binaries instead of downloading | — |
 
-### В панели Икара — рецептом
+### In the Icarus panel — via a recipe
 
-**панель → MCP → Рецепты → «Видео в блог-пост» → «Добавить»**. Ключей рецепт не
-спрашивает: он работает на том же ключе DeepInfra, что и сам Икар. Сервер
-приезжает ленивым (`lifecycle: lazy`), включается себе одним переключателем.
+**panel → MCP → Recipes → "Video to blog post" → "Add"**. The recipe doesn't
+ask for keys: it runs on the same DeepInfra key as Icarus itself. The server
+arrives lazy (`lifecycle: lazy`), turned on for yourself with a single toggle.
 
-### Где живёт сервер
+### Where the server lives
 
-Код монтируется в контейнер агента из репозитория: `tools/video-blog-mcp` →
-`/opt/icarus/tools/video-blog-mcp` (только чтение). Бинарники рядом с кодом не
-лежат: они скачиваются в `VIDEO_BLOG_HOME`, то есть в служебный каталог
-`/workspaces/.icarus/tools/video-blog` — пересоздание контейнера их не сносит.
-`yt-dlp` — статическая сборка с GitHub releases, `ffmpeg` — только когда аудио
-не влезает в лимит загрузки; **для коротких видео ffmpeg вообще не нужен**, потому
-что сырой аудиопоток (m4a/opus) Whisper принимает как есть.
+The code is mounted into the agent container from the repository: `tools/video-blog-mcp` →
+`/opt/icarus/tools/video-blog-mcp` (read-only). The binaries don't sit next to the code:
+they're downloaded into `VIDEO_BLOG_HOME`, that is, into the service directory
+`/workspaces/.icarus/tools/video-blog` — recreating the container doesn't wipe them.
+`yt-dlp` is a static build from GitHub releases, `ffmpeg` — only when the audio
+doesn't fit within the upload limit; **for short videos ffmpeg isn't needed at all**, because
+Whisper accepts the raw audio stream (m4a/opus) as is.
 
-## Сколько стоит
+## What it costs
 
-Whisper на DeepInfra — `$0.0002` за минуту аудио, редактор — доли цента. Пятиминутное
-видео стоит около **$0.002**; сервер печатает оценку в конце каждого прогона.
+Whisper on DeepInfra is `$0.0002` per minute of audio, the editor — fractions of a cent. A five-minute
+video costs about **$0.002**; the server prints an estimate at the end of every run.
 
-## Грабли
+## Gotchas
 
-- Ссылка на плейлист или поисковую выдачу — отказ до скачивания, а не первый ролик
-  неизвестно откуда.
-- Пустая расшифровка — ошибка, а не пустой файл: значит, речи в записи нет.
-- Транскрипт длиннее ~45 тысяч знаков идёт через map-reduce (сжатие по частям,
-  потом сборка поста) — так часовой разговор не выбивает контекст.
-- Аудио больше лимита режется `ffmpeg`-ом на части по 15 минут; таймкоды склеиваются
-  со сдвигом, а не начинаются заново в каждой части.
-- Пост — это пересказ. Для цитат нужен `.transcript.txt` рядом: там слова говорящего.
+- A link to a playlist or a search results page — a refusal before downloading, not the first clip
+  from who knows where.
+- An empty transcription is an error, not an empty file: it means there's no speech in the recording.
+- A transcript longer than ~45 thousand characters goes through map-reduce (compression in parts,
+  then assembling the post) — so an hour-long conversation doesn't blow the context.
+- Audio larger than the limit is split by `ffmpeg` into 15-minute parts; timecodes are glued
+  with an offset, not restarted in each part.
+- The post is a retelling. For quotations you need the `.transcript.txt` next to it: that's where the speaker's words are.
 
-## Проверка
+## Verification
 
 ```bash
-node tools/video-blog-mcp/test.mjs      # 10 проверок: заглушки yt-dlp/ffmpeg/DeepInfra, без сети
+node tools/video-blog-mcp/test.mjs      # 10 checks: yt-dlp/ffmpeg/DeepInfra stubs, no network
 ```
 
-Сценарий через настоящий stdio-протокол лежит в
-`packages/service/test/video-blog-mcp.test.ts` и гоняется `./script/test`.
+A scenario over the real stdio protocol lives in
+`packages/service/test/video-blog-mcp.test.ts` and is run by `./script/test`.

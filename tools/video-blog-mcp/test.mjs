@@ -1,15 +1,15 @@
 #!/usr/bin/env node
-// Быстрый самотест video-blog: без сети, без ключа и без настоящего yt-dlp.
+// A quick self-test of video-blog: no network, no key and no real yt-dlp.
 //
 //   node tools/video-blog-mcp/test.mjs
 //
-// Заглушками подменяется всё внешнее: yt-dlp и ffmpeg — скрипты во временном
-// каталоге, DeepInfra — локальный HTTP-сервер. Так проверяются разбор ответов,
-// защита от плейлиста и лимитов, нарезка длинного аудио и то, что пост и
-// транскрипт действительно ложатся на диск.
+// Everything external is replaced with stubs: yt-dlp and ffmpeg — scripts in a temporary
+// directory, DeepInfra — a local HTTP server. This tests response parsing,
+// protection against playlists and limits, splitting long audio, and that the post and
+// transcript actually land on disk.
 //
-// Полный сценарий через настоящий stdio-протокол живёт в
-// packages/service/test/video-blog-mcp.test.ts и гоняется через ./script/test.
+// The full scenario over the real stdio protocol lives in
+// packages/service/test/video-blog-mcp.test.ts and runs via ./script/test.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -20,13 +20,13 @@ import { dispatch, humanSize, humanTime, slugify, TOOLS } from './server.mjs';
 
 const NL = '\n';
 
-// --- стенд -------------------------------------------------------------------
+// --- test bench --------------------------------------------------------------
 
 function tempDir(prefix) {
   return fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}-`));
 }
 
-/** Заглушка yt-dlp: `-J` отдаёт метаданные, обычный вызов кладёт «аудио». */
+/** yt-dlp stub: `-J` returns metadata, a regular call writes "audio". */
 function fakeYtdlp(dir) {
   const file = path.join(dir, 'fake-yt-dlp');
   const lines = [
@@ -54,7 +54,7 @@ function fakeYtdlp(dir) {
   return file;
 }
 
-/** Заглушка ffmpeg: версия по запросу и две части вместо настоящей нарезки. */
+/** ffmpeg stub: version on request and two parts instead of a real split. */
 function fakeFfmpeg(dir) {
   const file = path.join(dir, 'fake-ffmpeg');
   const lines = [
@@ -76,7 +76,7 @@ function fakeFfmpeg(dir) {
   return file;
 }
 
-/** Заглушка DeepInfra: два маршрута, которых хватает цепочке. */
+/** DeepInfra stub: two routes, which is enough for the chain. */
 async function fakeDeepInfra({ text = 'Привет, это расшифровка.', segments = 2 } = {}) {
   const calls = { transcriptions: 0, chats: 0 };
   const server = http.createServer((req, res) => {
@@ -151,7 +151,7 @@ async function setup({ info = {}, audioBytes = 4096, api = {} } = {}) {
     out,
     deepinfra,
     async restore() {
-      // Сервер-заглушку закрываем обязательно: иначе тестовый прогон висит на живом сокете.
+      // We must close the stub server: otherwise the test run hangs on a live socket.
       await deepinfra.close();
       for (const key of Object.keys(env)) delete process.env[key];
       for (const key of ['FAKE_YTDLP_FAIL', 'VIDEO_BLOG_MAX_MINUTES', 'VIDEO_BLOG_API_KEY']) delete process.env[key];
@@ -172,9 +172,9 @@ function findFile(dir, suffix) {
   return name === undefined ? null : path.join(dir, name);
 }
 
-// --- тесты -------------------------------------------------------------------
+// --- tests -------------------------------------------------------------------
 
-test('инструменты: четыре, у каждого схема и запрет лишних полей', () => {
+test('tools: four, each with a schema and extra-field ban', () => {
   assert.deepEqual(
     TOOLS.map((tool) => tool.name),
     ['blog_status', 'video_transcribe', 'video_to_blog', 'blog_from_transcript'],
@@ -186,7 +186,7 @@ test('инструменты: четыре, у каждого схема и за
   }
 });
 
-test('мелочи: slug, размер и время', () => {
+test('small things: slug, size and time', () => {
   assert.equal(slugify('Why Are People Starting to Sound Like ChatGPT?'), 'why-are-people-starting-to-sound-like-chatgpt');
   assert.equal(slugify('Как читать видео: часть 2'), 'как-читать-видео-часть-2');
   assert.equal(slugify('!!!'), 'blog-post');
@@ -198,7 +198,7 @@ test('мелочи: slug, размер и время', () => {
   assert.equal(humanSize(1536), '1.5 КБ');
 });
 
-test('status: без ключа говорит об этом прямо, а не падает', async () => {
+test('status: without a key it says so outright instead of crashing', async () => {
   const stand = await setup();
   try {
     process.env.VIDEO_BLOG_API_KEY = '';
@@ -213,7 +213,7 @@ test('status: без ключа говорит об этом прямо, а не
   }
 });
 
-test('video_to_blog: ссылка на входе — пост и транскрипт на выходе', async () => {
+test('video_to_blog: a link in — a post and transcript out', async () => {
   const stand = await setup();
   try {
     const { text, isError } = await call('video_to_blog', { url: 'https://example.invalid/watch?v=1', out: stand.out });
@@ -232,7 +232,7 @@ test('video_to_blog: ссылка на входе — пост и транскр
     assert.match(markdown, /^# Заголовок/);
     assert.match(markdown, /Источник: \[Как читать видео\]/);
 
-    // Таймкоды склеены по частям: у второй сегмент стартует не с нуля.
+    // Timecodes are joined across parts: the second one's segment starts not from zero.
     const body = fs.readFileSync(transcript, 'utf8');
     assert.match(body, /^\[0:00\] Кусок 1/m);
     assert.match(body, /^\[0:30\] Кусок 2/m);
@@ -249,7 +249,7 @@ test('video_to_blog: ссылка на входе — пост и транскр
   }
 });
 
-test('длинное аудио режется, куски расшифровываются по очереди', async () => {
+test('long audio is split, chunks are transcribed in turn', async () => {
   const stand = await setup({ audioBytes: 8192 });
   try {
     process.env.VIDEO_BLOG_MAX_UPLOAD_MB = '0.001';
@@ -271,7 +271,7 @@ test('длинное аудио режется, куски расшифровы�
   }
 });
 
-test('пустая расшифровка — это ошибка, а не пустой файл', async () => {
+test('an empty transcript is an error, not an empty file', async () => {
   const stand = await setup({ api: { text: '' } });
   try {
     const { text, isError } = await call('video_transcribe', { url: 'https://example.invalid/watch?v=1', out: stand.out });
@@ -283,7 +283,7 @@ test('пустая расшифровка — это ошибка, а не пу�
   }
 });
 
-test('плейлист и превышение лимита отсекаются до скачивания', async () => {
+test('playlist and limit overflow are rejected before downloading', async () => {
   const playlist = await setup({ info: { _type: 'playlist', entries: [{ id: 'a' }] } });
   try {
     const { text, isError } = await call('video_to_blog', { url: 'https://example.invalid/playlist', out: playlist.out });
@@ -305,7 +305,7 @@ test('плейлист и превышение лимита отсекаются
   }
 });
 
-test('ссылка и файл вместе — отказ; yt-dlp не ответил — внятная причина', async () => {
+test('link and file together — refused; yt-dlp didn\'t respond — a clear reason', async () => {
   const stand = await setup();
   try {
     const both = await call('video_to_blog', { url: 'https://example.invalid/1', file: '/tmp/a.mp3', out: stand.out });
@@ -325,7 +325,7 @@ test('ссылка и файл вместе — отказ; yt-dlp не отве
   }
 });
 
-test('blog_from_transcript: текст на входе, пост на выходе, расшифровка не запускается', async () => {
+test('blog_from_transcript: text in, post out, transcription isn\'t started', async () => {
   const stand = await setup();
   try {
     const { text, isError } = await call('blog_from_transcript', {
@@ -349,7 +349,7 @@ test('blog_from_transcript: текст на входе, пост на выход
   }
 });
 
-test('временные каталоги убираются за собой, keep_audio их оставляет', async () => {
+test('temporary directories clean up after themselves, keep_audio leaves them', async () => {
   const stand = await setup();
   try {
     await call('video_to_blog', { url: 'https://example.invalid/watch?v=1', out: stand.out, include_text: false });

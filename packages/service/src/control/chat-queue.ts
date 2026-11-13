@@ -1,44 +1,44 @@
-// Очередь реплик, написанных во время хода.
+// Queue of turns written during a turn.
 //
-// Хранится в процессе сервиса, а не в браузере: человек нажал F5 или ушёл в другой
-// разговор — реплика всё равно доедет, когда текущий ход встанет. Перезапуск службы
-// очередь теряет вместе с ходом, который она ждала (см. chat-live.ts): незавершённый
-// ход после рестарта не восстановить, и делать вид, что реплика «где-то ждёт», было бы
-// враньём.
+// It is kept in the service process, not in the browser: if a person pressed F5 or went to another
+// conversation, the turn will still be delivered when the current turn finishes. A service restart
+// loses the queue together with the turn it was waiting for (see chat-live.ts): an unfinished
+// turn cannot be restored after a restart, and pretending that the turn is "waiting somewhere" would be
+// a lie.
 import crypto from 'node:crypto';
 import type { UploadedAttachments } from './chat.ts';
 
 /**
- * Сколько реплик держим в очереди одного разговора. Пять — уже «я наговорил, пока
- * он думал»; больше не влезет в память, если у каждой по несколько картинок.
+ * How many turns we keep in the queue of a single conversation. Five is already "I talked a lot while
+ * it was thinking"; more will not fit in memory if each has several images.
  */
 export const QUEUE_LIMIT = 5;
 
-/** Сколько символов реплики видно в индикаторе очереди. */
+/** How many characters of a turn are visible in the queue indicator. */
 const LABEL_CHARS = 120;
 
 export type QueuedMessage = {
   id: string;
-  /** Что человек видит в очереди: текст или имена вложений, без base64. */
+  /** What a person sees in the queue: text or attachment names, without base64. */
   label: string;
   text: string;
   attachments: UploadedAttachments;
   at: number;
 };
 
-/** Вид очереди для панели: идентификатор и подпись, ничего лишнего. */
+/** Queue view for the panel: identifier and label, nothing extra. */
 export type QueueItem = { id: string; text: string };
 
 const queues = new Map<string, QueuedMessage[]>();
 
-/** Ключ один на всех: человек и разговор. */
+/** One key for everyone: person and conversation. */
 function key(userId: string, chatId: string): string {
   return `${userId}\u0000${chatId}`;
 }
 
 /**
- * Подпись реплики для индикатора: текст, а если его нет — имена файлов. Слишком
- * длинную реплику обрезаем: очередь — это список, а не читалка.
+ * Turn label for the indicator: the text, or if there is none, the file names. A too
+ * long turn is truncated: the queue is a list, not a reader.
  */
 export function queueLabel(text: string, names: string[]): string {
   const trimmed = text.trim();
@@ -46,7 +46,7 @@ export function queueLabel(text: string, names: string[]): string {
   return full.length > LABEL_CHARS ? `${full.slice(0, LABEL_CHARS - 1).trimEnd()}…` : full;
 }
 
-/** Очередь разговора: от старых к новым. Копия — снаружи её не портят. */
+/** Conversation queue: from old to new. A copy — it is not spoiled from outside. */
 export function queued(userId: string, chatId: string): QueuedMessage[] {
   return [...(queues.get(key(userId, chatId)) ?? [])];
 }
@@ -56,8 +56,8 @@ export function queueView(userId: string, chatId: string): QueueItem[] {
 }
 
 /**
- * Ставит реплику в хвост. `null` — очередь полна: тогда честно отказываем, а не
- * копим бесконечно. `front` нужен команде «сейчас»: она обгоняет уже стоящих.
+ * Appends a turn to the tail. `null` means the queue is full: then we honestly refuse instead of
+ * accumulating endlessly. `front` is needed by the "now" command: it overtakes those already standing.
  */
 export function enqueue(
   userId: string,
@@ -81,7 +81,7 @@ export function enqueue(
   return { id: item.id, position: list.indexOf(item) + 1 };
 }
 
-/** Снимает голову очереди: её и запускаем следующим ходом. */
+/** Removes the head of the queue: it is what we run as the next turn. */
 export function takeNext(userId: string, chatId: string): QueuedMessage | undefined {
   const keyOf = key(userId, chatId);
   const list = queues.get(keyOf);
@@ -92,7 +92,7 @@ export function takeNext(userId: string, chatId: string): QueuedMessage | undefi
   return head;
 }
 
-/** Убирает одну реплику: человек передумал ещё до того, как её отправили. */
+/** Removes a single turn: the person changed their mind before it was sent. */
 export function dropQueued(userId: string, chatId: string, id: string): boolean {
   const keyOf = key(userId, chatId);
   const list = queues.get(keyOf);
@@ -104,7 +104,7 @@ export function dropQueued(userId: string, chatId: string, id: string): boolean 
   return true;
 }
 
-/** Снимает всю очередь: `/stop` — это «останови всё», а не «останови только ответ». */
+/** Removes the whole queue: `/stop` means "stop everything", not "stop only the reply". */
 export function clearQueue(userId: string, chatId: string): QueuedMessage[] {
   const keyOf = key(userId, chatId);
   const list = queues.get(keyOf) ?? [];

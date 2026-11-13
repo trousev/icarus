@@ -1,11 +1,11 @@
-// Реестр разговоров человека: chats.json.
+// A person's conversation registry: chats.json.
 //
-// Здесь только метаданные: id, заголовок, когда создан, канал и conversationId
-// для файла сессии. Превью и время последнего сообщения не храним — их даёт
-// jsonl-файл сессии, и читаем мы его только для той страницы, которую показали.
+// Only metadata here: id, title, when created, channel and conversationId
+// for the session file. We don't store the preview or last-message time — the session
+// jsonl file provides them, and we read it only for the page we've shown.
 //
-// Реестр общий для всех каналов: веб-чат, Telegram и OpenAI-клиент. По нему
-// панель показывает список и решает, куда писать можно, а куда — только смотреть.
+// The registry is shared across all channels: web chat, Telegram and the OpenAI client. From it
+// the panel shows the list and decides where writing is allowed and where it's view-only.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -23,18 +23,18 @@ import {
 export const NEW_CHAT_TITLE = 'Новый чат';
 export const NEW_CHAT_PREVIEW = 'Расскажи, что нужно сделать.';
 
-/** Одна сессия pi в жизни разговора: /clear начинает новую, старые остаются в истории. */
+/** One pi session in a conversation's life: /clear starts a new one, old ones stay in history. */
 export type SessionEpoch = {
   sessionId: string;
-  /** Когда началась эта сессия: по этой отметке в ленте рисуется разделитель. */
+  /** When this session started: the separator in the feed is drawn by this mark. */
   startedAt: string;
 };
 
 /**
- * Откуда пришла последняя реплика. Сессия pi у разговора одна на все каналы, и
- * файл истории не помнит, чем её прислали: панель, Telegram и API пишут в один и
- * тот же jsonl. Поэтому канал записывает тот, кто принял сообщение, — иначе в
- * общей ленте не понять, кто это сказал.
+ * Where the last reply came from. A conversation's pi session is shared across all channels, and
+ * the history file doesn't remember which one sent it: the panel, Telegram and API write to the same
+ * jsonl. So the channel is recorded by whoever accepted the message — otherwise in the
+ * shared feed you can't tell who said it.
  */
 export type ChatTurn = {
   channel: ChatChannel;
@@ -42,11 +42,11 @@ export type ChatTurn = {
 };
 
 /**
- * Место разговора в Telegram: чат и топик. Храним здесь, а не в памяти бота:
- * после перезапуска сервиса иначе не найти, в каком топике живёт разговор, —
- * а он нужен и чтобы переименовать топик по сводке панели, и чтобы удалить его
- * при архивации. В `conversationId` место не разобрать (в группе там ещё и
- * человек), а корень чата — это `threadId: null`.
+ * A conversation's place in Telegram: chat and topic. We keep it here, not in the bot's memory:
+ * after a service restart we otherwise couldn't find which topic the conversation lives in —
+ * and it's needed both to rename the topic from the panel's summary and to delete it
+ * on archiving. You can't parse the place out of `conversationId` (in a group there's also a
+ * person there), and the chat root is `threadId: null`.
  */
 export type ChatTelegram = {
   chatId: number;
@@ -58,53 +58,53 @@ export type ChatRecord = {
   title: string;
   createdAt: string;
   channel: ChatChannel;
-  /** Разговор в терминах pi: по нему находится файл истории. */
+  /** The conversation in pi terms: the history file is found by it. */
   conversationId?: string;
   /**
-   * Цепочка сессий pi: первая — как разговор начался, каждая следующая — после
-   * `/clear`. Старые сессии не удаляем: по ним собирается история до разделителя.
-   * Поля нет у старых записей — тогда сессия одна и выводится из разговора.
+   * The chain of pi sessions: the first is how the conversation started, each next is after
+   * `/clear`. We don't delete old sessions: the history before the separator is assembled from them.
+   * The field is absent on old records — then there's one session and it's derived from the conversation.
    */
   sessions?: SessionEpoch[];
-  /** Рабочая папка разговора: разговор навсегда остаётся в своём workspace'е. */
+  /** The conversation's working folder: a conversation permanently stays in its own workspace. */
   workspace: string;
   /**
-   * Папка в левом меню. К рабочему каталогу отношения не имеет: человек просто
-   * раскладывает разговоры по полкам, а chats без папки показывает «Входящие».
-   * Поля нет — значит, разговор лежит во «Входящих».
+   * The folder in the left menu. It has nothing to do with the working directory: a person simply
+   * files conversations onto shelves, and chats without a folder show up in "Inbox".
+   * The field is absent — meaning the conversation is in "Inbox".
    */
   folder?: string;
   /**
-   * Где разговор живёт в Telegram: его чат и топик. Поля нет у не-Telegram
-   * разговоров и у старых записей — до первого сообщения бота.
+   * Where the conversation lives in Telegram: its chat and topic. The field is absent on non-Telegram
+   * conversations and on old records — before the bot's first message.
    */
   telegram?: ChatTelegram;
   /**
-   * Артефакт, который правит этот разговор. Обычный чат работает в workspace,
-   * а артефактный — строго в папке артефакта, поэтому одной только workspace
-   * для него мало: папка берётся из сессии pi, а не из рабочего каталога.
+   * The artifact this conversation edits. A regular chat works in a workspace,
+   * while an artifact chat works strictly in the artifact's folder, so a workspace alone
+   * isn't enough for it: the folder is taken from the pi session, not from the working directory.
    */
   artifact?: string;
-  /** Откуда пришла последняя реплика: по ней панель подписывает шапку. */
+  /** Where the last reply came from: the panel labels the header by it. */
   lastTurn?: ChatTurn;
   /**
-   * Когда разговор убран в архив. Архив — это «не вижу каждый день», а не
-   * удаление: запись остаётся в chats.json, файл сессии и вложения целы,
-   * разговор можно вернуть. Поэтому здесь отметка, а не флаг «удалён».
+   * When the conversation was archived. Archive means "I don't see it every day", not
+   * deletion: the record stays in chats.json, the session file and attachments are intact,
+   * and the conversation can be returned. So this is a mark, not a "deleted" flag.
    */
   archivedAt?: string;
   /**
-   * Кто назвал разговор. `auto` — мы: эвристика из первой реплики или модель,
-   * и такое имя первые ходы ещё можно уточнить. `manual` — человек через
-   * `/rename` или из списка, и его не трогаем. Поля нет у старых записей —
-   * считаем, что имя уже устоялось, и моделью его не переписываем.
+   * Who named the conversation. `auto` — us: a heuristic from the first reply or the model,
+   * and such a name can still be refined during the first turns. `manual` — a person via
+   * `/rename` or from the list, and we don't touch it. The field is absent on old records —
+   * we assume the name has settled and don't rewrite it with the model.
    */
   titleSource?: 'auto' | 'manual';
   /**
-   * Имя, которое бот уже поставил топику Telegram. Telegram не отдаёт текущее
-   * имя топика, поэтому помним сами: без этой отметки каждое уточнение
-   * заголовка слало бы `editForumTopic` заново, а Telegram оставляет об этом
-   * служебку в топике. В корне чата топика нет — поля не появляется.
+   * The name the bot has already set for the Telegram topic. Telegram doesn't return the current
+   * topic name, so we remember it ourselves: without this mark every refinement
+   * of the title would send `editForumTopic` again, and Telegram leaves a service message
+   * about it in the topic. At the chat root there's no topic — the field doesn't appear.
    */
   topicTitle?: string;
 };
@@ -121,7 +121,7 @@ function isChannel(value: unknown): value is ChatChannel {
   return value === 'web' || value === 'telegram' || value === 'api';
 }
 
-/** Заголовок по умолчанию: пока первую реплику ещё не из чего взять. */
+/** Default title: while the first reply isn't available to take one from. */
 export function defaultTitle(channel: ChatChannel): string {
   switch (channel) {
     case 'telegram':
@@ -133,7 +133,7 @@ export function defaultTitle(channel: ChatChannel): string {
   }
 }
 
-/** Заголовок ещё не сложился из первой реплики — его можно заменить. */
+/** The title hasn't formed from the first reply yet — it can be replaced. */
 export function isGenericTitle(chat: ChatRecord): boolean {
   return !chat.title.trim() || chat.title === NEW_CHAT_TITLE || chat.title === defaultTitle(chat.channel);
 }
@@ -142,7 +142,7 @@ export function panelCanWrite(chat: Pick<ChatRecord, 'channel'>): boolean {
   return chat.channel === 'web' || chat.channel === 'telegram';
 }
 
-/** Имя дали мы, а не человек: такое ещё можно уточнить моделью. */
+/** We gave the name, not a person: this one can still be refined by the model. */
 export function isAutoTitle(chat: ChatRecord): boolean {
   return chat.titleSource === 'auto';
 }
@@ -153,7 +153,7 @@ function inferChannel(id: string): ChatChannel {
   return 'api';
 }
 
-/** Место в Telegram из записи реестра: годятся только числа и явный корень. */
+/** Telegram place from a registry record: only numbers and an explicit root are valid. */
 function telegramOf(value: unknown): ChatTelegram | null {
   if (!value || typeof value !== 'object') return null;
   const place = value as Record<string, unknown>;
@@ -170,9 +170,9 @@ function telegramOf(value: unknown): ChatTelegram | null {
 }
 
 /**
- * Приводит запись к текущей схеме. Старые веб-записи несут preview/updatedAt —
- * их выбрасываем, а канал и conversationId достраиваем: id веб-чата и есть
- * conversationId. У записей из старого session-index conversationId уже есть.
+ * Brings a record to the current schema. Old web records carry preview/updatedAt —
+ * we drop them, and build up the channel and conversationId: the web chat id is itself the
+ * conversationId. Records from the old session-index already have a conversationId.
  */
 function normalize(value: unknown): ChatRecord | null {
   if (!value || typeof value !== 'object') return null;
@@ -198,8 +198,8 @@ function normalize(value: unknown): ChatRecord | null {
         })
         .filter((epoch): epoch is SessionEpoch => epoch !== null)
     : [];
-  // Запись могли успеть записать с одиночным sessionId (промежуточный формат):
-  // не теряем сессию, а разворачиваем её в цепочку.
+  // A record could have been written with a single sessionId (an intermediate format):
+  // we don't lose the session but expand it into a chain.
   const legacySessionId = typeof item.sessionId === 'string' && item.sessionId.trim() ? item.sessionId : '';
   if (sessions.length === 0 && legacySessionId) sessions.push({ sessionId: legacySessionId, startedAt: createdAt });
 
@@ -215,13 +215,13 @@ function normalize(value: unknown): ChatRecord | null {
     title: typeof item.title === 'string' && item.title.trim() ? item.title : defaultTitle(channel),
     createdAt,
     channel,
-    // Записи до появления workspace'ов все жили в «Разговоре».
+    // Records before workspaces appeared all lived in "Conversation".
     workspace: typeof item.workspace === 'string' && item.workspace ? item.workspace : DEFAULT_WORKSPACE,
     ...(conversationId ? { conversationId } : {}),
     ...(sessions.length > 0 ? { sessions } : {}),
-    // Пустой папки не бывает: ссылка на удалённую папку равносильна «Входящим».
+    // An empty folder never happens: a reference to a deleted folder is the same as "Inbox".
     ...(typeof item.folder === 'string' && item.folder !== '' ? { folder: item.folder } : {}),
-    // Пустая строка — это «обычный чат», а не артефакт с пустым именем.
+    // An empty string means "regular chat", not an artifact with an empty name.
     ...(typeof item.artifact === 'string' && item.artifact !== '' ? { artifact: item.artifact } : {}),
     ...(telegram ? { telegram } : {}),
     ...(lastTurn ? { lastTurn } : {}),
@@ -231,7 +231,7 @@ function normalize(value: unknown): ChatRecord | null {
   };
 }
 
-/** Реестр читается целиком: это маленький индекс, а не история разговоров. */
+/** The registry is read in full: it's a small index, not a conversation history. */
 export function readChats(config: IcarusConfig, user: UserConfig): ChatRecord[] {
   try {
     const parsed = JSON.parse(fs.readFileSync(chatsFile(config, user), 'utf8')) as { chats?: unknown };
@@ -253,7 +253,7 @@ export function readChats(config: IcarusConfig, user: UserConfig): ChatRecord[] 
   }
 }
 
-/** Пишем через временный файл: падение посреди записи не должно съесть реестр. */
+/** We write via a temporary file: a crash mid-write shouldn't eat the registry. */
 export function writeChats(config: IcarusConfig, user: UserConfig, chats: ChatRecord[]): void {
   const file = chatsFile(config, user);
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -261,7 +261,7 @@ export function writeChats(config: IcarusConfig, user: UserConfig, chats: ChatRe
   const unique = new Map<string, ChatRecord>();
   for (const chat of chats) {
     const existing = unique.get(chat.id);
-    // Запись с conversationId полезнее: по ней находится файл истории.
+    // A record with a conversationId is more useful: the history file is found by it.
     if (!existing || (!existing.conversationId && chat.conversationId)) unique.set(chat.id, chat);
   }
   fs.writeFileSync(tmp, `${JSON.stringify({ chats: [...unique.values()] }, null, 2)}\n`, { mode: 0o600 });
@@ -269,24 +269,24 @@ export function writeChats(config: IcarusConfig, user: UserConfig, chats: ChatRe
   fs.renameSync(tmp, file);
 }
 
-/** Сессии разговора по порядку: у старых записей она одна и выводится из id. */
+/** A conversation's sessions in order: old records have one and it's derived from the id. */
 export function sessionEpochsOf(chat: ChatRecord, user: UserConfig): SessionEpoch[] {
   if (chat.sessions && chat.sessions.length > 0) return chat.sessions;
   return [{ sessionId: derivedSessionId(chat, user), startedAt: chat.createdAt }];
 }
 
-/** Все сессии разговора — по ним история собирается с разделителями после /clear. */
+/** All of a conversation's sessions — the history is assembled from them with separators after /clear. */
 export function sessionIdsOf(chat: ChatRecord, user: UserConfig): string[] {
   return sessionEpochsOf(chat, user).map((epoch) => epoch.sessionId);
 }
 
-/** id текущей (последней) сессии pi: по нему продолжаем разговор и ищем свежий файл. */
+/** id of the current (last) pi session: we continue the conversation and find a fresh file by it. */
 export function sessionIdOf(chat: ChatRecord, user: UserConfig): string {
   const epochs = sessionEpochsOf(chat, user);
   return epochs.at(-1)?.sessionId ?? derivedSessionId(chat, user);
 }
 
-/** id сессии, выведенный из разговора: так жили записи до цепочки сессий. */
+/** id of the session derived from the conversation: this is how records lived before the session chain. */
 function derivedSessionId(chat: ChatRecord, user: UserConfig): string {
   if (chat.conversationId) return sessionIdFor(user.id, chat.conversationId);
   if (chat.id.startsWith('session:')) return chat.id.slice('session:'.length);
@@ -294,9 +294,9 @@ function derivedSessionId(chat: ChatRecord, user: UserConfig): string {
 }
 
 /**
- * Добавляет разговору новую сессию pi. `/clear` заводит её в pi, а мы дописываем
- * в цепочку: старые файлы остаются историей до разделителя, новый — текущим
- * контекстом. Первую сессию выводим из conversationId, если цепочки ещё нет.
+ * Adds a new pi session to a conversation. `/clear` starts it in pi, and we append
+ * it to the chain: old files remain the history before the separator, the new one is the current
+ * context. We derive the first session from the conversationId if there's no chain yet.
  */
 export function appendChatSession(
   config: IcarusConfig,
@@ -316,7 +316,7 @@ export function appendChatSession(
   return chat;
 }
 
-/** Человек переименовал разговор: имя больше не выводится из первой реплики. */
+/** A person renamed the conversation: the name is no longer derived from the first reply. */
 export function renameChat(
   config: IcarusConfig,
   user: UserConfig,
@@ -328,9 +328,9 @@ export function renameChat(
   const chats = readChats(config, user);
   const chat = chats.find((item) => item.conversationId === conversationId || item.id === conversationId);
   if (!chat) return null;
-  // Имя выбрал человек: модель его больше не переписывает, даже если разговор
-  // только начался. Пишем и когда имя совпало: запись могла прийти из версии
-  // без этого поля, и тогда метку надо поставить, иначе модель переименует.
+  // The person chose the name: the model no longer rewrites it, even if the conversation
+  // just started. We also write when the name matched: the record could come from a version
+  // without this field, and then the mark must be set, otherwise the model would rename.
   if (chat.title !== name || chat.titleSource !== 'manual') {
     chat.title = name;
     chat.titleSource = 'manual';
@@ -340,10 +340,10 @@ export function renameChat(
 }
 
 /**
- * Убирает разговор в архив или возвращает обратно. Меняется только отметка
- * в реестре: история, файлы сессии и вложения остаются на месте, поэтому
- * архив не путается с удалением. Повторный уход в архив отметку не двигает —
- * так порядок в архиве не прыгает от лишнего клика.
+ * Archives the conversation or returns it back. Only the mark in the registry changes:
+ * the history, session files and attachments stay in place, so
+ * archive isn't confused with deletion. Re-archiving doesn't move the mark —
+ * so the order in the archive doesn't jump from an extra click.
  */
 export function setChatArchived(
   config: IcarusConfig,
@@ -367,9 +367,9 @@ export function setChatArchived(
 }
 
 /**
- * Запоминает, где разговор живёт в Telegram: чат и топик. Зовёт бот, приняв
- * сообщение, — тогда место переживает перезапуск сервиса. Пишем только
- * изменение: иначе каждое сообщение в чате трогало бы реестр зря.
+ * Remembers where the conversation lives in Telegram: chat and topic. Called by the bot after
+ * accepting a message — so the place survives a service restart. We write only
+ * a change: otherwise every message in the chat would touch the registry for nothing.
  */
 export function setChatTelegram(
   config: IcarusConfig,
@@ -387,7 +387,7 @@ export function setChatTelegram(
   return chat;
 }
 
-/** Место разговора в Telegram: null — разговор заведён не ботом. */
+/** A conversation's place in Telegram: null — the conversation wasn't started by the bot. */
 export function telegramPlaceOf(
   config: IcarusConfig,
   user: UserConfig,
@@ -396,7 +396,7 @@ export function telegramPlaceOf(
   return findChatRecord(config, user, conversationId)?.telegram ?? null;
 }
 
-/** Топик удалён вместе с сообщениями — места в Telegram у разговора больше нет. */
+/** The topic was deleted together with the messages — the conversation has no Telegram place anymore. */
 function clearChatTelegram(config: IcarusConfig, user: UserConfig, conversationId: string): void {
   const chats = readChats(config, user);
   const chat = chats.find((item) => item.conversationId === conversationId || item.id === conversationId);
@@ -405,19 +405,19 @@ function clearChatTelegram(config: IcarusConfig, user: UserConfig, conversationI
   writeChats(config, user, chats);
 }
 
-/** Что не вышло при выносе разговора из Telegram: архиву это не мешает. */
+/** What failed when removing the conversation from Telegram: this doesn't prevent archiving. */
 export type ArchiveOutcome = { chat: ChatRecord | null; topicError?: string };
 
 /**
- * Убирает разговор в архив и — если попросить — выносит его из Telegram.
- * Архив и удаление топика живут вместе, потому что в панели и в боте это
- * одно действие: «убрать с глаз». Топик Telegram удаляется вместе с
- * сообщениями, и это необратимо, поэтому возврат из архива его не воскрешает:
- * разговор вернётся только в панель (см. setChatArchived).
+ * Archives the conversation and — if asked — removes it from Telegram.
+ * Archiving and topic deletion live together because in the panel and in the bot this is
+ * one action: "clear from sight". The Telegram topic is deleted together with the
+ * messages, and this is irreversible, so returning from the archive doesn't resurrect it:
+ * the conversation returns only to the panel (see setChatArchived).
  *
- * Удаление топика — побочный эффект, а не условие архива: Telegram откажет —
- * разговор всё равно уйдёт в архив, а ошибку покажет тот, кто позвал.
- * `removeTopic` не передан (панель без бота) — просто двигаем отметку.
+ * Topic deletion is a side effect, not a condition of archiving: if Telegram refuses,
+ * the conversation still goes to the archive, and the error is shown by whoever called it.
+ * `removeTopic` not passed (panel without the bot) — we just move the mark.
  */
 export async function archiveChat(
   config: IcarusConfig,
@@ -429,9 +429,9 @@ export async function archiveChat(
   const before = findChatRecord(config, user, conversationId);
   const chat = setChatArchived(config, user, conversationId, archived);
   if (!chat) return { chat: null };
-  // Возврат из архива Telegram не трогает: топик уже удалён, воскрешать нечего.
-  // Уже архивный разговор тоже не трогаем — иначе повторный /archive долбил бы
-  // удаление по мёртвому топику.
+  // Returning from the archive doesn't touch Telegram: the topic is already deleted, nothing to resurrect.
+  // We also don't touch an already-archived conversation — otherwise a repeated /archive would keep
+  // hammering deletion on a dead topic.
   if (!archived || before?.archivedAt || !removeTopic) return { chat };
   const place = chat.telegram;
   if (!place || place.threadId === null) return { chat };
@@ -445,8 +445,8 @@ export async function archiveChat(
 }
 
 /**
- * Убирает workspace: его диалоги возвращаются в «Разговор» (панель так и обещает),
- * а сами файлы истории не трогаются — они лежат в общей папке сессий.
+ * Removes a workspace: its dialogs return to "Conversation" (as the panel promises),
+ * and the history files themselves aren't touched — they lie in the shared sessions folder.
  */
 export function reassignChats(config: IcarusConfig, user: UserConfig, from: string, to = DEFAULT_WORKSPACE): number {
   const chats = readChats(config, user);
@@ -461,8 +461,8 @@ export function reassignChats(config: IcarusConfig, user: UserConfig, from: stri
 }
 
 /**
- * Переносит разговор в папку меню (или во «Входящие», если folder === null).
- * Файл сессии, workspace и заголовок не меняются: это только полка в списке.
+ * Moves a conversation to a menu folder (or to "Inbox" if folder === null).
+ * The session file, workspace and title don't change: this is only a shelf in the list.
  */
 export function setChatFolder(
   config: IcarusConfig,
@@ -480,7 +480,7 @@ export function setChatFolder(
   return chat;
 }
 
-/** Папку удалили: её разговоры возвращаются во «Входящие», а не теряются. */
+/** The folder was deleted: its conversations return to "Inbox" rather than being lost. */
 export function reassignChatFolder(
   config: IcarusConfig,
   user: UserConfig,
@@ -499,7 +499,7 @@ export function reassignChatFolder(
   return moved;
 }
 
-/** В каком workspace'е живёт разговор: у записей до переезда — «Разговор». */
+/** Which workspace the conversation lives in: records before the move are in "Conversation". */
 export function workspaceForConversation(
   config: IcarusConfig,
   user: UserConfig,
@@ -511,10 +511,10 @@ export function workspaceForConversation(
 }
 
 /**
- * Переключает разговор в другой workspace. Папка живёт в chats.json рядом с
- * разговором, поэтому выбор видят все входы и он переживает перезапуск сервиса.
- * Сессия pi о переезде узнаёт при следующем ходе: реестр сверяет папку живой
- * сессии с записью и поднимает её заново в новой (см. SessionRegistry.acquire).
+ * Switches a conversation to another workspace. The folder lives in chats.json next to the
+ * conversation, so all entry points see the choice and it survives a service restart.
+ * The pi session learns about the move on the next turn: the registry compares the live
+ * session's folder with the record and raises it anew in the new one (see SessionRegistry.acquire).
  */
 export function setChatWorkspace(
   config: IcarusConfig,
@@ -522,13 +522,13 @@ export function setChatWorkspace(
   conversationId: string,
   workspace: string,
 ): ChatRecord {
-  // Запись может быть ещё не заведена: /workspace — законная первая команда
-  // в новом разговоре, до первого хода.
+  // The record may not exist yet: /workspace is a legitimate first command
+  // in a new conversation, before the first turn.
   ensureChat(config, user, conversationId, channelForConversation(conversationId), workspace);
   const chats = readChats(config, user);
   const chat = chats.find((item) => item.conversationId === conversationId || item.id === conversationId);
-  // ensureChat только что записал разговор, так что находим его всегда; если
-  // файл всё же не прочитался, пусть вызывающий не делает вид, что переключил.
+  // ensureChat just wrote the conversation, so we always find it; if
+  // the file still didn't read, don't let the caller pretend it switched.
   if (!chat) throw new Error(`разговор ${conversationId} не записался в реестр`);
   if (chat.workspace === workspace) return chat;
   chat.workspace = workspace;
@@ -536,7 +536,7 @@ export function setChatWorkspace(
   return chat;
 }
 
-/** Артефакт разговора: у обычного чата его нет, у правки артефакта — есть. */
+/** A conversation's artifact: a regular chat has none, an artifact edit has one. */
 export function artifactForConversation(
   config: IcarusConfig,
   user: UserConfig,
@@ -548,18 +548,18 @@ export function artifactForConversation(
 }
 
 /**
- * Откуда пришла последняя реплика разговора. null — ход ещё не записан этим
- * сервисом (старые сессии) или записи нет вовсе.
+ * Where the conversation's last reply came from. null — the turn hasn't been recorded by this
+ * service yet (old sessions) or there's no record at all.
  */
 export function lastTurnOf(config: IcarusConfig, user: UserConfig, conversationId: string): ChatTurn | null {
   return findChatRecord(config, user, conversationId)?.lastTurn ?? null;
 }
 
 /**
- * Записывает, из какого канала пришла реплика. Зовёт тот, кто принял сообщение:
- * панель, бот и OpenAI-вход. Разговор к этому моменту уже существует — его
- * заводит `registry.acquire`; если записи нет, молча ничего не делаем: реплика
- * важнее подписи.
+ * Records which channel the reply came from. Called by whoever accepted the message:
+ * the panel, the bot and the OpenAI entry point. By this point the conversation already exists —
+ * `registry.acquire` creates it; if there's no record, we silently do nothing: the reply
+ * matters more than the label.
  */
 export function recordTurn(
   config: IcarusConfig,
@@ -581,7 +581,7 @@ export function recordTurn(
   }
 }
 
-/** Новый веб-чат: единственный канал, который панель создаёт сама. */
+/** New web chat: the only channel the panel creates itself. */
 export function createChatRecord(
   config: IcarusConfig,
   user: UserConfig,
@@ -606,8 +606,8 @@ export function createChatRecord(
 }
 
 /**
- * Разговор, привязанный к артефакту. Один артефакт — один такой чат: человек
- * возвращается к «той же правке», а не заводит новый диалог каждый раз.
+ * A conversation tied to an artifact. One artifact — one such chat: a person
+ * returns to "the same edit" rather than starting a new dialog each time.
  */
 export function findArtifactChat(
   config: IcarusConfig,
@@ -618,9 +618,9 @@ export function findArtifactChat(
 }
 
 /**
- * Разговор поднялся — значит, он существует. Реестр знает о нём, даже если
- * человек ни разу не открывал панель. Старую запись `session:<id>` без
- * conversationId обновляем на настоящий id разговора, чтобы она не раздвоилась.
+ * The conversation was raised — so it exists. The registry knows about it even if
+ * a person never opened the panel. We update an old `session:<id>` record without a
+ * conversationId to the real conversation id so it doesn't split in two.
  */
 export function ensureChat(
   config: IcarusConfig,
@@ -666,8 +666,8 @@ export function ensureChat(
     chat.channel = channel;
     changed = true;
   }
-  // Реестр мог остаться от версии без артефактных чатов: тип разговора
-  // достраиваем при первом же ходе, а не теряем режим правки.
+  // The registry may be left over from a version without artifact chats: we build up
+  // the conversation type on the first turn rather than lose the edit mode.
   if (artifact && chat.artifact !== artifact) {
     chat.artifact = artifact;
     changed = true;
@@ -676,7 +676,7 @@ export function ensureChat(
   return chat;
 }
 
-/** Заголовок обновился: пишем один раз, а не на каждый показ списка. */
+/** The title updated: we write once, not on every list render. */
 export function updateChatTitles(config: IcarusConfig, user: UserConfig, titles: Map<string, string>): void {
   if (titles.size === 0) return;
   const chats = readChats(config, user);
@@ -691,10 +691,10 @@ export function updateChatTitles(config: IcarusConfig, user: UserConfig, titles:
 }
 
 /**
- * Имя от нас: эвристика из первой реплики или модель. Помечаем `auto` — только
- * такие имена модель ещё может уточнить; имя, выбранное человеком, не трогаем.
- * Архивный разговор не переименовываем: он убран с глаз, и новое имя там —
- * след чужой работы, а не то, что человек ждёт увидеть, вернув разговор.
+ * A name from us: a heuristic from the first reply or the model. We mark it `auto` — only
+ * such names the model can still refine; a name chosen by a person we don't touch.
+ * We don't rename an archived conversation: it's been cleared from sight, and a new name there
+ * is a trace of someone else's work, not what a person expects to see when returning the conversation.
  */
 export function applyAutoTitle(
   config: IcarusConfig,
@@ -716,9 +716,9 @@ export function applyAutoTitle(
 }
 
 /**
- * Заголовок из первой реплики человека. Читаем голову файла и только если
- * заголовок ещё служебный: у Telegram/API нет своего finishChat, поэтому
- * первый же ход даёт имя разговору, а панель потом показывает его как обычный.
+ * A title from the person's first reply. We read the head of the file and only if
+ * the title is still generic: Telegram/API have no finishChat of their own, so
+ * the first turn gives the conversation a name, and the panel later shows it as a regular one.
  */
 export function refreshChatTitle(config: IcarusConfig, user: UserConfig, conversationId: string): void {
   try {
@@ -733,20 +733,20 @@ export function refreshChatTitle(config: IcarusConfig, user: UserConfig, convers
     const title = titleFromText(text.replace(/^\[(?:голосовое|voice)[^\]]*\]\s*/i, ''));
     if (!title || title === chat.title) return;
     chat.title = title;
-    // У Telegram/API имя тоже наше: если человек его не выбирал, модель потом
-    // может уточнить его по первым репликам — но живой заголовок сейчас считается
-    // в веб-чате, туда и смотрим.
+    // Telegram/API names are ours too: if a person didn't choose it, the model can later
+    // refine it from the first replies — but the live title is counted in the web chat now,
+    // and that's where we look.
     if (chat.titleSource !== 'manual') chat.titleSource = 'auto';
     writeChats(config, user, chats);
   } catch (error) {
-    // Заголовок — украшение: его сбой не должен отменять ответ человеку.
+    // The title is decoration: its failure shouldn't cancel the answer to a person.
     log.warn('не обновился заголовок разговора', { user: user.id, error: String(error) });
   }
 }
 
 /**
- * Запомнил имя, поставленное топику Telegram. Сравнивать своё имя с текущим
- * приходится самим: Bot API не умеет спросить, как топик называется сейчас.
+ * Remembered the name set for the Telegram topic. We have to compare our own name with the current
+ * one ourselves: the Bot API can't ask what the topic is called right now.
  */
 export function setTopicTitle(
   config: IcarusConfig,
@@ -787,9 +787,9 @@ function readLegacyIndex(config: IcarusConfig, user: UserConfig): LegacyIndex {
 }
 
 /**
- * Перед первой миграцией сохраняем старый chats.json: в нём preview/updatedAt и
- * нет channel. Если файл битый — откладываем его в сторону, а не затираем:
- * реестр восстановим из сессий, а содержимое останется для разбора.
+ * Before the first migration we save the old chats.json: it has preview/updatedAt and
+ * no channel. If the file is broken — we set it aside rather than overwrite it:
+ * we'll restore the registry from sessions, and the contents remain for inspection.
  */
 function backupLegacyChats(config: IcarusConfig, user: UserConfig): void {
   const file = chatsFile(config, user);
@@ -834,12 +834,12 @@ function backupLegacyChats(config: IcarusConfig, user: UserConfig): void {
 }
 
 /**
- * Разовый проход по файлам сессий при старте: всё, что уже лежит на диске,
- * должно попасть в реестр. Полных чтений тут нет — только имена и mtime;
- * заголовки доезжают, когда разговор впервые показывается или получает ход.
+ * A one-time pass over session files at startup: everything already on disk
+ * must get into the registry. There are no full reads here — only names and mtime;
+ * titles arrive when a conversation is first shown or gets a turn.
  *
- * Заодно переносим старый session-index.json (sessionId → conversationId)
- * в основной реестр и удаляем его: второго индекса больше нет.
+ * Along the way we migrate the old session-index.json (sessionId → conversationId)
+ * into the main registry and delete it: there's no second index anymore.
  */
 export function backfillChats(config: IcarusConfig, user: UserConfig): void {
   try {
@@ -877,8 +877,8 @@ export function backfillChats(config: IcarusConfig, user: UserConfig): void {
       });
     }
 
-    // Две записи могли смотреть на один файл (старый session:<id> и настоящий
-    // conversationId). Оставляем одну — ту, где есть conversationId и живой заголовок.
+    // Two records could point at one file (the old session:<id> and the real
+    // conversationId). We keep one — the one with a conversationId and a live title.
     const unique = new Map<string, ChatRecord>();
     for (const chat of chats) {
       const key = sessionIdOf(chat, user);
@@ -892,10 +892,10 @@ export function backfillChats(config: IcarusConfig, user: UserConfig): void {
       }
     }
 
-    // Пишем всегда: заодно выбрасываем preview/updatedAt из старой схемы.
+    // We always write: along the way we drop preview/updatedAt from the old schema.
     writeChats(config, user, [...unique.values()]);
 
-    // Битой файл оставляем на месте: удалять то, что не смогли прочитать, — хуже, чем показать предупреждение.
+    // We leave a broken file in place: deleting what we couldn't read is worse than showing a warning.
     if (legacy.readable && fs.existsSync(legacyIndexFile(config, user))) {
       fs.rmSync(legacyIndexFile(config, user), { force: true });
       log.info('старый session-index.json перенесён в chats.json и удалён', { user: user.id });
@@ -906,13 +906,13 @@ export function backfillChats(config: IcarusConfig, user: UserConfig): void {
 }
 
 /**
- * Карта разговоров для агента: `conversationId` → id сессии pi и файл истории.
+ * Conversation map for the agent: `conversationId` → pi session id and history file.
  *
- * Агент видит сессии только как файлы `<время>_<id>.jsonl`, а из имени обратно разговор
- * не восстановить (см. files.ts). Ссылка из панели несёт `conversationId`, и сам он
- * посчитать id сессии не может — тот считается хешем с id человека, которого в контейнере
- * нет. Поэтому карту рендерит сервис (у него есть и то, и другое) и кладёт рядом с
- * реестром, куда агент смотрит через read-only маунт (см. compose.ts, workspace.ts).
+ * The agent sees sessions only as files `<time>_<id>.jsonl`, and the conversation can't be
+ * reconstructed back from the name (see files.ts). A panel link carries `conversationId`, and it
+ * can't compute the session id itself — that's a hash with the person's id, which isn't in the container.
+ * So the service renders the map (it has both) and puts it next to the
+ * registry, where the agent looks through a read-only mount (see compose.ts, workspace.ts).
  */
 export function renderSessionsMap(config: IcarusConfig, user: UserConfig): string {
   const paths = userPaths(config, user);
@@ -934,7 +934,7 @@ export function renderSessionsMap(config: IcarusConfig, user: UserConfig): strin
   return `${JSON.stringify({ sessions: entries }, null, 2)}\n`;
 }
 
-/** Находит запись по id панели, conversationId или старому `session:<id>`. */
+/** Finds a record by panel id, conversationId or the old `session:<id>`. */
 export function findChatRecord(config: IcarusConfig, user: UserConfig, id: string): ChatRecord | null {
   const chats = readChats(config, user);
   const direct = chats.find((chat) => chat.id === id || chat.conversationId === id);

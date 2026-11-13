@@ -1,12 +1,12 @@
-// Клиент Telegram Bot API: длинный опрос апдейтов, отправка и правка сообщений.
+// Telegram Bot API client: long polling for updates, sending and editing messages.
 //
-// Bot API — обычный JSON по https, поэтому клиент маленький и без зависимостей.
-// Всё, что нужно боту, — четыре метода; остальное (вебхук, TLS, очередь) Telegram
-// берёт на себя: сервису не нужен ни домен, ни сертификат.
+// The Bot API is ordinary JSON over https, so the client is small and dependency-free.
+// Everything the bot needs is four methods; the rest (webhook, TLS, queue) Telegram
+// takes care of: the service needs neither a domain nor a certificate.
 //
-// Файлы — единственное исключение из «JSON по https»: их Bot API принимает только
-// multipart-формой, полем `photo` или `document`. Поэтому здесь два отдельных метода
-// и общий `upload`, а не строковый параметр: строкой картинку в Telegram не отправишь.
+// Files are the only exception to "JSON over https": the Bot API accepts them only as a
+// multipart form, with the `photo` or `document` field. So here there are two separate methods
+// and a shared `upload`, rather than a string parameter: you can't send an image to Telegram as a string.
 import { log, redact } from '../log.ts';
 
 export type TelegramUser = {
@@ -16,17 +16,17 @@ export type TelegramUser = {
 };
 export type TelegramChat = { id: number; type: string };
 
-/** Служебное сообщение о созданном или переименованном топике. */
+/** Service message about a created or renamed topic. */
 export type TelegramForumTopicCreated = {
   name: string;
   icon_color?: number;
   icon_custom_emoji_id?: string;
 };
 
-/** Предел имени топика по документации Bot API: им же режем имя разговора. */
+/** Topic name limit per the Bot API docs: we trim the conversation name by it too. */
 export const TOPIC_NAME_LIMIT = 128;
 
-/** Фото: один и тот же кадр лестницей размеров, до последнего — сжатый JPEG. */
+/** Photo: the same frame as a ladder of sizes, down to a compressed JPEG at the end. */
 export type TelegramPhotoSize = {
   file_id: string;
   width?: number;
@@ -41,7 +41,7 @@ export type TelegramDocument = {
   file_size?: number;
 };
 
-/** Голосовое: у Telegram это всегда OGG/Opus, поэтому mime можно и не спрашивать. */
+/** Voice: on Telegram this is always OGG/Opus, so mime needn't even be asked for. */
 export type TelegramVoice = {
   file_id: string;
   duration?: number;
@@ -50,21 +50,21 @@ export type TelegramVoice = {
 };
 
 /**
- * Сообщение: текст и то, чем его заменяют (фото, голосовое, документ). У вложения
- * текст лежит не в `text`, а в подписи — `caption`.
+ * A message: the text and what replaces it (photo, voice, document). For an attachment
+ * the text isn't in `text` but in the caption — `caption`.
  */
 export type TelegramMessage = {
   message_id: number;
   chat: TelegramChat;
   from?: TelegramUser;
   /**
-   * Топик, в котором сообщение. В личке с включённым Threaded Mode приходит у всего,
-   * что написано внутри топика; у корня чата и у General-топика его может не быть
-   * вовсе или он равен 1 — и то и другое значит «корень» (см. topicThreadId).
+   * The topic the message is in. In a private chat with Threaded Mode enabled it arrives for everything
+   * written inside a topic; at the chat root and in the General topic it may be absent
+   * entirely or equal to 1 — both mean "root" (see topicThreadId).
    */
   message_thread_id?: number;
   is_topic_message?: boolean;
-  /** Служебное: человек (или бот) завёл топик — запоминаем имя и номер. */
+  /** Service: a person (or the bot) started a topic — we remember the name and number. */
   forum_topic_created?: TelegramForumTopicCreated;
   forum_topic_edited?: { name?: string };
   text?: string;
@@ -78,15 +78,15 @@ export type TelegramMessage = {
   sticker?: unknown;
 };
 
-/** Файл в хранилище Telegram: качать его — отдельным запросом по `file_path`. */
+/** A file in Telegram storage: downloading it is a separate request by `file_path`. */
 export type TelegramFile = { file_id: string; file_path?: string; file_size?: number };
 
 export type TelegramUpdate = { update_id: number; message?: TelegramMessage };
 
 /**
- * Отправленное сообщение: Telegram возвращает его же объектом, поэтому в ответе видно,
- * куда сообщение легло на самом деле. Проверять это нужно: в личке с топиками Telegram
- * умеет молча положить сообщение в общую ленту, подтвердив отправку (`ok: true`).
+ * A sent message: Telegram returns it as the same object, so the response shows
+ * where the message actually landed. This needs checking: in a private chat with topics Telegram
+ * can silently put the message into the shared feed while confirming the send (`ok: true`).
  */
 export type SentMessage = {
   message_id: number;
@@ -94,56 +94,56 @@ export type SentMessage = {
   is_topic_message?: boolean;
 };
 
-/** Легло ли сообщение в тот топик, который просили (см. sendMessage). */
+/** Whether the message landed in the requested topic (see sendMessage). */
 export function landedInThread(sent: SentMessage, asked: number): boolean {
-  // Номер топика Telegram возвращает у сообщений в топике — он и есть ответ.
+  // Telegram returns the topic number for messages in a topic — that is the answer.
   if (typeof sent.message_thread_id === 'number') return sent.message_thread_id === asked;
-  // Номера нет, но флаг топика есть: считаем, что доехало.
+  // No number, but the topic flag is set: we assume it got there.
   return sent.is_topic_message === true;
 }
 
 /**
- * Режим разметки. Telegram сам markdown не разбирает: без `parse_mode` человек видит
- * звёздочки и решётки как есть. Нам нужен только HTML — разметку под него собирает
- * format.ts, а MarkdownV2 требует экранировать полтора десятка знаков.
+ * Parse mode. Telegram doesn't parse markdown itself: without `parse_mode` a person sees
+ * asterisks and hashes as-is. We need only HTML — format.ts builds markup for it,
+ * while MarkdownV2 requires escaping a dozen-plus characters.
  */
 export type ParseMode = 'HTML';
 
-/** Как отправлять текст: с разметкой или как есть. */
+/** How to send the text: with markup or as-is. */
 export type SendOptions = { parseMode?: ParseMode };
 
 export const TELEGRAM_API_BASE = 'https://api.telegram.org';
-/** Сколько ждём ответ Bot API, если вызов не сказал иного. */
+/** How long we wait for the Bot API response if the call didn't say otherwise. */
 export const TELEGRAM_TIMEOUT_MS = 30_000;
-/** Предел Bot API на скачивание: файл больше 20 МБ он не отдаёт вовсе. */
+/** Bot API download limit: it doesn't return a file larger than 20 MB at all. */
 export const TELEGRAM_FILE_LIMIT = 20 * 1024 * 1024;
-/** Предел Bot API на отправку фотографии: больше — только документом. */
+/** Bot API limit for sending a photo: anything larger goes only as a document. */
 export const TELEGRAM_PHOTO_LIMIT = 10 * 1024 * 1024;
-/** Предел Bot API на отправку документа (файла) любого вида. */
+/** Bot API limit for sending a document (file) of any kind. */
 export const TELEGRAM_UPLOAD_LIMIT = 50 * 1024 * 1024;
-/** Подпись под фото/файлом короче сообщения: больше Telegram не примет. */
+/** The caption under a photo/file is shorter than a message: Telegram won't accept more. */
 export const CAPTION_LIMIT = 1024;
-/** Отправка файла дольше текста: запас на то, чтобы 10 МБ уехали по сети. */
+/** Sending a file takes longer than text: headroom for 10 MB to travel over the network. */
 export const UPLOAD_TIMEOUT_MS = 120_000;
 
-/** Файл, который едет в Telegram: байты плюс человеческое имя и тип. */
+/** A file going to Telegram: bytes plus a human name and type. */
 export type UploadFile = {
   bytes: Buffer;
-  /** Имя для человека: по нему Telegram различает тип документа. */
+  /** A name for a person: Telegram distinguishes the document type by it. */
   name: string;
   mimeType: string;
 };
 
-/** Подпись и место для файла: у вложения текст лежит в `caption`, а не в `text`. */
+/** Caption and place for the file: an attachment's text is in `caption`, not `text`. */
 export type UploadOptions = {
   caption?: string;
   threadId?: number | null;
   parseMode?: ParseMode;
 };
 
-/** Файл не влезает в предел Bot API: отправлять не пробуем, говорим человеку. */
+/** The file doesn't fit the Bot API limit: we don't try to send it, we tell the person. */
 export class UploadTooBigError extends Error {
-  /** Сколько мегабайт Telegram согласен принять этим методом. */
+  /** How many megabytes Telegram agrees to accept with this method. */
   readonly limit: number;
 
   constructor(name: string, bytes: number, limit: number) {
@@ -157,10 +157,10 @@ function megabytes(bytes: number): number {
   return Math.max(1, Math.round(bytes / (1024 * 1024)));
 }
 
-/** Ошибка Bot API: `{ok: false, error_code, description}`. */
+/** Bot API error: `{ok: false, error_code, description}`. */
 export class TelegramError extends Error {
   readonly code: number;
-  /** Через сколько секунд повторять (429): Telegram присылает это в parameters. */
+  /** After how many seconds to retry (429): Telegram sends this in parameters. */
   readonly retryAfter: number | null;
 
   constructor(description: string, code: number, retryAfter: number | null = null) {
@@ -173,10 +173,10 @@ export class TelegramError extends Error {
 
 export type TelegramApiOptions = {
   baseUrl?: string;
-  /** Подменяется в тестах: сеть там ни к чему. */
+  /** Overridden in tests: no need for the network there. */
   fetch?: typeof fetch;
   timeoutMs?: number;
-  /** Пауза перед повтором после 429: в тестах подменяется, чтобы не ждать. */
+  /** Pause before retrying after a 429: overridden in tests so they don't wait. */
   sleep?: (ms: number) => Promise<void>;
 };
 
@@ -184,8 +184,8 @@ type CallOptions = {
   signal?: AbortSignal;
   timeoutMs?: number;
   /**
-   * Готовое тело multipart. Параметры в `params` тогда не уезжают: файл и поля
-   * лежат в самой форме, а `content-type` с boundary fetch ставит сам.
+   * A ready multipart body. Parameters in `params` then don't go out: the file and fields
+   * lie in the form itself, and fetch sets the `content-type` with boundary itself.
    */
   multipart?: FormData;
 };
@@ -212,8 +212,8 @@ export class TelegramApi {
   private async call<T>(method: string, params: Record<string, unknown>, options: CallOptions = {}): Promise<T> {
     const signal = options.signal ?? AbortSignal.timeout(options.timeoutMs ?? this.timeoutMs);
 
-    // 429 — это «слишком часто», а не поломка: Telegram сам говорит, сколько ждать.
-    // Одна повторная попытка спасает финальную правку ответа, которую иначе потеряем.
+    // 429 is "too often", not a breakdown: Telegram itself says how long to wait.
+    // One retry saves the final edit of the answer, which we'd otherwise lose.
     for (let attempt = 0; ; attempt += 1) {
       let payload: {
         ok?: boolean;
@@ -226,21 +226,21 @@ export class TelegramApi {
       try {
         response = await this.request(`${this.baseUrl}/bot${this.token}/${method}`, {
           method: 'POST',
-          // Форма сама несёт boundary в content-type: свой заголовок её бы сломал.
+          // The form itself carries the boundary in content-type: our own header would break it.
           ...(options.multipart
             ? { body: options.multipart }
             : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(params) }),
           signal,
         });
       } catch (error) {
-        // Сеть и таймауты — не ответ Bot API: пусть решает вызывающий (опрос повторит).
+        // The network and timeouts are not a Bot API response: let the caller decide (polling will retry).
         throw error instanceof Error ? error : new Error(String(error));
       }
       try {
         payload = (await response.json()) as typeof payload;
       } catch {
-        // Не JSON: так отвечает прокси или балансировщик (HTML на 413), а не Bot API.
-        // Статус при этом содержательный — отдаём его, а не «не разобрался ответ».
+        // Not JSON: this is how a proxy or balancer replies (HTML on 413), not the Bot API.
+        // The status is still meaningful — we return it rather than "couldn't parse the response".
         throw new TelegramError(`ответ не разобрался (HTTP ${response.status})`, response.status);
       }
 
@@ -257,7 +257,7 @@ export class TelegramApi {
     }
   }
 
-  /** `offset` подтверждает всё, что пришло раньше: повторно эти апдейты не приедут. */
+  /** `offset` confirms everything that arrived earlier: those updates won't come again. */
   getUpdates(
     params: { offset?: number; timeoutSeconds?: number; signal?: AbortSignal } = {},
   ): Promise<TelegramUpdate[]> {
@@ -268,29 +268,29 @@ export class TelegramApi {
         ...(params.offset === undefined ? {} : { offset: params.offset }),
         timeout: timeoutSeconds,
         limit: 100,
-        // Боту нужны только сообщения: остальные апдейты — не про разговор.
+        // The bot needs only messages: the other updates aren't about the conversation.
         allowed_updates: ['message'],
       },
       {
         signal: params.signal,
-        // Длинный опрос живёт `timeout` секунд; запас — на дорогу и ответ.
+        // Long polling lives `timeout` seconds; the margin is for travel and the response.
         timeoutMs: (timeoutSeconds + 15) * 1000,
       },
     );
   }
 
   /**
-   * Путь к вложению в хранилище Telegram. Ссылка на файл живёт час, поэтому
-   * качаем сразу, а не откладываем.
+   * The path to an attachment in Telegram storage. The file link lives for an hour, so
+   * we download right away rather than postpone.
    */
   getFile(fileId: string): Promise<TelegramFile> {
     return this.call<TelegramFile>('getFile', { file_id: fileId });
   }
 
   /**
-   * Сам файл. Адрес другой, чем у методов Bot API (`/file/bot<токен>/<путь>`),
-   * и в ответе байты, а не JSON, поэтому мимо `call`. Токен в пути — секрет:
-   * в лог он не попадает (см. redact), а ошибки описываем без адреса.
+   * The file itself. The address differs from Bot API methods (`/file/bot<token>/<path>`),
+   * and the response has bytes, not JSON, so it bypasses `call`. The token in the path is a secret:
+   * it doesn't get into the log (see redact), and we describe errors without the address.
    */
   async downloadFile(filePath: string): Promise<Buffer> {
     const response = await this.request(`${this.baseUrl}/file/bot${this.token}/${filePath}`, {
@@ -303,13 +303,13 @@ export class TelegramApi {
   }
 
   /**
-   * Сообщение в чат или в топик. `message_thread_id` передаём только когда он есть:
-   * в чате без топиков Telegram на это поле отвечает ошибкой.
+   * A message to a chat or topic. We pass `message_thread_id` only when it's present:
+   * in a chat without topics Telegram answers that field with an error.
    *
-   * Про топики в личке Telegram умеет врать молча: отвечает `ok: true`, а сообщение
-   * лежит в общей ленте (см. landedInThread) — поэтому сверяем ответ и пишем в лог.
-   * А если топик отбит ошибкой «message thread not found», повторяем ответом на
-   * сообщение из топика (`anchorMessageId`): якорь уводит ответ в тот же топик.
+   * About topics in private chats, Telegram can lie silently: it answers `ok: true` while the message
+   * lies in the shared feed (see landedInThread) — so we check the response and write to the log.
+   * And if the topic is rejected with a "message thread not found" error, we retry as a reply to
+   * a message from the topic (`anchorMessageId`): the anchor pulls the reply into the same topic.
    */
   async sendMessage(
     chatId: number,
@@ -345,24 +345,24 @@ export class TelegramApi {
   }
 
   /**
-   * Фотография в чат: картинку Telegram показывает в пузыре и сжимает сам.
-   * Предел — 10 МБ; всё, что больше, честнее отправить документом (см. outgoing.ts).
+   * A photo to the chat: Telegram shows the image in a bubble and compresses it itself.
+   * The limit is 10 MB; anything larger is more honest to send as a document (see outgoing.ts).
    */
   sendPhoto(chatId: number, file: UploadFile, options: UploadOptions = {}): Promise<SentMessage> {
     return this.upload('sendPhoto', 'photo', chatId, file, TELEGRAM_PHOTO_LIMIT, options);
   }
 
   /**
-   * Документ в чат: файл как файл, с человеческим именем в шапке. Так уезжают
-   * PDF, архивы, длинные картинки и анимированные GIF — Telegram их не пережимает.
+   * A document to the chat: a file as a file, with a human name in the header. This is how
+   * PDFs, archives, long images and animated GIFs travel — Telegram doesn't recompress them.
    */
   sendDocument(chatId: number, file: UploadFile, options: UploadOptions = {}): Promise<SentMessage> {
     return this.upload('sendDocument', 'document', chatId, file, TELEGRAM_UPLOAD_LIMIT, options);
   }
 
   /**
-   * Отправка файла: форма собирается здесь, а не у вызывающего, — иначе каждый
-   * вызывающий повторял бы лимиты, подпись и проверку топика.
+   * Sending a file: the form is assembled here, not by the caller — otherwise every
+   * caller would repeat the limits, the caption and the topic check.
    */
   private async upload(
     method: 'sendPhoto' | 'sendDocument',
@@ -372,15 +372,15 @@ export class TelegramApi {
     limit: number,
     options: UploadOptions,
   ): Promise<SentMessage> {
-    // Проверяем до сети: 10 МБ по HTTP — это долго, а отказ всё равно придёт.
+    // We check before the network: 10 MB over HTTP takes a while, and the refusal would come anyway.
     if (!file.name.trim()) throw new Error('у файла нет имени: Telegram не поймёт, что это');
     if (file.bytes.length === 0) throw new Error(`файл «${file.name}» пустой`);
     if (file.bytes.length > limit) throw new UploadTooBigError(file.name, file.bytes.length, limit);
 
     const form = new FormData();
     form.append('chat_id', String(chatId));
-    // Buffer — это Uint8Array, но типы Blob ждут ArrayBuffer, а у Buffer он может
-    // быть Shared: на деле байты ложатся в тело запроса как есть, без копии.
+    // Buffer is a Uint8Array, but Blob types expect ArrayBuffer, and Buffer's may
+    // be Shared: in practice the bytes land in the request body as-is, without a copy.
     form.append(field, new Blob([file.bytes as unknown as Uint8Array<ArrayBuffer>], { type: file.mimeType }), file.name);
     if (options.caption) form.append('caption', options.caption.slice(0, CAPTION_LIMIT));
     if (options.parseMode) form.append('parse_mode', options.parseMode);
@@ -398,7 +398,7 @@ export class TelegramApi {
     return sent;
   }
 
-  /** Правка сообщения. «Не изменилось» — не ошибка: значит, показывать нечего. */
+  /** Editing a message. "Not modified" isn't an error: it means there's nothing to show. */
   async editMessageText(
     chatId: number,
     messageId: number,
@@ -426,7 +426,7 @@ export class TelegramApi {
     });
   }
 
-  /** Переименование топика: номер берётся из сообщения, имя — человеческое. */
+  /** Renaming a topic: the number is taken from the message, the name is human. */
   async editForumTopic(chatId: number, threadId: number, name: string): Promise<void> {
     await this.call('editForumTopic', {
       chat_id: chatId,
@@ -436,14 +436,14 @@ export class TelegramApi {
   }
 
   /**
-   * Удаление топика вместе с его сообщениями. Отменить нельзя: вернуть топик
-   * Telegram не умеет. Этим разговор выносится из Telegram при архивации.
+   * Deleting a topic together with its messages. Irreversible: Telegram can't restore
+   * a topic. This is how the conversation is removed from Telegram on archiving.
    */
   async deleteForumTopic(chatId: number, threadId: number): Promise<void> {
     await this.call('deleteForumTopic', { chat_id: chatId, message_thread_id: threadId });
   }
 
-  /** Меню команд: что бот умеет, без похода в модель. */
+  /** Command menu: what the bot can do, without a trip to the model. */
   async setMyCommands(commands: Array<{ command: string; description: string }>): Promise<void> {
     await this.call('setMyCommands', { commands });
   }
@@ -453,12 +453,12 @@ export class TelegramApi {
   }
 }
 
-/** Поле `parse_mode` для Bot API: без режима Telegram покажет разметку как текст. */
+/** The `parse_mode` field for the Bot API: without a mode Telegram shows markup as text. */
 function parseModeParam(options: SendOptions): Record<string, unknown> {
   return options.parseMode ? { parse_mode: options.parseMode } : {};
 }
 
-/** Короткий человеческий текст ошибки для логов: без токена в пути запроса. */
+/** A short human error text for logs: without the token in the request path. */
 export function describeTelegramError(error: unknown): string {
   return redact(error instanceof Error ? error.message : String(error));
 }

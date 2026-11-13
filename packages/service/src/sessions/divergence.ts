@@ -1,5 +1,5 @@
-// Сверка истории, которую прислал OpenAI-клиент, с тем, что реально помнит сессия pi.
-// Решение 14: сессия pi — истина, расхождения не ломают её, но логируются с диффом.
+// Comparing the history sent by the OpenAI client against what the pi session actually remembers.
+// Decision 14: the pi session is the truth, divergences don't break it, but they are logged with a diff.
 
 export type IncomingMessage = {
   role?: string;
@@ -20,7 +20,7 @@ export type Comparison = {
   newUserText: string;
 };
 
-/** Достаём плоский текст из content любой формы (строка, блоки OpenAI, блоки pi). */
+/** Extract flat text from content of any shape (string, OpenAI blocks, pi blocks). */
 export function normalizeContent(content: unknown): string {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return '';
@@ -33,7 +33,7 @@ export function normalizeContent(content: unknown): string {
   return parts.join('\n');
 }
 
-/** Оставляем только реплики диалога: системные сообщения и служебное не считаем. */
+/** Keep only dialogue turns: we don't count system messages and service ones. */
 export function toTurns(messages: Array<IncomingMessage | SessionMessage>): Turn[] {
   const turns: Turn[] = [];
   for (const message of messages ?? []) {
@@ -52,13 +52,13 @@ function short(text: string, limit = 120): string {
 }
 
 /**
- * Якорь сравнения — реплики пользователя. Ответы ассистента pi дробит на несколько
- * сообщений (текст → тулы → текст), а клиент склеивает их в одно, поэтому сверять
- * их построчно нельзя: получим расхождение на каждом ходу с тулами.
+ * The comparison anchor is the user turns. pi splits the assistant's answers into several
+ * messages (text → tools → text), while the client merges them into one, so they can't be
+ * compared line by line: we'd get a divergence on every turn with tools.
  *
- * Ожидание: пользовательские реплики сессии — префикс присланных. Если да, история
- * согласована (даже если ассистента перегенерировали в UI). Если нет — правка или
- * другой разговор, пишем дифф.
+ * Expectation: the session's user turns are a prefix of the incoming ones. If so, the history
+ * is consistent (even if the assistant was regenerated in the UI). If not — an edit or
+ * a different conversation, we write a diff.
  */
 export function compareHistory(
   incoming: IncomingMessage[],

@@ -1,12 +1,12 @@
-// Обновление OAuth-токенов перед стартом сессии.
+// Refreshing OAuth tokens before a session starts.
 //
-// pi читает mcp.json один раз при запуске и сам токены не обновляет: сервис
-// передаёт ему уже готовый `Authorization: Bearer`. Значит, обновлять должен тот,
-// кто пишет mcp.json, — и делать это до того, как pi поднялся, а не после 401.
+// pi reads mcp.json once at startup and doesn't refresh tokens itself: the service
+// passes it an already ready `Authorization: Bearer`. So whoever writes mcp.json must
+// refresh them — and do it before pi comes up, not after a 401.
 //
-// Обновление последовательное и с single-flight на пару «человек + сервер»:
-// параллельные записи в credentials.json затирали бы друг друга, а два хода в
-// один сервер не должны обновлять один и тот же токен дважды.
+// Refresh is sequential and single-flight per «person + server» pair: parallel writes to
+// credentials.json would overwrite each other, and two turns into one server must not
+// refresh the same token twice.
 import type { IcarusConfig, UserConfig } from '../config.ts';
 import { log, redact } from '../log.ts';
 import {
@@ -26,18 +26,18 @@ export type RefreshOptions = {
 };
 
 export type FreshTokenOptions = RefreshOptions & {
-  /** За сколько до истечения обновлять. */
+  /** How long before expiry to refresh. */
   marginMs?: number;
-  /** Обновить даже свежий токен — после 401 от сервера. */
+  /** Refresh even a fresh token — after a 401 from the server. */
   force?: boolean;
 };
 
 /**
- * Токен для одного запроса через локальный прокси.
+ * A token for a single request through the local proxy.
  *
- * В отличие от refreshUserMcpTokens это происходит не «перед сессией», а на
- * каждом HTTP-запросе pi к MCP: пятиминутный токен Black Forest обновляется
- * молча, и живой разговор не упирается в invalid_token.
+ * Unlike refreshUserMcpTokens this doesn't happen «before the session» but on every pi
+ * HTTP request to MCP: a five-minute Black Forest token is refreshed silently, and a live
+ * conversation doesn't hit invalid_token.
  */
 export async function freshOAuthForServer(
   config: IcarusConfig,
@@ -93,9 +93,9 @@ export async function freshOAuthForServer(
 }
 
 /**
- * Обновляет просроченные токены всех включённых серверов человека. Ошибку одного
- * сервера не выдаём наружу: остальные серверы и разговор важнее. Причина ложится
- * в credentials.json (`error`) и видна в панели.
+ * Refreshes expired tokens of all enabled servers of the person. We don't surface a
+ * single server's error: the other servers and the conversation matter more. The reason
+ * goes into credentials.json (`error`) and is visible in the panel.
  */
 export async function refreshUserMcpTokens(
   config: IcarusConfig,
@@ -106,8 +106,8 @@ export async function refreshUserMcpTokens(
   try {
     store = readStore(config);
   } catch (error) {
-    // Сломанный registry не должен лишать человека разговора: prepareUser ниже
-    // откатится на общие серверы config.yaml.
+    // A broken registry must not deprive the person of a conversation: prepareUser below
+    // will fall back to the shared servers from config.yaml.
     log.warn('MCP: не читается хранилище, обновлять нечего', { user: user.id, error: String(error) });
     return { refreshed: [], failed: [] };
   }

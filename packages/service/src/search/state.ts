@@ -1,8 +1,8 @@
-// Состояние роутера: кто в карантине, сколько провалился, кого зовём по умолчанию.
+// Router state: who is quarantined, how many failed, whom we call by default.
 //
-// Это «редко пишем, часто читаем»: файл крошечный, меняется только на отказе,
-// успехе или смене текущего провайдера. Никакой SQLite: JSON рядом с данными
-// сервиса, атомарная запись через переименование и замок на процесс.
+// This is “rarely written, often read”: the file is tiny and changes only on a failure,
+// a success, or a change of the current provider. No SQLite: JSON next to the service
+// data, atomic write via rename and a per-process lock.
 import fs from 'node:fs';
 import path from 'node:path';
 import type { IcarusConfig } from '../config.ts';
@@ -10,23 +10,23 @@ import { isProviderId, type ProviderId } from './types.ts';
 
 export type BanReason = 'error' | 'credits' | 'broken';
 
-/** Две возможности роутера: поиск и извлечение страницы. Баны и «текущий» у них свои. */
+/** The router's two capabilities: search and page extraction. Bans and the “current” one are separate. */
 export type Capability = 'search' | 'fetch';
 
 export type ProviderState = {
-  /** Сколько отказов подряд: успех обнуляет. */
+  /** How many consecutive failures: a success zeroes it. */
   fails: number;
-  /** До какого момента не трогаем; null — не в карантине. */
+  /** Until when we don't touch it; null — not in quarantine. */
   bannedUntil: string | null;
   banReason: BanReason | null;
   lastError: string | null;
   lastErrorAt: string | null;
-  /** «Ключ сломан»: 50 отказов подряд. Живёт до первого успеха или правки ключа. */
+  /** “Key is broken”: 50 consecutive failures. Lives until the first success or a key edit. */
   broken: boolean;
   brokenAt: string | null;
 };
 
-/** Состояние одной возможности: свой текущий и свои карантины. */
+/** State of a single capability: its own current one and its own quarantines. */
 export type ScopeState = {
   current: ProviderId | null;
   providers: Record<string, ProviderState>;
@@ -35,12 +35,12 @@ export type ScopeState = {
 export type RouterState = {
   version: 2;
   /**
-   * Поиск. Верхние поля оставлены именно поиску, чтобы файлы состояния,
-   * записанные до появления /fetch, читались без миграции.
+   * Search. The top-level fields are kept specifically for search so that state files
+   * written before /fetch appeared are read without migration.
    */
   current: ProviderId | null;
   providers: Record<string, ProviderState>;
-  /** Извлечение страниц: свой «текущий», он может не совпадать с поисковым. */
+  /** Page extraction: its own “current”, which may differ from the search one. */
   fetch?: ScopeState;
   updatedAt: string;
 };
@@ -61,7 +61,7 @@ export function emptyRouterState(): RouterState {
   return { version: 2, current: null, providers: {}, updatedAt: new Date().toISOString() };
 }
 
-/** Файл состояния: по умолчанию рядом с данными, в тестах подменяется. */
+/** State file: next to the data by default, substituted in tests. */
 export function stateFile(config: IcarusConfig): string {
   return config.searchStateFile ?? path.join(config.dataDir, 'search-router.json');
 }
@@ -110,8 +110,8 @@ function readCurrent(value: unknown): ProviderId | null {
 }
 
 /**
- * Прочитать состояние. Битый файл — не повод падать: роутер начнёт с чистого
- * листа, а не откажет в поиске из-за одной испорченной строки.
+ * Read the state. A corrupt file is no reason to crash: the router will start from a
+ * clean slate rather than refuse search because of one broken line.
  */
 export function readRouterState(file: string): RouterState {
   let text: string;
@@ -129,9 +129,9 @@ export function readRouterState(file: string): RouterState {
   const root = asRecord(parsed);
   if (!root) return emptyRouterState();
 
-  // v1 → v2: у извлечения сменился рейтинг (теперь он обратный поисковому),
-  // поэтому старый fetch.current сбрасывается — иначе он жил бы вечно и
-  // приоритет никогда бы не применился. Карантины при этом сохраняем.
+  // v1 → v2: extraction changed its ranking (now the reverse of search), so the old
+  // fetch.current is reset — otherwise it would live forever and the priority would
+  // never apply. The quarantines are kept meanwhile.
   const migrated = root.version !== 2;
   const fetchRaw = asRecord(root.fetch);
   return {
@@ -150,7 +150,7 @@ export function readRouterState(file: string): RouterState {
   };
 }
 
-/** Запись через временный файл: недописанный JSON не должен стать состоянием. */
+/** Write via a temporary file: an incompletely written JSON must not become the state. */
 function writeRouterState(file: string, state: RouterState): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
@@ -159,8 +159,8 @@ function writeRouterState(file: string, state: RouterState): void {
   fs.renameSync(tmp, file);
 }
 
-// Замок на файл внутри процесса: два одновременных отказа не должны потерять
-// один из них. Между процессами не защищает, но сервис у нас один.
+// Per-process file lock: two simultaneous failures must not lose one of them.
+// It doesn't protect across processes, but we have a single service.
 const locks = new Map<string, Promise<unknown>>();
 
 function withLock<T>(file: string, task: () => T): Promise<T> {
@@ -176,7 +176,7 @@ function withLock<T>(file: string, task: () => T): Promise<T> {
   return next;
 }
 
-/** Изменить состояние под замком: читаем свежее, правим, пишем. */
+/** Change state under the lock: read fresh, edit, write. */
 export function mutateRouterState(file: string, change: (state: RouterState) => void): Promise<RouterState> {
   return withLock(file, () => {
     const state = readRouterState(file);
@@ -186,13 +186,13 @@ export function mutateRouterState(file: string, change: (state: RouterState) => 
   });
 }
 
-/** Лениво создать состояние fetch: старый файл его не содержит. */
+/** Lazily create the fetch state: an old file doesn't contain it. */
 export function fetchState(state: RouterState): ScopeState {
   state.fetch ??= { current: null, providers: {} };
   return state.fetch;
 }
 
-/** Карта провайдеров нужной возможности. */
+/** Provider map of the needed capability. */
 export function scopeProviders(state: RouterState, scope: Capability = 'search'): Record<string, ProviderState> {
   return scope === 'fetch' ? fetchState(state).providers : state.providers;
 }
@@ -206,7 +206,7 @@ export function setScopeCurrent(state: RouterState, scope: Capability, current: 
   else state.current = current;
 }
 
-/** Состояние провайдера в карте; отсутствующее — чистый лист. */
+/** Provider state in the map; a missing one is a clean slate. */
 export function providerState(state: RouterState, id: ProviderId, scope: Capability = 'search'): ProviderState {
   const providers = scopeProviders(state, scope);
   const existing = providers[id];
@@ -221,7 +221,7 @@ export function isBanned(provider: ProviderState, now: number): boolean {
   return Date.parse(provider.bannedUntil) > now;
 }
 
-/** Ближайший момент, когда хоть кто-то выйдет из карантина: для ответа 503. */
+/** The nearest moment when anyone leaves quarantine: for a 503 response. */
 export function soonestUnban(
   state: RouterState,
   ids: Iterable<ProviderId>,

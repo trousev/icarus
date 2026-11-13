@@ -1,6 +1,6 @@
-// Заголовок разговора: клиент спрашивает его отдельным запросом, и этот
-// запрос не должен поднимать сессию pi. Проверяем разбор промпта, вызов дешёвой
-// модели, откат на эвристику и то, что сессия не трогается ни в одном случае.
+// Conversation title: the client asks for it with a separate request, and this
+// request must not spin up a pi session. We check prompt parsing, the call to a cheap
+// model, the fallback to a heuristic and that the session is untouched in any case.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
@@ -20,7 +20,7 @@ import { oneShotArgs } from '../src/sessions/one-shot.ts';
 
 const API_KEY = 'test-token';
 
-/** Промпт ровно в той форме, в какой его собирал LibreChat (`titlePrompt` из yaml). */
+/** The prompt in exactly the form LibreChat assembled it (`titlePrompt` from yaml). */
 function clientPrompt(input: string, output = ''): string {
   return `${TITLE_SENTINEL}
 Придумай короткий заголовок этого разговора: 3–6 слов, на языке разговора,
@@ -31,7 +31,7 @@ User: ${input}
 AI: ${output}`;
 }
 
-test('запрос заголовка узнаётся по модели и по метке', () => {
+test('a title request is recognized by model and by marker', () => {
   const plain = [{ role: 'user', content: 'привет' }];
   assert.equal(isTitleRequest(TITLE_MODEL_ID, plain), true);
   assert.equal(isTitleRequest('icarus', [{ role: 'user', content: clientPrompt('привет') }]), true);
@@ -39,48 +39,48 @@ test('запрос заголовка узнаётся по модели и по
   assert.equal(isTitleRequest(undefined, []), false);
 });
 
-test('из промпта клиента достаётся первая реплика человека', () => {
+test('the first human message is extracted from the client prompt', () => {
   const prompt = clientPrompt('Почему не стартует docker compose?');
   assert.equal(conversationFromTitlePrompt(prompt), 'Почему не стартует docker compose?');
 });
 
-test('короткая форма промпта — только метка и разговор — разбирается так же', () => {
+test('the short prompt form — only the marker and the conversation — is parsed the same way', () => {
   const prompt = `${TITLE_SENTINEL}\nUser: Как настроить память?\nAI: `;
   assert.equal(isTitleRequest(TITLE_MODEL_ID, [{ role: 'user', content: prompt }]), true);
   assert.equal(conversationFromTitlePrompt(prompt), 'Как настроить память?');
   assert.equal(titleFromPrompt(prompt), 'Как настроить память');
 });
 
-test('приветствие и обращение в заголовок не попадают', () => {
+test('a greeting and a salutation do not get into the title', () => {
   assert.equal(titleFromText('Привет!'), 'Привет!');
   assert.equal(titleFromText('Привет, Икар! Помоги разобраться, как настроить память.'), 'Помоги разобраться, как настроить память');
   assert.equal(titleFromText('Икар, а как настроить память?'), 'Как настроить память');
   assert.equal(titleFromText('как настроить память?'), 'Как настроить память');
 });
 
-test('заголовок ограничен по словам и длине', () => {
+test('the title is limited by words and length', () => {
   const long = titleFromText('очень длинное сообщение из многих слов которое надо обрезать');
   assert.ok(long.split(/\s+/).length <= 6, `слишком много слов: ${long}`);
   assert.ok(long.length <= 48, `слишком длинно: ${long}`);
 });
 
-test('пустая реплика даёт понятный фолбэк', () => {
+test('an empty message gives a clear fallback', () => {
   assert.equal(titleFromText('   '), 'Новый разговор');
   assert.equal(titleFromText('!!!'), '!!!');
 });
 
-test('заголовок собирается из полного промпта', () => {
+test('the title is assembled from the full prompt', () => {
   assert.equal(titleFromPrompt(clientPrompt('Почему не стартует docker compose')), 'Почему не стартует docker compose');
 });
 
-test('промпт для модели содержит разговор и не содержит служебной метки', () => {
+test('the prompt for the model contains the conversation and no service marker', () => {
   const built = buildTitlePrompt('Почему не стартует docker compose?');
   assert.match(built, /Почему не стартует docker compose\?/);
   assert.match(built, /заголовок/i);
   assert.doesNotMatch(built, /\[\[ICARUS_TITLE\]\]/);
 });
 
-test('ответ модели чистится до заголовка', () => {
+test('the model response is cleaned down to the title', () => {
   assert.equal(cleanModelTitle('Docker Compose не стартует после обновления'), 'Docker Compose не стартует после обновления');
   assert.equal(cleanModelTitle('  "Docker Compose не стартует."  '), 'Docker Compose не стартует');
   assert.equal(cleanModelTitle('Заголовок: Настройка памяти'), 'Настройка памяти');
@@ -91,7 +91,7 @@ test('ответ модели чистится до заголовка', () => {
   assert.ok(cleanModelTitle('очень длинный заголовок из многих слов который модель не сжала').split(/\s+/).length <= 8);
 });
 
-test('разовый вопрос к модели идёт без тулов, сессии и контекста', () => {
+test('a one-shot request to the model goes without tools, session and context', () => {
   const args = oneShotArgs(
     { provider: 'deepinfra', id: 'deepseek-ai/DeepSeek-V4.1-Flash', thinking: 'off' },
     'вопрос',
@@ -105,7 +105,7 @@ test('разовый вопрос к модели идёт без тулов, с
   assert.equal(args[args.indexOf('--thinking') + 1], 'off');
 });
 
-/** Заголовочный запрос к серверу с подставным реестром. */
+/** A title request to the server with a stub registry. */
 async function askTitle(options: {
   oneShot?: (prompt: string) => Promise<string>;
   headers?: Record<string, string>;
@@ -153,7 +153,7 @@ async function askTitle(options: {
   }
 }
 
-test('заголовок берётся у модели, если она ответила', async () => {
+test('the title is taken from the model if it responded', async () => {
   const result = await askTitle({ oneShot: async () => 'Docker Compose не стартует\n' });
   assert.equal(result.status, 200);
   assert.equal(result.content, 'Docker Compose не стартует');
@@ -162,7 +162,7 @@ test('заголовок берётся у модели, если она отв�
   assert.match(result.oneShotPrompts[0], /Почему не стартует docker compose\?/);
 });
 
-test('сбой модели откатывает на эвристику', async () => {
+test('a model failure falls back to the heuristic', async () => {
   const result = await askTitle({
     oneShot: async () => {
       throw new Error('модель не ответила за 12000 мс');
@@ -173,13 +173,13 @@ test('сбой модели откатывает на эвристику', async
   assert.equal(result.acquire, 0);
 });
 
-test('пустой ответ модели откатывает на эвристику', async () => {
+test('an empty model response falls back to the heuristic', async () => {
   const result = await askTitle({ oneShot: async () => '   \n' });
   assert.equal(result.status, 200);
   assert.equal(result.content, 'Почему не стартует docker compose');
 });
 
-test('неизвестный человек получает эвристику и не дёргает модель', async () => {
+test('an unknown person gets the heuristic and does not touch the model', async () => {
   const result = await askTitle({ headers: { 'x-icarus-user-id': 'stranger' } });
   assert.equal(result.status, 200);
   assert.equal(result.content, 'Почему не стартует docker compose');

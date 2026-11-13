@@ -1,7 +1,7 @@
-// Generic folder-guard: права папок для файловых инструментов агента.
+// Generic folder-guard: folder permissions for the agent's file tools.
 //
-// Проверяем не только артефакты, но и сам слой: любой корень с .folder-acl.json
-// ведёт себя одинаково, а bash по защищённому пути закрыт, чтобы не обойти read/write.
+// We check not only artifacts but the layer itself: any root with .folder-acl.json
+// behaves the same, and bash on a protected path is closed so read/write cannot be bypassed.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -29,7 +29,7 @@ function sandbox(acl: { owner: string; me: string; family: string } | null, file
   return root;
 }
 
-test('readFolderAcl читает владельца и уровни; мусор не принимает', () => {
+test('readFolderAcl reads the owner and levels; it rejects garbage', () => {
   const root = sandbox({ owner: 'probe', me: 'admin', family: 'read' });
   const acl = readFolderAcl(path.join(root, 'plan'));
   assert.deepEqual(acl?.acl, { me: 'admin', family: 'read' });
@@ -41,7 +41,7 @@ test('readFolderAcl читает владельца и уровни; мусор 
   assert.equal(readFolderAcl(path.join(broken, 'plan')), null);
 });
 
-test('владелец читает и пишет, family read — только читает', () => {
+test('the owner reads and writes, family read only reads', () => {
   const root = sandbox({ owner: 'probe', me: 'admin', family: 'read' }, { 'index.md': '# План' });
   const dir = path.join(root, 'plan');
   const file = path.join(dir, 'index.md');
@@ -63,7 +63,7 @@ test('владелец читает и пишет, family read — только 
   assert.equal(familyRead.allowed, true);
 });
 
-test('family none: ни чтения, ни записи — артефакт личный', () => {
+test('family none: neither read nor write, the artifact is private', () => {
   const root = sandbox({ owner: 'probe', me: 'admin', family: 'none' }, { 'index.md': '# Секрет' });
   const dir = path.join(root, 'plan');
   const acl = readFolderAcl(dir);
@@ -85,7 +85,7 @@ test('family none: ни чтения, ни записи — артефакт л�
   assert.equal(owner.allowed, true);
 });
 
-test('папка без ACL закрыта: новый артефакт только через artifact_new', () => {
+test('a folder without ACL is closed: a new artifact only via artifact_new', () => {
   const root = sandbox(null, { 'index.md': '# Без прав' });
   const verdict = folderVerdict(path.join(root, 'plan', 'index.md'), 'probe', 'read', [root]);
   assert.equal(verdict.protected, true);
@@ -94,13 +94,13 @@ test('папка без ACL закрыта: новый артефакт толь
   assert.match(verdict.reason ?? '', /artifact_new/);
 });
 
-test('корень защищённого хранилища — только список имён', () => {
+test('the root of a protected store is only a list of names', () => {
   const root = sandbox({ owner: 'probe', me: 'admin', family: 'read' });
   const verdict = folderVerdict(root, 'probe', 'read', [root]);
   assert.deepEqual(verdict, { protected: true, rootOnly: true, root });
 });
 
-test('симлинк из разрешённой папки наружу не обходит права', () => {
+test('a symlink from an allowed folder outward does not bypass permissions', () => {
   const root = sandbox({ owner: 'probe', me: 'admin', family: 'read' }, { 'index.md': '# План' });
   const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'folder-guard-outside-'));
   fs.writeFileSync(path.join(outside, 'secret.txt'), 'секрет');
@@ -112,7 +112,7 @@ test('симлинк из разрешённой папки наружу не о
   assert.match(verdict.reason ?? '', /Симлинк/);
 });
 
-test('симлинк из workspace внутрь /artifacts тоже проверяет ACL', () => {
+test('a symlink from the workspace into /artifacts also checks the ACL', () => {
   const root = sandbox({ owner: 'probe', me: 'admin', family: 'read' }, { 'index.md': '# План' });
   const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'folder-guard-workspace-'));
   fs.symlinkSync(path.join(root, 'plan'), path.join(outside, 'jump'));
@@ -126,7 +126,7 @@ test('симлинк из workspace внутрь /artifacts тоже прове�
   assert.equal(write.allowed, false);
 });
 
-test('guardToolCall: read/edit разрешены по ACL, write заблокирован', () => {
+test('guardToolCall: read/edit allowed by ACL, write blocked', () => {
   const root = sandbox({ owner: 'probe', me: 'admin', family: 'read' }, { 'index.md': '# План' });
   const options = { viewer: 'probe2', roots: [root] };
   assert.equal(guardToolCall('read', { path: path.join(root, 'plan', 'index.md') }, options), undefined);
@@ -134,7 +134,7 @@ test('guardToolCall: read/edit разрешены по ACL, write заблоки
   assert.equal(guardToolCall('write', { path: path.join(root, 'plan', 'index.md') }, { viewer: 'probe', roots: [root] }), undefined);
 });
 
-test('guardToolCall: .git и служебные файлы артефакта закрыты', () => {
+test('guardToolCall: .git and service files of an artifact are closed', () => {
   const root = sandbox({ owner: 'probe', me: 'admin', family: 'read' });
   const options = { viewer: 'probe', roots: [root] };
   assert.match(guardToolCall('read', { path: path.join(root, 'plan', '.git', 'config') }, options)?.reason ?? '', /История версий/);
@@ -148,7 +148,7 @@ test('guardToolCall: .git и служебные файлы артефакта з
   );
 });
 
-test('guardToolCall: ls корня можно, ls папки без ACL — нет; bash по /artifacts закрыт', () => {
+test('guardToolCall: ls of the root is allowed, ls of a folder without ACL is not; bash on /artifacts is closed', () => {
   const root = sandbox({ owner: 'probe', me: 'admin', family: 'read' });
   assert.equal(guardToolCall('ls', { path: root }, { viewer: 'probe2', roots: [root] }), undefined);
   assert.match(guardToolCall('grep', { path: root }, { viewer: 'probe2', roots: [root] })?.reason ?? '', /Уточни артефакт/);

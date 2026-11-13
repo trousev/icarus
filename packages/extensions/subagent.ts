@@ -1,27 +1,25 @@
-// Субагенты Икара: задачи, которые уходят отдельным процессам pi.
+// Icarus subagents: tasks that go to separate pi processes.
 //
-// Зачем отдельный процесс на задачу. Контекст — самый дорогой ресурс разговора:
-// шесть поисковых запросов по две-три страницы выдачи утопят любой контекст, если
-// тащить их в родителя целиком. Ребёнок читает страницы сам, а назад отдаёт только
-// вывод. Родитель платит за результат, а не за дорогу к нему.
+// Why a separate process per task. Context is the most expensive resource of a conversation:
+// six search queries of two or three result pages each will drown any context if you drag them
+// into the parent whole. The child reads the pages itself and gives back only the conclusion.
+// The parent pays for the result, not for the road to it.
 //
-// Что здесь зашито жёстко, потому что иначе фича становится опасной:
+// Here is what is nailed down hard, because otherwise the feature becomes dangerous:
 //
-//   * Вложенности нет. Ребёнок запускается с ICARUS_SUBAGENT_DEPTH=1 и инструмент
-//     ему не регистрируется вовсе; `--exclude-tools subagent` — вторая линия, на
-//     случай если кто-то снимет переменную. Сорок субагентов, каждый из которых
-//     запустил ещё сорок, — это не «больше работы», это счёт за токены.
-//   * Вызов блокирующий. Инструмент не возвращается, пока не закончилась последняя
-//     задача: у pi нет фоновых инструментов, и человек получает ответ только тогда,
-//     когда все дети отработали. Половинчатый ответ «запустил и побежал» здесь
-//     невозможен по устройству.
-//   * Параллельность — через очередь. Модель просит сколько угодно задач (до
-//     MAX_TASKS), но одновременно работают не больше ICARUS_SUBAGENT_CONCURRENCY.
-//     Почему четыре по умолчанию: у Anthropic в их исследовательском агенте ведущий
-//     запускает 3–5 субагентов параллельно, а не пятьдесят, — они сами пишут, что
-//     ранние версии «плодили 50 субагентов на простой вопрос» и это была ошибка.
-//     OpenClaw держит рядом те же числа: maxConcurrent 4 на основную линию и 8 на
-//     субагентов. Потолок 8 — уже предел провайдера и CPU контейнера, а не вкус.
+//   * There is no nesting. The child is launched with ICARUS_SUBAGENT_DEPTH=1 and the tool is
+//     not registered for it at all; `--exclude-tools subagent` is a second line, in case someone
+//     removes the variable. Forty subagents, each of which launched another forty, is not "more
+//     work", it is a token bill.
+//   * The call is blocking. The tool does not return until the last task has finished: pi has no
+//     background tools, and the person gets an answer only when all children have completed.
+//     A half-baked answer of "launched it and ran off" is impossible here by design.
+//   * Concurrency is through a queue. The model may ask for any number of tasks (up to MAX_TASKS),
+//     but no more than ICARUS_SUBAGENT_CONCURRENCY work at the same time. Why four by default:
+//     Anthropic's research agent has the lead launch 3–5 subagents in parallel, not fifty — they
+//     write themselves that early versions "bred 50 subagents for a simple question" and that it
+//     was a mistake. OpenClaw keeps the same numbers: maxConcurrent 4 for the main line and 8 for
+//     subagents. The cap of 8 is already the provider's and the container CPU's limit, not taste.
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -29,62 +27,62 @@ import path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-/** Глубина вложенности: у ребёнка единица, и инструмент ему уже не положен. */
+/** Nesting depth: the child has one, and the tool is already not available to it. */
 export const DEPTH_ENV = "ICARUS_SUBAGENT_DEPTH";
 
-/** Сколько задач ждём одновременно, если человек не сказал иначе. */
+/** How many tasks we wait for at the same time, unless the person said otherwise. */
 export const DEFAULT_CONCURRENCY = 4;
 /**
- * Потолок параллельности. Восемь — не «мало»: каждая задача это отдельный процесс
- * pi, свой контекст и свой счёт за токены, а провайдер считает параллельные запросы
- * по ключу на всех. Дальше очередь, а не героизм.
+ * Concurrency cap. Eight is not "a little": each task is a separate pi process, its own context
+ * and its own token bill, and the provider counts parallel requests per key for all of them.
+ * Beyond that there is a queue, not heroics.
  */
 export const MAX_CONCURRENCY = 8;
-/** Сколько задач принимаем за один вызов: сорок — по числу запросов в большом скилле. */
+/** How many tasks we accept per call: forty — the number of queries in the big skill. */
 export const DEFAULT_MAX_TASKS = 40;
-/** Одна задача: дольше пяти минут ребёнок обычно уже не ищет, а страдает. */
+/** One task: after five minutes the child is usually no longer searching, it is suffering. */
 export const DEFAULT_TASK_TIMEOUT_MS = 300_000;
-/** Весь вызов целиком: четверть часа — это уже неприлично долгий ход. */
+/** The whole call: a quarter of an hour is already an indecently long turn. */
 export const DEFAULT_BUDGET_MS = 900_000;
 /**
- * Сколько символов вывода ребёнка уходит родителю в отчёт.
+ * How many characters of the child's output go to the parent in the report.
  *
- * Не резиновая величина и не «чем больше, тем лучше». Правило, к которому сходятся
- * практики контекст-менеджмента (Claude Code, OpenClaw, Arize): результат инструмента
- * живёт в отдельном бюджете — порядка 16 КБ или трети окна, что меньше. На задачу
- * это много (мы платим за все сорок), поэтому берём восьмую часть бюджета, 8000.
- * Меньше трёх тысяч не хватало: отчёт с таблицей и цитатами обрезался на середине,
- * и родитель всерьёз верил, что видел ответ целиком.
- * Резать молча нельзя: обрезка помечается, и родителю сказано — полный текст был,
- * он у ребёнка, спроси выжимку или перезапусти задачу с явным «коротко».
+ * Not a rubber value and not "the more the better". The rule that context-management
+ * practitioners converge on (Claude Code, OpenClaw, Arize): a tool result lives in its own
+ * budget — on the order of 16 KB or a third of the window, whichever is smaller. Per task that
+ * is a lot (we pay for all forty), so we take an eighth of the budget, 8000. Less than three
+ * thousand was not enough: a report with a table and quotes was cut in the middle, and the
+ * parent seriously believed it had seen the whole answer.
+ * We cannot cut silently: truncation is marked, and the parent is told — the full text existed,
+ * it is at the child's, ask for a summary or rerun the task with an explicit "briefly".
  */
 const OUTPUT_LIMIT = 8000;
-/** Как часто двигаем прогресс: чаще — только зря дёргать UI и телеграм. */
+/** How often we move progress: more often only needlessly pokes the UI and telegram. */
 const PROGRESS_INTERVAL_MS = 700;
 /**
- * Сколько шагов ребёнка помним для вложенного списка в панели. Список — не отчёт:
- * по нему видно, куда ребёнок ходил, а не весь его путь; десять последних хватает,
- * и детали прогресса не растут с каждой страницей.
+ * How many child steps we remember for the nested list in the panel. The list is not a report:
+ * it shows where the child went, not its whole path; the last ten are enough, and progress
+ * details do not grow with every page.
  */
 const ACTION_LIMIT = 10;
-/** Длинный запрос или URL в строке действия не должен растягивать детали. */
+/** A long query or URL in an action line must not stretch the details. */
 const ACTION_CHARS = 160;
 
-/** Модель для задачи: дешёвая или та, что получше. Уровни раздаёт сервис. */
+/** Model for a task: the cheap one or the better one. The service hands out the tiers. */
 export type SubagentTier = "fast" | "strong";
 
 export type SubagentSpec = {
-  /** Имя, которым агента зовёт модель. */
+  /** Name by which the model calls the agent. */
   name: string;
-  /** Одна строка для описания инструмента: что этот агент умеет. */
+  /** One line for the tool description: what this agent can do. */
   label: string;
-  /** Инструменты ребёнка: передаются в `--tools`, поэтому лишнего он не получит. */
+  /** The child's tools: passed to `--tools`, so it will not get anything extra. */
   tools: string[];
   /**
-   * Расширения, без которых роли не обойтись (имена файлов в ~/.pi/agent/extensions).
-   * Всё остальное ребёнку не грузим вовсе: персона, память и эскалация — это дела
-   * родителя, а не задачи. Заодно ни одно расширение не может включить ребёнку
-   * инструмент субагента.
+   * Extensions without which the role cannot do (file names in ~/.pi/agent/extensions).
+   * We do not load anything else into the child at all: persona, memory and escalation are the
+   * parent's business, not the task's. At the same time, no extension can enable the subagent
+   * tool for the child.
    */
   extensions: string[];
   systemPrompt: string;
@@ -92,13 +90,13 @@ export type SubagentSpec = {
 };
 
 /**
- * Всё, что есть у Икара: восемь встроенных инструментов pi и инструменты наших
- * расширений. Список явный, потому что `--tools` — это allowlist по точным именам
- * (шаблона `*` в 0.85.1 нет), а grep/find/ls у pi не входят в набор по умолчанию.
+ * Everything Icarus has: eight built-in pi tools and the tools of our extensions. The list is
+ * explicit, because `--tools` is an allowlist by exact names (there is no `*` pattern in
+ * 0.85.1), and grep/find/ls in pi are not in the default set.
  *
- * MCP-инструментов здесь нарочно нет: их имена приходят от серверов динамически, и
- * субагент с доступом к дому или к MCP — это уже не «ещё руки», а чужие кнопки.
- * Понадобится — добавляется строкой сюда, но не по умолчанию.
+ * There are deliberately no MCP tools here: their names come from servers dynamically, and a
+ * subagent with access to the home or to MCP is no longer "extra hands" but someone else's
+ * buttons. If needed, it is added by a line here, but not by default.
  */
 export const ALL_TOOLS = [
   "read",
@@ -115,10 +113,9 @@ export const ALL_TOOLS = [
 ];
 
 /**
- * Три роли — это не «мало ролей», а ровно столько, сколько Икару есть чем занять.
- * Разведчик смотрит по файлам, исследователь ходит в интернет, исполнитель правит.
- * Новая роль добавляется здесь же; городить реестр из markdown-файлов незачем,
- * пока ролей три.
+ * Three roles are not "few roles", but exactly as many as Icarus has work for. The scout looks
+ * through files, the researcher goes to the internet, the worker edits. A new role is added right
+ * here; there is no point in building a registry of markdown files while there are three roles.
  */
 export const AGENTS: Readonly<Record<string, SubagentSpec>> = {
   scout: {
@@ -158,9 +155,9 @@ export const AGENTS: Readonly<Record<string, SubagentSpec>> = {
     name: "worker",
     label: "всё: файлы, правки, команды, веб-поиск, время",
     tools: ALL_TOOLS,
-    // Полный набор инструментов — значит и все расширения, которые их дают.
-    // Персона, память и эскалация сюда по-прежнему не входят: они про разговор,
-    // а не про работу.
+    // The full tool set means all the extensions that provide them too.
+    // Persona, memory and escalation still do not enter here: they are about the conversation,
+    // not about the work.
     extensions: ["web-search.ts", "clock.ts", "control-panel.ts"],
     systemPrompt: [
       "Ты — исполнитель Икара. Тебе дают конкретную работу, и ты её делаешь до конца:",
@@ -178,23 +175,23 @@ export const AGENTS: Readonly<Record<string, SubagentSpec>> = {
 
 export type SubagentStatus = "queued" | "running" | "ok" | "error" | "aborted" | "skipped";
 
-/** Что видно про одну задачу: и в прогрессе, и в итоге, и в веб-панели. */
+/** What is visible about one task: both in progress, and in the result, and in the web panel. */
 export type SubagentState = {
   index: number;
   agent: string;
   task: string;
   status: SubagentStatus;
-  /** Чем занят прямо сейчас: «web_search: amazon.co.uk». Только у работающих. */
+  /** What it is busy with right now: "web_search: amazon.co.uk". Only for running ones. */
   activity?: string;
   /**
-   * Последние шаги ребёнка («web_search: amazon.ie», «read: SKILL.md»…). Панель
-   * рисует их вложенным списком под самим субагентом: раскрыл — видно, куда он
-   * ходил; закрыл — не мешает читать ответ.
+   * The child's last steps ("web_search: amazon.ie", "read: SKILL.md"...). The panel draws them
+   * as a nested list under the subagent itself: expanded — you see where it went; collapsed — it
+   * does not interfere with reading the answer.
    */
   actions?: string[];
   /**
-   * Сколько шагов было всего. Список хранит только последние, и без этого числа
-   * панель писала бы «10 действий», хотя ребёнок сходил пятьдесят раз.
+   * How many steps there were in total. The list stores only the last ones, and without this
+   * number the panel would say "10 actions" even if the child went out fifty times.
    */
   actionsTotal?: number;
   startedAt?: number;
@@ -203,7 +200,7 @@ export type SubagentState = {
   error?: string;
 };
 
-/** Пределы вызова. Вынесены в тип: их видно и в тестах, и в описании инструмента. */
+/** Call limits. Extracted into a type: visible both in tests and in the tool description. */
 export type Limits = {
   concurrency: number;
   maxTasks: number;
@@ -221,8 +218,8 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 /**
- * Пределы из окружения контейнера (`env:` в config.yaml). Клампим, а не падаем:
- * опечатка в конфиге не должна оставить человека без субагентов вовсе.
+ * Limits from the container environment (`env:` in config.yaml). We clamp instead of crashing:
+ * a typo in the config must not leave the person without subagents at all.
  */
 export function resolveLimits(env: Record<string, string | undefined> = process.env): Limits {
   return {
@@ -233,12 +230,12 @@ export function resolveLimits(env: Record<string, string | undefined> = process.
   };
 }
 
-/** Мы внутри субагента? Тогда инструмент регистрировать нечего. */
+/** Are we inside a subagent? Then there is no tool to register. */
 export function isSubagentProcess(env: Record<string, string | undefined> = process.env): boolean {
   return numberFrom(env[DEPTH_ENV], 0) > 0;
 }
 
-/** Имя агента без учёта регистра: «Scout» и «scout» — одно и то же. */
+/** Agent name case-insensitively: "Scout" and "scout" are the same. */
 export function agentNameOf(name: string): string | null {
   const wanted = name.trim().toLowerCase();
   return Object.hasOwn(AGENTS, wanted) ? wanted : null;
@@ -251,9 +248,9 @@ export function agentsLine(): string {
 }
 
 /**
- * Аргументы ребёнка. Скиллы оставляем — ими и работают задачи вроде «пройди по
- * этому скиллу»; контекстные файлы (AGENTS.md, персона) убираем: подсказку роли
- * ребёнок получает свою, а правила памяти ему ни к чему — он не пишет в память.
+ * The child's arguments. We keep skills — that is what tasks like "go by this skill" work with;
+ * we drop context files (AGENTS.md, persona): the child gets its own role hint, and the memory
+ * rules are none of its business — it does not write to memory.
  */
 export function buildChildArgs(options: {
   spec: SubagentSpec;
@@ -263,18 +260,18 @@ export function buildChildArgs(options: {
 }): string[] {
   const { spec, model, systemPromptFile, extensionFiles } = options;
   const args = ["--mode", "json", "-p", "--no-session", "--no-context-files", "--no-extensions"];
-  // Свои расширения роли подключаем поимённо: остальные (персона, память, эскалация)
-  // в ребёнке не нужны, а память в чужих руках ещё и вредна.
+  // We connect the role's own extensions by name: the rest (persona, memory, escalation)
+  // are not needed in the child, and memory in someone else's hands is also harmful.
   for (const file of extensionFiles) args.push("--extension", file);
   args.push("--tools", spec.tools.join(","));
-  // Третий замок от вложенности: даже если инструмент откуда-то возьмётся.
+  // The third lock against nesting: even if the tool appears from somewhere.
   args.push("--exclude-tools", "subagent");
   if (model) args.push("--model", model);
   args.push("--append-system-prompt", systemPromptFile);
   return args;
 }
 
-/** Пути к расширениям роли: чего нет в контейнере, то молча не подключаем. */
+/** Paths to the role's extensions: whatever is missing in the container is silently not connected. */
 export function extensionFilesOf(spec: SubagentSpec, home = os.homedir()): string[] {
   return spec.extensions
     .map((name) => path.join(home, ".pi", "agent", "extensions", name))
@@ -282,9 +279,9 @@ export function extensionFilesOf(spec: SubagentSpec, home = os.homedir()): strin
 }
 
 /**
- * Как запустить pi: тем же рантаймом, если это не node/bun, иначе — по имени.
- * ICARUS_SUBAGENT_PI перекрывает всё: в образе команда может называться иначе,
- * и тогда это дело конфига, а не догадки по имени рантайма.
+ * How to launch pi: with the same runtime, if it is not node/bun, otherwise by name.
+ * ICARUS_SUBAGENT_PI overrides everything: in the image the command may be named differently,
+ * and then it is a matter of config, not a guess by runtime name.
  */
 function piInvocation(env: NodeJS.ProcessEnv = process.env): { command: string; args: string[] } {
   const explicit = env.ICARUS_SUBAGENT_PI?.trim();
@@ -297,9 +294,9 @@ function piInvocation(env: NodeJS.ProcessEnv = process.env): { command: string; 
 }
 
 /**
- * Копит шаги ребёнка для вложенного списка: без повторов и не длиннее предела.
- * Возвращает, был ли это новый шаг: по нему считается общее число действий, даже
- * когда в списке остались только последние.
+ * Accumulates the child's steps for the nested list: without repeats and no longer than the
+ * limit. Returns whether it was a new step: it is used to count the total number of actions,
+ * even when only the last ones remain in the list.
  */
 export function rememberAction(actions: string[], action: string): boolean {
   const text = action.trim();
@@ -309,7 +306,7 @@ export function rememberAction(actions: string[], action: string): boolean {
   return true;
 }
 
-/** Строка «чем занят» из аргументов инструмента: первое осмысленное поле. */
+/** The "busy with" line from the tool arguments: the first meaningful field. */
 export function activityOf(toolName: string, args: unknown): string {
   const record = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
   const first = ["query", "url", "path", "file", "command", "name"]
@@ -337,7 +334,7 @@ type ChildEvent = {
   message?: { role?: string; content?: unknown; stopReason?: string; errorMessage?: string };
 };
 
-/** Итог одного ребёнка. Ошибку не бросаем: родитель должен увидеть её в отчёте. */
+/** Result of one child. We do not throw the error: the parent must see it in the report. */
 type ChildResult = { status: "ok" | "error" | "timeout"; output: string; error?: string };
 
 function killChild(child: ChildProcess): void {
@@ -350,9 +347,9 @@ function killChild(child: ChildProcess): void {
 }
 
 /**
- * Один ребёнок: файл с подсказкой роли, процесс pi в JSON-режиме, разбор строк.
- * Возвращает последний текст ассистента — всё, что ребёнок наработал, короче
- * собственного контекста.
+ * One child: a file with the role hint, a pi process in JSON mode, line parsing.
+ * Returns the assistant's last text — everything the child produced, shorter than
+ * its own context.
  */
 async function runChild(options: {
   spec: SubagentSpec;
@@ -442,7 +439,7 @@ async function runChild(options: {
       for (const line of lines) processLine(line);
     });
     child.stderr?.on("data", (chunk: Buffer) => {
-      // Хвост stderr: в начало обычно уезжает шум запуска, а причина — в конце.
+      // Tail of stderr: startup noise usually goes to the beginning, and the reason is at the end.
       stderr = (stderr + chunk.toString("utf8")).slice(-4000);
     });
     child.on("error", (error) => {
@@ -480,10 +477,10 @@ async function runChild(options: {
 }
 
 /**
- * Слоты на весь процесс. Модель может позвать инструмент дважды в одном сообщении
- * (pi запускает вызовы батчем), и тогда лимит на вызов превратился бы в лимит на
- * вызов² — восемь детей на каждую копию. Держим общий потолок, а `concurrency`
- * остаётся обещанием «не больше» для одного вызова.
+ * Slots for the whole process. The model may call the tool twice in one message (pi launches
+ * calls in a batch), and then the per-call limit would turn into a per-call² limit — eight
+ * children per copy. We keep a global cap, and `concurrency` remains a "no more than" promise
+ * for a single call.
  */
 const slots = { active: 0, waiting: [] as Array<() => void> };
 
@@ -505,9 +502,8 @@ async function acquireSlot(): Promise<() => void> {
 }
 
 /**
- * Очередь с ограничением параллельности: ровно `limit` работников разбирают общий
- * список по порядку. Порядок важен — первый запрос скилла должен уехать первым,
- * иначе очередь превращается в лотерею.
+ * A queue with a concurrency limit: exactly `limit` workers go through a shared list in order.
+ * Order matters — the first skill request must go first, otherwise the queue turns into a lottery.
  */
 export async function runPool(total: number, limit: number, worker: (index: number) => Promise<void>): Promise<void> {
   const lanes = Math.max(1, Math.min(limit, total));
@@ -526,7 +522,7 @@ function formatSeconds(ms: number): string {
   return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} с`;
 }
 
-/** «1 задача», «2 задачи», «5 задач»: отчёт читает человек, а не только модель. */
+/** "1 task", "2 tasks", "5 tasks": the report is read by a human, not only by the model. */
 function taskCount(count: number): string {
   const tens = count % 100;
   const ones = count % 10;
@@ -543,7 +539,7 @@ const STATUS_WORD: Record<SubagentStatus, string> = {
   skipped: "пропущен",
 };
 
-/** Прогресс: строка для телеграма и подробности для панели. */
+/** Progress: a line for telegram and details for the panel. */
 export function renderProgress(states: SubagentState[], limits: Limits, elapsedMs: number): string {
   const done = states.filter((state) => state.status === "ok").length;
   const failed = states.filter((state) => state.status === "error").length;
@@ -565,15 +561,15 @@ export function renderProgress(states: SubagentState[], limits: Limits, elapsedM
   return [`${head}${tail ? ` ${tail[0].toUpperCase()}${tail.slice(1)}` : ""}`, ...lines].join("\n");
 }
 
-/** Сколько символов отдаём с начала переполненного вывода, прежде чем пометить обрезку. */
+/** How many characters we give from the beginning of an overflowing output before marking truncation. */
 const OUTPUT_HEAD = OUTPUT_LIMIT;
 
-/** Подсказка родителю при обрезке: что случилось и что с этим делать. */
+/** Hint to the parent on truncation: what happened and what to do about it. */
 const CLIPPED_HINT =
   `\n\n… (обрезано на ${OUTPUT_LIMIT} символах: ребёнок написал больше. ` +
   "Полного текста здесь нет — или попроси у него сжатую выжимку, или повтори задачу с явным пределом в задании.)";
 
-/** Итог для модели: то, что она прочитает вместо страниц, которые излазили дети. */
+/** Result for the model: what it will read instead of the pages the children crawled. */
 export function renderReport(states: SubagentState[], limits: Limits, elapsedMs: number): string {
   const ok = states.filter((state) => state.status === "ok").length;
   const failed = states.length - ok;
@@ -591,11 +587,12 @@ export function renderReport(states: SubagentState[], limits: Limits, elapsedMs:
 }
 
 /**
- * Снимок для деталей инструмента: панель рисует по нему живой список.
+ * Snapshot for tool details: the panel draws a live list from it.
  *
- * Обрезаем текст: детали уезжают в каждое обновление прогресса, и сорок задач с
- * полными выводами гоняли бы по stdio сотни килобайт каждые полсекунды. Панели
- * хватает начала задания и начала ответа, полный текст и так есть в отчёте.
+ * We truncate the text: the details go into every progress update, and forty tasks with full
+ * outputs would push hundreds of kilobytes over stdio every half second. The panel is satisfied
+ * with the beginning of the task and the beginning of the answer; the full text is in the report
+ * anyway.
  */
 export function snapshot(states: SubagentState[]): SubagentState[] {
   const clip = (text: string | undefined, limit: number): string | undefined =>
@@ -612,8 +609,8 @@ export function snapshot(states: SubagentState[]): SubagentState[] {
 }
 
 export default function (pi: ExtensionAPI) {
-  // Внутри субагента инструмента нет: единственный надёжный способ запретить
-  // вложенность — не давать ребёнку чем её запускать.
+  // There is no tool inside a subagent: the only reliable way to forbid nesting is not to give
+  // the child anything to launch it with.
   if (isSubagentProcess()) return;
 
   const limits = resolveLimits();
@@ -711,7 +708,7 @@ export default function (pi: ExtensionAPI) {
         const key = spec.tier === "strong" ? "ICARUS_MODEL_STRONG" : "ICARUS_MODEL_FAST";
         const fromEnv = process.env[key]?.trim();
         if (fromEnv) return fromEnv;
-        // Не задали в контейнере — берём модель родителя, она заведомо работает.
+        // Not set in the container — we take the parent's model, it works for sure.
         return ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined;
       };
 
@@ -729,7 +726,7 @@ export default function (pi: ExtensionAPI) {
           return;
         }
 
-        // Слот берём перед стартом: пока он не дался, задача честно «в очереди».
+        // We take the slot before starting: until it is granted, the task is honestly "queued".
         const release = await acquireSlot();
         if (controller.signal.aborted) {
           release();

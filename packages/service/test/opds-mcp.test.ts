@@ -1,10 +1,10 @@
-// OPDS MCP: универсальный прокси между MCP и OPDS-каталогом.
+// OPDS MCP: a universal proxy between MCP and an OPDS catalog.
 //
-// Сервер запускается отдельным процессом, как его запускает pi, и ходит в
-// локальный фейковый каталог: тест не должен зависеть от чужого сайта. Фикстуры —
-// настоящие ответы Project Gutenberg (общественное достояние), сохранённые в
-// tools/opds-mcp/fixtures; в них подменяется только адрес, чтобы запросы ушли
-// в локальный HTTP.
+// The server is launched as a separate process, the way pi launches it, and talks to a
+// local fake catalog: the test must not depend on someone else's site. The fixtures are
+// real Project Gutenberg responses (public domain), saved in
+// tools/opds-mcp/fixtures; only the address in them is replaced so requests go
+// to local HTTP.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -33,12 +33,12 @@ function fixture(name: string): string {
   return fs.readFileSync(path.join(FIXTURES, name), 'utf8');
 }
 
-/** Фикстура снята с живого сайта; адреса переводим на локальный, остальное — как есть. */
+/** The fixture was captured from a live site; we map addresses to local ones, the rest untouched. */
 function localize(text: string, base: string): string {
   return text.replace(/https?:\/\/(?:www|m)\.gutenberg\.org/gi, base);
 }
 
-/** Фиды, которые отдают книги сразу ссылками на файлы (так делает Calibre). */
+/** Feeds that serve books directly with file links (that's what Calibre does). */
 function directFeed(base: string): string {
   return `<?xml version="1.0" encoding="utf-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom" xmlns:opds="http://opds-spec.org/2010/catalog" xmlns:dcterms="http://purl.org/dc/terms/">
@@ -56,7 +56,7 @@ function directFeed(base: string): string {
 </feed>`;
 }
 
-/** Фейковый OPDS-каталог: корень, OpenSearch-описание, поиск, карточка и файл. */
+/** Fake OPDS catalog: root, OpenSearch description, search, card and file. */
 async function fakeCatalog(options: { search?: (base: string) => string } = {}): Promise<Catalog> {
   const requests: string[] = [];
   let slowTimer: NodeJS.Timeout | undefined;
@@ -162,7 +162,7 @@ function saveDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'opds-mcp-'));
 }
 
-test('initialize отдаёт инструкции и четыре инструмента', async () => {
+test('initialize returns instructions and four tools', async () => {
   await withServer({ OPDS_URL: 'http://127.0.0.1:1/opds/' }, async (rpc) => {
     const init = await rpc.call({ method: 'initialize', params: {} });
     const result = init.result as { serverInfo: { name: string }; instructions: string };
@@ -177,7 +177,7 @@ test('initialize отдаёт инструкции и четыре инстру�
   });
 });
 
-test('поиск: шаблон OpenSearch берётся из корня, книги и разделы различаются', async () => {
+test('search: the OpenSearch template comes from the root, books and sections are distinguished', async () => {
   const catalog = await fakeCatalog();
   try {
     await withServer({ OPDS_URL: `${catalog.base}/root.opds` }, async (rpc) => {
@@ -193,7 +193,7 @@ test('поиск: шаблон OpenSearch берётся из корня, кни
       assert.match(body, new RegExp(`${catalog.base}/ebooks/98\\.opds`));
       assert.match(body, /Разделы:/);
       assert.match(body, /Authors/);
-      // Порядок поиска: корень → OpenSearch-описание → найденный шаблон.
+      // Search order: root → OpenSearch description → the found template.
       assert.ok(catalog.requests.includes('/root.opds'));
       assert.ok(catalog.requests.includes('/catalog/osd-books.xml'), 'OSD прочитан из корня');
       assert.ok(catalog.requests.some((request) => request.startsWith('/ebooks/search.opds')), 'поиск по шаблону из OSD');
@@ -203,7 +203,7 @@ test('поиск: шаблон OpenSearch берётся из корня, кни
   }
 });
 
-test('навигация: корень каталога показывает разделы, а не пустую выдачу', async () => {
+test('navigation: the catalog root shows sections, not an empty result', async () => {
   const catalog = await fakeCatalog();
   try {
     await withServer({ OPDS_URL: `${catalog.base}/root.opds` }, async (rpc) => {
@@ -219,7 +219,7 @@ test('навигация: корень каталога показывает р�
       assert.match(body, /Latest/);
       assert.doesNotMatch(body, /Книги:/, 'в корне Gutenberg только разделы');
 
-      // Полка — это тот же поисковый фид: записи в нём книги, а не разделы.
+      // A shelf is the same search feed: its entries are books, not sections.
       const shelf = await rpc.call({
         method: 'tools/call',
         params: { name: 'catalog_browse', arguments: { link: `${catalog.base}/ebooks/search.opds/?query=dickens`, limit: 2 } },
@@ -234,7 +234,7 @@ test('навигация: корень каталога показывает р�
   }
 });
 
-test('карточка книги: автор, год, языки, форматы с размером и аннотация', async () => {
+test('book card: author, year, languages, formats with size and annotation', async () => {
   const catalog = await fakeCatalog();
   try {
     await withServer({ OPDS_URL: `${catalog.base}/root.opds` }, async (rpc) => {
@@ -252,7 +252,7 @@ test('карточка книги: автор, год, языки, формат�
       assert.match(body, /mobi \(611\.8 КБ\)/);
       assert.match(body, /Public domain in the USA/);
       assert.match(body, /historical novel published in 1859/);
-      // Служебные поля content не должны попадать в аннотацию целиком.
+      // Service content fields must not land in the annotation in full.
       assert.doesNotMatch(body, /Reading Level:/);
       assert.match(body, /book_download/);
     });
@@ -261,7 +261,7 @@ test('карточка книги: автор, год, языки, формат�
   }
 });
 
-test('«это не OPDS» — честная ошибка, а не пустая выдача', async () => {
+test('"this is not OPDS" is an honest error, not an empty result', async () => {
   const catalog = await fakeCatalog();
   try {
     await withServer({ OPDS_URL: `${catalog.base}/html` }, async (rpc) => {
@@ -277,7 +277,7 @@ test('«это не OPDS» — честная ошибка, а не пустая
   }
 });
 
-test('OPDS_URL не задан и 401 — разные ошибки с подсказкой, что чинить', async () => {
+test('OPDS_URL not set and 401 are different errors with a hint what to fix', async () => {
   await withServer({ OPDS_URL: '' }, async (rpc) => {
     const answer = await rpc.call({ method: 'tools/call', params: { name: 'catalog_search', arguments: { query: 'dickens' } } });
     assert.equal(isError(answer), true);
@@ -298,7 +298,7 @@ test('OPDS_URL не задан и 401 — разные ошибки с подс�
   }
 });
 
-test('таймаут каталога — ошибка с именем настройки, а не зависание', async () => {
+test('catalog timeout is an error naming the setting, not a hang', async () => {
   const catalog = await fakeCatalog();
   try {
     await withServer({ OPDS_URL: `${catalog.base}/slow`, OPDS_TIMEOUT_SECONDS: '0.2' }, async (rpc) => {
@@ -312,7 +312,7 @@ test('таймаут каталога — ошибка с именем наст�
   }
 });
 
-test('скачивание без confirm отказывает, не трогая каталог', async () => {
+test('download without confirm refuses without touching the catalog', async () => {
   const catalog = await fakeCatalog();
   const dir = saveDir();
   try {
@@ -331,7 +331,7 @@ test('скачивание без confirm отказывает, не трога�
   }
 });
 
-test('лимит размера останавливает скачивание', async () => {
+test('the size limit stops the download', async () => {
   const catalog = await fakeCatalog();
   const dir = saveDir();
   try {
@@ -353,7 +353,7 @@ test('лимит размера останавливает скачивание'
   }
 });
 
-test('скачивание с confirm кладёт файл в incoming человеческим именем', async () => {
+test('download with confirm puts the file into incoming under a human-readable name', async () => {
   const catalog = await fakeCatalog();
   const dir = saveDir();
   try {
@@ -376,7 +376,7 @@ test('скачивание с confirm кладёт файл в incoming чело
   }
 });
 
-test('каталог отдаёт книги сразу ссылками на файлы: карточка берётся из выдачи', async () => {
+test('a catalog serves books directly with file links: the card is taken from the result', async () => {
   const catalog = await fakeCatalog({ search: (base) => directFeed(base) });
   const dir = saveDir();
   try {
@@ -424,7 +424,7 @@ test('каталог отдаёт книги сразу ссылками на ф
 });
 
 
-test('формат не найден — говорит, какие есть, и ничего не качает', async () => {
+test('format not found — says which ones exist and downloads nothing', async () => {
   const catalog = await fakeCatalog();
   const dir = saveDir();
   try {

@@ -1,35 +1,35 @@
-// Панель управления, раздел памяти: чтение файлов, поиск, точечное забывание и удаление
-// файла целиком. Всё, что приходит из браузера, проверяется на выход за пределы каталога
-// памяти.
+// Control panel, memory section: reading files, search, targeted forgetting and deleting
+// a whole file. Everything that comes from the browser is checked for escaping the memory
+// directory.
 //
-// Память — markdown, который агент правит руками; у скиллов свой каталог и свое
-// правило (файл целиком). Набор допустимых расширений поэтому передаётся в функцию,
-// а не выбирается по месту: панель не должна открывать .jsonl журнала как память
-// с кнопками, которых там быть не должно.
+// Memory is markdown that the agent edits by hand; skills have their own directory and their
+// own rule (the whole file). The set of allowed extensions is therefore passed into the function,
+// not chosen locally: the panel must not open a .jsonl journal as memory
+// with buttons that should not be there.
 import fs from 'node:fs';
 import path from 'node:path';
 
 export type MemoryFile = { path: string; size: number; modified: string; ext: string };
 export type SearchHit = { path: string; line: number; text: string };
 
-/** Расширения памяти: её правит агент, и в панели у неё есть «забыть строку». */
+/** Memory extensions: it is edited by the agent, and in the panel it has "forget a line". */
 const MEMORY_EXTENSIONS = new Set(['.md']);
 
-/** Форматы, которые браузер покажет картинкой, а не текстом. */
+/** Formats that the browser will display as an image, not as text. */
 const IMAGE_EXTENSIONS = new Set(['.gif', '.jpg', '.jpeg', '.bmp']);
 
 export const memoryExtensions = MEMORY_EXTENSIONS;
 
-/** Считается ли файл картинкой: панель рисует его через <img>, а не как текст. */
+/** Whether a file is considered an image: the panel renders it via <img>, not as text. */
 export function isImageFile(relative: string): boolean {
   return IMAGE_EXTENSIONS.has(path.extname(relative).toLowerCase());
 }
 
 /**
- * Приводит путь к безопасному виду внутри root или возвращает null.
- * allowed — какие расширения пускать: у памяти и скиллов они разные, и смешивать
- * их нельзя, иначе «/file?path=SKILL.md» открывался бы как память — с кнопками,
- * которых там быть не должно.
+ * Brings a path to a safe form inside root or returns null.
+ * allowed — which extensions to let through: memory and skills have different ones, and mixing
+ * them is not allowed, otherwise "/file?path=SKILL.md" would open as memory — with buttons
+ * that should not be there.
  */
 export function resolveInside(
   root: string,
@@ -37,8 +37,8 @@ export function resolveInside(
   allowed: ReadonlySet<string> = MEMORY_EXTENSIONS,
 ): string | null {
   if (!relative || relative.includes('\u0000')) return null;
-  // Абсолютный путь отбрасываем до любых манипуляций: иначе «/etc/passwd.md»
-  // превратился бы в относительный «etc/passwd.md» и тихо уехал внутрь памяти.
+  // We discard an absolute path before any manipulations: otherwise "/etc/passwd.md"
+  // would turn into the relative "etc/passwd.md" and quietly go inside memory.
   if (path.isAbsolute(relative)) return null;
   const normalized = path.normalize(relative);
   if (normalized.startsWith('..') || path.isAbsolute(normalized)) return null;
@@ -86,7 +86,7 @@ export function readMemoryFile(
   return fs.readFileSync(full, 'utf8');
 }
 
-/** Картинку читаем байтами: как текст график не отдать. */
+/** We read an image as bytes: a graphic cannot be given as text. */
 export function readImageFile(
   root: string,
   relative: string,
@@ -126,9 +126,9 @@ function normalize(text: string): string {
 }
 
 /**
- * Удаляет файл целиком — когда чистить построчно нечего или файл больше не нужен.
- * Каталог не сносим: панель удаляет файл, а не полку памяти, иначе одним промахом
- * уехали бы все записи разом.
+ * Deletes a whole file — when there is nothing to clean line by line or the file is no longer needed.
+ * We do not remove the directory: the panel deletes a file, not a memory shelf, otherwise one slip
+ * would take out all records at once.
  */
 export function removeFile(
   root: string,
@@ -150,7 +150,7 @@ export function removeFile(
   return { ok: true, message: `удалил файл ${relative}` };
 }
 
-/** Убирает строку из файла — то самое «забудь это». */
+/** Removes a line from a file — the very "forget this". */
 export function removeLine(
   root: string,
   relative: string,
@@ -173,12 +173,12 @@ export function removeLine(
 }
 
 /**
- * Убирает несколько записей разом — то, что в панели отмечают галочками.
+ * Removes several records at once — what is marked with checkboxes in the panel.
  *
- * Номера строк берутся из того же файла, который сейчас на диске, поэтому и
- * проверяются все сразу: одна промахнувшаяся строка (файл изменил агент между
- * открытием панели и нажатием «удалить») отменяет всю пачку. Так честнее, чем
- * удалить половину и оставить человека разбираться, что именно пропало.
+ * Line numbers are taken from the same file that is on disk right now, so they are
+ * all checked at once: one missed line (the agent changed the file between
+ * opening the panel and pressing "delete") cancels the whole batch. That is more honest than
+ * deleting half and leaving the person to figure out what exactly disappeared.
  */
 export function removeLines(
   root: string,
@@ -207,7 +207,7 @@ export function removeLines(
   return { ok: true, message: `убрал записей: ${wanted.size}`, removed: wanted.size };
 }
 
-/** Сколько файлов лежит в разделе: панель показывает это числом у раздела. */
+/** How many files are in the section: the panel shows this as a number next to the section. */
 export function countFiles(root: string, allowed: ReadonlySet<string> = MEMORY_EXTENSIONS): number {
   return listFiles(root, '', allowed).length;
 }

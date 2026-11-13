@@ -1,7 +1,7 @@
-// История версий артефакта: маленький git-репозиторий на папку.
+// Artifact version history: a small git repository per folder.
 //
-// Проверяем не «git вообще», а обещание человеку: каждое изменение можно
-// вернуть, а права и публичная ссылка при откате не меняются.
+// We check not "git in general" but the promise to the person: any change can
+// be reverted, and rights and the public link do not change on rollback.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -28,7 +28,7 @@ function artifact(): string {
   return dir;
 }
 
-test('снимок, изменение и возврат к первой версии', async () => {
+test('snapshot, change and return to the first version', async () => {
   const dir = artifact();
   await ensureArtifactRepo(dir);
   assert.equal(await commitArtifact(dir, 'artifact: initial version'), true);
@@ -52,7 +52,7 @@ test('снимок, изменение и возврат к первой вер�
   assert.equal(await commitArtifact(dir, 'artifact: initial version'), false, 'рабочая папка чистая');
 });
 
-test('служебные файлы не версионируются: откат не меняет права и ссылку', async () => {
+test('service files are not versioned: rollback does not change rights and the link', async () => {
   const dir = artifact();
   await ensureArtifactRepo(dir);
   await commitArtifact(dir, 'artifact: initial version');
@@ -75,7 +75,7 @@ test('служебные файлы не версионируются: отка�
   assert.equal(fs.existsSync(path.join(dir, '.artifact.json')), true);
 });
 
-test('несуществующая версия и мусорный хеш не откатываются', async () => {
+test('nonexistent version and garbage hash are not rolled back', async () => {
   const dir = artifact();
   await ensureArtifactRepo(dir);
   await commitArtifact(dir, 'artifact: initial version');
@@ -83,7 +83,7 @@ test('несуществующая версия и мусорный хеш не 
   await assert.rejects(() => restoreArtifact(dir, 'не-хеш'), /не похоже/);
 });
 
-test('инициализация всех артефактов: initial-коммит у существующих', async () => {
+test('initialization of all artifacts: initial commit for existing ones', async () => {
   const config = makeConfig({ users: [probe('probe')] });
   const dir = path.join(artifactsRoot(config), 'plan');
   fs.mkdirSync(dir, { recursive: true });
@@ -99,7 +99,7 @@ test('инициализация всех артефактов: initial-комм
 });
 
 
-test('предпросмотр версии читает содержимое и ассеты, не меняя файлы', async () => {
+test('version preview reads content and assets without changing files', async () => {
   const dir = artifact();
   await ensureArtifactRepo(dir);
   await commitArtifact(dir, 'artifact: initial version');

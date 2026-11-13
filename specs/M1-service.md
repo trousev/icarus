@@ -1,94 +1,94 @@
-# M1 — сервис icarus
+# M1 — the icarus service
 
-> Историческая спека этапа M1: тогда в сервис смотрел LibreChat. Сейчас основной вход —
-> Telegram-бот, а OpenAI-совместимый эндпоинт остаётся для будущих клиентов; актуальное
-> состояние — в [README](../README.md).
+> A historical spec for stage M1: back then LibreChat was the front end to the service. Now the main entry point is
+> a Telegram bot, while the OpenAI-compatible endpoint remains for future clients; the current
+> state is in the [README](../README.md).
 
-## Цель
+## Goal
 
-LibreChat разговаривает с Икаром как с обычной моделью: стрим, отмена, история, вложения. За каждым
-разговором стоит живая сессия pi внутри контейнера пользователя. Память между разговорами сохраняется.
+LibreChat talks to Icarus like any ordinary model: streaming, cancellation, history, attachments. Behind every
+conversation is a live pi session inside the user's container. Memory persists between conversations.
 
-## Границы
+## Boundaries
 
-**Входит:** HTTP-фасад под OpenAI, реестр сессий, управление контейнерами, генерация `AGENTS.md` и `auth.json`,
-трансляция активности тулов в `reasoning_content`, отмена по обрыву, сверка истории с логом диффов,
-расширение-персона, контрактные и интеграционные тесты.
+**In scope:** the HTTP facade for OpenAI, the session registry, container management, generation of `AGENTS.md` and `auth.json`,
+translation of tool activity into `reasoning_content`, cancellation on disconnect, history reconciliation with a diff log,
+the persona extension, contract and integration tests.
 
-**Не входит:** экстрактор памяти, ядро памяти в промпте, мини-панель, веб-поиск, MCP, egress-политика, квоты,
-работа с кодом в репозиториях.
+**Out of scope:** the memory extractor, the memory core in the prompt, the mini-panel, web search, MCP, egress policy, quotas,
+working with code in repositories.
 
-## Структура репозитория
+## Repository structure
 
 ```
 packages/
-  service/                     # сам icarus
+  service/                     # icarus itself
     src/
-      index.ts                 # точка входа
-      config.ts                # разбор config.yaml
-      http/server.ts           # http-сервер и аутентификация
+      index.ts                 # entry point
+      config.ts                # parse config.yaml
+      http/server.ts           # http server and authentication
       http/openai.ts           # /v1/models, /v1/chat/completions
-      http/sse.ts              # упаковка в OpenAI-чанки
-      sessions/registry.ts     # (user, conversation) → сессия, TTL, очередь
-      sessions/pi-session.ts   # жизненный цикл pi-процесса
-      sessions/rpc-client.ts   # JSONL по stdio через docker exec
-      sessions/divergence.ts   # сверка истории, дифф в лог
-      reasoning.ts             # события тулов → человеческие фразы
-      docker/manager.ts        # контейнер на пользователя (dockerode)
+      http/sse.ts              # packing into OpenAI chunks
+      sessions/registry.ts     # (user, conversation) → session, TTL, queue
+      sessions/pi-session.ts   # pi process lifecycle
+      sessions/rpc-client.ts   # JSONL over stdio via docker exec
+      sessions/divergence.ts   # history reconciliation, diff to log
+      reasoning.ts             # tool events → human phrases
+      docker/manager.ts        # container per user (dockerode)
       workspace.ts             # AGENTS.md, auth.json, incoming/
-  extensions/                  # наши расширения pi (persona, …)
+  extensions/                  # our pi extensions (persona, …)
 docker/
-  user/Dockerfile              # уже собран и проверен
-specs/M1-service.md            # этот файл
-tools/rpc-probe.mjs            # отладочный клиент (уже есть)
+  user/Dockerfile              # already built and verified
+specs/M1-service.md            # this file
+tools/rpc-probe.mjs            # debug client (already exists)
 ```
 
-## HTTP-контракт
+## HTTP contract
 
-| Метод | Путь | Назначение |
+| Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/healthz` | живость + статус контейнеров |
-| `GET` | `/v1/models` | одна модель, id `icarus` |
-| `POST` | `/v1/chat/completions` | основной маршрут, `stream` поддержан |
+| `GET` | `/healthz` | liveness + container status |
+| `GET` | `/v1/models` | a single model, id `icarus` |
+| `POST` | `/v1/chat/completions` | the main route, `stream` supported |
 
-**Идентичность.** Заголовки от LibreChat: `x-icarus-user-id` ← плейсхолдер `{{LIBRECHAT_USER_*}}`
-(сам заголовок настраивается, поэтому источник зависит от того, как заведены люди: прод —
-`{{LIBRECHAT_USER_LDAPID}}`, uid из LDAP; стенд на паролях — `{{LIBRECHAT_USER_USERNAME}}`; в наброске
-спеки стоял `{{LIBRECHAT_USER_ID}}`, но id — это ObjectId MongoDB, людям он ничего не говорит),
-`x-icarus-conversation-id` ← `{{LIBRECHAT_BODY_CONVERSATIONID}}`. Фолбэки: `body.user`, иначе
-`sha1(первое сообщение)`. Неизвестный пользователь → `403` и запись в лог.
+**Identity.** Headers from LibreChat: `x-icarus-user-id` ← placeholder `{{LIBRECHAT_USER_*}}`
+(the header itself is configurable, so the source depends on how people are set up: prod —
+`{{LIBRECHAT_USER_LDAPID}}`, the uid from LDAP; the password-based staging — `{{LIBRECHAT_USER_USERNAME}}`; the spec draft
+had `{{LIBRECHAT_USER_ID}}`, but that id is a MongoDB ObjectId, which tells people nothing),
+`x-icarus-conversation-id` ← `{{LIBRECHAT_BODY_CONVERSATIONID}}`. Fallbacks: `body.user`, otherwise
+`sha1(first message)`. Unknown user → `403` and a log entry.
 
-**Аутентификация.** Один общий `Bearer`-токен из конфига (его же указываем в `librechat.yaml`).
+**Authentication.** A single shared `Bearer` token from the config (the same one we specify in `librechat.yaml`).
 
-**Вложения.** Части `image_url` с data-URL раскодируются в `/workspaces/.icarus/incoming/<uuid>.<ext>`; в текст реплики
-добавляется строка «Пользователь приложил файл: <путь>». Дальше агент сам решает — pi умеет читать и картинки.
+**Attachments.** `image_url` parts with data URLs are decoded into `/workspaces/.icarus/incoming/<uuid>.<ext>`; the line
+"The user attached a file: <path>" is added to the message text. After that the agent decides for itself — pi can read images too.
 
-## Сессии
+## Sessions
 
-- Ключ — `(user_id, conversation_id)`. Один pi-процесс на разговор: `docker exec -i <c> pi --mode rpc
-  --session-dir /workspaces/.icarus/sessions/<conversation_id>` — так разговор переживает перезапуск сервиса.
-- **Занят:** один ход на сессию. Пока идёт стрим, второе сообщение получает `409` и лог.
-- **Простой:** процесс гасится через N минут без запросов; контейнер остаётся поднятым.
-- **Сверка истории (решение 14):** перед ходом сравниваем присланную историю с `get_messages`. Совпал префикс —
-  просто подаём новую реплику. Разошлось — пишем дифф в `logs/divergence/<conversation>.log` и продолжаем
-  **свою** сессию (правки и регенерации в UI не откатывают память Икара — это осознанно).
+- The key is `(user_id, conversation_id)`. One pi process per conversation: `docker exec -i <c> pi --mode rpc
+  --session-dir /workspaces/.icarus/sessions/<conversation_id>` — this way the conversation survives a service restart.
+- **Busy:** one turn per session. While a stream is in progress, a second message gets `409` and a log entry.
+- **Idle:** the process is shut down after N minutes without requests; the container stays up.
+- **History reconciliation (decision 14):** before a turn we compare the submitted history with `get_messages`. If the prefix matches
+  we simply feed in the new message. If it diverges, we write a diff to `logs/divergence/<conversation>.log` and continue
+  **our own** session (edits and regenerations in the UI do not roll back Icarus's memory — that is deliberate).
 
-## Стриминг, отмена, видимость
+## Streaming, cancellation, visibility
 
-- Текст: `message_update.text_delta` → `choices[].delta.content`.
-- Активность: `tool_execution_start/end` → короткие фразы в `choices[].delta.reasoning_content`
-  («читаю `memory/identity.md`», «правлю `preferences.md`», «выполняю команду»). Реальные размышления модели,
-  если включены, идут туда же.
-- Финал: чанк с `finish_reason: "stop"`, затем `data: [DONE]`; `usage` — из статистики сессии pi.
-- **Отмена:** `res.on('close')` при `writableEnded === false` → `{"type":"abort"}` в pi (проверено в M0).
+- Text: `message_update.text_delta` → `choices[].delta.content`.
+- Activity: `tool_execution_start/end` → short phrases in `choices[].delta.reasoning_content`
+  ("reading `memory/identity.md`", "editing `preferences.md`", "running a command"). The model's actual reasoning,
+  if enabled, goes there too.
+- Final: a chunk with `finish_reason: "stop"`, then `data: [DONE]`; `usage` comes from the pi session stats.
+- **Cancellation:** `res.on('close')` with `writableEnded === false` → `{"type":"abort"}` to pi (verified in M0).
 
-## Конфигурация
+## Configuration
 
-`config.yaml` в корне репозитория (образец — `config.example.yaml`, рабочий файл в git не попадает).
-Общее для всех людей лежит на верхнем уровне, у человека остаётся только id:
+`config.yaml` at the repository root (a sample is `config.example.yaml`; the working file is not committed to git).
+What is common to all people lives at the top level; each person keeps only an id:
 
 ```yaml
-apiKey: …                                    # Bearer для LibreChat
+apiKey: …                                    # Bearer for LibreChat
 dataDir: ~/icarus-data
 docker: { image: icarus-user:dev, socket: unix:///var/run/docker.sock, network: icarus }
 
@@ -96,48 +96,48 @@ models:
   - { provider: deepinfra, id: deepseek-ai/DeepSeek-V4.1-Flash, thinking: low,    tier: fast }
   - { provider: deepinfra, id: deepseek-ai/DeepSeek-V4.1-Flash, thinking: medium, tier: strong }
 auth: { deepinfra: env:DEEPINFRA_API_KEY }
-# кастомных маунтов нет: контейнер видит только /workspaces и установку Maple
+# no custom mounts: the container sees only /workspaces and the Maple installation
 
 users:
   - trousev
   - second
 ```
 
-Из этого сервис генерирует `auth.json`, `models.json` и `settings.json` в примонтированный `~/.pi/agent` и
-`AGENTS.md` с картой окружения. `models.json` нужен кастомным провайдерам вроде `deepinfra`: pi их сам не
-знает, и без файла модель из `models` в контейнере не найдётся. Ключи в логи не попадают никогда. Уровни
-моделей уезжают в контейнер переменными `ICARUS_MODEL_FAST` / `…_STRONG` / `…_VISION` — их читает расширение
-эскалации. Уровень размышлений расширение отдаёт ровно тот, что записан в конфиге: pi поднял бы
-неподдерживаемый до ближайшего доступного (`medium` у прежней модели в каталоге был помечен отсутствующим),
-а расширение шлёт `reasoning_effort` как есть.
+From this the service generates `auth.json`, `models.json` and `settings.json` into the mounted `~/.pi/agent`, plus
+`AGENTS.md` with a map of the environment. `models.json` is needed by custom providers like `deepinfra`: pi does not
+know them by itself, and without the file the model from `models` will not be found in the container. Keys never
+end up in logs. Model tiers travel into the container as the variables `ICARUS_MODEL_FAST` / `…_STRONG` / `…_VISION` — read
+by the escalation extension. The reasoning level the extension passes through is exactly the one written in the config: pi would
+bump an unsupported one up to the nearest available (`medium` for the previous model was marked as absent in the catalog),
+while the extension sends `reasoning_effort` as is.
 
-Изначально конфиг был JSON'ом и дублировал модели с ключами у каждого человека; формат упростили
-(см. историю коммитов), потому что настройки у людей незаметно разъезжались, а добавление человека
-превращалось в копипасту на сорок строк.
+Initially the config was JSON and duplicated models with keys for each person; the format was simplified
+(see the commit history) because people's settings were imperceptibly drifting apart, and adding a person
+turned into forty lines of copy-paste.
 
-## Готово, когда
+## Done when
 
-1. ✅ LibreChat на стенде получает стриминговый ответ от icarus (эхо-сервер больше не нужен).
-2. ✅ Два пользователя — два контейнера, две независимые памяти; общая память общая.
-3. ✅ Разговор продолжается между запросами, а правка сообщения в UI даёт дифф в логе и не ломает сессию.
-4. ✅ Отмена в UI реально останавливает агента (видно по логу и по `abort` в pi).
-5. ✅ Вложение из чата оказывается в `incoming/`, и агент может его прочитать.
-6. ✅ Перезапуск сервиса не теряет разговоры (`--session-id` + `--session-dir`).
-7. ✅ `npm test`: 36 тестов — контракт формы, сверка истории, фразы тулов, вложения, RPC на заглушке, HTTP целиком.
+1. ✅ LibreChat in the staging environment receives a streaming response from icarus (the echo server is no longer needed).
+2. ✅ Two users — two containers, two independent memories; shared memory is shared.
+3. ✅ The conversation continues between requests, and editing a message in the UI produces a diff in the log without breaking the session.
+4. ✅ Cancellation in the UI actually stops the agent (visible in the log and in the `abort` to pi).
+5. ✅ An attachment from the chat ends up in `incoming/`, and the agent can read it.
+6. ✅ A service restart does not lose conversations (`--session-id` + `--session-dir`).
+7. ✅ `npm test`: 36 tests — the shape contract, history reconciliation, tool phrases, attachments, RPC against a stub, HTTP end to end.
 
-**Уточнения, найденные при реализации** (в спеке было иначе — оставляю как историю решений):
+**Clarifications found during implementation** (the spec said otherwise — I'm keeping them as a record of decisions):
 
-- сверка истории идёт по репликам **пользователя**, а не по всем: ответы pi дробятся тулами, LibreChat их
-  склеивает, и построчное сравнение давало ложные расхождения на каждом ходу;
-- `usage` отдаётся только при `stream_options.include_usage`, первый чанк несёт `delta.role`;
-- идентичность по умолчанию берём из заголовка (`x-icarus-user-id`), а не из id сессии — так удобнее
-  заводить людей; заголовок всё равно настраивается. Позже выяснилось, что источник заголовка важен:
-  на проде это `{{LIBRECHAT_USER_LDAPID}}` (uid из LDAP, совпадает с логином), а не
-  `{{LIBRECHAT_USER_USERNAME}}` — username LibreChat собирает из `givenName` и с логином не совпадает
-  (см. README, раздел про `ICARUS_USERS`). В конфиге стенда остаётся `USERNAME`: стенд на паролях,
-  LDAP там нет и `ldapId` ни у кого не заполнен.
+- history reconciliation runs over **user** messages, not all of them: pi's replies are split up by tools, LibreChat
+  glues them back together, and a line-by-line comparison produced false divergences on every turn;
+- `usage` is returned only with `stream_options.include_usage`, the first chunk carries `delta.role`;
+- by default identity is taken from the header (`x-icarus-user-id`), not from the session id — that makes
+  setting people up easier; the header is configurable anyway. Later it turned out the source of the header matters:
+  in prod it is `{{LIBRECHAT_USER_LDAPID}}` (the uid from LDAP, which matches the login), not
+  `{{LIBRECHAT_USER_USERNAME}}` — LibreChat builds the username from `givenName` and it does not match the login
+  (see the README, the section on `ICARUS_USERS`). The staging config keeps `USERNAME`: staging uses passwords,
+  there is no LDAP there and nobody's `ldapId` is filled in.
 
-## Риски
+## Risks
 
-Молодой API pi (пины версий, вся логика — в расширениях и одном слое `rpc-client`); гонки при обрыве
-и одновременных запросах (закрываем тестами на заглушке); утечка памяти в пуле процессов (TTL и метрики).
+pi's young API (version pins, all the logic lives in extensions and a single `rpc-client` layer); races on disconnect
+and concurrent requests (we cover them with stub tests); a memory leak in the process pool (TTL and metrics).

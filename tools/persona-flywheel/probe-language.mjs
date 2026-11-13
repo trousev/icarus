@@ -1,31 +1,31 @@
-// probe-language.mjs — стенд проверки языка: русский промпт, англоязычный человек.
+// probe-language.mjs — the language test rig: Russian prompt, English-speaking person.
 //
-// Зачем отдельный стенд, а не step из flywheel. В бою язык живёт не в icarus.md,
-// а в AGENTS.md человека (раздел «Язык»), и настраивается в панели. Значит,
-// проверять надо ровно эту сборку: персона-русская + карта-окружения-английская.
-// flywheel так не умеет — он гоняет один файл.
+// Why a separate rig and not step from the flywheel. In production the language doesn't live in icarus.md,
+// but in the person's AGENTS.md (the "Language" section), and is configured in the panel. So
+// we need to test exactly that assembly: Russian persona + English environment map.
+// The flywheel can't do this — it runs a single file.
 //
-// ВАЖНО про слой: правило языка живёт в двух местах — раздел «Язык» в промпте (сборка
-// сервиса) и короткая строка у последней реплики человека (packages/extensions/language.ts).
-// В pi системное сообщение не доезжает (convertToLlm его режет, PR #116), поэтому язык
-// в бою держит именно строка у реплики. Стенд дописывает её тоже — иначе он мерил бы один
-// промпт и объявлял бы рабочий прод сломанным: на вырезанном разделе без строки у реплики
-// он давал 78% (разовая просьба не исполнялась), а со строкой — 100%.
+// IMPORTANT about the layer: the language rule lives in two places — the "Language" section in the prompt (service
+// assembly) and a short line on the person's last turn (packages/extensions/language.ts).
+// In pi the system message doesn't get through (convertToLlm cuts it, PR #116), so in production the language
+// is actually held by the line on the turn. The rig appends it too — otherwise it would measure one
+// prompt and declare working prod broken: on the cut section without the line on the turn
+// it gave 78% (the one-off request wasn't honored), and with the line — 100%.
 //
-// Что проверяем (все — по одному свойству на прогон):
-//   1. говорит ли Икар по-английски, когда промпт русский (главная гипотеза);
-//   2. не сваливается ли на русский от русской вставки в сообщении человека
-//      (цитата, лог, чужое слово) — самый частый соблазн;
-//   3. не разваливается ли характер: шутит ли он по-английски так же, как по-русски;
-//   4. не переспрашивает ли про язык;
-//   5. что бывает при неправильной настройке (ru) и с языком, которого нет в промпте.
+// What we test (each — one property per run):
+//   1. does Icarus speak English when the prompt is Russian (the main hypothesis);
+//   2. does he slip into Russian because of a Russian insertion in the person's message
+//      (a quote, a log, someone else's word) — the most common temptation;
+//   3. does the character hold up: does he joke in English the same way as in Russian;
+//   4. does he ask again about the language;
+//   5. what happens with a wrong setting (ru) and a language that isn't in the prompt.
 //
-//   node probe-language.mjs                 # все варианты
-//   node probe-language.mjs --lang en       # только английские
-//   node probe-language.mjs --model flash   # только варианты на flash
+//   node probe-language.mjs                 # all variants
+//   node probe-language.mjs --lang en       # only the English ones
+//   node probe-language.mjs --model flash   # only the flash variants
 //
-// Пишет logs/lang-probe-<метка>/{samples.md,verdict.json} — реплики целиком, чтобы
-// читать глазами, и машинный вердикт для сверки между запусками.
+// Writes logs/lang-probe-<label>/{samples.md,verdict.json} — full replies, to
+// read with your eyes, and a machine verdict for comparison between runs.
 
 import { writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -33,19 +33,19 @@ import { chat, ROOT, MODELS, mapLimit, parseJson } from "./lib/api.mjs";
 import { languageRule } from "../../packages/service/src/workspace.ts";
 import { languageOverride } from "../../packages/extensions/language.ts";
 
-// ── как сервис собирает промпт в бою ─────────────────────────────────────────
-// Персона читается файлом, раздел «Язык» берётся ИЗ СЕРВИСА (languageRule), а не
-// копией: копия однажды разъедется с боевым текстом, и стенд начнёт проверять не то,
-// что уезжает человеку.
+// ── how the service assembles the prompt in production ───────────────────────
+// The persona is read from the file, the "Language" section is taken FROM THE SERVICE (languageRule), not
+// as a copy: a copy would eventually drift from the production text, and the rig would start checking something
+// other than what ships to the person.
 const PERSONA = readFileSync(join(ROOT, "../../icarus.md"), "utf8")
   .replace(/<!--[\s\S]*?-->/g, "")
   .trim();
 
-/** В бою это AGENTS.md: карта окружения, собранная сервисом. Нам хватает раздела. */
+/** In production this is AGENTS.md: the environment map assembled by the service. A section is enough for us. */
 const systemFor = (lang) => `${PERSONA}\n${languageRule(lang)}`;
 
 
-// ── сценарии: каждый ловит свой соблазн свалиться на чужой язык ──────────────
+// ── scenarios: each catches its own temptation to slip into the wrong language ──
 const SCENARIOS = [
   {
     id: "plain-en",
@@ -113,12 +113,12 @@ const SCENARIOS = [
   {
     id: "once-request-en",
     lang: "en",
-    // Реплики заданы жёстко: человек должен держать свой язык, иначе проверка теряет смысл.
+    // The turns are hard-coded: the person must hold their language, otherwise the check loses its point.
     scripted: true,
     title: "Разовая просьба: одно сообщение на другом языке",
     why: "«Следующее сообщение на грузинском» — выполнить ровно один ответ и вернуться к настройке.",
-    // Ожидаемый язык по ходам: настройка, потом выполненная просьба, потом снова настройка.
-    // Третий ход — главная проверка: вернулся ли.
+    // Expected language per turn: the setting, then the fulfilled request, then the setting again.
+    // The third turn is the main check: did it come back.
     expect: ["en", "ka", "en"],
     turns: [
       "hey, quick one — reply to my next message in Georgian, then back to normal",
@@ -129,7 +129,7 @@ const SCENARIOS = [
   {
     id: "mode-request-en",
     lang: "en",
-    // Реплики заданы жёстко: человек должен держать свой язык, иначе проверка теряет смысл.
+    // The turns are hard-coded: the person must hold their language, otherwise the check loses its point.
     scripted: true,
     title: "Режим: «с этого момента ты переводчик»",
     why: "Режимная просьба держится: каждый следующий ответ на заданном языке, пока не отменят.",
@@ -143,11 +143,11 @@ const SCENARIOS = [
   {
     id: "mode-cancel-en",
     lang: "en",
-    // Реплики заданы жёстко: человек должен держать свой язык, иначе проверка теряет смысл.
+    // The turns are hard-coded: the person must hold their language, otherwise the check loses its point.
     scripted: true,
     title: "Отмена режима: возврат к настройке",
     why: "Режим кончается, когда человек его снимает. Самое частое место ошибки — не заметить отмену.",
-    // Третий ход снимает режим — и ждём возврат к настройке, а не продолжение перевода.
+    // The third turn cancels the mode — and we expect a return to the setting, not continued translation.
     expect: ["en", "ka", "en"],
     turns: [
       "ok, from now on you're my translator into Georgian — i'm writing to my landlord",
@@ -168,10 +168,10 @@ const SCENARIOS = [
   },
 ];
 
-// ── разговор ─────────────────────────────────────────────────────────────────
-// Играем собеседника моделью: скриптовые реплики задают язык, дальше человек
-// должен оставаться собой. Модель-«человек» пишет на том же языке, что и первая
-// реплика: нам важно не «человек переключился», а язык ответа Икара.
+// ── conversation ─────────────────────────────────────────────────────────────
+// We play the interlocutor with a model: scripted turns set the language, after that the person
+// must stay themselves. The "person" model writes in the same language as the first
+// turn: what matters to us is not "the person switched" but the language of Icarus's reply.
 const userSystem = (scenario) => `You are playing Icarus's friend in a test rig. Stay in character.
 
 Who you are: a 34-year-old who lives in Dublin, works in IT, mood is normal-to-meh. You are chatting casually.
@@ -198,10 +198,10 @@ async function runScenario({ system, scenario, maxTokens = 560 }) {
   const userHistory = [];
 
   for (let index = 0; index < scenario.turns.length; index++) {
-    // В сценариях про просьбу реплики СКРИПТОВЫЕ, и это не лень: там человек должен
-    // строго держать свой язык, а модель-человек его меняла — и проверка получала
-    // не то, что мы хотели проверить (она отвечала на грузинском, «исполняя» просьбу
-    // за Икара). Обычные сценарии оставляем живыми: пусть человек реагирует сам.
+    // In request scenarios the turns are SCRIPTED, and that's not laziness: there the person must
+    // strictly hold their language, but the person-model changed it — and the check got
+    // something other than what we wanted to test (it replied in Georgian, "fulfilling" the request
+    // for Icarus). We keep ordinary scenarios live: let the person react on their own.
     const userText =
       index === 0 || scenario.scripted
         ? scenario.turns[index]
@@ -217,9 +217,9 @@ async function runScenario({ system, scenario, maxTokens = 560 }) {
     userHistory.push({ role: "user", content: userText });
     dialogue.push({ role: "user", text: userText });
 
-    // Правило у реплики — как в бою: language.ts дописывает его к последней реплике
-    // человека, и в pi оно переживает convertToLlm (системное сообщение — нет, PR #116).
-    // Без этого стенд мерил бы только карту и объявлял бы рабочий прод сломанным.
+    // The rule on the turn — as in production: language.ts appends it to the person's last turn,
+    // and in pi it survives convertToLlm (the system message does not, PR #116).
+    // Without this the rig would measure only the map and declare working prod broken.
     const reply = await chat({
       model: MODELS.icarus,
       system,
@@ -235,22 +235,22 @@ async function runScenario({ system, scenario, maxTokens = 560 }) {
   return dialogue;
 }
 
-// ── детектор языка: правило, а не судья ──────────────────────────────────────
-// Судья-LLM тут плохой инструмент: он оценивает «хорошо ли», а нам нужен факт
-// «на каком языке». LLM на этом ещё и врёт: он принимал настоящий грузинский за
-// «русскую вставку» и цитировал реплики, которых в диалоге не было. Поэтому язык
-// считаем буквами, а судью спрашиваем только про голос.
+// ── language detector: a rule, not a judge ───────────────────────────────────
+// An LLM judge is a bad tool here: it evaluates "is it good", while we need the fact
+// "in which language". The LLM also lies about this: it took real Georgian for a
+// "Russian insertion" and quoted turns that weren't in the dialogue. So we
+// count language by letters, and ask the judge only about voice.
 const SCRIPTS = [
-  { code: "ka", re: /[\u10A0-\u10FF\u2D00-\u2D2F]/g }, // грузинский
+  { code: "ka", re: /[\u10A0-\u10FF\u2D00-\u2D2F]/g }, // Georgian
   { code: "ru", re: /[А-Яа-яЁё]/g },
   { code: "en", re: /[A-Za-z]/g },
 ];
 
 export function languageOf(text) {
-  // Грузинский — особый случай, и перевес тут неверная мера. Переводчик пишет
-  // по-английски пояснение и рядом строку на грузинском: букв латиницы выходит больше,
-  // и по перевесу такая реплика считалась бы английской, хотя перевод в ней есть.
-  // Поэтому грузинский ищем НАЛИЧИЕМ: сколько-нибудь настоящих букв — реплика про него.
+  // Georgian is a special case, and the margin is the wrong measure here. A translator writes
+  // an explanation in English and a Georgian line next to it: Latin letters come out more numerous,
+  // and by margin such a reply would count as English, although it does contain a translation.
+  // So we look for Georgian by PRESENCE: any real letters at all — the reply is about it.
   const georgian = (text.match(/[\u10A0-\u10FF\u2D00-\u2D2F]/g) ?? []).length;
   if (georgian >= 3) return "ka";
 
@@ -258,49 +258,49 @@ export function languageOf(text) {
   for (const { code, re } of SCRIPTS) {
     if (code === "ka") continue;
     const count = (text.match(re) ?? []).length;
-    // Термины и имена не считаем: решает перевес. Одно русское слово в английской
-    // реплике — это английский, и наоборот.
+    // We don't count terms and names: the margin decides. One Russian word in an English
+    // reply — that's English, and vice versa.
     if (count > best.count) best = { code, count };
   }
   return best.code;
 }
 
-/** Смешанная ли реплика: буквы двух письменностей, каждая заметная. */
+/** Whether the reply is mixed: letters of two scripts, each noticeable. */
 export function scriptsIn(text) {
   return SCRIPTS.filter(({ re }) => (text.match(re) ?? []).length >= 3).map((s) => s.code);
 }
 
-/** Языки реплик Икара по ходам: первый факт, на котором стоит вся проверка. */
+/** Languages of Icarus's replies per turn: the first fact the whole check rests on. */
 function dialogueLanguages(dialogue) {
   return dialogue.filter((turn) => turn.role === "icarus").map((turn) => languageOf(turn.text));
 }
 
 /**
- * Совпало ли поведение с тем, что ждали на каждом ходу.
+ * Whether the behavior matched what was expected on each turn.
  *
- * Раньше тут было сравнение «язык большинства = язык настройки», и оно врало на
- * сценариях с просьбой: верное поведение (выполнил просьбу и вернулся) выглядело
- * провалом, потому что большинство реплик оказывалось не на языке настройки.
- * Теперь у сценария есть расписание `expect` — по ожиданию на каждый ход.
+ * This used to be a comparison "majority language = setting language", and it lied on
+ * request scenarios: correct behavior (fulfilled the request and came back) looked
+ * like a failure, because the majority of replies turned out not to be in the setting language.
+ * Now a scenario has an `expect` schedule — one expectation per turn.
  */
 function matchesExpectation(got, scenario) {
   const expect = scenario.expect ?? got.map(() => scenario.lang);
   if (got.length !== expect.length) return false;
-  // В ожидании хода можно перечислить допустимые языки через «|»: например, первый
-  // ответ на режимную просьбу бывает и сразу на новом языке, и с подтверждением на
-  // прежнем — оба поведения верны, и жёсткое расписание ловило бы одно из них зря.
+  // In a turn's expectation you can list the allowed languages separated by "|": for example, the first
+  // reply to a mode request can be both immediately in the new language and with confirmation in
+  // the previous one — both behaviors are correct, and a hard schedule would catch one of them needlessly.
   return got.every((lang, index) => String(expect[index]).split("|").includes(lang));
 }
 
-/** Переспрашивал ли про язык: короткий вопрос про язык в реплике Икара. */
+/** Whether it asked about the language: a short question about language in Icarus's reply. */
 const ASKS_LANGUAGE = /which language|what language|in english or|по-английски или|на каком языке|предпочитаешь.*язык/i;
 
-// ── судья «не развалился ли характер» ────────────────────────────────────────
-// Отдельно от языка: язык мы уже знаем правилом. Тут — остался ли он собой.
+// ── judge "did the character hold up" ────────────────────────────────────────
+// Separate from language: we already know the language by rule. Here — did he stay himself.
 async function characterJudge({ scenario, dialogue, expected, perTurn = [], expectedPerTurn = [] }) {
-  // Расписание ходов приходит готовым: судья не должен сам решать, какой язык «правильный»
-  // в сценарии с просьбой, — он на этом уже ошибался, принимая выполненную просьбу
-  // за нарушение и цитируя реплики, которых в диалоге не было.
+  // The turn schedule arrives ready-made: the judge must not decide on its own which language is "correct"
+  // in a request scenario — it already erred on this, taking a fulfilled request
+  // for a violation and quoting turns that weren't in the dialogue.
   const plan = perTurn.length
     ? `
 Расписание: от Икара ждали по ходам — ${perTurn.map((got, i) => `ход ${i + 1}: ${expectedPerTurn[i] ?? expected} (вышло ${got})`).join("; ")}.`
@@ -345,7 +345,7 @@ ${transcript(dialogue)}
   };
 }
 
-// ── прогон ───────────────────────────────────────────────────────────────────
+// ── run ──────────────────────────────────────────────────────────────────────
 const args = process.argv.slice(2);
 const arg = (name) => (args.includes(`--${name}`) ? args[args.indexOf(`--${name}`) + 1] : undefined);
 const onlyLang = arg("lang");
@@ -376,12 +376,12 @@ const results = await mapLimit(jobs, 4, async ({ variant, scenario }) => {
     const expected = scenario.expect ?? perTurn.map(() => scenario.lang);
     const asks = dialogue.filter((turn) => turn.role === "icarus" && ASKS_LANGUAGE.test(turn.text)).length;
     const scores = await characterJudge({ scenario, dialogue, expected: scenario.lang, perTurn, expectedPerTurn: expected });
-    // Прошли, если язык по ходам совпал с расписанием и не переспрашивал.
+    // Pass if the per-turn language matched the schedule and it didn't ask about language.
     //
-    // Судья в вердикте НЕ участвует — только пишет замечания в отчёт. Он трижды
-    // ошибся на этих сценариях: счёл выполненную просьбу нарушением, потребовал
-    // от одной реплики противоречивых вещей и поставил 2 из 10 хорошему диалогу.
-    // Язык — факт, и он проверен правилом; голос оценивает человек, читая samples.md.
+    // The judge does NOT participate in the verdict — it only writes remarks into the report. It erred
+    // three times on these scenarios: took a fulfilled request for a violation, demanded
+    // contradictory things from one reply, and gave 2 out of 10 to a good dialogue.
+    // Language is a fact, and it's checked by rule; voice is assessed by a human reading samples.md.
     const pass = matchesExpectation(perTurn, scenario) && asks === 0;
     return { variant: variant.id, scenario: scenario.id, title: scenario.title, expected: expected.join(","), lang: { perTurn }, asks, scores, pass, dialogue };
   } catch (error) {

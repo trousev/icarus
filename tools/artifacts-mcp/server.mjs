@@ -1,13 +1,13 @@
 #!/usr/bin/env node
-// Артефакты: MCP-сервер, который объясняет агенту, куда класть готовые вещи,
-// откуда их брать и как показать человеку.
+// Artifacts: an MCP server that explains to the agent where to put finished things,
+// where to take them from and how to show them to the person.
 //
-// Артефакты — глобальная библиотека `/artifacts`, общая для всех людей. Доступ
-// к папкам решают права `.folder-acl.json`: у каждого артефакта есть владелец,
-// а уровни none ⊂ read ⊂ write ⊂ admin задаются отдельно для «меня» и «семьи».
-// По умолчанию family = none: новый артефакт личный, пока владелец не откроет
-// его семье. Файловые инструменты pi блокирует generic folder-guard, поэтому
-// читать и писать здесь можно только то, что разрешено.
+// Artifacts are a global library `/artifacts`, shared by all people. Access
+// to folders is governed by `.folder-acl.json` permissions: each artifact has an owner,
+// and the levels none ⊂ read ⊂ write ⊂ admin are set separately for "me" and "family".
+// By default family = none: a new artifact is personal until the owner opens
+// it to the family. pi's file tools are blocked by the generic folder-guard, so
+// here you can read and write only what is permitted.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';

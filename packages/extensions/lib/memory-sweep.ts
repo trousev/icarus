@@ -1,32 +1,32 @@
-// Ежедневная уборка памяти: чистая логика, которую можно проверить без pi.
+// Daily memory sweep: pure logic that can be tested without pi.
 //
-// В контейнере нет крона: pi-процесс живёт, пока идёт разговор, и гаснет по простою.
-// Поэтому уборку запускает расширение после затишья (memory-sweeper.ts), а здесь
-// собрано всё остальное — сбор файлов, промпт, разбор плана и его применение.
+// There's no cron in the container: the pi process lives as long as the conversation goes and dies on idle.
+// That's why the extension starts the sweep after a lull (memory-sweeper.ts), and everything
+// else is gathered here — collecting files, the prompt, parsing the plan and applying it.
 //
-// Главный принцип: уборка НЕ удаляет информацию. Строку можно перенести на другую
-// полку или переформулировать/датировать, но не выбросить; файл — только слить с
-// другим, при этом всё содержимое переезжает в целевой файл. Поэтому строку адресуют
-// не текстом, а парой «номер строки + дословная цитата»: номер — основной ключ,
-// цитата — проверка, что он не уехал. Не сошлось — пункт пропускается, а не правит
-// соседнюю строку; остальной план при этом применяется, а не отменяется целиком.
+// The main principle: the sweep does NOT delete information. A line can be moved to another
+// shelf or rephrased/dated, but not thrown away; a file can only be merged with
+// another, and all content moves into the target file. That's why a line is addressed
+// not by text but by a pair "line number + verbatim quote": the number is the primary key,
+// the quote is a check that it hasn't shifted. If it doesn't match, the item is skipped rather than editing
+// the neighboring line; the rest of the plan is applied, not cancelled entirely.
 //
-// Две болезни памяти лечатся здесь же: файлы-близнецы (щенок/собака/дори) сводятся
-// слиянием, а разросшиеся файлы модель дробит по темам переносами. Журналы уборка не
-// трогает и в промпт не кладёт: только их наличие и объём, чтобы не жечь токены на
-// то, с чем всё равно ничего не делает.
+// Two memory diseases are treated right here: twin files (puppy/dog/dory) are consolidated
+// by merging, and the model splits overgrown files by topic with moves. The sweep doesn't
+// touch journals and doesn't put them in the prompt: only their presence and volume, so as not to burn tokens on
+// something it does nothing with anyway.
 import fs from 'node:fs';
 import path from 'node:path';
 import { isAllowedTarget, isDuplicate, squash } from '../memory-extractor.ts';
 
 export type SweepFile = { path: string; content: string };
-/** Журнал в промпт не кладём: только имя, объём и число записей — то есть наличие. */
+/** We don't put the journal in the prompt: only the name, volume and entry count — i.e. presence. */
 export type SweepJournal = { path: string; bytes: number; entries: number };
-/** Адрес строки: номер из промпта (с 1) и её дословный текст. */
+/** Line address: the number from the prompt (1-based) and its verbatim text. */
 export type SweepAnchor = { index?: number; quote: string };
 export type SweepMove = { from: string; to: string; append?: string } & SweepAnchor;
 export type SweepRewrite = { file: string; to: string } & SweepAnchor;
-/** Слияние файлов-близнецов: содержимое files целиком переезжает в into. */
+/** Merging twin files: the content of files moves entirely into into. */
 export type SweepMerge = { into: string; files: string[] };
 export type SweepPlan = {
   merges: SweepMerge[];
@@ -38,49 +38,49 @@ export type SweepResult = { changed: string[]; skipped: string[] };
 export type SweepState = { lastRunAt?: string };
 
 /**
- * Бюджет промпта уборки в символах. Файл показываем целиком или не показываем вовсе:
- * обрезанный хвост модель дочиняет выдумками, а разбить по смыслу огрызок невозможно.
- * Не влезшие файлы перечисляем по именам — в следующий раз уборка начнёт с них.
+ * The sweep prompt budget in characters. We show a file in full or not at all:
+ * the model fills in a truncated tail with inventions, and a stump can't be split by meaning.
+ * Files that didn't fit are listed by name — next time the sweep will start with them.
  */
 export const SWEEP_PROMPT_BUDGET = 120_000;
 
-/** Интервал уборки по умолчанию: сутки. */
+/** Default sweep interval: one day. */
 export const DEFAULT_SWEEP_AFTER_HOURS = 24;
 
-/** Сравнение строк как в экстракторе: маркер списка и вёрстка не в счёт. */
+/** Line comparison as in the extractor: the list marker and formatting don't count. */
 export function normalizeLine(line: string): string {
   return line.replace(/^\s*[-*]\s*/, '').replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
 /**
- * Полка — это место, а не тема: identity.md и preferences.md остаются всегда, их нельзя
- * слить с другим файлом и они не исчезают, даже если строки из них разъехались.
+ * A shelf is a place, not a topic: identity.md and preferences.md always remain, they can't
+ * be merged with another file and they don't disappear even if lines have left them.
  */
 function isShelf(rel: string): boolean {
   return /^(identity|preferences)\.md$/i.test(rel.replace(/^\.\//, '').trim());
 }
 
-/** Файл-тема: его можно слить с близнецом, и он исчезает, когда опустел. */
+/** A topic file: it can be merged with a twin, and it disappears when it's empty. */
 function isTopic(rel: string): boolean {
   return isAllowedTarget(rel) && !isShelf(rel);
 }
 
 /**
- * Модель иногда копирует строку вместе с номером из промпта («L12: - …») — номер
- * частью текста не является, иначе якорь не сойдётся с файлом.
+ * The model sometimes copies a line together with the number from the prompt ("L12: - …") — the number
+ * isn't part of the text, otherwise the anchor wouldn't match the file.
  */
 export function withoutLineNumber(text: string): string {
   return text.replace(/^\s*L\d+:\s?/i, '');
 }
 
-/** Строка-пункт: переносим и переписываем только пункты списка. */
+/** A bullet line: we move and rewrite only list items. */
 function ensureBullet(text: string): string {
   return /^\s*[-*]\s+/.test(text) ? text : `- ${text}`;
 }
 
 /**
- * Тело файла без frontmatter. При слиянии описание — метаданные, а не факт:
- * иначе в целевом файле оказалось бы несколько `description` подряд.
+ * The file body without frontmatter. On merge the description is metadata, not a fact:
+ * otherwise the target file would end up with several `description` entries in a row.
  */
 function contentLines(lines: string[]): string[] {
   if (lines[0]?.trim() !== '---') return lines;
@@ -112,7 +112,7 @@ function markdownFiles(dir: string): string[] {
   }
 }
 
-/** Всё, что уборка читает и правит: постоянные полки и люди. Журналы сюда не входят. */
+/** Everything the sweep reads and edits: permanent shelves and people. Journals aren't included. */
 export function collectMemoryFiles(root: string): SweepFile[] {
   const files: SweepFile[] = [];
   const add = (rel: string): void => {
@@ -128,8 +128,8 @@ export function collectMemoryFiles(root: string): SweepFile[] {
 }
 
 /**
- * Журналы: только наличие. Содержимое в промпт не попадает — журнал не полка уборки,
- * его нельзя ни перенести, ни переписать, а токенов он съедал больше всех.
+ * Journals: presence only. The content doesn't make it into the prompt — a journal isn't a sweep shelf,
+ * it can neither be moved nor rewritten, and it used to eat the most tokens.
  */
 export function collectJournals(root: string): SweepJournal[] {
   const dir = path.join(root, 'journal');
@@ -142,7 +142,7 @@ export function collectJournals(root: string): SweepJournal[] {
     try {
       bytes = fs.statSync(file).size;
     } catch {
-      // файл исчез между чтением и stat — показываем то, что успели прочитать
+      // the file disappeared between read and stat — we show what we managed to read
     }
     journals.push({
       path: `journal/${name}`,
@@ -158,11 +158,11 @@ function kilobytes(bytes: number): string {
 }
 
 /**
- * Промпт уборки. Правила жёсткие намеренно: модель склонна «наводить порядок»
- * удалением, а нам нужны только перенос, переформулировка и слияние файлов. Строки
- * пронумерованы: по номеру строка находится точно, а цитата нужна, чтобы поймать
- * уехавший номер. Файлы показываем целиком: разбить по смыслу можно только то, что
- * видишь от первой строки до последней, поэтому обрезки здесь нет.
+ * The sweep prompt. The rules are deliberately strict: the model tends to "tidy up"
+ * by deleting, while we need only moves, rephrasing and file merging. The lines
+ * are numbered: by number a line is found exactly, and the quote is needed to catch
+ * a shifted number. We show files in full: you can only split by meaning what you
+ * see from the first line to the last, so there's no truncation here.
  */
 export function buildSweepPrompt(
   files: SweepFile[],
@@ -246,7 +246,7 @@ ${hidden.map((file) => `- ${file.path} — ${file.content.length} символо
 ${body}${hiddenBlock}`;
 }
 
-/** Номер строки из плана: 12, "12" или "L12". Всё остальное — это цитата старого формата. */
+/** Line number from the plan: 12, "12" or "L12". Everything else is an old-format quote. */
 export function lineNumberOf(value: unknown): number | undefined {
   if (typeof value === 'number') {
     return Number.isInteger(value) && value >= 1 ? value : undefined;
@@ -259,8 +259,8 @@ export function lineNumberOf(value: unknown): number | undefined {
 }
 
 /**
- * Цитата-якорь. В новом формате это quote, в старом — сам line (у moves) или from
- * (у rewrites). Без цитаты пункт бесполезен: вслепую по одному номеру память не правим.
+ * The anchor quote. In the new format it's quote, in the old one it's line itself (for moves) or from
+ * (for rewrites). Without a quote the item is useless: we don't edit memory blindly by number alone.
  */
 function anchorText(quote: unknown, legacy: unknown): string {
   if (typeof quote === 'string' && quote.trim()) return squash(quote);
@@ -269,10 +269,10 @@ function anchorText(quote: unknown, legacy: unknown): string {
 }
 
 /**
- * Разбор плана уборки. Неизвестные полки, попытки удаления и пункты без якоря
- * отбрасываются молча: лучше сделать меньше, чем тронуть память непонятно как.
- * Удаление — это перенос без цели или переформулировка в пустую строку; слияние
- * удалением не считается, потому что содержимое источников переезжает в цель.
+ * Parsing the sweep plan. Unknown shelves, deletion attempts and items without an anchor
+ * are discarded silently: better to do less than to touch memory in an unclear way.
+ * Deletion is a move without a target or a rewrite into an empty line; a merge
+ * isn't considered deletion because the sources' content moves into the target.
  */
 export function parseSweepPlan(raw: string): SweepPlan | null {
   const match = /\{[\s\S]*\}/.exec(raw);
@@ -299,7 +299,7 @@ export function parseSweepPlan(raw: string): SweepPlan | null {
       for (const raw of files) {
         if (typeof raw !== 'string') continue;
         const name = raw.trim();
-        // Себя в источники не берём, повторы не плодим: иначе слияние не имеет смысла.
+        // We don't include itself as a source and don't breed duplicates: otherwise the merge makes no sense.
         if (!isTopic(name) || name === target || sources.includes(name)) continue;
         sources.push(name);
       }
@@ -345,7 +345,7 @@ export function parseSweepPlan(raw: string): SweepPlan | null {
   return { merges, moves, rewrites, journal: journal || undefined };
 }
 
-/** Добавляет пункт в конец, не задевая завершающий перевод строки. */
+/** Adds an item to the end without disturbing the trailing newline. */
 function appendBullet(lines: string[], line: string): void {
   let end = lines.length;
   while (end > 0 && lines[end - 1].trim() === '') end -= 1;
@@ -353,18 +353,18 @@ function appendBullet(lines: string[], line: string): void {
 }
 
 /**
- * Применяет план. Строку ищет по номеру из промпта и сверяет с цитатой: не сошлось —
- * пункт пропускается, остальные применяются (факт остаётся на месте, терять нечего).
- * Правки идут в памяти, запись на диск — в самом конце, чтобы сбой записи не оставил
- * половину уборки. Слияния идут первыми: они меняют файлы, но переносы и правки
- * адресуются цитатой, поэтому находят свои строки и после слияния.
+ * Applies the plan. It looks for a line by the number from the prompt and checks it against the quote: if it doesn't
+ * match, the item is skipped and the rest are applied (the fact stays in place, nothing is lost).
+ * The edits happen in memory, and writing to disk happens at the very end, so a write failure doesn't leave
+ * half a sweep. Merges go first: they change files, but moves and rewrites
+ * are addressed by quote, so they find their lines even after a merge.
  */
 export function applySweepPlan(root: string, plan: SweepPlan, now = new Date()): SweepResult {
   const changed: string[] = [];
   const skipped: string[] = [];
   const state = new Map<string, string[]>();
   const original = new Map<string, string>();
-  /** Файлы, которые исчезнут после успешной записи: источники слияний. */
+  /** Files that will disappear after a successful write: merge sources. */
   const gone = new Set<string>();
 
   const linesOf = (rel: string, create = false): string[] => {
@@ -378,7 +378,7 @@ export function applySweepPlan(root: string, plan: SweepPlan, now = new Date()):
       state.set(rel, lines);
       return lines;
     } catch {
-      // Целевой файл может ещё не существовать — перенос создаёт его. Источник обязан быть.
+      // The target file may not exist yet — a move creates it. The source must exist.
       if (!create) throw new Error(`файл не читается: ${rel}`);
       original.set(rel, '');
       const lines = [''];
@@ -387,7 +387,7 @@ export function applySweepPlan(root: string, plan: SweepPlan, now = new Date()):
     }
   };
 
-  /** Файл может быть неизвестен или не читаться — это повод пропустить пункт, не план. */
+  /** A file may be unknown or unreadable — that's a reason to skip the item, not the plan. */
   const tryLines = (rel: string, create = false): string[] | null => {
     try {
       return linesOf(rel, create);
@@ -397,10 +397,10 @@ export function applySweepPlan(root: string, plan: SweepPlan, now = new Date()):
   };
 
   /**
-   * Номер строки под якорь. Номер из промпта — основной ключ, но применяем его, только
-   * если цитата совпала: иначе номер мог уехать (файл дописали) и правка попадёт не туда.
-   * Запасной путь — поиск по цитате, и только если такая строка в файле ровно одна:
-   * при дублях непонятно, какую править, а угадывать в памяти нельзя.
+   * The line number for the anchor. The number from the prompt is the primary key, but we apply it only
+   * if the quote matches: otherwise the number could have shifted (the file was appended to) and the edit would land in the wrong place.
+   * The fallback is searching by quote, and only if such a line is exactly one in the file:
+   * with duplicates it's unclear which to edit, and guessing in memory is not allowed.
    */
   const resolveLine = (lines: string[], anchor: SweepAnchor): number => {
     const needle = normalizeLine(withoutLineNumber(anchor.quote));
@@ -417,9 +417,9 @@ export function applySweepPlan(root: string, plan: SweepPlan, now = new Date()):
   };
 
   /**
-   * Куда на самом деле едет содержимое: цель слияния может сама уехать в другой файл
-   * (щенок → дори, а дори → «собаки»). Иначе строки осели бы в файле, который тут же
-   * удаляется, и факты пропали бы. Кольцо (A ← B, B ← A) не разрешаем — слияние мимо.
+   * Where the content actually goes: a merge target can itself move into another file
+   * (puppy → dory, and dory → "dogs"). Otherwise the lines would settle in a file that's immediately
+   * deleted, and the facts would be lost. We don't allow a cycle (A ← B, B ← A) — the merge is dropped.
    */
   const redirect = (rel: string): string | null => {
     const seen = new Set<string>();
@@ -434,10 +434,10 @@ export function applySweepPlan(root: string, plan: SweepPlan, now = new Date()):
   };
 
   /**
-   * Слияние файлов-близнецов: пункт применяется целиком или не применяется вовсе.
-   * Сначала читаем все источники, потом переносим строки в цель. Повторы выбрасываем —
-   * та же мысль в цели уже есть, — а уникальное переезжает дословно. Источники исчезают
-   * в самом конце, после успешной записи цели.
+   * Merging twin files: the item is applied entirely or not at all.
+   * First we read all sources, then move the lines into the target. We drop duplicates —
+   * the same thought is already in the target — and the unique moves verbatim. Sources disappear
+   * at the very end, after a successful write of the target.
    */
   for (const merge of plan.merges) {
     const into = redirect(merge.into);
@@ -462,8 +462,8 @@ export function applySweepPlan(root: string, plan: SweepPlan, now = new Date()):
       for (const line of contentLines(lines)) {
         if (!line.trim()) continue;
         if (intoLines.some((known) => normalizeLine(known) === normalizeLine(line))) continue;
-        // Похожие формулировки — тот же факт: в слитом файле он не нужен дважды.
-        // Заголовки так не сравниваем: «# Переезд» и «# Переезд в Порту» — разные шапки.
+        // Similar wording is the same fact: it isn't needed twice in a merged file.
+        // We don't compare headings this way: "# Moving" and "# Moving to Porto" are different headings.
         if (/^\s*[-*]\s+/.test(line) && isDuplicate(intoLines, line)) continue;
         appendBullet(intoLines, line);
       }
@@ -482,11 +482,11 @@ export function applySweepPlan(root: string, plan: SweepPlan, now = new Date()):
       skipped.push(move.from);
       continue;
     }
-    // Без append переносим строку дословно — вместе с цитатой человека, если она есть.
+    // Without append we move the line verbatim — together with the person's quote, if there is one.
     const movedLine = fromLines[index];
     const targetLine = move.append ? ensureBullet(move.append) : movedLine;
 
-    // Перенос в тот же файл — по сути переформулировка: меняем строку на месте.
+    // A move into the same file is essentially a rephrase: we change the line in place.
     if (move.from === move.to) {
       if (normalizeLine(movedLine) === normalizeLine(targetLine)) {
         skipped.push(move.to);
@@ -496,9 +496,9 @@ export function applySweepPlan(root: string, plan: SweepPlan, now = new Date()):
       continue;
     }
 
-    // Цель проверяем ДО правки источника: похожая строка в цели — это повод пропустить
-    // перенос, а не потерять факт. Сначала splice, потом проверка — и исходная строка
-    // исчезла бы из источника, не появившись в цели.
+    // We check the target BEFORE editing the source: a similar line in the target is a reason to skip
+    // the move, not to lose the fact. Splice first, check later — and the original line
+    // would disappear from the source without appearing in the target.
     const toLines = tryLines(move.to, true);
     if (!toLines) {
       skipped.push(move.to);
@@ -536,7 +536,7 @@ export function applySweepPlan(root: string, plan: SweepPlan, now = new Date()):
     const next = lines.join('\n');
     if (next === original.get(rel)) continue;
     const file = path.join(root, rel);
-    // Опустевший файл-тему не оставляем пустышкой в панели; полки живут всегда.
+    // We don't leave an emptied topic file as an empty shell in the panel; shelves always live.
     if (isTopic(rel) && lines.every((line) => line.trim() === '')) {
       if (fs.existsSync(file)) {
         fs.rmSync(file);
@@ -549,8 +549,8 @@ export function applySweepPlan(root: string, plan: SweepPlan, now = new Date()):
     changed.push(rel);
   }
 
-  // Источники слияний удаляем только после записи целей: сбой записи не должен оставить
-  // память без фактов, которые уже уехали из источника.
+  // We delete merge sources only after writing the targets: a write failure must not leave
+  // memory without facts that have already left the source.
   for (const rel of gone) {
     const file = path.join(root, rel);
     if (!fs.existsSync(file)) continue;
@@ -578,7 +578,7 @@ export function applySweepPlan(root: string, plan: SweepPlan, now = new Date()):
   return { changed, skipped };
 }
 
-/** Интервал уборки из окружения: 0 — выключено, мусор и отрицательные — дефолт. */
+/** Sweep interval from the environment: 0 — disabled, garbage and negatives — default. */
 export function sweepAfterHours(raw: string | undefined): number {
   if (raw === undefined || raw.trim() === '') return DEFAULT_SWEEP_AFTER_HOURS;
   const value = Number(raw);
@@ -586,7 +586,7 @@ export function sweepAfterHours(raw: string | undefined): number {
   return value;
 }
 
-/** Состояние уборки: dot-файл рядом с памятью, но вне её git-репозитория. */
+/** Sweep state: a dot-file next to memory but outside its git repository. */
 export function sweepStatePath(workspace: string): string {
   return path.join(workspace, '.sweep.json');
 }
@@ -607,7 +607,7 @@ export function writeSweepState(file: string, state: SweepState): void {
   fs.writeFileSync(file, `${JSON.stringify(state, null, 2)}\n`);
 }
 
-/** Пора ли убирать: интервал вышел или отметки ещё нет. 0 часов — выключено. */
+/** Whether it's time to sweep: the interval has passed or there's no mark yet. 0 hours — disabled. */
 export function sweepDue(state: SweepState, now: Date, hours: number): boolean {
   if (hours <= 0) return false;
   if (!state.lastRunAt) return true;
