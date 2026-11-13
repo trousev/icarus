@@ -83,6 +83,13 @@ export type ChatRecord = {
    * считаем, что имя уже устоялось, и моделью его не переписываем.
    */
   titleSource?: 'auto' | 'manual';
+  /**
+   * Имя, которое бот уже поставил топику Telegram. Telegram не отдаёт текущее
+   * имя топика, поэтому помним сами: без этой отметки каждое уточнение
+   * заголовка слало бы `editForumTopic` заново, а Telegram оставляет об этом
+   * служебку в топике. В корне чата топика нет — поля не появляется.
+   */
+  topicTitle?: string;
 };
 
 function chatsFile(config: IcarusConfig, user: UserConfig): string {
@@ -185,6 +192,7 @@ function normalize(value: unknown): ChatRecord | null {
     ...(lastTurn ? { lastTurn } : {}),
     ...(typeof item.archivedAt === 'string' && item.archivedAt !== '' ? { archivedAt: item.archivedAt } : {}),
     ...(item.titleSource === 'auto' || item.titleSource === 'manual' ? { titleSource: item.titleSource } : {}),
+    ...(typeof item.topicTitle === 'string' && item.topicTitle !== '' ? { topicTitle: item.topicTitle } : {}),
   };
 }
 
@@ -621,6 +629,23 @@ export function refreshChatTitle(config: IcarusConfig, user: UserConfig, convers
     // Заголовок — украшение: его сбой не должен отменять ответ человеку.
     log.warn('не обновился заголовок разговора', { user: user.id, error: String(error) });
   }
+}
+
+/**
+ * Запомнил имя, поставленное топику Telegram. Сравнивать своё имя с текущим
+ * приходится самим: Bot API не умеет спросить, как топик называется сейчас.
+ */
+export function setTopicTitle(
+  config: IcarusConfig,
+  user: UserConfig,
+  conversationId: string,
+  name: string,
+): void {
+  const chats = readChats(config, user);
+  const chat = chats.find((item) => item.conversationId === conversationId || item.id === conversationId);
+  if (!chat || chat.topicTitle === name) return;
+  chat.topicTitle = name;
+  writeChats(config, user, chats);
 }
 
 type LegacyIndexEntry = { sessionId: string; conversationId: string };
