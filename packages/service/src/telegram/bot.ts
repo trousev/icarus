@@ -22,14 +22,17 @@ import { speechTranscriber, type Transcriber } from '../speech.ts';
 import type { SessionRegistry } from '../sessions/registry.ts';
 import type { PiSession } from '../sessions/pi-session.ts';
 import {
+  archiveChat,
   findChatRecord,
   lastTurnOf,
   recordTurn,
   refreshChatTitle,
   renameChat,
+  setChatTelegram,
   setChatWorkspace,
   setTopicTitle,
   workspaceForConversation,
+  type ChatRecord,
 } from '../sessions/chats.ts';
 import { AUTO_TITLE_TIMEOUT_MS, refineChatTitle } from '../control/chat.ts';
 import { watchAll } from '../control/chat-live.ts';
@@ -102,6 +105,7 @@ export const COMMANDS = [
   { command: 'stats', description: 'токены, деньги, контекст' },
   { command: 'clear', description: 'начать разговор с чистого листа' },
   { command: 'rename', description: 'переименовать текущий чат' },
+  { command: 'archive', description: 'убрать разговор в архив' },
   { command: 'workspace', description: 'рабочая папка разговора' },
   { command: 'skills', description: 'скиллы и шаблоны' },
 ];
@@ -118,6 +122,7 @@ export const BOT_COMMANDS = new Set([
   'stats',
   'clear',
   'rename',
+  'archive',
   'workspace',
   'skills',
 ]);
@@ -141,6 +146,7 @@ export const HELP = [
   '/stats — сколько токенов и денег ушло и сколько занято в контексте',
   '/clear — начать разговор с чистого листа (память остаётся при мне)',
   '/rename <имя> — переименовать текущий чат',
+  '/archive — убрать этот разговор в архив: здесь топик удалится вместе с сообщениями',
   '/workspace — рабочая папка этого разговора и куда ещё можно переключиться',
   '/workspace <имя> — переключить разговор в другую папку',
   '/skills — что у меня есть сверх разговора: скиллы и шаблоны',
@@ -175,6 +181,25 @@ export function workspaceUnknown(name: string): string {
 export function workspaceFailed(reason: string): string {
   return `Не получилось переключить: ${reason}`;
 }
+
+/**
+ * `/archive` прошёл: топик удалён вместе с сообщениями. Пишем в корень чата —
+ * в самом топике сказать уже нечем. Возврат живёт только в панели: померла
+ * так померла, второй топик Telegram не заводит.
+ */
+export function archivedText(title: string, removedTopic: boolean): string {
+  const head = `🗄 Убрал «${title}» в архив.`;
+  return removedTopic
+    ? `${head}\nТопик здесь удалён вместе с сообщениями — вернуть его Telegram не умеет. В панели разговор лежит в архиве, оттуда его можно вернуть.`
+    : `${head}\nТопика здесь нет — удалять в Telegram нечего. В панели разговор в архиве.`;
+}
+
+/** Топик не удалился — разговор остался в Telegram, но в архив всё равно ушёл. */
+export function archiveTopicFailed(reason: string): string {
+  return `Убрал в архив, но топик не удалился: ${reason}. В Telegram разговор остался на месте.`;
+}
+
+export const ARCHIVE_NOT_FOUND = 'Не нашёл этот разговор в реестре — архивировать нечего.';
 
 /**
  * Ответ не доехал до топика. Говорим об этом в корне чата: в топике человек ждал бы
@@ -370,13 +395,6 @@ export class TelegramBot {
    */
   private freshTopics = new Map<number, { threadId: number; at: number; name: string }>();
   private freshTopicWindowMs: number;
-  /**
-   * Где живёт каждый разговор: чат и топик Telegram. Имя топика меняется только
-   * по номеру топика, а в `conversationId` его не всегда разберёшь (в группе там
-   * ещё и человек), поэтому запоминаем место, когда мимо пролетает реплика.
-   * Отсюда же берётся место для переименования по сводке панели.
-   */
-  private routes = new Map<string, { userId: string; chatId: number; threadId: number | null }>();
   /** Очередь переименований: два события заголовка подряд не должны спорить за топик. */
   private titles = new KeyedQueue();
   /** Отписка от сводки панели — ставится на старте и снимается в `stop`. */
@@ -580,9 +598,6 @@ export class TelegramBot {
     // Куда относится реплика, считаем один раз: очередь, ответ и сессия pi должны
     // говорить об одном и том же месте.
     const route = this.routeFor(message, user.id, thread);
-    // Место разговора помним: имя топика можно поменять только по номеру топика,
-    // а он есть не в каждом сообщении (служебка, общая лента).
-    this.routes.set(route.conversationId, { userId: user.id, chatId, threadId: route.threadId });
     // В логе видно и топик, и разговор: по этим строкам потом разбираются жалобы
     // «ответ уехал не туда» — в самом Telegram номера топиков не показываются.
     log.info('телеграм: сообщение принято', {
@@ -684,6 +699,8 @@ export class TelegramBot {
         return say(clearText(await this.registry.clear(user, conversationId)));
       case 'rename':
         return this.renameChat(message, user, command.args, route);
+      case 'archive':
+        return this.archive(message, user, route);
       case 'workspace':
         return this.selectWorkspace(message, user, command.args, route);
       case 'skills':
@@ -782,6 +799,10 @@ export class TelegramBot {
       await reply.finish();
       return;
     }
+
+    // Место разговора в Telegram — в реестр: по нему топик переименовывается из панели
+    // и удаляется при архивации, и оно переживает перезапуск сервиса (см. setChatTelegram).
+    setChatTelegram(this.config, user, conversationId, message.chat.id, route.threadId);
 
     // Сжатие прерывать нечем: это не ход, а переписывание контекста. Здесь честно
     // просим подождать. Всё остальное — гонка с прерыванием из enqueue: ход уже
@@ -921,26 +942,17 @@ export class TelegramBot {
   private noteTopicEdited(message: TelegramMessage): void {
     const name = message.forum_topic_edited?.name?.replace(/\s+/g, ' ').trim();
     if (!name) return;
-    const place = this.placeFor(message.chat.id, topicThreadId(message));
-    if (!place) return;
-    const user = findUser(this.config, place.userId);
+    // Человека и разговор находим сами: по чату и топику место разговора не
+    // поискать, а в `conversationId` номер топика не разобрать (см. conversationIdFor).
+    const user = findTelegramUser(this.config, message.from?.username);
     if (!user) return;
-    const chat = findChatRecord(this.config, user, place.conversationId);
+    const threadId = topicThreadId(message);
+    const conversationId = conversationIdFor(message, user.id, threadId);
+    const chat = findChatRecord(this.config, user, conversationId);
     if (!chat || chat.topicTitle === name) return;
-    renameChat(this.config, user, place.conversationId, name);
-    setTopicTitle(this.config, user, place.conversationId, name);
-    log.info('телеграм: топик назван человеком', { user: user.id, threadId: place.threadId, name });
-  }
-
-  /** Место разговора по чату и топику: так служебка топика находит разговор. */
-  private placeFor(
-    chatId: number,
-    threadId: number | null,
-  ): { userId: string; conversationId: string; threadId: number | null } | null {
-    for (const [conversationId, place] of this.routes) {
-      if (place.chatId === chatId && place.threadId === threadId) return { ...place, conversationId };
-    }
-    return null;
+    renameChat(this.config, user, conversationId, name);
+    setTopicTitle(this.config, user, conversationId, name);
+    log.info('телеграм: топик назван человеком', { user: user.id, threadId, name });
   }
 
   /**
@@ -969,7 +981,9 @@ export class TelegramBot {
    * заново, а Telegram оставляет в топике служебку о переименовании.
    */
   private pushTopicTitle(user: UserConfig, conversationId: string, title: string): Promise<void> {
-    const place = this.routes.get(conversationId);
+    // Место разговора берём из реестра, а не из памяти бота: оно переживает
+    // перезапуск сервиса, поэтому имя из панели доедет до топика и после него (см. setChatTelegram).
+    const place = findChatRecord(this.config, user, conversationId)?.telegram;
     const threadId = place?.threadId ?? null;
     // Корень чата — не топик: там имя менять нечем.
     if (!place || threadId === null) return Promise.resolve();
@@ -1087,6 +1101,48 @@ export class TelegramBot {
     // После `registry.rename`: до него записи разговора может ещё не быть.
     if (route.threadId !== null) setTopicTitle(this.config, user, route.conversationId, name);
     await this.say(chatId, renameText(outcome), route.threadId, route.anchor);
+  }
+
+  /**
+   * `/archive`: разговор уходит в архив панели и выносится из Telegram. Это одно
+   * действие: в панели архив — это «убрать с глаз», и в Telegram топик убирается
+   * так же — целиком, вместе с сообщениями. Вернуть его Telegram не умеет, поэтому
+   * из архива разговор возвращается только в панель (см. archiveChat).
+   */
+  private async archive(message: TelegramMessage, user: UserConfig, route: Route): Promise<void> {
+    const chatId = message.chat.id;
+    // Есть ли что удалять в Telegram: у корня чата топика нет.
+    const hadTopic = (findChatRecord(this.config, user, route.conversationId)?.telegram?.threadId ?? null) !== null;
+    const outcome = await archiveChat(this.config, user, route.conversationId, true, (chat) =>
+      this.removeTopic(user, chat),
+    );
+    const chat = outcome.chat;
+    if (!chat) {
+      await this.say(chatId, ARCHIVE_NOT_FOUND, route.threadId, route.anchor);
+      return;
+    }
+    // Топик не удалился — разговор всё равно в архиве, но говорим там, где человек писал.
+    if (outcome.topicError) {
+      await this.say(chatId, archiveTopicFailed(outcome.topicError), route.threadId, route.anchor);
+      return;
+    }
+    // Топик удалён вместе с сообщениями — отвечать в нём уже нечем: пишем в корень чата.
+    await this.say(chatId, archivedText(chat.title, hadTopic));
+  }
+
+  /**
+   * Выносит разговор из Telegram: топик удаляется вместе с сообщениями. Зовут его
+   * и `/archive`, и панель — архивация у них одно действие (см. archiveChat).
+   */
+  async removeTopic(user: UserConfig, chat: ChatRecord): Promise<void> {
+    const place = chat.telegram;
+    if (!place || place.threadId === null) return;
+    await this.api.deleteForumTopic(place.chatId, place.threadId);
+    log.info('телеграм: топик удалён вместе с разговором', {
+      user: user.id,
+      chatId: place.chatId,
+      threadId: place.threadId,
+    });
   }
 
   /**

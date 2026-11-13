@@ -28,6 +28,7 @@ import { type ChatChannel } from '../sessions/identity.ts';
 import {
   NEW_CHAT_PREVIEW,
   applyAutoTitle,
+  archiveChat,
   createChatRecord,
   findChatRecord,
   isAutoTitle,
@@ -39,7 +40,6 @@ import {
   sessionEpochsOf,
   sessionIdOf,
   sessionIdsOf,
-  setChatArchived,
   setChatFolder,
   updateChatTitles,
   type ChatRecord,
@@ -230,6 +230,12 @@ export type ChatApiContext = {
   userId: string;
   /** null — панель поднята без докера: чат честно скажет, что ему некуда идти. */
   registry?: SessionRegistry;
+  /**
+   * Вынести Telegram-разговор из Telegram: архивация в панели и в боте — одно
+   * действие, и топик удаляется вместе с сообщениями (см. archiveChat). Не
+   * передан — панель без бота: архив остаётся отметкой в реестре.
+   */
+  archiveTelegram?: (user: UserConfig, chat: ChatRecord) => Promise<void>;
 };
 
 /** Отказ писать туда, где историей владеет не панель. */
@@ -1392,10 +1398,25 @@ export async function handleChatApi(
         return true;
       }
       const archived = body.archived !== false;
-      const chat = setChatArchived(ctx.config, user, chatId, archived);
+      const outcome = await archiveChat(
+        ctx.config,
+        user,
+        chatId,
+        archived,
+        ctx.archiveTelegram ? (chat) => ctx.archiveTelegram!(user, chat) : undefined,
+      );
+      const chat = outcome.chat;
       if (!chat) {
         json(res, 404, errorBody('разговор не найден'));
         return true;
+      }
+      if (outcome.topicError) {
+        // Архив состоялся, а топик Telegram остался: это стоит увидеть в логе.
+        log.warn('панель: топик Telegram не удалился при архивации', {
+          user: user.id,
+          chat: chat.id,
+          error: outcome.topicError,
+        });
       }
       json(res, 200, { chat: { id: chat.id, archived: Boolean(chat.archivedAt) } });
       return true;

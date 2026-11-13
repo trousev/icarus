@@ -1,8 +1,9 @@
 // HTTP-сервер icarus: три маршрута и ничего лишнего.
 import http from 'node:http';
 import { log, redact } from '../log.ts';
-import { findUser, type IcarusConfig } from '../config.ts';
+import { findUser, type IcarusConfig, type UserConfig } from '../config.ts';
 import type { SessionRegistry } from '../sessions/registry.ts';
+import type { ChatRecord } from '../sessions/chats.ts';
 import { errorBody } from './sse.ts';
 import { handleChatCompletions, headerValue } from './openai.ts';
 import { handlePanel } from '../control/index.ts';
@@ -27,6 +28,12 @@ export type ServerOptions = {
    * в бою — ничего: возьмут глобальный fetch и системное время.
    */
   search?: SearchHttpOptions;
+  /**
+   * Вынести разговор из Telegram: панель зовёт при архивации Telegram-разговора,
+   * чтобы топик удалился вместе с сообщениями (см. archiveChat). Не передан —
+   * панель поднята без бота и просто двигает отметку в реестре.
+   */
+  archiveTelegram?: (user: UserConfig, chat: ChatRecord) => Promise<void>;
 };
 
 export function createServer(
@@ -89,6 +96,7 @@ export function createServer(
           config,
           registry,
           bump: (user: string) => void registry.bumpResources(user),
+          ...(options.archiveTelegram ? { archiveTelegram: options.archiveTelegram } : {}),
           ...(draftSkills
             ? {
                 draft: (userId: string, idea: string) => {

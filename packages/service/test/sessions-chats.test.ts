@@ -8,6 +8,7 @@ import { userPaths } from '../src/config.ts';
 import { sessionIdFor } from '../src/sessions/pi-session.ts';
 import { SessionRegistry } from '../src/sessions/registry.ts';
 import {
+  archiveChat,
   backfillChats,
   ensureChat,
   lastTurnOf,
@@ -18,7 +19,9 @@ import {
   renderSessionsMap,
   sessionIdOf,
   setChatArchived,
+  setChatTelegram,
   setChatWorkspace,
+  telegramPlaceOf,
   type ChatRecord,
 } from '../src/sessions/chats.ts';
 import { makeConfig, probe } from './fixtures.ts';
@@ -400,4 +403,61 @@ test('архив переживает пересборку реестра, а в
   assert.equal(restored?.archivedAt, undefined);
   assert.equal(readChats(config, user)[0]?.archivedAt, undefined, 'вернулся в обычный реестр');
   assert.equal(setChatArchived(config, user, 'нет-такого', true), null);
+});
+
+test('место разговора в Telegram лежит в chats.json и переживает перезапуск', () => {
+  const { config, user } = fixture();
+  ensureChat(config, user, 'telegram-42-17', 'telegram', 'talk');
+
+  setChatTelegram(config, user, 'telegram-42-17', 42, 17);
+  setChatTelegram(config, user, 'telegram-42-17', 42, 17);
+
+  // Именно в файле: имя топика и удаление темы иначе не пережили бы перезапуск.
+  assert.deepEqual(readChats(config, user)[0]?.telegram, { chatId: 42, threadId: 17 });
+  assert.deepEqual(telegramPlaceOf(config, user, 'telegram-42-17'), { chatId: 42, threadId: 17 });
+});
+
+test('архивация Telegram-разговора удаляет топик и забывает место', async () => {
+  const { config, user } = fixture();
+  ensureChat(config, user, 'telegram-42-17', 'telegram', 'talk');
+  setChatTelegram(config, user, 'telegram-42-17', 42, 17);
+
+  const deleted: Array<{ chatId?: number; threadId?: number | null }> = [];
+  const outcome = await archiveChat(config, user, 'telegram-42-17', true, async (chat) => {
+    deleted.push(chat.telegram ?? {});
+  });
+
+  assert.equal(outcome.chat?.archivedAt !== undefined, true, 'разговор ушёл в архив');
+  assert.deepEqual(deleted, [{ chatId: 42, threadId: 17 }]);
+  assert.equal(readChats(config, user)[0]?.telegram, undefined, 'топика больше нет — и места нет');
+
+  // Возврат из архива Telegram не воскрешает: померла так померла.
+  const restored = await archiveChat(config, user, 'telegram-42-17', false, async () => {
+    throw new Error('возврат не должен трогать Telegram');
+  });
+  assert.equal(restored.chat?.archivedAt, undefined);
+});
+
+test('топик не удалился — архив всё равно состоялся, место осталось', async () => {
+  const { config, user } = fixture();
+  ensureChat(config, user, 'telegram-42-17', 'telegram');
+  setChatTelegram(config, user, 'telegram-42-17', 42, 17);
+
+  const outcome = await archiveChat(config, user, 'telegram-42-17', true, async () => {
+    throw new Error('не форум');
+  });
+
+  assert.equal(outcome.chat?.archivedAt !== undefined, true);
+  assert.equal(outcome.topicError, 'не форум');
+  assert.deepEqual(readChats(config, user)[0]?.telegram, { chatId: 42, threadId: 17 }, 'топик жив — место нужно');
+});
+
+test('без бота архивация панели просто ставит отметку', async () => {
+  const { config, user } = fixture();
+  ensureChat(config, user, 'telegram-42-17', 'telegram');
+  setChatTelegram(config, user, 'telegram-42-17', 42, 17);
+
+  const outcome = await archiveChat(config, user, 'telegram-42-17', true);
+  assert.equal(outcome.chat?.archivedAt !== undefined, true);
+  assert.deepEqual(readChats(config, user)[0]?.telegram, { chatId: 42, threadId: 17 });
 });

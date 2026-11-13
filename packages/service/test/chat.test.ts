@@ -13,6 +13,7 @@ import {
   findChatRecord,
   sessionIdsOf,
   setChatArchived,
+  setChatTelegram,
 } from '../src/sessions/chats.ts';
 import {
   chatAttachmentFile,
@@ -342,7 +343,14 @@ test('архивный разговор уходит из общего спис�
 test('архив через API: разговор уезжает из списка, возвращается и переживает реестр', async () => {
   const { config, user } = fixture();
   const chat = createChat(config, user, 'talk', new Date('2026-11-01T10:00:00.000Z'));
-  const server = createServer(config, {} as never);
+  // Разговор живёт в Telegram: без места панель не знает, какой топик удалять.
+  setChatTelegram(config, user, chat.id, 42, 17);
+  // Архив Telegram-разговора — одно действие с ботом: панель зовёт бота вынести
+  // топик, а возврат из архива Telegram не трогает (восстанавливать нечего).
+  const removed: string[] = [];
+  const server = createServer(config, {} as never, {
+    archiveTelegram: async (_person, record) => void removed.push(record.id),
+  });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address() as AddressInfo;
   const headers = { [PANEL_USER_HEADER]: 'probe', 'content-type': 'application/json' };
@@ -382,6 +390,7 @@ test('архив через API: разговор уезжает из списк
       total: number;
     };
     assert.equal(back.total, 1, 'вернулся в общий список');
+    assert.deepEqual(removed, [chat.id], 'топик выносится ботом только при архивации, а не при возврате');
 
     const missing = await fetch(`${base}/panel/api/chat/archive`, {
       method: 'POST',
