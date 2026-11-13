@@ -1,20 +1,15 @@
 // Запуск задачи по расписанию: новый разговор и промпт в него — тем же путём, что и
 // реплика из панели (SessionRegistry), только человек ничего не нажимает.
 //
-// Новый разговор — обычный чат, а не служебный тред: он появляется в списке, его можно
-// открыть, продолжить и убрать в архив. Заголовок берём из промпта сразу: человек
-// видит в списке, что именно запустилось, ещё до первого слова модели.
+// Новый разговор помечен задачей: в общем списке таких чатов нет, панель собирает
+// их в виртуальное дерево «Задачи → имя задачи → дата запуска». Заголовок разговора
+// — имя задачи, а не промпт: человек видит в дереве и в открытом чате, ЧТО это за
+// прогон, ещё до первого слова модели. У старых задач имени нет — берём промпт.
 import { DEFAULT_WORKSPACE, type IcarusConfig, type UserConfig } from '../config.ts';
 import { log, redact } from '../log.ts';
 import { createChatRecord, recordTurn } from './chats.ts';
 import type { SessionRegistry } from './registry.ts';
-import type { TaskLauncher } from './scheduled.ts';
-
-/** Заголовок разговора: первая строка промпта — в списке видно, что запустилось. */
-function titleFor(prompt: string): string {
-  const line = (prompt.split('\n')[0] ?? '').replace(/\s+/g, ' ').trim();
-  return line.length > 60 ? `${line.slice(0, 59).trimEnd()}…` : line;
-}
+import { taskName, type TaskLauncher } from './scheduled.ts';
 
 export function taskLauncher(config: IcarusConfig, registry: SessionRegistry): TaskLauncher {
   return {
@@ -23,7 +18,11 @@ export function taskLauncher(config: IcarusConfig, registry: SessionRegistry): T
     busy: (user: UserConfig) => registry.busyConversations(user.id).length > 0,
     launch: async (user, task) => {
       const workspace = task.workspace ?? DEFAULT_WORKSPACE;
-      const chat = createChatRecord(config, user, workspace, new Date(), { title: titleFor(task.prompt) });
+      const name = taskName(task);
+      const chat = createChatRecord(config, user, workspace, new Date(), {
+        title: name,
+        task: { id: task.id, name },
+      });
       const chatId = chat.conversationId ?? chat.id;
       try {
         // Реестр заводит сессию pi в этом разговоре; промпт уезжает в неё как обычная

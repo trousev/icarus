@@ -190,6 +190,20 @@
 .folder-act:hover { background: var(--line); color: var(--text); }
 .folder-empty { margin: 2px 10px 6px; font-style: italic; }
 
+/* ── виртуальное дерево «Задачи» ──────────────────────────────────────────── */
+/* Не папка реестра: ветки собираются из метки запуска в chats.json, поэтому у
+   заголовков нет действий, а строки нельзя тащить в настоящие папки. */
+.folder-head.task-root { color: var(--text); }
+.folder-head.task-head {
+  margin-top: 2px; padding-left: 16px;
+  font-size: 12px; letter-spacing: normal; text-transform: none;
+}
+.task-date {
+  margin: 4px 8px 2px 32px; color: var(--dim); font-size: 10px;
+  letter-spacing: .06em; text-transform: uppercase;
+}
+.task-row .chat-item { padding-left: 34px; }
+
 /* Поля имени папки: своё, а не системное, — строка списка не должна прыгать. */
 .folder-new { margin: 10px 2px 2px; }
 .folder-new input, .folder-rename {

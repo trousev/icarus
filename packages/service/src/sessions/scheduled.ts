@@ -24,6 +24,12 @@ import { nextRunAt, parseRepeat, taskTimeZone, type TaskRepeat } from './schedul
 
 export type ScheduledTask = {
   id: string;
+  /**
+   * Человеческое имя задачи: по нему подписана ветка дерева «Задачи» и заголовок
+   * её разговоров. Необязательное: у старых задач его нет, и тогда имя выводится
+   * из первой строки промпта (см. taskName).
+   */
+  name?: string;
   /** Что делает агент в новом разговоре. Без промпта задачи не бывает. */
   prompt: string;
   repeat: TaskRepeat;
@@ -50,12 +56,27 @@ export type TaskView = ScheduledTask & {
 export const TASK_LIMIT = 100;
 /** Промпт — это реплика человека: длиннее не пишут, а хранить полотно незачем. */
 const PROMPT_LIMIT = 4000;
+/** Имя — подпись ветки, а не абзац: длиннее в меню всё равно не прочитать. */
+const NAME_LIMIT = 80;
 
 export type TaskInput = {
+  name?: string;
   prompt: string;
   repeat: TaskRepeat;
   workspace?: string;
 };
+
+/**
+ * Имя задачи для человека и панели. Своё имя хранится в задаче; у старых задач
+ * его нет — берём первую строку промпта и аккуратно режем, чтобы подпись ветки
+ * влезала в строку меню.
+ */
+export function taskName(task: Pick<ScheduledTask, 'name' | 'prompt'>): string {
+  const own = (task.name ?? '').replace(/\s+/g, ' ').trim();
+  if (own) return own;
+  const line = (task.prompt.split('\n')[0] ?? '').replace(/\s+/g, ' ').trim();
+  return line.length > 60 ? `${line.slice(0, 59).trimEnd()}…` : line;
+}
 
 function tasksFile(config: IcarusConfig, user: UserConfig): string {
   return userPaths(config, user).scheduledTasks;
@@ -71,6 +92,7 @@ function normalize(value: unknown): ScheduledTask | null {
   if (typeof item.prompt !== 'string' || !item.prompt.trim()) return null;
   return {
     id: item.id,
+    ...(typeof item.name === 'string' && item.name.trim() ? { name: item.name.trim() } : {}),
     prompt: item.prompt,
     repeat,
     ...(typeof item.workspace === 'string' && item.workspace.trim() ? { workspace: item.workspace.trim() } : {}),
@@ -113,6 +135,11 @@ export function parseTaskInput(value: unknown, timeZone: string, now = new Date(
     .trim()
     .slice(0, PROMPT_LIMIT);
   if (!prompt) throw new Error('напиши, что должен сделать агент: задача без промпта — это не задача');
+  // Имя необязательно: пустое поле — это «назови по промпту», а не ошибка.
+  const name = String(raw.name ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, NAME_LIMIT);
   const repeat = parseRepeat(raw.repeat);
   if (!repeat) throw new Error('расписание не разобрал: нужен день, время или правило повтора');
   // Одноразовое «запусти вчера» — это не задача, а недоразумение: следующий запуск
@@ -124,7 +151,7 @@ export function parseTaskInput(value: unknown, timeZone: string, now = new Date(
         : 'не удалось посчитать следующий запуск: проверь время и дни недели',
     );
   }
-  return { prompt, repeat };
+  return { ...(name ? { name } : {}), prompt, repeat };
 }
 
 export function createTask(
@@ -139,6 +166,7 @@ export function createTask(
   const next = nextRunAt(input.repeat, now, timeZone);
   const task: ScheduledTask = {
     id: crypto.randomUUID(),
+    ...(input.name ? { name: input.name } : {}),
     prompt: input.prompt,
     repeat: input.repeat,
     ...(input.workspace ? { workspace: input.workspace } : {}),

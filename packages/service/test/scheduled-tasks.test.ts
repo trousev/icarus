@@ -77,6 +77,35 @@ test('задача создаётся со следующим запуском �
   assert.deepEqual(readTasks(config, user).map((item) => item.id), [task.id]);
 });
 
+test('своё имя задачи сохраняется и читается, пустое — не сохраняется', () => {
+  const { config, user } = setup();
+  const now = new Date('2026-11-08T07:00:00Z');
+  const named = createTask(
+    config,
+    user,
+    parseTaskInput(
+      { name: '  Сводка по проекту  ', prompt: 'Собери сводку по проекту X', repeat: { kind: 'daily', time: '08:00' } },
+      DUBLIN,
+      now,
+    ),
+    now,
+  );
+  const anonymous = createTask(
+    config,
+    user,
+    parseTaskInput({ name: '   ', prompt: 'Полить цветы', repeat: { kind: 'daily', time: '09:00' } }, DUBLIN, now),
+    now,
+  );
+
+  assert.equal(named.name, 'Сводка по проекту', 'имя обрезано и сохранено');
+  assert.equal(anonymous.name, undefined, 'пустое имя — это «назови по промпту», а не пустая строка');
+  assert.deepEqual(
+    readTasks(config, user).map((task) => task.name),
+    ['Сводка по проекту', undefined],
+  );
+  assert.equal(readTasks(config, user)[0].prompt, 'Собери сводку по проекту X', 'промпт не тронут');
+});
+
 test('чужой человек не видит и не удаляет задачу', () => {
   const { config } = setup();
   const owner = probe('probe');

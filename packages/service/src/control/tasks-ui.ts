@@ -56,6 +56,10 @@ ${settingsAside(session, 'tasks')}
     <div class="task-form" id="task-form" hidden>
       <h2>${escapeHtml(ui.tasksNew)}</h2>
       <div class="field">
+        <label for="task-name">${escapeHtml(ui.tasksNameLabel)}</label>
+        <input type="text" id="task-name" placeholder="${escapeHtml(ui.tasksNamePlaceholder)}">
+      </div>
+      <div class="field">
         <label for="task-prompt">${escapeHtml(ui.tasksPromptLabel)}</label>
         <textarea id="task-prompt" rows="3" placeholder="${escapeHtml(ui.tasksPromptPlaceholder)}"></textarea>
       </div>
