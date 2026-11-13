@@ -207,9 +207,8 @@ function fakeApi(files: Record<string, Buffer> = {}) {
       parseMode: string | null;
     }>,
     nextId: 1,
-    typing: 0,
-    /** Куда ушло последнее «печатает…»: в топике это должно быть то же место. */
-    typingThreadId: null as number | null,
+    /** Действия Telegram по порядку: чем бот показывал, что он занят. */
+    actions: [] as Array<{ action: string; threadId: number | null }>,
     files: new Map(Object.entries(files)),
     downloaded: [] as string[],
     /** Threaded Mode: в бою это флаги getMe, в тестах — переключатель. */
@@ -253,9 +252,8 @@ function fakeApi(files: Record<string, Buffer> = {}) {
       message.text = text;
       message.parseMode = options.parseMode ?? null;
     },
-    async sendChatAction(_chatId: number, _action = 'typing', threadId: number | null = null) {
-      state.typing += 1;
-      state.typingThreadId = threadId;
+    async sendChatAction(_chatId: number, action = 'typing', threadId: number | null = null) {
+      state.actions.push({ action, threadId });
     },
     async setMyCommands() {},
     async getMe() {
@@ -304,6 +302,13 @@ function chatText(state: ReturnType<typeof fakeApi>['state'], chatId: number): s
     .filter((message) => message.chatId === chatId && message.threadId === null)
     .map((message) => message.text)
     .join('\n');
+}
+
+/** Последнее действие Telegram: чем бот показал, что он занят, в самый последний раз. */
+function lastAction(state: ReturnType<typeof fakeApi>['state']): { action: string; threadId: number | null } {
+  const last = state.actions.at(-1);
+  assert.ok(last, 'бот должен показать, что он занят');
+  return last;
 }
 
 /** Только то, что уехало в конкретный топик: в корне чата ответа быть не должно. */
@@ -411,6 +416,9 @@ function makeBot(
   const bot = new TelegramBot(config, registry as never, {
     api,
     editIntervalMs: 0,
+    // Действие показать сразу, а повторять не чаще раза в час: тесту не нужны тики.
+    actionGapMs: 0,
+    actionIntervalMs: 3_600_000,
     transcribe,
     ...(options.freshTopicWindowMs === undefined ? {} : { freshTopicWindowMs: options.freshTopicWindowMs }),
   });
@@ -506,9 +514,13 @@ test('знакомого человека бот слушает и отвеча�
   await bot.handleUpdate(messageUpdate('привет, Икар'));
 
   assert.deepEqual(session.prompts, ['привет, Икар']);
-  assert.equal(chatText(state, 42), 'Привет, Саня', 'служебная строка «⚙ читаю…» в ответ не попала');
+  assert.equal(chatText(state, 42), 'Привет, Саня', 'служебных строк в ответе нет — только слова Икара');
   assert.equal(state.messages[0]?.text, 'Привет, Саня', 'ответ менялся правкой одного сообщения');
-  assert.ok(state.typing > 0, 'человек видит «печатает»');
+  assert.deepEqual(
+    state.actions.map((item) => item.action),
+    ['choose_sticker', 'upload_document', 'typing'],
+    'ход показан действиями: думает — стикер, читает файл — файл, ответ поехал — «печатает»',
+  );
 });
 
 test('ошибка авторизации MCP даёт в ответе ссылку на переподключение', async () => {
@@ -677,7 +689,7 @@ test('голосовое расшифровывается и уезжает ре
   assert.deepEqual(state.downloaded, ['files/VOICE']);
   assert.deepEqual(session.prompts, ['[голосовое, 7 с] напомни купить молоко']);
   assert.deepEqual(session.images, [[]], 'голосовое картинкой не считается');
-  assert.equal(chatText(state, 42), 'Привет, Саня');
+  assert.equal(state.actions[0]?.action, 'record_voice', 'пока идёт расшифровка — «записывает голосовое»');  assert.equal(chatText(state, 42), 'Привет, Саня');
 });
 
 test('распознавания нет — говорим об этом, а не молчим', async () => {
@@ -1102,7 +1114,34 @@ test('пустой ответ не оставляет висящее много�
 
   const text = chatText(state, 42);
   assert.notEqual(text, PLACEHOLDER);
-  assert.match(text, /команда отработала/, 'видно, чем закончили');
+  assert.equal(text, 'Готово.', 'молчаливый ход закрыт коротким словом, а не висящим многоточием');
+});
+
+test('чем занят ход, видно действием Telegram, а не строкой в ответе', async () => {
+  const { bot, state } = makeBot({
+    steps: [
+      {
+        type: 'tool_execution_start',
+        toolCallId: 'call-read',
+        toolName: 'read',
+        args: { path: '/workspaces/talk/смета.pdf' },
+      },
+      { type: 'tool_execution_end', toolCallId: 'call-read', toolName: 'read', isError: false },
+      { type: 'tool_execution_start', toolCallId: 'call-sub', toolName: 'subagent', args: { tasks: [{}, {}] } },
+      { type: 'tool_execution_end', toolCallId: 'call-sub', toolName: 'subagent', isError: false },
+      { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'Смета на месте' } },
+      { type: 'agent_settled' },
+    ],
+  });
+
+  await bot.handleUpdate(messageUpdate('глянь смету'));
+
+  assert.deepEqual(
+    state.actions.map((item) => item.action),
+    ['choose_sticker', 'upload_document', 'choose_sticker', 'find_location', 'choose_sticker', 'typing'],
+    'каждая фаза хода получила своё действие из списка Bot API',
+  );
+  assert.equal(chatText(state, 42), 'Смета на месте', 'служебных строк в ответе нет');
 });
 
 test('сбой хода человек видит ответом, а не тишиной', async () => {
@@ -1205,7 +1244,7 @@ test('ответ в топике уезжает в топик, а не в кор
   assert.equal(session.prompts.length, 1);
   assert.equal(chatText(state, 42), '', 'в корне чата пусто');
   assert.match(topicText(state, 42, 17), /Привет, Саня/);
-  assert.equal(state.typingThreadId, 17, '«печатает…» — в том же топике');
+  assert.equal(lastAction(state).threadId, 17, 'действие — в том же топике');
 });
 
 test('первое сообщение топика из общей ленты уезжает в топик, а не в корень', async () => {
@@ -1218,7 +1257,7 @@ test('первое сообщение топика из общей ленты у
 
   assert.equal(chatText(state, 42), '', 'в корне чата пусто');
   assert.match(topicText(state, 42, 17), /Привет, Саня/);
-  assert.equal(state.typingThreadId, 17, '«печатает…» — в том же топике');
+  assert.equal(lastAction(state).threadId, 17, 'действие — в том же топике');
 });
 
 test('разговор свежего топика считается по номеру топика, а не по корню', async () => {

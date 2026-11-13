@@ -7,18 +7,25 @@
 // Предел Telegram в 4096 знаков обходим, разрезая ответ на несколько сообщений:
 // активное доводим до границы и заводим следующее. Так длинный ответ доезжает
 // целиком, а не обрывается на полуслове.
+//
+// Что ход делает прямо сейчас, в сообщении не пишем: словами это был лишний текст,
+// который человек читает вместо ответа. Вместо него — «действие» Telegram
+// (см. chat-action.ts), которое живёт в клиенте и гаснет само.
 import { log } from '../log.ts';
+import {
+  ACTION_GAP_MS,
+  ACTION_INTERVAL_MS,
+  STICKER_LIE_MS,
+  THINKING_ACTION,
+  type ChatAction,
+} from './chat-action.ts';
 import { describeTelegramError, TelegramError, type SendOptions, type TelegramApi } from './api.ts';
 import { htmlToPlain, renderHtml } from './format.ts';
 
 /** Предел одного сообщения Telegram. */
 export const MESSAGE_LIMIT = 4096;
-/** Режем раньше предела: запас на служебную строку и на разметку вокруг текста. */
+/** Режем раньше предела: запас на разметку вокруг текста. */
 export const SAFE_LIMIT = 3800;
-/** «Печатает…» живёт около пяти секунд — обновляем чуть раньше. */
-export const TYPING_INTERVAL_MS = 4500;
-/** Служебная строка: длинные команды в неё не влезают. */
-const STATUS_LIMIT = 200;
 /** Что видно в сообщении, пока ответа ещё нет. */
 export const PLACEHOLDER = '…';
 
@@ -39,6 +46,10 @@ export function splitPoint(text: string, limit: number): number {
 export type ReplyOptions = {
   /** Минимум между правками одного сообщения. */
   intervalMs?: number;
+  /** Минимум между действиями Telegram; в тестах схлопывают в ноль. */
+  actionGapMs?: number;
+  /** Через сколько повторять действие, пока ход идёт. */
+  actionIntervalMs?: number;
   /** Часы: в тестах подменяются, чтобы не ждать throttle. */
   now?: () => number;
   /**
@@ -63,12 +74,18 @@ export class TelegramReply {
 
   /** Текст активного сообщения; всё, что не влезло раньше, уже разослано. */
   private tail = '';
-  /** Строка «что делаю»: живёт до конца хода и в готовый ответ не попадает. */
-  private status = '';
+  /** Чем показываем занятость; null — «ничего не делаем», индикатор гаснет сам. */
+  private action: ChatAction | null = null;
+  /** Когда поставили текущее действие: по этому времени стикер-шутка перестаёт врать. */
+  private actionAt = 0;
+  /** Когда действие уехало в Telegram: между отправками держим паузу. */
+  private actionSentAt = 0;
+  private actionGapMs: number;
+  private actionIntervalMs: number;
   private messageId: number | null = null;
   private lastEdit = 0;
   private timer: NodeJS.Timeout | null = null;
-  private typing: NodeJS.Timeout | null = null;
+  private actionTimer: NodeJS.Timeout | null = null;
   /** Правки идут по очереди: две одновременные правки одного сообщения дерутся. */
   private chain: Promise<void> = Promise.resolve();
   private finished = false;
@@ -79,6 +96,8 @@ export class TelegramReply {
     this.api = api;
     this.chatId = chatId;
     this.intervalMs = options.intervalMs ?? 1200;
+    this.actionGapMs = options.actionGapMs ?? ACTION_GAP_MS;
+    this.actionIntervalMs = options.actionIntervalMs ?? ACTION_INTERVAL_MS;
     this.now = options.now ?? Date.now;
     this.threadId = options.threadId ?? null;
     this.anchorMessageId = options.anchorMessageId;
@@ -92,9 +111,13 @@ export class TelegramReply {
     return this.failure;
   }
 
-  /** Заводит сообщение-заготовку: человек видит, что его услышали, ещё до ответа. */
-  async start(): Promise<void> {
-    this.keepTyping();
+  /**
+   * Заводит сообщение-заготовку: человек видит, что его услышали, ещё до ответа.
+   * Действие задаётся на входе: расшифровка голосового начинается раньше, чем
+   * в ход вступит модель, и обещать мысль в этот момент нечестно.
+   */
+  async start(action: ChatAction = THINKING_ACTION): Promise<void> {
+    this.setAction(action);
     try {
       const sent = await this.api.sendMessage(this.chatId, PLACEHOLDER, this.threadId, this.anchorMessageId);
       this.messageId = sent.message_id;
@@ -121,37 +144,43 @@ export class TelegramReply {
     this.schedule();
   }
 
-  /** Чем Икар занят прямо сейчас (фраза про тул). В ответ не попадает. */
-  setStatus(text: string): void {
-    this.status = text.replace(/\s+/g, ' ').trim().slice(0, STATUS_LIMIT);
-    this.schedule();
+  /**
+   * Чем показывать занятость прямо сейчас. null — ход ничего не делает: ждёт
+   * человека (вопрос, вход в MCP, разрешение), и молчащий индикатор тут честнее
+   * любого действия — оно погаснет само через несколько секунд.
+   */
+  setAction(action: ChatAction | null): void {
+    if (this.finished || action === this.action) return;
+    this.action = action;
+    this.actionAt = this.now();
+    if (action === null) {
+      this.stopAction();
+      return;
+    }
+    // Отправляем сразу, не дожидаясь тика: иначе человек ещё несколько секунд
+    // видит действие прошлой фазы, которое уже неправда.
+    this.keepAction();
+    this.sendActionIfDue();
   }
 
   /**
-   * Ход закончился: убираем служебную строку, доводим текст до конца. Пустой ответ
-   * (одни тулы без слов) показываем последней фразой о том, чем закончили, — иначе
+   * Ход закончился: индикатору больше нечего повторять, доводим текст до конца.
+   * Пустой ответ (одни тулы без слов) закрываем коротким `fallback` — иначе
    * человек остался бы с висящим многоточием.
    */
   async finish(fallback = 'Готово.'): Promise<void> {
     this.finished = true;
-    this.stopTyping();
+    this.stopAction();
     this.clearTimer();
 
-    const status = this.status;
-    this.status = '';
     await this.enqueue(async () => {
-      if (!this.tail.trim() && status) this.tail = status;
       if (!this.tail.trim()) this.tail = fallback;
       await this.refresh();
     });
   }
 
-  private statusText(): string {
-    return this.status ? `\n\n${this.status}` : '';
-  }
-
   private render(): string {
-    return `${this.tail}${this.statusText()}`;
+    return this.tail;
   }
 
   /**
@@ -160,7 +189,7 @@ export class TelegramReply {
    * уезжает следующим сообщением, и дальше правим уже его.
    */
   private async refresh(): Promise<void> {
-    while (this.tail.length + this.statusText().length > SAFE_LIMIT) {
+    while (this.tail.length > SAFE_LIMIT) {
       const cut = splitPoint(this.tail, SAFE_LIMIT);
       if (cut <= 0) break;
       const head = this.tail.slice(0, cut);
@@ -233,21 +262,42 @@ export class TelegramReply {
     return this.chain;
   }
 
-  private keepTyping(): void {
-    const tick = () => {
-      void this.api.sendChatAction(this.chatId, 'typing', this.threadId).catch((error) => {
-        log.debug('телеграм: «печатает» не отправилось', { error: describeTelegramError(error) });
-      });
-    };
-    tick();
-    this.typing = setInterval(tick, TYPING_INTERVAL_MS);
-    this.typing.unref?.();
+  /**
+   * Держит действие живым: клиент забывает его через пять секунд, а ход может
+   * идти минутами. Действие читается из поля на каждом тике, поэтому смена фазы —
+   * просто новое значение, а не перезапуск цикла.
+   */
+  private keepAction(): void {
+    if (this.actionTimer) return;
+    this.actionTimer = setInterval(() => this.sendAction(), this.actionIntervalMs);
+    this.actionTimer.unref?.();
   }
 
-  private stopTyping(): void {
-    if (!this.typing) return;
-    clearInterval(this.typing);
-    this.typing = null;
+  private stopAction(): void {
+    if (!this.actionTimer) return;
+    clearInterval(this.actionTimer);
+    this.actionTimer = null;
+  }
+
+  /** Слишком частые смены фаз схлопываем: успевшее действие и так свежее. */
+  private sendActionIfDue(): void {
+    if (this.now() - this.actionSentAt < this.actionGapMs) return;
+    this.sendAction();
+  }
+
+  private sendAction(): void {
+    const action = this.currentAction();
+    if (!action) return;
+    this.actionSentAt = this.now();
+    void this.api.sendChatAction(this.chatId, action, this.threadId).catch((error) => {
+      log.debug('телеграм: действие не отправилось', { action, error: describeTelegramError(error) });
+    });
+  }
+
+  /** Затянувшаяся шутка перестаёт быть шуткой: стикер заменяем на честное «печатает». */
+  private currentAction(): ChatAction | null {
+    if (this.action !== THINKING_ACTION) return this.action;
+    return this.now() - this.actionAt >= STICKER_LIE_MS ? 'typing' : this.action;
   }
 }
 

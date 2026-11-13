@@ -15,7 +15,8 @@
 import { DEFAULT_WORKSPACE, findTelegramUser, findUser, userPaths, type IcarusConfig, type UserConfig } from '../config.ts';
 import { log, redact } from '../log.ts';
 import { buildPrompt } from '../prompt.ts';
-import { phraseForToolStart, phraseForToolEnd, subagentStatus } from '../reasoning.ts';
+import { subagentStatus } from '../reasoning.ts';
+import { actionForTool, THINKING_ACTION } from './chat-action.ts';
 import { mcpReauthNotice } from '../mcp/reauth.ts';
 import { speechTranscriber, type Transcriber } from '../speech.ts';
 import type { SessionRegistry } from '../sessions/registry.ts';
@@ -306,6 +307,10 @@ export type TelegramBotOptions = {
   api?: TelegramApi;
   pollTimeoutSeconds?: number;
   editIntervalMs?: number;
+  /** Минимум между действиями Telegram; в тестах схлопывают в ноль. */
+  actionGapMs?: number;
+  /** Через сколько повторять действие, пока ход идёт; в тестах — чтобы не ждать. */
+  actionIntervalMs?: number;
   /** Сколько живёт «свежий топик»; в тестах окно схлопывают в ноль. */
   freshTopicWindowMs?: number;
   /** Чем расшифровывать голосовые; null — не расшифровываем (подменяется в тестах). */
@@ -341,6 +346,8 @@ export class TelegramBot {
   private api: TelegramApi;
   private pollTimeoutSeconds: number;
   private editIntervalMs: number;
+  private actionGapMs: number | undefined;
+  private actionIntervalMs: number | undefined;
   /** null — распознавание речи не настроено: голосовые честно просим словами. */
   private transcribe: Transcriber | null;
 
@@ -382,6 +389,8 @@ export class TelegramBot {
     this.api = options.api ?? new TelegramApi(config.telegram.token);
     this.pollTimeoutSeconds = options.pollTimeoutSeconds ?? POLL_TIMEOUT_SECONDS;
     this.editIntervalMs = options.editIntervalMs ?? EDIT_INTERVAL_MS;
+    this.actionGapMs = options.actionGapMs;
+    this.actionIntervalMs = options.actionIntervalMs;
     this.freshTopicWindowMs = options.freshTopicWindowMs ?? FRESH_TOPIC_WINDOW_MS;
     this.transcribe = options.transcribe === undefined ? speechTranscriber(config) : options.transcribe;
   }
@@ -695,8 +704,8 @@ export class TelegramBot {
       return null;
     }
 
-    // Расшифровка — тоже ожидание: человек должен видеть, что его слушают.
-    reply.setStatus('🎤 слушаю голосовое');
+    // Действие уже стоит с заготовки (см. runTurn): здесь расшифровку не начинаем
+    // заново, а только ждём её.
     let transcript: string;
     try {
       transcript = await this.transcribe(voice.audio, voice.mimeType);
@@ -706,7 +715,8 @@ export class TelegramBot {
       await reply.finish();
       return null;
     }
-    reply.setStatus('');
+    // Дальше слово снова у модели: наружу ничего не уходит, и показывать нечего.
+    reply.setAction(THINKING_ACTION);
 
     // Пустая расшифровка — это тишина или музыка: ход начинать не с чего.
     const spoken = transcript.trim();
@@ -723,14 +733,19 @@ export class TelegramBot {
     const conversationId = route.conversationId;
     const reply = new TelegramReply(this.api, message.chat.id, {
       intervalMs: this.editIntervalMs,
+      // Действие по умолчанию — «печатает», и каждая фаза хода только меняет его
+      // (см. chat-action.ts): словесного статуса в ответе больше нет.
+      ...(this.actionGapMs === undefined ? {} : { actionGapMs: this.actionGapMs }),
+      ...(this.actionIntervalMs === undefined ? {} : { actionIntervalMs: this.actionIntervalMs }),
       // Разговор идёт в топике — ответ, «печатает…» и продолжения уезжают туда же.
       threadId: route.threadId,
       // Если Telegram отобьёт топик, ответ уедет ответом на реплику человека — в тот же топик.
       ...(route.anchor === undefined ? {} : { anchorMessageId: route.anchor }),
     });
     // Заготовку показываем до поднятия сессии: контейнер и pi стартуют секунды,
-    // и человек должен видеть, что его услышали.
-    await reply.start();
+    // и человек должен видеть, что его услышали. Голосовое начинается с расшифровки,
+    // и показывать в это время «выбирает стикер» было бы враньём.
+    await reply.start(incoming.voice && this.transcribe ? 'record_voice' : THINKING_ACTION);
 
     let text = incoming.text;
     if (incoming.voice) {
@@ -810,21 +825,22 @@ export class TelegramBot {
           if (delta?.type === 'text_delta' && delta.delta) {
             answer += delta.delta;
             reply.push(delta.delta);
+            // Текст поехал к человеку — и индикатор честно становится «печатает».
+            reply.setAction('typing');
           }
           break;
         }
         case 'tool_execution_start': {
           const args = (event.args ?? {}) as Record<string, unknown>;
           toolArgs.set(String(event.toolCallId ?? ''), args);
-          const phrase = phraseForToolStart(String(event.toolName), args);
-          if (phrase) reply.setStatus(`⚙ ${phrase}`);
+          reply.setAction(actionForTool(String(event.toolName)));
           break;
         }
         case 'tool_execution_update': {
-          // У субагентов прогресс содержательный: кто бежит, кто в очереди.
+          // Прогресс приходит только от субагентов: он же — повод показать, что
+          // агенты ещё бегут. Кто именно и в каком порядке — это панель, не Telegram.
           const partial = event.partialResult as { details?: unknown } | undefined;
-          const line = subagentStatus(partial?.details);
-          if (line) reply.setStatus(`⚙ ${line}`);
+          if (subagentStatus(partial?.details)) reply.setAction(actionForTool('subagent'));
           break;
         }
         case 'tool_execution_end': {
@@ -841,7 +857,7 @@ export class TelegramBot {
           if (notice && !reauth.has(notice.server)) {
             reauth.set(notice.server, { name: notice.name, url: notice.url });
           }
-          reply.setStatus(`⚙ ${phraseForToolEnd(tool, Boolean(event.isError))}`);
+          reply.setAction(THINKING_ACTION);
           break;
         }
         case 'agent_settled': {
