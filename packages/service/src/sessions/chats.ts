@@ -41,6 +41,18 @@ export type ChatTurn = {
   at: string;
 };
 
+/**
+ * Место разговора в Telegram: чат и топик. Храним здесь, а не в памяти бота:
+ * после перезапуска сервиса иначе не найти, в каком топике живёт разговор, —
+ * а он нужен и чтобы переименовать топик по сводке панели, и чтобы удалить его
+ * при архивации. В `conversationId` место не разобрать (в группе там ещё и
+ * человек), а корень чата — это `threadId: null`.
+ */
+export type ChatTelegram = {
+  chatId: number;
+  threadId: number | null;
+};
+
 export type ChatRecord = {
   id: string;
   title: string;
@@ -62,6 +74,11 @@ export type ChatRecord = {
    * Поля нет — значит, разговор лежит во «Входящих».
    */
   folder?: string;
+  /**
+   * Где разговор живёт в Telegram: его чат и топик. Поля нет у не-Telegram
+   * разговоров и у старых записей — до первого сообщения бота.
+   */
+  telegram?: ChatTelegram;
   /**
    * Артефакт, который правит этот разговор. Обычный чат работает в workspace,
    * а артефактный — строго в папке артефакта, поэтому одной только workspace
@@ -136,6 +153,22 @@ function inferChannel(id: string): ChatChannel {
   return 'api';
 }
 
+/** Место в Telegram из записи реестра: годятся только числа и явный корень. */
+function telegramOf(value: unknown): ChatTelegram | null {
+  if (!value || typeof value !== 'object') return null;
+  const place = value as Record<string, unknown>;
+  const chatId = typeof place.chatId === 'number' && Number.isFinite(place.chatId) ? place.chatId : null;
+  if (chatId === null) return null;
+  const threadId =
+    place.threadId === null
+      ? null
+      : typeof place.threadId === 'number' && Number.isFinite(place.threadId)
+        ? place.threadId
+        : undefined;
+  if (threadId === undefined) return null;
+  return { chatId, threadId };
+}
+
 /**
  * Приводит запись к текущей схеме. Старые веб-записи несут preview/updatedAt —
  * их выбрасываем, а канал и conversationId достраиваем: id веб-чата и есть
@@ -170,6 +203,7 @@ function normalize(value: unknown): ChatRecord | null {
   const legacySessionId = typeof item.sessionId === 'string' && item.sessionId.trim() ? item.sessionId : '';
   if (sessions.length === 0 && legacySessionId) sessions.push({ sessionId: legacySessionId, startedAt: createdAt });
 
+  const telegram = telegramOf(item.telegram);
   const turn = item.lastTurn && typeof item.lastTurn === 'object' ? (item.lastTurn as Record<string, unknown>) : null;
   const lastTurn: ChatTurn | null =
     turn && isChannel(turn.channel) && typeof turn.at === 'string' && turn.at
@@ -189,6 +223,7 @@ function normalize(value: unknown): ChatRecord | null {
     ...(typeof item.folder === 'string' && item.folder !== '' ? { folder: item.folder } : {}),
     // Пустая строка — это «обычный чат», а не артефакт с пустым именем.
     ...(typeof item.artifact === 'string' && item.artifact !== '' ? { artifact: item.artifact } : {}),
+    ...(telegram ? { telegram } : {}),
     ...(lastTurn ? { lastTurn } : {}),
     ...(typeof item.archivedAt === 'string' && item.archivedAt !== '' ? { archivedAt: item.archivedAt } : {}),
     ...(item.titleSource === 'auto' || item.titleSource === 'manual' ? { titleSource: item.titleSource } : {}),
@@ -329,6 +364,84 @@ export function setChatArchived(
   }
   writeChats(config, user, chats);
   return chat;
+}
+
+/**
+ * Запоминает, где разговор живёт в Telegram: чат и топик. Зовёт бот, приняв
+ * сообщение, — тогда место переживает перезапуск сервиса. Пишем только
+ * изменение: иначе каждое сообщение в чате трогало бы реестр зря.
+ */
+export function setChatTelegram(
+  config: IcarusConfig,
+  user: UserConfig,
+  conversationId: string,
+  chatId: number,
+  threadId: number | null,
+): ChatRecord | null {
+  const chats = readChats(config, user);
+  const chat = chats.find((item) => item.conversationId === conversationId || item.id === conversationId);
+  if (!chat) return null;
+  if (chat.telegram?.chatId === chatId && chat.telegram.threadId === threadId) return chat;
+  chat.telegram = { chatId, threadId };
+  writeChats(config, user, chats);
+  return chat;
+}
+
+/** Место разговора в Telegram: null — разговор заведён не ботом. */
+export function telegramPlaceOf(
+  config: IcarusConfig,
+  user: UserConfig,
+  conversationId: string,
+): ChatTelegram | null {
+  return findChatRecord(config, user, conversationId)?.telegram ?? null;
+}
+
+/** Топик удалён вместе с сообщениями — места в Telegram у разговора больше нет. */
+function clearChatTelegram(config: IcarusConfig, user: UserConfig, conversationId: string): void {
+  const chats = readChats(config, user);
+  const chat = chats.find((item) => item.conversationId === conversationId || item.id === conversationId);
+  if (!chat?.telegram) return;
+  delete chat.telegram;
+  writeChats(config, user, chats);
+}
+
+/** Что не вышло при выносе разговора из Telegram: архиву это не мешает. */
+export type ArchiveOutcome = { chat: ChatRecord | null; topicError?: string };
+
+/**
+ * Убирает разговор в архив и — если попросить — выносит его из Telegram.
+ * Архив и удаление топика живут вместе, потому что в панели и в боте это
+ * одно действие: «убрать с глаз». Топик Telegram удаляется вместе с
+ * сообщениями, и это необратимо, поэтому возврат из архива его не воскрешает:
+ * разговор вернётся только в панель (см. setChatArchived).
+ *
+ * Удаление топика — побочный эффект, а не условие архива: Telegram откажет —
+ * разговор всё равно уйдёт в архив, а ошибку покажет тот, кто позвал.
+ * `removeTopic` не передан (панель без бота) — просто двигаем отметку.
+ */
+export async function archiveChat(
+  config: IcarusConfig,
+  user: UserConfig,
+  conversationId: string,
+  archived = true,
+  removeTopic?: (chat: ChatRecord) => Promise<void>,
+): Promise<ArchiveOutcome> {
+  const before = findChatRecord(config, user, conversationId);
+  const chat = setChatArchived(config, user, conversationId, archived);
+  if (!chat) return { chat: null };
+  // Возврат из архива Telegram не трогает: топик уже удалён, воскрешать нечего.
+  // Уже архивный разговор тоже не трогаем — иначе повторный /archive долбил бы
+  // удаление по мёртвому топику.
+  if (!archived || before?.archivedAt || !removeTopic) return { chat };
+  const place = chat.telegram;
+  if (!place || place.threadId === null) return { chat };
+  try {
+    await removeTopic(chat);
+  } catch (error) {
+    return { chat, topicError: error instanceof Error ? error.message : String(error) };
+  }
+  clearChatTelegram(config, user, conversationId);
+  return { chat };
 }
 
 /**

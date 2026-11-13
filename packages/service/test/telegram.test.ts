@@ -215,6 +215,8 @@ function fakeApi(files: Record<string, Buffer> = {}) {
     topicsEnabled: false,
     /** Переименования: chatId, топик, новое имя. */
     renames: [] as Array<{ chatId: number; threadId: number; name: string }>,
+    /** Удалённые топики: так архивация выносит разговор из Telegram. */
+    deletedTopics: [] as Array<{ chatId: number; threadId: number }>,
     /** Отправленные вложения: фотографии и документы — отдельно, как в Telegram. */
     photos: [] as Array<{ chatId: number; threadId: number | null; name: string; bytes: Buffer; caption?: string }>,
     documents: [] as Array<{ chatId: number; threadId: number | null; name: string; bytes: Buffer; caption?: string }>,
@@ -262,6 +264,10 @@ function fakeApi(files: Record<string, Buffer> = {}) {
     async editForumTopic(chatId: number, threadId: number, name: string) {
       if (!state.topicsEnabled) throw new TelegramError('Bad Request: the chat is not a forum', 400);
       state.renames.push({ chatId, threadId, name });
+    },
+    async deleteForumTopic(chatId: number, threadId: number) {
+      if (!state.topicsEnabled) throw new TelegramError('Bad Request: the chat is not a forum', 400);
+      state.deletedTopics.push({ chatId, threadId });
     },
     async getFile(fileId: string) {
       if (!state.files.has(fileId)) throw new TelegramError('file not found', 400);
@@ -1582,4 +1588,62 @@ test('имя, поправленное в панели, доезжает до т
   } finally {
     off();
   }
+});
+
+test('место разговора в Telegram бот кладёт в chats.json, а не только в память', async () => {
+  const config = topicChat();
+  const { bot } = makeBot({ config, topics: true });
+
+  await bot.handleUpdate(messageUpdate('привет', { threadId: 17 }));
+
+  assert.deepEqual(
+    findChatRecord(config, probe(), 'telegram-42-17')?.telegram,
+    { chatId: 42, threadId: 17 },
+    'по этому месту панель найдёт топик после перезапуска',
+  );
+});
+
+test('/archive убирает разговор в архив и удаляет топик вместе с сообщениями', async () => {
+  const config = topicChat();
+  const { bot, state } = makeBot({ config, topics: true, oneShot: async () => 'Знакомство с Икаром' });
+
+  await bot.handleUpdate(messageUpdate('привет', { threadId: 17 }));
+  await titlesSettled();
+  await bot.handleUpdate(messageUpdate('/archive', { threadId: 17 }));
+
+  assert.deepEqual(state.deletedTopics, [{ chatId: 42, threadId: 17 }]);
+  const chat = findChatRecord(config, probe(), 'telegram-42-17');
+  assert.equal(chat?.archivedAt !== undefined, true, 'разговор в архиве');
+  assert.equal(chat?.telegram, undefined, 'топика больше нет — место забыто');
+  // Топик удалён — подтверждение уходит в корень чата, а не в никуда.
+  assert.match(chatText(state, 42), /Убрал «/);
+  assert.match(chatText(state, 42), /вернуть его Telegram не умеет/);
+});
+
+test('/archive без топика архивирует, но в Telegram удалять нечего', async () => {
+  const config = makeConfig({ telegram: { token: 'bot-token', mapping: { trousev: 'probe' } } });
+  ensureChat(config, probe(), 'telegram-42', 'telegram', 'talk');
+  const { bot, state } = makeBot({ config, topics: true });
+
+  await bot.handleUpdate(messageUpdate('привет'));
+  await titlesSettled();
+  await bot.handleUpdate(messageUpdate('/archive'));
+
+  assert.deepEqual(state.deletedTopics, [], 'корень чата — не топик, удалять нечего');
+  assert.match(chatText(state, 42), /Топика здесь нет/);
+});
+
+test('/archive: панель и бот делают одно действие — топик уезжает вместе с архивом', async () => {
+  const config = topicChat();
+  const { bot, state } = makeBot({ config, topics: true, oneShot: async () => 'Знакомство с Икаром' });
+
+  await bot.handleUpdate(messageUpdate('привет', { threadId: 17 }));
+  await titlesSettled();
+
+  // Так панель зовёт бота при архивации: тем же removeTopic, без реплик.
+  const chat = findChatRecord(config, probe(), 'telegram-42-17');
+  assert.ok(chat?.telegram);
+  await bot.removeTopic(probe(), chat);
+
+  assert.deepEqual(state.deletedTopics, [{ chatId: 42, threadId: 17 }]);
 });

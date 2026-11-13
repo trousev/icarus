@@ -74,7 +74,11 @@ const telegram = startTelegramBot(config, registry);
 // Агент работает в нём как в обычном чате, и результат человек видит в списке.
 const scheduled = new ScheduledTasks(config, { launch: taskLauncher(config, registry) });
 scheduled.start();
-const server = createServer(config, registry);
+// Архивация Telegram-разговора из панели должна выносить его и из Telegram:
+// топик удаляется вместе с сообщениями, поэтому панели нужен живой бот (см. archiveChat).
+const server = createServer(config, registry, {
+  ...(telegram ? { archiveTelegram: (user, chat) => telegram.removeTopic(user, chat) } : {}),
+});
 
 server.listen(config.port, config.host, () => {
   log.info('icarus слушает', { url: `http://${config.host}:${config.port}`, users: config.users.length });

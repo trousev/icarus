@@ -435,6 +435,14 @@ export class TelegramApi {
     });
   }
 
+  /**
+   * Удаление топика вместе с его сообщениями. Отменить нельзя: вернуть топик
+   * Telegram не умеет. Этим разговор выносится из Telegram при архивации.
+   */
+  async deleteForumTopic(chatId: number, threadId: number): Promise<void> {
+    await this.call('deleteForumTopic', { chat_id: chatId, message_thread_id: threadId });
+  }
+
   /** Меню команд: что бот умеет, без похода в модель. */
   async setMyCommands(commands: Array<{ command: string; description: string }>): Promise<void> {
     await this.call('setMyCommands', { commands });

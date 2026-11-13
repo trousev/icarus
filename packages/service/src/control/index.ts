@@ -94,6 +94,7 @@ import { handleArtifactsApi, handleArtifactsRaw, handleArtifactsVersionRaw } fro
 import { artifactsPage } from './artifacts-ui.ts';
 import { countArtifacts } from '../artifacts.ts';
 import type { SessionRegistry } from '../sessions/registry.ts';
+import type { ChatRecord } from '../sessions/chats.ts';
 import { log as logger } from '../log.ts';
 
 export type PanelContext = {
@@ -112,6 +113,12 @@ export type PanelContext = {
    * контейнера с моделью рядом с ней нет).
    */
   draft?: (userId: string, idea: string) => Promise<string>;
+  /**
+   * Вынести Telegram-разговор из Telegram: архивация в панели и в боте — одно
+   * действие, и топик Telegram удаляется вместе с сообщениями (см. archiveChat).
+   * Не передан — панель без бота: архив остаётся только отметкой в реестре.
+   */
+  archiveTelegram?: (user: UserConfig, chat: ChatRecord) => Promise<void>;
 };
 
 /** Разделы панели: порядок здесь — порядок в сайдбаре. Подписи — из словаря. */
@@ -725,7 +732,12 @@ async function handleApi(
   // разбор памяти тут только мешал бы. Тело POST он читает сам, поэтому уходим
   // до общего readJsonBody ниже.
   if (url.pathname === '/panel/api/chats' || url.pathname.startsWith('/panel/api/chat/')) {
-    await handleChatApi(req, res, url, { config, userId, registry: ctx.registry });
+    await handleChatApi(req, res, url, {
+      config,
+      userId,
+      registry: ctx.registry,
+      ...(ctx.archiveTelegram ? { archiveTelegram: ctx.archiveTelegram } : {}),
+    });
     return;
   }
 
