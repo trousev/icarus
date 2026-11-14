@@ -2,12 +2,15 @@
 // No docker or model here: the registry is a stub, while HTTP and conversation records are real.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { createServer } from '../src/http/server.ts';
 import { createChat } from '../src/control/chat.ts';
 import { ensureChat } from '../src/sessions/chats.ts';
 import type { SessionRegistry } from '../src/sessions/registry.ts';
 import type { IcarusConfig, UserConfig } from '../src/config.ts';
+import { languageOf, profilePath, readProfile } from '../src/profile.ts';
+import { languageSet, languagesText, languageUnknown } from '../src/sessions/commands.ts';
 import { makeConfig, PANEL_USER_HEADER, probe } from './fixtures.ts';
 
 type Call = { method: string; args: unknown[] };
@@ -49,6 +52,10 @@ function makeRegistry() {
     },
     busyConversations: () => [],
     list: () => [],
+    bumpResources: (userId: string) => {
+      calls.push({ method: 'bumpResources', args: [userId] });
+      return 1;
+    },
   };
   return { registry: registry as unknown as SessionRegistry, calls };
 }
@@ -123,6 +130,7 @@ test('/help replies even without a conversation — before the first message', a
     assert.equal(help.data.handled, true);
     assert.match(String(help.data.text), /\/compact/);
     assert.match(String(help.data.text), /\/skills/);
+    assert.match(String(help.data.text), /\/language <язык>/, 'команда языка видна и в веб-чате');
   });
 });
 
@@ -155,6 +163,65 @@ test('/rename changes the current conversation name and returns it to the client
       chat.id,
       'Налоги',
     ]);
+  });
+});
+
+test('/language shows the current reply language and the codes to switch', async () => {
+  await withServer(async (stand) => {
+    const shown = await command(stand, { text: '/language' });
+    assert.equal(shown.status, 200);
+    assert.equal(shown.data.handled, true);
+    // `languagesText` is shared with Telegram: two products must not word it differently.
+    assert.equal(shown.data.text, languagesText('ru'));
+    assert.match(String(shown.data.text), /English \(en\)/);
+  });
+});
+
+test('/language changes the reply language without a chatId and marks the resources', async () => {
+  await withServer(async (stand) => {
+    const changed = await command(stand, { text: '/language en' });
+    assert.equal(changed.status, 200);
+    assert.equal(changed.data.handled, true);
+    assert.equal(changed.data.text, languageSet('en', true));
+    assert.equal(languageOf(stand.config, stand.user), 'en', 'язык ответов сменился в том же профиле, что у панели');
+    assert.deepEqual(
+      readProfile(stand.config, stand.user),
+      { language: 'en', uiLanguage: 'ru' },
+      'язык интерфейса команда не трогает — это дело раздела «Профиль»',
+    );
+    assert.deepEqual(
+      stand.calls.find((call) => call.method === 'bumpResources')?.args,
+      ['probe'],
+      'без пометки живая сессия осталась бы на старом языке',
+    );
+  });
+});
+
+test('/language understands a name and does not write a profile for the current one', async () => {
+  await withServer(async (stand) => {
+    const named = await command(stand, { text: '/language English' });
+    assert.equal(named.data.handled, true);
+    assert.equal(languageOf(stand.config, stand.user), 'en');
+
+    // The same language again — nothing to write and nothing to restart.
+    const again = await command(stand, { text: '/language английский' });
+    assert.equal(again.data.text, languageSet('en', false));
+    assert.equal(
+      stand.calls.filter((call) => call.method === 'bumpResources').length,
+      1,
+      'повторная смена на тот же язык не дёргает сессию',
+    );
+  });
+});
+
+test('/language with an unknown one gives a hint and touches nothing', async () => {
+  await withServer(async (stand) => {
+    const unknown = await command(stand, { text: '/language клингонский' });
+    assert.equal(unknown.data.handled, true);
+    assert.equal(unknown.data.text, languageUnknown('клингонский'));
+    assert.equal(languageOf(stand.config, stand.user), 'ru', 'чужой язык не меняет настройку');
+    assert.equal(stand.calls.some((call) => call.method === 'bumpResources'), false);
+    assert.equal(fs.existsSync(profilePath(stand.config, stand.user)), false, 'битого профиля не заводим');
   });
 });
 

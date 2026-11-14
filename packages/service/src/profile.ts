@@ -176,6 +176,33 @@ export function readProfile(
   return { language, uiLanguage };
 }
 
+/**
+ * Change only the reply language from a human input (`/language en`, «English», «английский»),
+ * keeping the interface language as it is. The write and the «did anything change» decision
+ * live here, not in each channel: Telegram and the web chat must not drift apart on what
+ * counts as a change (see profile.ts header on why the two settings are independent).
+ *
+ * undefined — the input isn't a language we know; the text about it is composed by the
+ * one who asked (see languagesText/languageUnknown in sessions/commands.ts). `changed`
+ * is false when the person picked the language that was already set: there's nothing to
+ * write and nothing to bump.
+ */
+export function changeReplyLanguage(
+  config: IcarusConfig,
+  user: UserConfig,
+  input: string,
+): { language: Language; changed: boolean } | undefined {
+  const language = resolveLanguage(input);
+  if (!language) return undefined;
+  const current = languageOf(config, user);
+  const changed = language !== current;
+  if (changed) {
+    const profile = readProfile(config, user) ?? { language: current, uiLanguage: DEFAULT_UI_LANGUAGE };
+    writeProfile(config, user, { ...profile, language });
+  }
+  return { language, changed };
+}
+
 /** Write the settings. The directory is created: the panel may outpace the service's first start. */
 export function writeProfile(config: IcarusConfig, user: UserConfig, profile: Profile): void {
   const file = profilePath(config, user);
