@@ -13,6 +13,7 @@ import type {
   RenameOutcome,
   StatsOutcome,
 } from './registry.ts';
+import { LANGUAGE_LABELS, LANGUAGES, type Language } from '../profile.ts';
 
 /** A parsed command: the name without «/» and without «@бота», and everything the person wrote after. */
 export type ParsedCommand = { name: string; args: string };
@@ -36,6 +37,7 @@ export const WEB_COMMANDS: { name: string; description: string }[] = [
   { name: 'stats', description: 'токены, деньги, контекст' },
   { name: 'clear', description: 'начать разговор с чистого листа' },
   { name: 'rename', description: 'переименовать текущий чат' },
+  { name: 'language', description: 'язык моих ответов' },
   { name: 'skills', description: 'скиллы, шаблоны и команды pi' },
 ];
 
@@ -62,6 +64,8 @@ export const WEB_HELP = [
   '/stats — сколько токенов и денег ушло и сколько занято в контексте',
   '/clear — начать разговор с чистого листа (память остаётся при мне)',
   '/rename <имя> — переименовать текущий чат',
+  '/language — на каком языке я отвечаю и какие есть ещё',
+  '/language <язык> — отвечать на другом языке: код или название (en, English, английский)',
   '/skills — что можно позвать сверх разговора: скиллы, шаблоны и команды pi',
   '',
   'Пока я думаю, писать можно: Enter ставит реплику в очередь, а «прервать и отправить»',
@@ -201,6 +205,35 @@ function commandRank(source: string | undefined): number {
   if (source === 'skill') return 0;
   if (source === 'prompt') return 1;
   return 2;
+}
+
+/**
+ * `/language` without an argument: on which language Icarus answers now and what one can
+ * switch to. The codes are right there — a person who came for `/language en` shouldn't
+ * have to guess: the label is what they recognize, the code is what they type.
+ *
+ * These texts are shared by all inputs: Telegram and the web chat answer the same way
+ * (the command is person-level, not conversation-level, so it lives here with the others).
+ */
+export function languagesText(current: Language): string {
+  const available = LANGUAGES.map((code) => `${LANGUAGE_LABELS[code]} (${code})`).join(', ');
+  return [
+    `Сейчас отвечаю на: ${LANGUAGE_LABELS[current]}`,
+    '',
+    `Сменить: /language <язык>. Доступно: ${available}.`,
+  ].join('\n');
+}
+
+/** `/language` succeeded — or didn't change anything: the answer is honest about both. */
+export function languageSet(language: Language, changed: boolean): string {
+  return changed
+    ? `Готово: теперь отвечаю на ${LANGUAGE_LABELS[language]}. Новый язык подхватится со следующего ответа.`
+    : `Я и так отвечаю на ${LANGUAGE_LABELS[language]} — менять нечего.`;
+}
+
+/** `/language` with a name we don't know: a hint rather than silence. */
+export function languageUnknown(name: string): string {
+  return `Не знаю такого языка: «${name}». /language — покажу, какие есть.`;
 }
 
 /** What to reply to /skills: what the person can call themselves. */

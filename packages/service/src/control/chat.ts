@@ -61,6 +61,9 @@ import type { SessionRegistry } from '../sessions/registry.ts';
 import {
   clearText,
   compactText,
+  languageSet,
+  languagesText,
+  languageUnknown,
   parseCommand,
   REMOVED_COMMANDS,
   renameText,
@@ -72,6 +75,7 @@ import {
   WEB_COMMAND_NAMES,
   WEB_HELP,
 } from '../sessions/commands.ts';
+import { changeReplyLanguage, languageOf } from '../profile.ts';
 import { mcpReauthNotice } from '../mcp/reauth.ts';
 import {
   broadcast,
@@ -253,6 +257,11 @@ export type ChatApiContext = {
    * passed — panel without a bot: the archive remains just a mark in the registry.
    */
   archiveTelegram?: (user: UserConfig, chat: ChatRecord) => Promise<void>;
+  /**
+   * Mark that the person's slow resources changed — the reply language is one of them (see
+   * bumpResources in control/index.ts). Not passed — the panel just writes the profile.
+   */
+  bump?: (userId: string) => void;
 };
 
 /** Refusal to write where the history is owned not by the panel. */
@@ -1443,6 +1452,24 @@ function clearQueued(user: UserConfig, chatId: string): number {
   return dropped;
 }
 
+/**
+ * `/language [name]` from the web chat: the reply language — the same setting as «Язык» in
+ * the profile section. The write is shared with Telegram (changeReplyLanguage keeps the
+ * interface language and reports whether anything changed); only the texts and the bump
+ * are local. No chatId is needed: the setting is the person's, not the conversation's.
+ */
+function languageCommand(ctx: ChatApiContext, user: UserConfig, argument: string): string {
+  const current = languageOf(ctx.config, user);
+  if (argument === '') return languagesText(current);
+
+  const result = changeReplyLanguage(ctx.config, user, argument);
+  if (!result) return languageUnknown(argument);
+  // The reply language travels into pi with the container environment at session start:
+  // without the bump the live conversation would answer in the old language (see bumpResources).
+  if (result.changed) ctx.bump?.(user.id);
+  return languageSet(result.language, result.changed);
+}
+
 export async function handleChatApi(
   req: IncomingMessage,
   res: ServerResponse,
@@ -1719,6 +1746,13 @@ export async function handleChatApi(
       // Removed commands we explain ourselves instead of sending them to pi as a message.
       if (REMOVED_COMMANDS.has(command.name)) {
         json(res, 200, { handled: true, text: TOPICS_REMOVED });
+        return true;
+      }
+      // The reply language is the person's own setting, not the conversation's: it changes
+      // here without a chatId, just like in Telegram. The interface language isn't touched —
+      // that's the profile section's business (see handleProfileApi).
+      if (command.name === 'language') {
+        json(res, 200, { handled: true, text: languageCommand(ctx, user, command.args) });
         return true;
       }
       // An unfamiliar command without arguments is a typo; with arguments it's already

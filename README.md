@@ -461,7 +461,7 @@ behavior differs between them. Service data (memory, sessions, attachments, pers
 - **you can stop the response midway**: while a turn is in progress, "■" takes the place of "send" — it sends
   abort, and the running subagents go down along with the turn;
 - **commands — as in Telegram**: type `/` — a palette opens above the field. It contains its own commands
-  (`/compact`, `/stop`, `/stats`, `/clear`, `/rename`, `/skills`, `/help`) and pi's commands: skills,
+  (`/compact`, `/stop`, `/stats`, `/clear`, `/rename`, `/language`, `/skills`, `/help`) and pi's commands: skills,
   prompt templates and extension commands. `/compact` and `/clear` are pi RPC (`compact` and `new_session`),
   so pi itself compresses the context and starts over; `/rename` changes the chat name in `chats.json`, and it is
   immediately visible in the header and sidebar. `/clear` does not throw away the feed: old messages remain above
@@ -908,7 +908,7 @@ doesn't know gets a hint — but only if it's one word: `/fix-tests run it` and
 `/skill:brave-search` go to pi as an ordinary message, because pi has its own commands, and there's no reason to take
 them away from the person.
 
-In the web chat the same seven commands: the parsing and texts are shared, they live in `sessions/commands.ts`, and they're launched by
+In the web chat the same commands: the parsing and texts are shared, they live in `sessions/commands.ts`, and they're launched by
 `POST /panel/api/chat/command`. `/compact` and `/clear` go to pi with the same RPCs there too, and `/rename`
 changes the name in `chats.json`. The palette takes pi's commands from the same `get_commands` as `/skills`.
 ## Checks

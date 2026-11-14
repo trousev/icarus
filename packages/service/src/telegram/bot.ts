@@ -17,16 +17,7 @@
 import { DEFAULT_WORKSPACE, findTelegramUser, findUser, userPaths, type IcarusConfig, type UserConfig } from '../config.ts';
 import { log, redact } from '../log.ts';
 import { buildPrompt } from '../prompt.ts';
-import {
-  DEFAULT_UI_LANGUAGE,
-  LANGUAGE_LABELS,
-  LANGUAGES,
-  languageOf,
-  readProfile,
-  resolveLanguage,
-  writeProfile,
-  type Language,
-} from '../profile.ts';
+import { changeReplyLanguage, languageOf } from '../profile.ts';
 import { subagentStatus } from '../reasoning.ts';
 import { actionForTool, THINKING_ACTION } from './chat-action.ts';
 import { mcpReauthNotice } from '../mcp/reauth.ts';
@@ -58,6 +49,9 @@ import {
 import {
   clearText,
   compactText,
+  languageSet,
+  languagesText,
+  languageUnknown,
   parseCommand,
   REMOVED_COMMANDS,
   RENAME_NEEDS_NAME,
@@ -87,6 +81,9 @@ import { answerFiles, deliverFiles, filesFailedText, stripLocalRefs, type FileRe
 export {
   clearText,
   compactText,
+  languageSet,
+  languagesText,
+  languageUnknown,
   parseCommand,
   REMOVED_COMMANDS,
   RENAME_NEEDS_NAME,
@@ -198,32 +195,6 @@ export function workspaceUnknown(name: string): string {
 
 export function workspaceFailed(reason: string): string {
   return `Не получилось переключить: ${reason}`;
-}
-
-/**
- * `/language` without an argument: on which language Icarus answers now and what one can
- * switch to. The codes are right there — a person who came for `/language en` shouldn't
- * have to guess: the label is what they recognize, the code is what they type.
- */
-export function languagesText(current: Language): string {
-  const available = LANGUAGES.map((code) => `${LANGUAGE_LABELS[code]} (${code})`).join(', ');
-  return [
-    `Сейчас отвечаю на: ${LANGUAGE_LABELS[current]}`,
-    '',
-    `Сменить: /language <язык>. Доступно: ${available}.`,
-  ].join('\n');
-}
-
-/** `/language` succeeded — or didn't change anything: the answer is honest about both. */
-export function languageSet(language: Language, changed: boolean): string {
-  return changed
-    ? `Готово: теперь отвечаю на ${LANGUAGE_LABELS[language]}. Новый язык подхватится со следующего ответа.`
-    : `Я и так отвечаю на ${LANGUAGE_LABELS[language]} — менять нечего.`;
-}
-
-/** `/language` with a name we don't know: a hint rather than silence. */
-export function languageUnknown(name: string): string {
-  return `Не знаю такого языка: «${name}». /language — покажу, какие есть.`;
 }
 
 /**
@@ -1225,26 +1196,22 @@ export class TelegramBot {
       return;
     }
 
-    const language = resolveLanguage(argument);
-    if (!language) {
+    // The write is shared with the web chat (changeReplyLanguage keeps the interface
+    // language and says whether anything changed); here only the bump and the log are ours.
+    const result = changeReplyLanguage(this.config, user, argument);
+    if (!result) {
       await say(languageUnknown(argument));
       return;
     }
-
-    const changed = language !== current;
-    if (changed) {
-      // We keep the interface language: the command is about replies, and swapping it here
-      // would silently reset what the person set in the panel (see handleProfileApi).
-      const profile = readProfile(this.config, user) ?? { language: current, uiLanguage: DEFAULT_UI_LANGUAGE };
-      writeProfile(this.config, user, { ...profile, language });
+    if (result.changed) {
       this.registry.bumpResources(user.id);
       log.info('телеграм: язык ответов сменён командой', {
         user: user.id,
         from: current,
-        to: language,
+        to: result.language,
       });
     }
-    await say(languageSet(language, changed));
+    await say(languageSet(result.language, result.changed));
   }
 
   /**

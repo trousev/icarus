@@ -736,6 +736,7 @@ async function handleApi(
       config,
       userId,
       registry: ctx.registry,
+      ...(ctx.bump ? { bump: ctx.bump } : {}),
       ...(ctx.archiveTelegram ? { archiveTelegram: ctx.archiveTelegram } : {}),
     });
     return;
