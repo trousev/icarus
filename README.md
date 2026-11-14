@@ -30,7 +30,9 @@ Telegram / web chat ──► icarus ──docker exec + JSONL──► pi in th
 
 - conversation in Telegram (text, photos, voice messages), in the web panel (dialogs, streaming, markdown, images),
   and via `POST /v1/chat/completions` with streaming and cancellation;
-- memory between conversations: the core in the prompt, background parsing after a lull, a git commit on every parse;
+- memory between conversations: the core in the prompt (the person's `identity.md` and `preferences.md`
+  plus the family `shared-memory/identity.md` — one file from the family shelf, with its own smaller cap),
+  background parsing after a lull, a git commit on every parse;
 - isolation: its own container, its own memory, its own key per person; shared memory — only on an explicit request;
 - workspaces: a person has several working folders (`/workspaces/<name>`), each with its own `AGENTS.md`;
   the service stuff — memory, sessions, attachments, persona — sits alongside, in `/workspaces/.icarus`, and doesn't enter any
@@ -492,7 +494,9 @@ behavior differs between them. Service data (memory, sessions, attachments, pers
 
 Memory is edited line by line: you can see which commit each entry came from, superfluous ones are checked off
 and leave in a single commit, the file can be deleted entirely or downloaded. History — per file, with a diff and
-rollback.
+rollback. The section has two scopes: the person's memory and the family `shared-memory/` — the latter is common
+to the whole instance and is written only on an explicit request. Only its `identity.md` goes into the prompt
+core; the rest of the family shelf (people, home, projects) is reached by the links written inside that file.
 
 ### Skills
 
