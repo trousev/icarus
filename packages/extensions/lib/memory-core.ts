@@ -3,6 +3,10 @@
 // first `memory_index` returns files with descriptions, then the model reads what it selected.
 // Otherwise facts in the prompt become a reason to change the subject — exactly what people complained about.
 //
+// The family memory is the one exception, and it is a narrow one: `shared-memory/identity.md`
+// arrives at the end of the same block, in one file with its own smaller cap. The rest of the
+// shared shelf (people, home, projects) is reached by the links written inside that file.
+//
 // Each item carries a month tag for when it appeared in memory: `- [2026-03] text`
 // from git blame by line author time. The tag shows what's outdated and what's fresh.
 // The tag doesn't change until memory itself changes, so the prompt is stable for the model's
@@ -17,7 +21,18 @@ import { stripFrontmatter } from "./memory-catalog.ts";
 const ICARUS = process.env.ICARUS_HOME ?? "/workspaces/.icarus";
 const MEMORY = process.env.ICARUS_MEMORY_DIR ?? `${ICARUS}/memory`;
 const LIMIT_PER_FILE = 1200;
-const LIMIT_TOTAL = 6000;
+/** The family identity is one file and it is shared: it gets its own, smaller cap. */
+const LIMIT_SHARED = 900;
+const LIMIT_TOTAL = 7500;
+
+/**
+ * Where the family memory lies. Unlike the other paths, this one is read at call time rather
+ * than at module load: tests point it at their own fixture, and neither the memory core nor its
+ * result should depend on import order.
+ */
+export function sharedMemoryDir(): string {
+  return process.env.ICARUS_SHARED_MEMORY_DIR ?? `${ICARUS}/shared-memory`;
+}
 
 /** Cache of ages by mtime and file size: otherwise git would be called every turn. */
 type AgeEntry = { key: string; ages: Map<number, string> };
@@ -125,17 +140,23 @@ function clip(text: string, limit = LIMIT_PER_FILE): string {
 }
 
 /**
- * The core — only "who they are" and "how to talk to them". People and projects don't go here:
- * first `memory_index` returns files with descriptions, then the model reads what it selected.
- * Otherwise facts in the prompt become a reason to change the subject — that's what people complained about.
+ * The core — "who they are", "how to talk to them", and one shared file about the family.
+ * People and projects don't go here: first `memory_index` returns files with descriptions, then
+ * the model reads what it selected. Otherwise facts in the prompt become a reason to change the
+ * subject — that's what people complained about.
  */
-export function buildMemoryCore(root = MEMORY): string {
+export function buildMemoryCore(root = MEMORY, shared = sharedMemoryDir()): string {
   const parts: string[] = [];
   const identity = readAnnotated(path.join(root, 'identity.md'));
   const preferences = readAnnotated(path.join(root, 'preferences.md'));
+  // Family memory enters the core by exactly one file. Everything else there — people, home
+  // projects, the list of tradesmen — is reached through the links written in this file, not by
+  // a second copy in the prompt: the family file is the pointer a person can actually maintain.
+  const family = readAnnotated(path.join(shared, 'identity.md'));
 
   if (identity) parts.push(`## Кто это\n${clip(identity)}`);
   if (preferences) parts.push(`## Предпочтения\n${clip(preferences)}`);
+  if (family) parts.push(`## Семья\n${clip(family, LIMIT_SHARED)}`);
 
   const total = parts.join('\n\n');
   if (!total) return '';
@@ -157,7 +178,7 @@ export function memoryPrompt(core: string): string {
     '',
     core,
     '',
-    `Полная память лежит в ${MEMORY}/, семейная — в ${ICARUS}/shared-memory/.`,
+    `Полная память лежит в ${MEMORY}/, семейная — в ${ICARUS}/shared-memory/: из неё в ядре только её identity.md, остальное (люди, дом, мастера) — по ссылкам оттуда.`,
     // The rule goes last: it closes the block so the facts aren't read as an invitation
     // to change the conversation, but also doesn't forbid searching memory to answer.
     'Память отвечает, а не начинает: не делай её темой, вопросом, шуткой или утешением. Для ответа — ищи и используй.',

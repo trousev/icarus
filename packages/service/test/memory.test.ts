@@ -16,11 +16,21 @@ import {
 } from '../../extensions/memory-extractor.ts';
 import { buildMemoryCore, memoryPrompt } from '../../extensions/lib/memory-core.ts';
 
+// These tests are about the person's own shelves. The family memory is not empty on a live
+// machine, and the core reads it by path at call time — so point it at an empty directory,
+// otherwise "an empty memory gives an empty core" would depend on whose laptop runs the test.
+process.env.ICARUS_SHARED_MEMORY_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-nofamily-'));
+
 function tempMemory(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-memory-'));
   fs.mkdirSync(path.join(dir, 'people'), { recursive: true });
   fs.mkdirSync(path.join(dir, 'journal'), { recursive: true });
   return dir;
+}
+
+/** A family shelf with nothing in it — the default for tests about the personal memory. */
+function emptyFamily(): string {
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-nofamily-'));
 }
 
 test('you can write only to known shelves', () => {
@@ -243,13 +253,13 @@ test('deduplication also works during filing', () => {
 
 test('the core contains only the personal: people and projects are read by topic', () => {
   const root = tempMemory();
-  assert.equal(buildMemoryCore(root), '', 'на пустой памяти ядро не выдумывается');
+  assert.equal(buildMemoryCore(root, emptyFamily()), '', 'на пустой памяти ядро не выдумывается');
 
   fs.writeFileSync(path.join(root, 'identity.md'), '# Кто это\n- Зовут Саня');
   fs.writeFileSync(path.join(root, 'preferences.md'), '- Кофе без сахара');
   fs.writeFileSync(path.join(root, 'people/маша.md'), '- Сестра');
 
-  const core = buildMemoryCore(root);
+  const core = buildMemoryCore(root, emptyFamily());
   assert.match(core, /Зовут Саня/);
   assert.match(core, /Кофе без сахара/);
   // People do not enter the core: otherwise memory itself picks the topic of the conversation.
@@ -274,7 +284,7 @@ test('frontmatter with a description does not enter the core', () => {
   const root = tempMemory();
   fs.writeFileSync(path.join(root, 'identity.md'), '---\ndescription: кто он\n---\n- Зовут Саня\n');
 
-  const core = buildMemoryCore(root);
+  const core = buildMemoryCore(root, emptyFamily());
   assert.match(core, /Зовут Саня/, 'факт на месте');
   assert.doesNotMatch(core, /description/, 'описание — метаданные индекса, не факт');
   assert.doesNotMatch(core, /^---$/m, 'frontmatter в ядро не едет');
@@ -283,6 +293,6 @@ test('frontmatter with a description does not enter the core', () => {
 test('the memory core does not grow without bound', () => {
   const root = tempMemory();
   fs.writeFileSync(path.join(root, 'identity.md'), 'x'.repeat(5000));
-  const core = buildMemoryCore(root);
+  const core = buildMemoryCore(root, emptyFamily());
   assert.ok(core.length < 2500, `ядро должно обрезаться, получилось ${core.length}`);
 });

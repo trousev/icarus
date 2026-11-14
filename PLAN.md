@@ -21,13 +21,13 @@ structured. Working with code in repositories is not in the MVP.
 | 3 | Mounts | internal only: the workspaces root, `shared-memory`, the Maple install. Custom host directories are not supported — if you need a repository, we check it out into the workspace |
 | 4 | Filling memory | Hybrid: "remember this" — immediately; plus a background extractor, transparent and with rollback |
 | 5 | Shape of memory | Shelves by meaning + a journal: `identity.md`, `people/`, `preferences.md`, `projects/`, `journal/YYYY-MM.md` |
-| 6 | Reading memory | A compact core always in the prompt; the rest — via search tools (also prompt-cache protection) |
+| 6 | Reading memory | A compact core always in the prompt; the rest — via search tools (also prompt-cache protection). The core = personal `identity.md` + `preferences.md` **and** family `shared-memory/identity.md` (one file, its own smaller cap) |
 | 7 | Mode of operation | Always an agent, one mode; small talk must be ultra-fast |
 | 8 | Speed | Two model tiers, escalation as the conversation goes |
 | 9 | Access | API keys only |
 | 10 | Models | A declarative config: endpoint, model name, token, thinking effort. By default DeepSeek V4.1 on DeepInfra with different effort |
 | 11 | Choosing the tier | Automatically. We don't expose presets: LibreChat can't do them, and with proper escalation they aren't needed |
-| 12 | Shared memory | In `shared-memory/` — **only on explicit request**; auto-extraction writes exclusively to personal |
+| 12 | Shared memory | In `shared-memory/` — **only on explicit request**; auto-extraction writes exclusively to personal. The prompt reads its `identity.md`, nothing else, and only for reading |
 | 13 | Where pi lives | pi inside the user's container, real keys in `~/.pi/agent/auth.json`. **No mega-proxy** |
 | 14 | History | We always continue our own session (pi is the truth); divergences from LibreChat's history are logged with a diff |
 | 15 | Lifecycle | Containers are always running; a separate pi process per conversation (RPC over stdio) |

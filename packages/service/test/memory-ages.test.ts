@@ -9,6 +9,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { annotateAges, buildMemoryCore, clearMemoryAges } from '../../extensions/lib/memory-core.ts';
 
+// The family memory is not the subject here: point it at an empty directory so the core under
+// test holds only what the test wrote. The path is read at call time, so a module-level line is
+// enough — the real `.icarus/shared-memory` must not leak into assertions.
+process.env.ICARUS_SHARED_MEMORY_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-nofamily-'));
+
 const hasGit = spawnSync('git', ['--version'], { encoding: 'utf8' }).status === 0;
 
 /** We skip git tests only where git really is absent. */
