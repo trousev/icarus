@@ -17,6 +17,16 @@
 import { DEFAULT_WORKSPACE, findTelegramUser, findUser, userPaths, type IcarusConfig, type UserConfig } from '../config.ts';
 import { log, redact } from '../log.ts';
 import { buildPrompt } from '../prompt.ts';
+import {
+  DEFAULT_UI_LANGUAGE,
+  LANGUAGE_LABELS,
+  LANGUAGES,
+  languageOf,
+  readProfile,
+  resolveLanguage,
+  writeProfile,
+  type Language,
+} from '../profile.ts';
 import { subagentStatus } from '../reasoning.ts';
 import { actionForTool, THINKING_ACTION } from './chat-action.ts';
 import { mcpReauthNotice } from '../mcp/reauth.ts';
@@ -110,6 +120,7 @@ export const COMMANDS = [
   { command: 'rename', description: 'переименовать текущий чат' },
   { command: 'archive', description: 'убрать разговор в архив' },
   { command: 'workspace', description: 'рабочая папка разговора' },
+  { command: 'language', description: 'язык моих ответов' },
   { command: 'skills', description: 'скиллы и шаблоны' },
 ];
 
@@ -128,6 +139,7 @@ export const BOT_COMMANDS = new Set([
   'rename',
   'archive',
   'workspace',
+  'language',
   'skills',
 ]);
 
@@ -153,6 +165,8 @@ export const HELP = [
   '/archive — убрать этот разговор в архив: здесь топик удалится вместе с сообщениями',
   '/workspace — рабочая папка этого разговора и куда ещё можно переключиться',
   '/workspace <имя> — переключить разговор в другую папку',
+  '/language — на каком языке я отвечаю и какие есть ещё',
+  '/language <язык> — отвечать на другом языке: код или название (en, English, английский)',
   '/skills — что у меня есть сверх разговора: скиллы и шаблоны',
   '',
   'Ещё я понимаю фото и голосовые, помню прошлые разговоры и умею искать в интернете.',
@@ -184,6 +198,32 @@ export function workspaceUnknown(name: string): string {
 
 export function workspaceFailed(reason: string): string {
   return `Не получилось переключить: ${reason}`;
+}
+
+/**
+ * `/language` without an argument: on which language Icarus answers now and what one can
+ * switch to. The codes are right there — a person who came for `/language en` shouldn't
+ * have to guess: the label is what they recognize, the code is what they type.
+ */
+export function languagesText(current: Language): string {
+  const available = LANGUAGES.map((code) => `${LANGUAGE_LABELS[code]} (${code})`).join(', ');
+  return [
+    `Сейчас отвечаю на: ${LANGUAGE_LABELS[current]}`,
+    '',
+    `Сменить: /language <язык>. Доступно: ${available}.`,
+  ].join('\n');
+}
+
+/** `/language` succeeded — or didn't change anything: the answer is honest about both. */
+export function languageSet(language: Language, changed: boolean): string {
+  return changed
+    ? `Готово: теперь отвечаю на ${LANGUAGE_LABELS[language]}. Новый язык подхватится со следующего ответа.`
+    : `Я и так отвечаю на ${LANGUAGE_LABELS[language]} — менять нечего.`;
+}
+
+/** `/language` with a name we don't know: a hint rather than silence. */
+export function languageUnknown(name: string): string {
+  return `Не знаю такого языка: «${name}». /language — покажу, какие есть.`;
 }
 
 /**
@@ -712,6 +752,8 @@ export class TelegramBot {
         return this.archive(message, user, route);
       case 'workspace':
         return this.selectWorkspace(message, user, command.args, route);
+      case 'language':
+        return this.selectLanguage(user, command.args, say);
       case 'skills':
         return say(skillsText(await this.registry.commands(user, conversationId)));
       default:
@@ -1159,6 +1201,50 @@ export class TelegramBot {
       chatId: place.chatId,
       threadId: place.threadId,
     });
+  }
+
+  /**
+   * `/language [name]`: the language of Icarus's replies. Without a name — the current one
+   * and the available ones; with a name — switching. This is the same setting as «Язык» in
+   * the panel's profile: the file is one (`profile.json`), and the command exists so a
+   * person doesn't have to leave the chat for it. The panel keeps its say in the interface
+   * language; here only the language of replies changes.
+   *
+   * The change doesn't touch a live turn: the reply language travels into pi with the
+   * environment at container start, so we mark the resources (see bumpResources) — the
+   * running turn finishes in the old language, and the next reply starts in the new one.
+   */
+  private async selectLanguage(
+    user: UserConfig,
+    argument: string,
+    say: (text: string) => Promise<void>,
+  ): Promise<void> {
+    const current = languageOf(this.config, user);
+    if (argument === '') {
+      await say(languagesText(current));
+      return;
+    }
+
+    const language = resolveLanguage(argument);
+    if (!language) {
+      await say(languageUnknown(argument));
+      return;
+    }
+
+    const changed = language !== current;
+    if (changed) {
+      // We keep the interface language: the command is about replies, and swapping it here
+      // would silently reset what the person set in the panel (see handleProfileApi).
+      const profile = readProfile(this.config, user) ?? { language: current, uiLanguage: DEFAULT_UI_LANGUAGE };
+      writeProfile(this.config, user, { ...profile, language });
+      this.registry.bumpResources(user.id);
+      log.info('телеграм: язык ответов сменён командой', {
+        user: user.id,
+        from: current,
+        to: language,
+      });
+    }
+    await say(languageSet(language, changed));
   }
 
   /**

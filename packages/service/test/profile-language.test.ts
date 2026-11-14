@@ -20,6 +20,7 @@ import {
   languageOf,
   profilePath,
   readProfile,
+  resolveLanguage,
   writeProfile,
 } from '../src/profile.ts';
 import { languageRule } from '../src/workspace.ts';
@@ -164,6 +165,30 @@ users: [probe]
 
   fs.writeFileSync(file, base);
   assert.equal(loadConfig(file, {}).userLanguage, undefined);
+});
+
+test('a language is recognized by code, label, name and adjective, regardless of case', () => {
+  // The Telegram /language command is typed by hand: a person writes the code they know
+  // (en), the label they see in the panel (English), or the word in their own language.
+  for (const [input, expected] of [
+    ['en', 'en'],
+    ['EN', 'en'],
+    ['  en  ', 'en'],
+    ['English', 'en'],
+    ['english', 'en'],
+    ['Russian', 'ru'],
+    ['английский', 'en'],
+    ['Русский', 'ru'],
+    ['русский', 'ru'],
+    ['ru', 'ru'],
+  ] as const) {
+    assert.equal(resolveLanguage(input), expected, `«${input}» → ${expected}`);
+  }
+
+  // Everything we don't know is a refusal, not a guess: the command words it itself.
+  for (const input of ['', '   ', 'клингонский', 'de', 'en-US', '[]']) {
+    assert.equal(resolveLanguage(input), undefined, `«${input}» не язык`);
+  }
 });
 
 test('in the panel the language has labels, and both are human', () => {

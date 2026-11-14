@@ -81,6 +81,26 @@ export function languageName(language: Language): string {
   return FORMS[language].name;
 }
 
+/**
+ * A language from what the person typed: the code (`en`), the panel label («English»),
+ * the full name («Russian») or the Russian adjective («английский»). Case, surrounding
+ * spaces and a stray «/language» in the input don't matter.
+ *
+ * undefined means «we don't know such a language» — the text about it is composed by the
+ * one who asked (the Telegram `/language` command): the reply language is each person's own,
+ * and every input words the refusal in its own way.
+ */
+export function resolveLanguage(input: string): Language | undefined {
+  const wanted = input.trim().toLowerCase();
+  if (wanted === '') return undefined;
+  return LANGUAGES.find((code) => {
+    const forms = FORMS[code];
+    return [code, forms.label, forms.name, forms.adjective].some(
+      (candidate) => candidate.toLowerCase() === wanted,
+    );
+  });
+}
+
 /** Forms for the requirement's Russian prose (see languageRule). */
 export function languageForms(language: Language): LanguageForms {
   return FORMS[language];

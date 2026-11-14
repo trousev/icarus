@@ -27,6 +27,9 @@ import {
   RENAME_NEEDS_NAME,
   UNKNOWN_COMMAND,
   WORKSPACE_PRIVATE_REFUSED,
+  languageSet,
+  languagesText,
+  languageUnknown,
   workspaceUnknown,
   workspacesText,
 } from '../src/telegram/bot.ts';
@@ -39,6 +42,7 @@ import {
 } from '../src/telegram/api.ts';
 import { MESSAGE_LIMIT, splitPoint } from '../src/telegram/reply.ts';
 import { userPaths } from '../src/config.ts';
+import { languageOf, profilePath, readProfile, writeProfile } from '../src/profile.ts';
 import { ensureChat, findChatRecord, readChats, recordTurn, renameChat, workspaceForConversation } from '../src/sessions/chats.ts';
 import { sessionIdFor } from '../src/sessions/pi-session.ts';
 import { broadcast } from '../src/control/chat-live.ts';
@@ -355,6 +359,8 @@ function makeBot(
     makeConfig({ telegram: { token: 'bot-token', mapping: { trousev: 'probe' } } });
   const session = options.session ?? fakeSession(options.steps ?? ANSWER_STEPS);
   const calls: Array<{ command: string; user: string; conversationId: string; args?: string }> = [];
+  /** Whose resources were marked as updated: /language bumps them, the panel does the same. */
+  const bumps: string[] = [];
   const record = (command: string, user: { id: string }, conversationId: string, args?: string) => {
     calls.push({ command, user: user.id, conversationId, ...(args ? { args } : {}) });
   };
@@ -413,6 +419,10 @@ function makeBot(
       if (!options.oneShot) throw new Error('модель не настроена');
       return options.oneShot(prompt);
     },
+    bumpResources: (userId: string) => {
+      bumps.push(userId);
+      return bumps.length;
+    },
   };
   const { api, state } = fakeApi(options.files ?? { IMAGE: JPEG, VOICE: JPEG });
   state.topicsEnabled = options.topics ?? false;
@@ -428,7 +438,7 @@ function makeBot(
     transcribe,
     ...(options.freshTopicWindowMs === undefined ? {} : { freshTopicWindowMs: options.freshTopicWindowMs }),
   });
-  return { bot, session, state, calls, config };
+  return { bot, session, state, calls, bumps, config };
 }
 
 function messageUpdate(
@@ -799,6 +809,7 @@ test('/start and /help tell what the bot can do and do not intrude into the conv
   assert.match(chatText(state, 42), /\/stats —/);
   assert.equal(HELP.includes('/clear'), true);
   assert.match(HELP, /\/workspace <имя> — переключить разговор в другую папку/, 'команда видна в /help');
+  assert.match(HELP, /\/language <язык> — отвечать на другом языке/, 'команда языка видна в /help');
   assert.deepEqual(session.prompts, [], 'команды в разговор не уезжают');
 });
 
@@ -993,6 +1004,69 @@ test('/workspace with an unknown name does not invent a folder', async () => {
 
 test('/workspace with no folders at all says so instead of showing emptiness', () => {
   assert.equal(workspacesText('Разговор', []), 'Переключать некуда: рабочих папок нет.');
+});
+
+test('/language shows the current reply language and the codes to switch', async () => {
+  const { bot, state, session } = makeBot();
+
+  await bot.handleUpdate(messageUpdate('/language'));
+
+  assert.equal(chatText(state, 42), languagesText('ru'));
+  assert.match(chatText(state, 42), /Сейчас отвечаю на: Русский/);
+  assert.match(chatText(state, 42), /English \(en\)/, 'код виден: его и набирают');
+  assert.deepEqual(session.prompts, [], 'команда не тратит ход модели');
+});
+
+test('/language switches the reply language, keeps the interface one, and marks the resources', async () => {
+  const { bot, state, session, calls, bumps, config } = makeBot();
+  writeProfile(config, probe(), { language: 'ru', uiLanguage: 'ru' });
+
+  await bot.handleUpdate(messageUpdate('/language en'));
+
+  assert.equal(chatText(state, 42), languageSet('en', true));
+  assert.equal(languageOf(config, probe()), 'en', 'язык ответов сменился в профиле');
+  assert.deepEqual(
+    readProfile(config, probe()),
+    { language: 'en', uiLanguage: 'ru' },
+    'язык интерфейса команда не трогает',
+  );
+  assert.deepEqual(bumps, ['probe'], 'ресурсы отмечены — новый язык подхватится со следующего ответа');
+  assert.deepEqual(calls, [], 'смена языка не тратит ход модели');
+  assert.deepEqual(session.prompts, []);
+});
+
+test('/language understands a name as well as a code, in both languages', async () => {
+  const { bot, config } = makeBot();
+
+  await bot.handleUpdate(messageUpdate('/language English'));
+  assert.equal(languageOf(config, probe()), 'en');
+
+  await bot.handleUpdate(messageUpdate('/language английский'));
+  assert.equal(languageOf(config, probe()), 'en', 'английский — тот же en');
+
+  await bot.handleUpdate(messageUpdate('/language EN'));
+  assert.equal(languageOf(config, probe()), 'en', 'регистр кода не важен');
+});
+
+test('/language with the current language changes nothing and does not restart the session', async () => {
+  const { bot, state, bumps, config } = makeBot();
+
+  await bot.handleUpdate(messageUpdate('/language ru'));
+
+  assert.equal(chatText(state, 42), languageSet('ru', false));
+  assert.deepEqual(bumps, [], 'нечего менять — нечего и перезапускать');
+  assert.deepEqual(readProfile(config, probe()), undefined, 'профиль не завёлся впустую');
+});
+
+test('/language with an unknown one gives a hint, not silence', async () => {
+  const { bot, state, bumps, config } = makeBot();
+
+  await bot.handleUpdate(messageUpdate('/language клингонский'));
+
+  assert.equal(chatText(state, 42), languageUnknown('клингонский'));
+  assert.equal(languageOf(config, probe()), 'ru', 'чужой язык не меняет настройку');
+  assert.deepEqual(bumps, []);
+  assert.equal(fs.existsSync(profilePath(config, probe())), false, 'битого профиля не заводим');
 });
 
 test('in a group each person has their own conversation', () => {

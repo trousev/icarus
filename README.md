@@ -61,8 +61,10 @@ Telegram / web chat ──► icarus ──docker exec + JSONL──► pi in th
   git, but doesn't make it into pi's catalog; a skill can be shared — for the others it arrives disabled;
 - Telegram: the bot answers to acquaintances from `telegram.mapping`, understands text, photos, and voice messages (an image
   goes to the model natively, a voice message is transcribed by Whisper) — the answer arrives via live message edits;
-  the commands `/compact`, `/stop`, `/stats`, `/clear`, `/rename`, `/archive`, and `/skills` the bot handles itself, without
-  sending them as a reply to the model. `/archive` is the same as the archive button in the panel: the conversation goes
+  the commands `/compact`, `/stop`, `/stats`, `/clear`, `/rename`, `/archive`, `/workspace`, `/language`, and `/skills` the bot
+  handles itself, without sending them as a reply to the model. `/language` is the same setting as «Язык» in the panel
+  profile (reply language, not interface): it frees a person from opening the panel just to switch — `/language` shows the
+  current one and the codes, `/language en` switches (by code, label or name). `/archive` is the same as the archive button in the panel: the conversation goes
   to the archive and in Telegram, where the topic is deleted together with the messages (Telegram can't bring it back —
   a conversation returns from the archive only in the panel). The conversation's location in Telegram (`chatId` and `threadId`)
   the bot stores in `chats.json`, so archiving from the panel removes the topic even after a service restart.
@@ -879,7 +881,7 @@ The link is removed from the text, and the file arrives after it as a separate m
 larger than 50 MB, the person gets "⚠️ Couldn't send the file" with the reason, not silence. The paths are the same as
 for images: `incoming/`, `/workspaces/<folder>/…` and `/artifacts/<slug>/…` (according to the artifact's permissions).
 
-The bot has seven commands, and each handles its own thing, without sending the command as a message into the conversation:
+The bot has its own commands, and each handles its own thing, without sending the command as a message into the conversation:
 
 - `/compact [wish]` — sum up now: pi compacts the context with its `compact` RPC. The wish
   goes to pi as an instruction for the retelling: "keep the math". It also works in a quieted-down conversation —
@@ -895,6 +897,10 @@ The bot has seven commands, and each handles its own thing, without sending the 
   the conversation is running in a Telegram topic, the topic is renamed too;
 - `/skills` — what can be called in the chat: the person's skills, prompt templates and extension commands
   (pi itself serves their list, see `get_commands`);
+- `/language [язык]` — the language of Icarus's replies: without an argument it shows the current one and the codes,
+  with an argument it switches (`en`, `English`, `английский`). It's the same setting as «Язык» in the panel profile, so
+  the conversation language can be switched without leaving the chat. The interface language isn't touched — Telegram has
+  no panel of its own — and the reply language catches up with the next turn (the resources are marked, see `bumpResources`);
 - `/help` — the same menu that Telegram shows via the button.
 
 `/start`, which Telegram sends itself on the first visit, replies with a greeting. A line with a slash that the bot
