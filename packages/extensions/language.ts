@@ -13,8 +13,11 @@
 // rule lives in the same place as the timestamp from clock.ts: appended to the last human message.
 // That way it always arrives — and doesn't depend on what pi decides to filter out.
 //
-// The language arrives via the ICARUS_LANGUAGE variable (full name: English, Russian) — it's
-// prepared by the service from the person's profile (see containerEnv in docker/spec.ts).
+// The language arrives via the ICARUS_LANGUAGE variable (full name: English, Russian). The service
+// takes it from the person's profile and passes it into every pi launch (`docker exec -e` in
+// sessions/pi-session.ts), the same way as panel keys — otherwise a language switched in the panel
+// would wait for the container to be recreated. The container itself also carries the value
+// (containerEnv in docker/spec.ts): that is the fallback for anything started not by a session.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export type ChatMessage = { role?: string; content?: string | Array<{ type?: string; text?: string }> };

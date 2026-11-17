@@ -40,6 +40,8 @@ export function containerEnv(config: IcarusConfig, user: UserConfig): Record<str
     // Conversation language — as a full name (English, Russian). The language extension sends it
     // as a separate system message: inside a large Russian prompt the language rule
     // did not hold (measurement — tools/persona-flywheel/smoke-language.mjs).
+    // This is the value the container is created with; a live session overrides it from the
+    // profile on every launch (see pi-session.ts), so a panel change doesn't wait for a recreate.
     ICARUS_LANGUAGE: languageName(languageOf(config, user)),
   };
 }

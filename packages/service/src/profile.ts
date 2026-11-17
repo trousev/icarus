@@ -11,7 +11,8 @@
 // The file lives next to the person's memory (`<home>/profile.json`) rather than in
 // config.yaml: config.yaml is shared by everyone, while the language is each person's own.
 // It's read by the service: the reply language is substituted into AGENTS.md, which is
-// what goes into the container, and the interface language into the panel's strings.
+// what goes into the container, and is passed into every pi session launch (see pi-session.ts),
+// while the interface language goes into the panel's strings.
 //
 // The config isn't the only source: it provides the default (`userLanguage`), and the
 // person's profile overrides it. That way an old installation stays Russian until the

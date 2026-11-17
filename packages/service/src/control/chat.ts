@@ -1464,7 +1464,7 @@ function languageCommand(ctx: ChatApiContext, user: UserConfig, argument: string
 
   const result = changeReplyLanguage(ctx.config, user, argument);
   if (!result) return languageUnknown(argument);
-  // The reply language travels into pi with the container environment at session start:
+  // The reply language is passed into pi at session start (see pi-session.ts):
   // without the bump the live conversation would answer in the old language (see bumpResources).
   if (result.changed) ctx.bump?.(user.id);
   return languageSet(result.language, result.changed);
