@@ -6,6 +6,7 @@ import { appendChatSession, findChatRecord, refreshChatTitle, sessionIdOf } from
 import { log } from '../log.ts';
 import { SERVICE_NAME } from '../docker/compose.ts';
 import { modelTierEnv } from '../docker/spec.ts';
+import { languageName, languageOf } from '../profile.ts';
 import {
   CONTAINER_PATHS,
   containerWorkspace,
@@ -171,6 +172,12 @@ export class PiSession {
         // docker network: the compose service name resolves, no token needed.
         ICARUS_SEARCH_URL: `http://${SERVICE_NAME}:${config.port}`,
         ...modelTierEnv(config),
+        // The reply language — the same story as panel keys below: the container got
+        // ICARUS_LANGUAGE at creation, but a person who switched the language in the panel
+        // must not wait for the container to be recreated. `docker exec -e` overrides the
+        // container environment, so the very next session answers in the new language
+        // (see SessionRegistry.bumpResources — it restarts the session, not the container).
+        ICARUS_LANGUAGE: languageName(languageOf(config, user)),
         // Keys from .env and panel settings: the container got them at creation, but
         // a key saved in the panel must reach the next conversation without
         // recreating the container. Here they override the container environment.

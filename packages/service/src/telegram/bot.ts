@@ -1181,9 +1181,10 @@ export class TelegramBot {
    * person doesn't have to leave the chat for it. The panel keeps its say in the interface
    * language; here only the language of replies changes.
    *
-   * The change doesn't touch a live turn: the reply language travels into pi with the
-   * environment at container start, so we mark the resources (see bumpResources) — the
-   * running turn finishes in the old language, and the next reply starts in the new one.
+   * The change doesn't touch a live turn: the service passes the reply language into pi at
+   * session start (`docker exec -e`, see pi-session.ts), so we mark the resources
+   * (see bumpResources) — the running turn finishes in the old language, and the next
+   * reply starts in the new one.
    */
   private async selectLanguage(
     user: UserConfig,

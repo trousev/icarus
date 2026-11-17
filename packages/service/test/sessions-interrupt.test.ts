@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { PiSession } from '../src/sessions/pi-session.ts';
 import { modelTierEnv } from '../src/docker/spec.ts';
+import { writeProfile } from '../src/profile.ts';
 import type { Spawner } from '../src/sessions/rpc-client.ts';
 import { makeConfig, probe } from './fixtures.ts';
 
@@ -91,7 +92,24 @@ test('in production the model name comes from the config, not from the host envi
   assert.equal(envs[0]?.ICARUS_MODEL_FAST, 'deepinfra/deepseek-ai/DeepSeek-V4.1-Flash:low');
   assert.equal(envs[0]?.ICARUS_MODEL_STRONG, 'deepinfra/deepseek-ai/DeepSeek-V4.1-Flash:medium');
   assert.ok(envs[0]?.ICARUS_CHANNEL, 'канал разговора тоже передаётся');
+  assert.equal(envs[0]?.ICARUS_LANGUAGE, 'Russian', 'язык ответов тоже доезжает до pi');
   assert.match(envs[0]?.ICARUS_SEARCH_URL ?? '', /^http:\/\/icarus:\d+$/, 'адрес роутера задан и не требует токена');
+});
+
+test('the language switched in the panel reaches the next session without recreating the container', () => {
+  // The container got ICARUS_LANGUAGE at creation, and recreating it for the sake of language would
+  // tear live conversations. So the service passes the value from the profile on every launch:
+  // docker exec -e overrides the container environment.
+  const config = makeConfig({ userLanguage: 'en' });
+  const before: Array<Record<string, string>> = [];
+  new PiSession(config, probe(), 'web-1', config.models[0], 'stub', 0, stubSpawner(before)).dispose();
+  assert.equal(before[0]?.ICARUS_LANGUAGE, 'English', 'конфиг задаёт умолчание');
+
+  // The person switched the replies to Russian in the panel: the profile changed — the container did not.
+  writeProfile(config, probe(), { language: 'ru', uiLanguage: 'ru' });
+  const after: Array<Record<string, string>> = [];
+  new PiSession(config, probe(), 'web-2', config.models[0], 'stub', 0, stubSpawner(after)).dispose();
+  assert.equal(after[0]?.ICARUS_LANGUAGE, 'Russian', 'новая сессия берёт язык из профиля, а не из env контейнера');
 });
 
 test('the search router address is built from the service port', () => {

@@ -273,9 +273,11 @@ async function handleProfileApi(
   };
   writeProfile(config, user, next);
 
-  // The response language lives in AGENTS.md, and pi reads it at process start — that means
-  // without this mark the language change will not catch up with the live session, and the person will hear the previous
-  // language. We mark only when it really changed, and never — because of the interface.
+  // The response language goes into pi twice: the brief rule from ICARUS_LANGUAGE travels with
+  // every session launch, and the section in AGENTS.md (languageRule) is read at process start.
+  // Without this mark the live session would keep its old language until the next restart
+  // (a fresh chat, by itself, does not help: the container keeps its environment). We mark only when
+  // it really changed, and never — because of the interface.
   if (next.language !== previousLanguage) bumpResources(ctx, userId);
 
   json(res, 200, { user: userId, language: next.language, uiLanguage: next.uiLanguage });
