@@ -60,6 +60,15 @@ function daysAgo(iso) {
   return Math.round((startOfDay(new Date()) - startOfDay(date)) / 86400000);
 }
 
+/**
+ * The moment the list is sorted by — the very same key as on the server (`recencyOf`):
+ * the last recorded turn, and for records that never saw one — creation. The row's time and
+ * its date heading must count from here, otherwise the headings creep sideways against the order.
+ */
+function chatStamp(chat) {
+  return (chat && chat.lastTurn && chat.lastTurn.at) || (chat && chat.createdAt) || '';
+}
+
 function timeLabel(iso) {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return '';
@@ -532,7 +541,7 @@ function chatRowHtml(chat) {
     (dot ? '<span class="chat-dot ' + dot + '"></span>' : '') +
     '<span class="chat-item-title">' + esc(chat.title) + '</span>' +
     (channelTag(chat) ? '<span class="chat-item-tag">' + esc(channelTag(chat)) + '</span>' : '') +
-    '<time class="chat-item-time">' + esc(timeLabel(chat.createdAt)) + '</time>' +
+    '<time class="chat-item-time">' + esc(timeLabel(chatStamp(chat))) + '</time>' +
     '</div><div class="chat-item-preview">' + esc(cleanPreview(chat.preview || '')) + '</div></button>' +
     // Renaming — right here: the person sees the name in the list and wants to fix it here.
     '<button class="chat-rename" type="button" data-id="' + esc(chat.id) +
@@ -550,7 +559,7 @@ function chatItemsHtml(list, withDates) {
   let html = '';
   for (const chat of list) {
     if (withDates) {
-      const label = groupLabel(chat.createdAt);
+      const label = groupLabel(chatStamp(chat));
       if (label !== group) {
         if (group) html += '</div>';
         group = label;
