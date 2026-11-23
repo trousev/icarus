@@ -1305,6 +1305,38 @@ test('search shows matches even in a collapsed folder', async () => {
   assert.match(app.sidebar(), /chat-item-title">Сводка по «Атласу»/, 'найденное видно и в свёрнутой папке');
 });
 
+test('the list heading counts from the last reply: an old chat that answered today is «Сегодня»', async () => {
+  const app = await driveChat({
+    chatId: 'web-1',
+    routes: {
+      '/panel/api/chat/status': () => ({ busy: [] }),
+      '/panel/api/chat/history': () => ({
+        chat: { id: 'web-1', title: 'Разговор', workspace: 'talk' },
+        messages: [],
+        live: false,
+      }),
+      // The server sorts by the last reply; the row's time and its day heading must
+      // count from the same moment — otherwise the headings creep sideways against the order.
+      '/panel/api/chats': () => ({
+        chats: [
+          {
+            id: 'web-1',
+            title: 'Разговор',
+            createdAt: '2026-01-05T10:00:00.000Z',
+            lastTurn: { channel: 'telegram', at: new Date().toISOString() },
+          },
+        ],
+      }),
+      '/panel/api/folders': () => ({ folders: [] }),
+    },
+  });
+
+  const sidebar = app.sidebar();
+  assert.match(sidebar, /chat-group-title">Сегодня/, 'шапка дня — по последней реплике, а не по дате создания');
+  assert.doesNotMatch(sidebar, /chat-group-title">Раньше/, 'старая дата создания больше не задаёт шапку');
+  assert.match(sidebar, /chat-item-time">\d{2}:\d{2}</, 'время в строке — тоже от последней реплики');
+});
+
 /* ── archive ─────────────────────────────────────────────────────────────────
    The archive is not deletion: the conversation leaves the daily list, but the history
    stays, and you can bring it back from there too. We check on the live client. */
