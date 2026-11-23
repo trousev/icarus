@@ -668,9 +668,19 @@ function summariesOf(config: IcarusConfig, user: UserConfig, records: ChatRecord
 }
 
 /**
- * List page. We sort by createdAt — the creation time doesn't change, so
- * pages don't jump from a new message. Preview and last-message time
- * are read only for the shown page; stat too — only for it.
+ * Recency of a conversation for the list order: the last recorded turn, and for records
+ * that never saw one (old registries) — creation. `recordTurn` already bumps `lastTurn`
+ * on every message, so the key comes from the registry alone: no file is read for sorting.
+ */
+function recencyOf(chat: ChatRecord): string {
+  return chat.lastTurn?.at ?? chat.createdAt;
+}
+
+/**
+ * List page. We sort by recency — the list is «who answered last is on top». The key
+ * comes from the registry (`lastTurn`), not from the session files: digest and stat are still
+ * read only for the shown page. The price is that a new message shifts the list under the cursor,
+ * so on the seam between pages one chat can slip through twice.
  *
  * The archive is a separate page of the same list (`archived`): the regular sidebar
  * doesn't show it, otherwise «убрать с глаз» would change nothing. Task chats aren't
@@ -694,7 +704,7 @@ export function listChatPage(
     .filter(
       (chat) => !needle || `${chat.title}\n${chat.conversationId ?? ''}`.toLocaleLowerCase('ru').includes(needle),
     )
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
+    .sort((a, b) => recencyOf(b).localeCompare(recencyOf(a)) || b.id.localeCompare(a.id));
 
   const offset = pageOffset(cursor);
   const size = pageLimit(limit);

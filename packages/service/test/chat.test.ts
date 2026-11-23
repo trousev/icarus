@@ -11,6 +11,7 @@ import {
   appendChatSession,
   ensureChat,
   findChatRecord,
+  recordTurn,
   sessionIdsOf,
   setChatArchived,
   setChatTelegram,
@@ -215,7 +216,7 @@ test('a Telegram conversation in the registry and in the list: it can be continu
   assert.equal(legacy?.chat.id, conversationId);
 });
 
-test('the list is sorted by createdAt, not by the session file time', () => {
+test('the list is sorted by recency, not by the session file time', () => {
   const { config, user } = fixture();
   const older = createChat(config, user, 'talk', new Date('2026-01-01T10:00:00.000Z'));
   const newer = createChat(config, user, 'talk', new Date('2026-02-01T10:00:00.000Z'));
@@ -231,10 +232,29 @@ test('the list is sorted by createdAt, not by the session file time', () => {
   // The old chat's file was touched later — this must not affect the order.
   fs.utimesSync(olderFile, new Date('2026-03-01T10:00:00.000Z'), new Date('2026-03-01T10:00:00.000Z'));
 
+  // Neither chat saw a turn yet: the key falls back to creation, and the file's mtime is ignored.
   assert.deepEqual(
     listChatPage(config, user).chats.map((chat) => chat.id),
     [newer.id, older.id],
   );
+});
+
+test('the freshest turn lifts the conversation to the top: the list is sorted by last reply', () => {
+  const { config, user } = fixture();
+  const older = createChat(config, user, 'talk', new Date('2026-01-01T10:00:00.000Z'));
+  const newer = createChat(config, user, 'talk', new Date('2026-02-01T10:00:00.000Z'));
+  putSessionFile(config, user, older.id, dialog('Старый разговор', 'Старый ответ'), '2026-01-01T10-00-00-000Z');
+  putSessionFile(config, user, newer.id, dialog('Новый разговор', 'Новый ответ'), '2026-02-01T10-00-00-000Z');
+
+  assert.deepEqual(
+    listChatPage(config, user).chats.map((chat) => chat.id),
+    [newer.id, older.id],
+    'пока ходов нет — по дате создания',
+  );
+
+  // The old conversation answered last: it goes up, though it was created a month earlier.
+  recordTurn(config, user, older.id, 'telegram', new Date('2026-03-01T10:00:00.000Z'));
+  assert.deepEqual(listChatPage(config, user).chats.map((chat) => chat.id), [older.id, newer.id]);
 });
 
 test('the list is paged, the next page is loaded by cursor', () => {
