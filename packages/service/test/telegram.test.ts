@@ -1507,9 +1507,9 @@ test('an utterance on top of a running turn interrupts it and becomes a new turn
     calls.some((call) => call.command === 'interrupt'),
     'прерывание идёт через реестр, а не мимо него',
   );
-  // There are no buttons in Telegram, so there is one operation — "now". But a person must
-  // see that the previous reply was cut off rather than lost.
-  assert.match(chatText(state, 42), /Прервал прошлый ответ/, 'об прерывании сказано честно');
+  // There are no buttons in Telegram, so there is one operation — "now". The interrupted reply
+  // stays in the feed on its own: the engine does not stuff the feed with notes about it.
+  assert.doesNotMatch(chatText(state, 42), /Прервал прошлый ответ/, 'никаких служебных реплик о прерывании');
 });
 
 test('a file link in the reply goes as an attachment, and the path disappears from the text', async () => {
