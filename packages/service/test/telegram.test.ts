@@ -670,6 +670,26 @@ test('a photo without a caption still arrives — with just a path', async () =>
   assert.equal(session.images[0]?.length, 1, 'картинка при этом уехала');
 });
 
+test('a location goes into the reply as text: there is nothing to download', async () => {
+  const { bot, session, state } = makeBot();
+
+  await bot.handleUpdate({
+    update_id: 1,
+    message: {
+      message_id: 40,
+      chat: { id: 42, type: 'private' },
+      from: { id: 7, username: 'trousev' },
+      location: { latitude: 53.349805, longitude: -6.26031 },
+    },
+  });
+
+  assert.equal(session.prompts.length, 1);
+  assert.match(session.prompts[0] ?? '', /\[локация\] 53\.349805,-6\.26031/);
+  assert.deepEqual(state.downloaded, [], 'у точки на карте нет файла — скачивать нечего');
+  assert.deepEqual(session.images[0], [], 'картинок тут тоже нет');
+  assert.equal(chatText(state, 42), 'Привет, Саня', 'ход дошёл до ответа, а не упёрся в «нечего разбирать»');
+});
+
 test('an image sent as a document is still an image, with a human file name', async () => {
   const { bot, session, config } = makeBot({
     files: { SHOT: JPEG },

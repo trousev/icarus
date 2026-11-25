@@ -10,6 +10,7 @@ import {
   documentName,
   extensionFor,
   largestPhoto,
+  placeText,
   safeName,
   unsupportedKind,
 } from '../src/telegram/attachments.ts';
@@ -116,6 +117,56 @@ test('video, sticker and audio file are not ours', async () => {
   const incoming = await collectIncoming(api, message({ video: {} }), tmp());
   assert.equal(incoming.unsupported, 'видео');
   assert.equal(incoming.voice, null);
+});
+
+test('a dropped pin becomes the text of the reply, both for a human and for the scripts', async () => {
+  const { api } = fakeApi();
+
+  const incoming = await collectIncoming(
+    api,
+    message({ location: { latitude: 53.349805, longitude: -6.26031 } }),
+    tmp(),
+  );
+
+  assert.equal(
+    incoming.text,
+    '[локация] 53.349805,-6.26031 (на карте: https://maps.google.com/?q=53.349805,-6.26031)',
+    'координаты — и по-человечески, и готовой парой «lat,lon» для tfi',
+  );
+  assert.deepEqual(incoming.images, [], 'забирать тут нечего: точка на карте — не файл');
+  assert.equal(incoming.unsupported, null, 'локацию мы разбираем, а не отказываемся от неё');
+});
+
+test('a venue keeps its name and address, and the caption stays above', async () => {
+  const { api } = fakeApi();
+
+  const incoming = await collectIncoming(
+    api,
+    message({
+      caption: 'встречаемся тут',
+      venue: {
+        title: "St Stephen's Green",
+        address: 'Dublin 2',
+        location: { latitude: 53.338, longitude: -6.259 },
+      },
+    }),
+    tmp(),
+  );
+
+  assert.equal(
+    incoming.text,
+    'встречаемся тут\n\n[место] St Stephen\'s Green, Dublin 2 — 53.338,-6.259 (на карте: https://maps.google.com/?q=53.338,-6.259)',
+  );
+});
+
+test('a named venue without an address does not leave a dangling comma', () => {
+  assert.equal(
+    placeText(
+      message({ venue: { title: 'the Spire', address: '  ', location: { latitude: 53.3498, longitude: -6.2603 } } }),
+    ),
+    '[место] the Spire — 53.3498,-6.2603 (на карте: https://maps.google.com/?q=53.3498,-6.2603)',
+  );
+  assert.equal(placeText(message({ text: 'просто текст' })), null, 'обычный текст точкой на карте не считается');
 });
 
 test('a non-image document is not parsed either', async () => {

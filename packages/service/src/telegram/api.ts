@@ -41,6 +41,28 @@ export type TelegramDocument = {
   file_size?: number;
 };
 
+/**
+ * A point on the map: Telegram sends coordinates, not an address, so “where is this” is answered
+ * by the model (see place.ts). A live location updates as the person moves — for us it's still one point.
+ */
+export type TelegramLocation = {
+  longitude: number;
+  latitude: number;
+  horizontal_accuracy?: number;
+  live_period?: number;
+  heading?: number;
+  proximity_alert_radius?: number;
+};
+
+/** A place with a name: a location plus a title and an address (a check-in, not a dropped pin). */
+export type TelegramVenue = {
+  location: TelegramLocation;
+  title: string;
+  address: string;
+  foursquare_id?: string;
+  google_place_id?: string;
+};
+
 /** Voice: on Telegram this is always OGG/Opus, so mime needn't even be asked for. */
 export type TelegramVoice = {
   file_id: string;
@@ -50,8 +72,8 @@ export type TelegramVoice = {
 };
 
 /**
- * A message: the text and what replaces it (photo, voice, document). For an attachment
- * the text isn't in `text` but in the caption — `caption`.
+ * A message: the text and what replaces it (photo, voice, document, a point on the map). For an
+ * attachment the text isn't in `text` but in the caption — `caption`.
  */
 export type TelegramMessage = {
   message_id: number;
@@ -69,6 +91,9 @@ export type TelegramMessage = {
   forum_topic_edited?: { name?: string };
   text?: string;
   caption?: string;
+  /** A dropped pin: coordinates and no name. A venue (below) is the same point with a name. */
+  location?: TelegramLocation;
+  venue?: TelegramVenue;
   photo?: TelegramPhotoSize[];
   document?: TelegramDocument;
   voice?: TelegramVoice;

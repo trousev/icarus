@@ -28,7 +28,7 @@ Telegram / web chat ──► icarus ──docker exec + JSONL──► pi in th
 
 ## What already works
 
-- conversation in Telegram (text, photos, voice messages), in the web panel (dialogs, streaming, markdown, images),
+- conversation in Telegram (text, photos, voice messages, a point on the map), in the web panel (dialogs, streaming, markdown, images),
   and via `POST /v1/chat/completions` with streaming and cancellation;
 - memory between conversations: the core in the prompt (the person's `identity.md` and `preferences.md`
   plus the family `shared-memory/identity.md` — one file from the family shelf, with its own smaller cap),
@@ -59,8 +59,8 @@ Telegram / web chat ──► icarus ──docker exec + JSONL──► pi in th
   the catalog in the prompt and reads the body on demand. Authoring is in the panel (or via the `skill_writer` tool),
   there's no synchronization with an external chat. An enabled skill is visible to Icarus, a disabled one sits in the panel and under
   git, but doesn't make it into pi's catalog; a skill can be shared — for the others it arrives disabled;
-- Telegram: the bot answers to acquaintances from `telegram.mapping`, understands text, photos, and voice messages (an image
-  goes to the model natively, a voice message is transcribed by Whisper) — the answer arrives via live message edits;
+- Telegram: the bot answers to acquaintances from `telegram.mapping`, understands text, photos, voice messages and locations (an image
+  goes to the model natively, a voice message is transcribed by Whisper, a location becomes text with coordinates) — the answer arrives via live message edits;
   the commands `/compact`, `/stop`, `/stats`, `/clear`, `/rename`, `/archive`, `/workspace`, `/language`, and `/skills` the bot
   handles itself, without sending them as a reply to the model. `/language` is the same setting as «Язык» in the panel
   profile (reply language, not interface): it frees a person from opening the panel just to switch — `/language` shows the
@@ -858,6 +858,11 @@ the Bot API that's two requests — `getFile` for the path and the file itself),
 model natively, while the path to the file rides in the message — the tool can find the image by it too. The caption to the photo
 becomes the text of the message; a photo without a caption Icarus just sees as an image. An image sent as a document (that's how
 screenshots without Telegram's compression are sent) is saved under its own name.
+
+**Locations.** A dropped pin or a check-in (a venue) is not a file: there's nothing to download, so the place itself becomes the text
+of the reply. Telegram gives coordinates and, for a venue, the name and address, and the message carries both a human line and the
+bare `lat,lon` — the transport scripts take exactly that as a place name. What to do with the point (how to get home from here,
+what's around) Icarus decides itself; a caption on the location stays on the first line.
 
 **Voice messages.** The model doesn't hear sound, so a voice message is first transcribed by a separate request
 to the provider — the `/audio/transcriptions` method, on DeepInfra that's Whisper — with the same key as the models.
