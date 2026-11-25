@@ -1,4 +1,4 @@
-// Attachments from Telegram: photos, an image sent as a document, and voice.
+// Attachments from Telegram: photos, an image sent as a document, voice — and a point on the map.
 //
 // The Bot API doesn't send files — only links: first getFile for the path, then the file
 // itself in a separate request. We give the image to the model natively (as the HTTP
@@ -60,6 +60,14 @@ export async function collectIncoming(
   const text = (message.text ?? message.caption ?? '').trim();
   const incoming: Incoming = { text, images: [], voice: null, unsupported: null };
 
+  // A location is not a file: there's nothing to download, and the place itself becomes the text
+  // of the reply. A caption, if the person left one, stays on the first line.
+  const place = placeText(message);
+  if (place) {
+    incoming.text = text === '' ? place : `${text}\n\n${place}`;
+    return incoming;
+  }
+
   const photo = message.photo === undefined ? undefined : largestPhoto(message.photo);
   if (photo) {
     const bytes = await fetchFile(api, photo.file_id, photo.file_size);
@@ -106,6 +114,33 @@ export function unsupportedKind(message: TelegramMessage): string | null {
   if (message.sticker) return 'стикер';
   if (message.audio) return 'аудиофайл';
   return null;
+}
+
+/** Where the map link leads: a pin by coordinates, outside any account. */
+const MAP_URL = 'https://maps.google.com/?q=';
+
+/**
+ * A point on the map, said in words. Telegram sends coordinates and, for a venue, a name and an
+ * address — the rest (“how do I get home from here”, “what's around”) the model does itself with
+ * its tools. The point is written both the human way and as “lat,lon”: the transport scripts take
+ * exactly that as a place name.
+ */
+export function placeText(message: TelegramMessage): string | null {
+  const venue = message.venue;
+  const location = venue?.location ?? message.location;
+  if (!location) return null;
+
+  const point = `${coordinate(location.latitude)},${coordinate(location.longitude)}`;
+  // A venue is a check-in: the person chose a place by name, and its title is what they recognize.
+  const named =
+    venue === undefined ? '' : [venue.title, venue.address].map((part) => part.trim()).filter((part) => part !== '').join(', ');
+  const head = named === '' ? `[локация] ${point}` : `[место] ${named} — ${point}`;
+  return `${head} (на карте: ${MAP_URL}${point})`;
+}
+
+/** Coordinates to six decimals (about 0.1 m) and without the trailing zeroes Telegram pads with. */
+function coordinate(value: number): string {
+  return String(Number(value.toFixed(6)));
 }
 
 /**
