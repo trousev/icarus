@@ -257,13 +257,6 @@ export function crossChannelNote(channel: ChatChannel): string {
   return `🧵 Продолжаю разговор, который шёл ${from}: эти реплики уже в контексте. /clear — начать с чистого листа.\n\n`;
 }
 
-/**
- * A reply on top of an ongoing turn. There are no buttons in Telegram, so the operation is
- * a single one — “now”: the previous answer is cut off. We can't stay silent about this,
- * otherwise it looks like Icarus just stopped answering.
- */
-export const INTERRUPTED_NOTE = '⏹ Прервал прошлый ответ, чтобы взяться за твоё сообщение.\n\n';
-
 export function unknownUser(username: string): string {
   return (
     `Не знаю тебя: @${username} не привязан ни к кому в конфиге. ` +
@@ -403,8 +396,6 @@ export class TelegramBot {
    * on top, and they won't wait five minutes for subagents to answer.
    */
   private turns = new Map<string, { interrupt: () => Promise<void> }>();
-  /** Chats where a new reply has already interrupted the turn: the answer must say so. */
-  private interrupted = new Set<string>();
   /**
    * A topic the person just created from the general feed: the client creates the topic, and
    * the message itself arrives as a root message — see resolveThread.
@@ -574,8 +565,8 @@ export class TelegramBot {
       const running = this.turns.get(key);
       if (running) {
         log.info('телеграм: новое сообщение прерывает текущий ход', { key });
-        // The answer to this message will start with an honest line: the previous answer was interrupted.
-        this.interrupted.add(key);
+        // The previous answer is cut off silently: the person sees their own new reply right
+        // away, and the engine's note about the interruption is just noise in the feed.
         void running.interrupt().catch((error) => {
           log.warn('телеграм: прервать ход не вышло', { error: describeTelegramError(error) });
         });
@@ -804,10 +795,6 @@ export class TelegramBot {
         await this.registry.interrupt(user, conversationId);
       },
     };
-    // The only second operation here: this turn has already interrupted the previous one. We
-    // say this on the first line of the answer — Telegram has neither a “queue” button nor an
-    // indicator.
-    if (this.interrupted.delete(turnKey)) reply.push(INTERRUPTED_NOTE);
     this.turns.set(turnKey, turn);
     const dropTurn = (): void => {
       if (this.turns.get(turnKey) === turn) this.turns.delete(turnKey);
